@@ -82,7 +82,9 @@ window.DeckSrc = (() => {
       if (/^(SIDEBOARD|MAYBEBOARD):?$/i.test(line)) { inSideboard = true; continue; }
       if (inSideboard) continue;
       // Match "[qty]x? Name (SET) num"
-      const m = line.match(/^(\d+)x?\s+(.+?)(?:\s+[\(\[]([A-Za-z0-9_]+)[\)\]])?(?:\s+(\S+))?$/i);
+      // A collector number only counts after a (SET) code, otherwise "1 Sol Ring" would parse as
+      // card "Sol", number "Ring". Also tolerates Archidekt/Moxfield *F*/*E* finish markers.
+      const m = line.match(/^(\d+)x?\s+(.+?)(?:\s+[\(\[]([A-Za-z0-9_]+)[\)\]](?:\s+([A-Za-z0-9★†-]+))?)?(?:\s+\*[FE]\*)?\s*$/i);
       if (!m) continue;
       const qty = parseInt(m[1]);
       const name = m[2].trim();
