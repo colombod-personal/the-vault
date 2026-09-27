@@ -115,7 +115,8 @@ function App() {
   const loadCollection = async () => {
     try {
       setLoadProgress('Opening your vault…');
-      const [who, j] = await Promise.all([window.VaultApi.me(), window.VaultApi.collection()]);
+      const progress = (n, total) => setLoadProgress(`Opening your vault… ${n.toLocaleString()} / ${total.toLocaleString()} printings`);
+      const [who, j] = await Promise.all([window.VaultApi.me(), window.VaultApi.collection(progress)]);
       setMe(who);
       setAuth('signed-in');
       setViewing(null);
@@ -263,8 +264,10 @@ function App() {
   };
 
   if (auth === 'signed-out') return <SignIn />;
+  const nav = (view, extra = {}) => setRoute({ view, ...extra });
+  let body;
   if (data && data.meta.totalQty === 0) {
-    return (
+    body = (
       <div className="app">
         <header className="topbar">
           <div className="brand"><span className="mark"><span>V</span></span><span className="title">The Vault</span></div>
@@ -273,13 +276,10 @@ function App() {
         {noticeBanner}
         <main><EmptyVault onImported={onImported} /></main>
         <VaultFooter />
-        {accountPanel}
       </div>
     );
-  }
-
-  if (!data) {
-    return (
+  } else if (!data) {
+    body = (
       <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh' }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontFamily: 'var(--display)', fontSize: 36, color: 'var(--gold)', marginBottom: 16 }}>◇</div>
@@ -288,157 +288,155 @@ function App() {
         </div>
       </div>
     );
+  } else {
+    body = (
+      <div className="app">
+        <header className="topbar">
+          <div className="brand">
+            <span className="mark"><span>V</span></span>
+            <span className="title">The Vault</span>
+            <span className="subtitle">MTG Collection</span>
+          </div>
+          <nav className="nav">
+            <button className={route.view === 'dashboard' ? 'active' : ''} onClick={() => nav('dashboard')}>Vault</button>
+            <button className={route.view === 'browse' ? 'active' : ''} onClick={() => nav('browse')}>Browse</button>
+            <button className={route.view === 'sets' || route.view === 'setdetail' ? 'active' : ''} onClick={() => nav('sets')}>Sets</button>
+            <button className={route.view === 'decks' ? 'active' : ''} onClick={() => nav('decks')}>Decks</button>
+            <button className={route.view === 'lab' ? 'active' : ''} onClick={() => nav('lab')}>Lab</button>
+            <button className={route.view === 'graph' ? 'active' : ''} onClick={() => nav('graph')}>Graph</button>
+          </nav>
+          <AccountMenu me={me} onImported={onImported} onAccount={() => setAccountOpen(true)} readOnly={!!viewing} />
+        </header>
+        {viewing && (
+          <div className="panel panel-tight" style={{ margin: '12px 24px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderColor: 'var(--gold)' }}>
+            <span className="label-mono">
+              Viewing {viewing.from}'s collection · read-only{data.meta.costsHidden ? ' · prices paid are private' : ''}
+            </span>
+            <button className="btn xs" onClick={backToMine}>Back to my vault</button>
+          </div>
+        )}
+        {noticeBanner}
+
+        <main>
+          {route.view === 'dashboard' && (
+            <Dashboard
+              data={data}
+              gotoBrowse={(q) => nav('browse', { initialQuery: q })}
+              gotoSet={code => nav('setdetail', { code })}
+              gotoValuation={() => nav('valuation')}
+              onRefresh={doRefresh}
+              onBulkSync={doBulkSync}
+              refreshing={refreshing}
+              refreshProgress={refreshProgress}
+              refreshError={refreshError}
+              openCard={c => setDrawerCard(c)}
+            />
+          )}
+          {route.view === 'browse' && (
+            <Browse data={data} openCard={c => setDrawerCard(c)} initialQuery={route.initialQuery} />
+          )}
+          {route.view === 'sets' && (
+            <Sets data={data} onSetClick={code => nav('setdetail', { code })} />
+          )}
+          {route.view === 'setdetail' && (
+            <SetDetail data={data} code={route.code} onBack={() => nav('sets')} openCard={c => setDrawerCard(c)} />
+          )}
+          {route.view === 'decks' && (
+            <DeckView key={deckText || 'deck'} data={data} openCard={c => setDrawerCard(c)} initialText={deckText} />
+          )}
+          {route.view === 'lab' && (
+            <Lab data={data} openCard={c => setDrawerCard(c)} />
+          )}
+          {route.view === 'graph' && (
+            <GraphView data={data} openCard={c => setDrawerCard(c)} />
+          )}
+          {route.view === 'valuation' && (
+            <Valuation
+              data={data}
+              onBack={() => nav('dashboard')}
+              onRefresh={doRefresh}
+              onBulkSync={doBulkSync}
+              refreshing={refreshing}
+              refreshProgress={refreshProgress}
+              refreshError={refreshError}
+              openCard={c => setDrawerCard(c)}
+            />
+          )}
+        </main>
+
+        <VaultFooter />
+        {drawerCard && <CardDrawer card={drawerCard} onClose={() => setDrawerCard(null)} />}
+
+        <TweaksPanel title="Tweaks">
+          <TweakSection label="Theme" />
+          <TweakColor
+            label="Accent"
+            value={t.accent}
+            options={['#c79b3f', '#b86a3a', '#5b8f8b', '#7a6da8', '#9aa86b', '#d27d6f']}
+            onChange={(v) => setTweak('accent', v)}
+          />
+          <TweakRadio
+            label="Density"
+            value={t.density}
+            options={['compact', 'regular', 'comfy']}
+            onChange={(v) => setTweak('density', v)}
+          />
+
+          <TweakSection label="Data display" />
+          <TweakRadio
+            label="Currency"
+            value={t.currency}
+            options={['USD', 'EUR']}
+            onChange={(v) => setTweak('currency', v)}
+          />
+          <TweakToggle
+            label="Compact numbers"
+            subtitle="$1.2K vs $1,234"
+            value={t.compactNumbers}
+            onChange={(v) => setTweak('compactNumbers', v)}
+          />
+          <TweakToggle
+            label="Show P&L on dashboard"
+            value={t.showPnL}
+            onChange={(v) => setTweak('showPnL', v)}
+          />
+
+          <TweakSection label="Defaults" />
+          <TweakSelect
+            label="Landing tab"
+            value={t.landing}
+            options={['dashboard', 'browse', 'sets', 'decks', 'lab', 'graph']}
+            onChange={(v) => setTweak('landing', v)}
+          />
+          <TweakSlider
+            label="Graph default top-N"
+            value={t.graphTopN}
+            min={50}
+            max={800}
+            step={10}
+            onChange={(v) => setTweak('graphTopN', v)}
+          />
+          <TweakRadio
+            label="Image quality"
+            value={t.imageQuality}
+            options={['small', 'normal']}
+            onChange={(v) => setTweak('imageQuality', v)}
+          />
+
+          <TweakSection label="Cache" />
+          <TweakButton
+            label="Clear Scryfall cache"
+            subtitle={`${window.Scryfall?.cacheSize?.() || 0} cards cached`}
+            onClick={() => {
+              window.Scryfall.clearCache();
+              alert('Scryfall cache cleared. Refresh to start over.');
+            }}
+          />
+        </TweaksPanel>
+      </div>
+    );
   }
-
-  const nav = (view, extra = {}) => setRoute({ view, ...extra });
-
-  return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <span className="mark"><span>V</span></span>
-          <span className="title">The Vault</span>
-          <span className="subtitle">MTG Collection</span>
-        </div>
-        <nav className="nav">
-          <button className={route.view === 'dashboard' ? 'active' : ''} onClick={() => nav('dashboard')}>Vault</button>
-          <button className={route.view === 'browse' ? 'active' : ''} onClick={() => nav('browse')}>Browse</button>
-          <button className={route.view === 'sets' || route.view === 'setdetail' ? 'active' : ''} onClick={() => nav('sets')}>Sets</button>
-          <button className={route.view === 'decks' ? 'active' : ''} onClick={() => nav('decks')}>Decks</button>
-          <button className={route.view === 'lab' ? 'active' : ''} onClick={() => nav('lab')}>Lab</button>
-          <button className={route.view === 'graph' ? 'active' : ''} onClick={() => nav('graph')}>Graph</button>
-        </nav>
-        <AccountMenu me={me} onImported={onImported} onAccount={() => setAccountOpen(true)} readOnly={!!viewing} />
-      </header>
-      {viewing && (
-        <div className="panel panel-tight" style={{ margin: '12px 24px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderColor: 'var(--gold)' }}>
-          <span className="label-mono">
-            Viewing {viewing.from}'s collection · read-only{data.meta.costsHidden ? ' · prices paid are private' : ''}
-          </span>
-          <button className="btn xs" onClick={backToMine}>Back to my vault</button>
-        </div>
-      )}
-      {noticeBanner}
-
-      <main>
-        {route.view === 'dashboard' && (
-          <Dashboard
-            data={data}
-            gotoBrowse={(q) => nav('browse', { initialQuery: q })}
-            gotoSet={code => nav('setdetail', { code })}
-            gotoValuation={() => nav('valuation')}
-            onRefresh={doRefresh}
-            onBulkSync={doBulkSync}
-            refreshing={refreshing}
-            refreshProgress={refreshProgress}
-            refreshError={refreshError}
-            openCard={c => setDrawerCard(c)}
-          />
-        )}
-        {route.view === 'browse' && (
-          <Browse data={data} openCard={c => setDrawerCard(c)} initialQuery={route.initialQuery} />
-        )}
-        {route.view === 'sets' && (
-          <Sets data={data} onSetClick={code => nav('setdetail', { code })} />
-        )}
-        {route.view === 'setdetail' && (
-          <SetDetail data={data} code={route.code} onBack={() => nav('sets')} openCard={c => setDrawerCard(c)} />
-        )}
-        {route.view === 'decks' && (
-          <DeckView key={deckText || 'deck'} data={data} openCard={c => setDrawerCard(c)} initialText={deckText} />
-        )}
-        {route.view === 'lab' && (
-          <Lab data={data} openCard={c => setDrawerCard(c)} />
-        )}
-        {route.view === 'graph' && (
-          <GraphView data={data} openCard={c => setDrawerCard(c)} />
-        )}
-        {route.view === 'valuation' && (
-          <Valuation
-            data={data}
-            onBack={() => nav('dashboard')}
-            onRefresh={doRefresh}
-            onBulkSync={doBulkSync}
-            refreshing={refreshing}
-            refreshProgress={refreshProgress}
-            refreshError={refreshError}
-            openCard={c => setDrawerCard(c)}
-          />
-        )}
-      </main>
-
-      <VaultFooter />
-      {drawerCard && <CardDrawer card={drawerCard} onClose={() => setDrawerCard(null)} />}
-      {accountPanel}
-
-      <TweaksPanel title="Tweaks">
-        <TweakSection label="Theme" />
-        <TweakColor
-          label="Accent"
-          value={t.accent}
-          options={['#c79b3f', '#b86a3a', '#5b8f8b', '#7a6da8', '#9aa86b', '#d27d6f']}
-          onChange={(v) => setTweak('accent', v)}
-        />
-        <TweakRadio
-          label="Density"
-          value={t.density}
-          options={['compact', 'regular', 'comfy']}
-          onChange={(v) => setTweak('density', v)}
-        />
-
-        <TweakSection label="Data display" />
-        <TweakRadio
-          label="Currency"
-          value={t.currency}
-          options={['USD', 'EUR']}
-          onChange={(v) => setTweak('currency', v)}
-        />
-        <TweakToggle
-          label="Compact numbers"
-          subtitle="$1.2K vs $1,234"
-          value={t.compactNumbers}
-          onChange={(v) => setTweak('compactNumbers', v)}
-        />
-        <TweakToggle
-          label="Show P&L on dashboard"
-          value={t.showPnL}
-          onChange={(v) => setTweak('showPnL', v)}
-        />
-
-        <TweakSection label="Defaults" />
-        <TweakSelect
-          label="Landing tab"
-          value={t.landing}
-          options={['dashboard', 'browse', 'sets', 'decks', 'lab', 'graph']}
-          onChange={(v) => setTweak('landing', v)}
-        />
-        <TweakSlider
-          label="Graph default top-N"
-          value={t.graphTopN}
-          min={50}
-          max={800}
-          step={10}
-          onChange={(v) => setTweak('graphTopN', v)}
-        />
-        <TweakRadio
-          label="Image quality"
-          value={t.imageQuality}
-          options={['small', 'normal']}
-          onChange={(v) => setTweak('imageQuality', v)}
-        />
-
-        <TweakSection label="Cache" />
-        <TweakButton
-          label="Clear Scryfall cache"
-          subtitle={`${window.Scryfall?.cacheSize?.() || 0} cards cached`}
-          onClick={() => {
-            window.Scryfall.clearCache();
-            alert('Scryfall cache cleared. Refresh to start over.');
-          }}
-        />
-      </TweaksPanel>
-    </div>
-  );
+  return <>{body}{accountPanel}</>;
 }
 
 function CardDrawer({ card, onClose }) {

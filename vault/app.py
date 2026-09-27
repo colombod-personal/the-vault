@@ -13,11 +13,17 @@ from starlette.middleware.gzip import GZipMiddleware
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
 from . import auth as auth_module
+from . import tokens
+from .api import meta, v1
+from .api.hal import problem
 from .config import Settings
 from .db import Database
 from .models import User
-from .routes import api
+from .native import NativeVerifier
 
 PUBLIC_DIR = Path(__file__).resolve().parent.parent / "public"
 
@@ -32,15 +38,34 @@ def _origin(url: str) -> str:
 
 
 def create_app(settings: Settings | None = None, *, serve_static: bool = True, auth_transport=None) -> FastAPI:
+    """``auth_transport`` routes all calls to identity providers elsewhere (tests: the twins)."""
     settings = settings or Settings()
     settings.check()
     db = Database(settings.database_url)
     db.create_all()
     auth = auth_module.Auth(settings, transport=auth_transport)
+    verifier = NativeVerifier(settings, transport=auth_transport)
 
-    app = FastAPI(title="The Vault", docs_url="/api/docs", openapi_url="/api/openapi.json")
+    app = FastAPI(
+        title="The Vault API", version="1",
+        description=(v1.__doc__ or "") + "\n\nCard data and images: Scryfall. Unofficial Fan Content "
+                    "permitted under the Fan Content Policy. Not approved/endorsed by Wizards.",
+        docs_url="/api/docs", openapi_url="/api/openapi.json",
+    )
     app.state.db = db
     app.state.settings = settings
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_problem(request: Request, exc: StarletteHTTPException):
+        res = problem(exc.status_code, str(exc.detail))
+        for k, v in (exc.headers or {}).items():
+            res.headers[k] = v
+        return res
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_problem(request: Request, exc: RequestValidationError):
+        return problem(422, "The request is not valid", errors=[
+            {"loc": list(e.get("loc", [])), "msg": e.get("msg")} for e in exc.errors()])
     # Vercel caps a function response at 4.5 MB; the collection JSON compresses ~10x.
     app.add_middleware(GZipMiddleware, minimum_size=1024)
     app.add_middleware(
@@ -67,21 +92,35 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, a
             and _origin(origin) != allowed_origin
             and not request.url.path.startswith(CROSS_SITE_ALLOWED)
         ):
-            return JSONResponse({"detail": "Cross-site request refused"}, status_code=403)
+            return problem(403, "Cross-site request refused")
         return await call_next(request)
 
     def get_db():
         yield from db.session()
 
-    def current_user(request: Request, session: Session = Depends(get_db)) -> User:
+    def optional_user(request: Request, session: Session = Depends(get_db)) -> User | None:
+        """The caller: a bearer token (native apps) or the web session cookie."""
+        header = request.headers.get("authorization", "")
+        if header[:7].lower() == "bearer ":
+            bearer = header[7:].strip()
+            user = tokens.authenticate(session, bearer)
+            if user is not None:
+                request.state.bearer = bearer
+            return user
         uid = request.session.get("uid")
-        user = session.get(User, uid) if uid else None
+        return session.get(User, uid) if uid else None
+
+    def current_user(request: Request, user: User | None = Depends(optional_user)) -> User:
         if user is None:
-            raise HTTPException(401, "Sign in required")
+            bearer = request.headers.get("authorization", "")[:7].lower() == "bearer "
+            raise HTTPException(401, "Invalid or expired access token" if bearer else "Sign in required",
+                                headers={"WWW-Authenticate": 'Bearer error="invalid_token"' if bearer else "Bearer"})
         return user
 
     app.include_router(auth_module.build_router(auth, get_db))
-    app.include_router(api.build_router(get_db, current_user, settings))
+    app.include_router(v1.build_router(get_db, current_user, optional_user, settings, verifier,
+                                       lambda: auth.enabled))
+    app.include_router(meta.build_router(get_db, settings))
 
     @app.get("/api/health")
     def health() -> dict:

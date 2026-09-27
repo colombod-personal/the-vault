@@ -13,7 +13,7 @@ from vault.auth import Auth, Profile, apple_client_secret, microsoft_issuer_ok, 
 from vault.config import Settings
 from vault.db import Database
 from vault.models import Identity, User
-from vault.routes.api import parse_signed_request
+from vault.api.meta import parse_signed_request
 
 
 def test_microsoft_issuer_must_match_tenant():

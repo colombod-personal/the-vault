@@ -26,6 +26,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
+from urllib.parse import urlencode
 
 import httpx
 from authlib.common.errors import AuthlibBaseError
@@ -160,12 +161,12 @@ class Auth:
         return Profile(provider, str(info["sub"]), email, name)
 
 
-def sign_in(db: Session, request: Request, profile: Profile) -> User:
-    """Find or create the user for ``profile`` and put them in the session."""
+def find_or_create(db: Session, profile: Profile, current: User | None = None) -> User:
+    """The user owning ``profile``'s identity. A new identity is linked to ``current`` when
+    someone is already signed in; otherwise it gets a new account. Never merged by e-mail."""
     identity = db.scalar(
         select(Identity).where(Identity.provider == profile.provider, Identity.subject == profile.subject)
     )
-    current = db.get(User, request.session.get("uid")) if request.session.get("uid") else None
     if identity:
         user = identity.user
         identity.email = profile.email or identity.email
@@ -179,9 +180,22 @@ def sign_in(db: Session, request: Request, profile: Profile) -> User:
     if profile.email and not user.email:
         user.email = profile.email
     db.commit()
+    return user
+
+
+def sign_in(db: Session, request: Request, profile: Profile) -> User:
+    """Find or create the user for ``profile`` and put them in the browser session."""
+    current = db.get(User, request.session.get("uid")) if request.session.get("uid") else None
+    user = find_or_create(db, profile, current)
+    app_flow = request.session.get("app_flow")
     request.session.clear()
     request.session["uid"] = user.id
+    if app_flow:
+        request.session["app_flow"] = app_flow
     return user
+
+
+APP_FLOW_KEYS = ("app_redirect_uri", "code_challenge")
 
 
 def build_router(auth: Auth, get_db) -> APIRouter:
@@ -192,19 +206,40 @@ def build_router(auth: Auth, get_db) -> APIRouter:
         return {"providers": auth.enabled, "dev_login": auth.settings.dev_login}
 
     @router.get("/login/{provider}")
-    async def login(provider: str, request: Request):
+    async def login(provider: str, request: Request, app_redirect_uri: str | None = None,
+                    code_challenge: str | None = None, code_challenge_method: str | None = None):
+        """Browser sign-in. Native apps open this in ASWebAuthenticationSession with
+        ``app_redirect_uri`` (one of APP_REDIRECT_URIS) and a PKCE ``code_challenge`` (S256);
+        they get ``<app_redirect_uri>?code=...`` back and redeem it at POST /api/v1/auth/token."""
+        request.session.pop("app_flow", None)
+        if app_redirect_uri is not None:
+            if app_redirect_uri not in auth.settings.app_redirect_uris:
+                raise HTTPException(400, "app_redirect_uri is not allowed")
+            if not code_challenge or (code_challenge_method or "S256") != "S256" or len(code_challenge) < 43:
+                raise HTTPException(400, "A PKCE code_challenge (S256) is required")
+            request.session["app_flow"] = {"app_redirect_uri": app_redirect_uri, "code_challenge": code_challenge}
         redirect_uri = f"{auth.settings.base_url}/api/auth/callback/{provider}"
         return await auth.client(provider).authorize_redirect(request, redirect_uri)
 
     @router.api_route("/callback/{provider}", methods=["GET", "POST"])
     async def callback(provider: str, request: Request, db: Session = Depends(get_db)):
+        app_flow = request.session.get("app_flow")
         try:
             profile = await auth.profile(provider, request)
         except SIGN_IN_ERRORS as exc:
             code = getattr(exc, "error", None) or "invalid_response"
             log.warning("sign-in with %s failed: %s", provider, exc)
+            if app_flow:
+                request.session.pop("app_flow", None)
+                return RedirectResponse(f"{app_flow['app_redirect_uri']}?{urlencode({'error': code})}", status_code=303)
             return RedirectResponse(f"/?signin_error={code}", status_code=303)
-        sign_in(db, request, profile)
+        user = sign_in(db, request, profile)
+        if app_flow:
+            from . import tokens
+
+            request.session.pop("app_flow", None)
+            code = tokens.create_code(db, user, app_flow["code_challenge"], app_flow["app_redirect_uri"])
+            return RedirectResponse(f"{app_flow['app_redirect_uri']}?{urlencode({'code': code})}", status_code=303)
         return RedirectResponse("/", status_code=303)
 
     @router.post("/logout")

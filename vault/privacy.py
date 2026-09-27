@@ -20,9 +20,9 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from .importer import export_dragonshield
-from .models import CollectionValue, Deck, Entry, Identity, Import, Share, User
+from .models import ApiSession, AuthCode, CollectionValue, Deck, Entry, Identity, Import, Share, User
 from .prices import history
-from .vault_json import build
+from .collection_view import CollectionView
 
 README = """\
 The Vault: your data export
@@ -37,6 +37,7 @@ imports.json         every CSV you imported, with what changed each time
 value_history.json   your collection's daily market value and cost
 decks.json           your saved decks (each also as a .txt file in decks/)
 shares.json          who you have given access to, and what others have shared with you
+app_sessions.json    apps signed in to your account (tokens are never exported)
 
 Card data, images and prices come from Scryfall (https://scryfall.com), which sources prices
 from TCGplayer and Cardmarket. They are not personal data. Thank you, Scryfall.
@@ -93,7 +94,9 @@ def export_archive(db: Session, user: User) -> bytes:
         z.writestr("README.txt", README.format(created=now.isoformat(timespec="seconds"), user_id=user.id))
         z.writestr("account.json", _json(account))
         z.writestr("collection.csv", export_dragonshield(db, user))
-        z.writestr("collection.json", _json(build(db, user)))
+        view = CollectionView(db, user)
+        z.writestr("collection.json", _json({"summary": view.summary(), "sets": view.sets(),
+                                             "cards": [view.item(g) for g in view.groups]}))
         z.writestr("imports.json", _json([
             {"filename": i.filename, "imported_at": i.created_at, "rows": i.rows, "copies": i.copies,
              "changes": i.summary}
@@ -109,6 +112,11 @@ def export_archive(db: Session, user: User) -> bytes:
             safe = "".join(ch if ch.isalnum() or ch in " -_" else "_" for ch in d.name).strip() or "deck"
             z.writestr(f"decks/{d.id}-{safe[:60]}.txt", d.text)
         z.writestr("shares.json", _json(shares))
+        z.writestr("app_sessions.json", _json([
+            {"client": a.client, "device_name": a.device_name, "created_at": a.created_at.isoformat(),
+             "last_used_at": a.last_used_at and a.last_used_at.isoformat()}
+            for a in db.scalars(select(ApiSession).where(ApiSession.user_id == user.id))
+        ]))
     return buf.getvalue()
 
 
@@ -119,6 +127,8 @@ def personal_data(user_id: int) -> dict:
     here, so a new table can't be forgotten on account deletion.
     """
     return {
+        "api_sessions": delete(ApiSession).where(ApiSession.user_id == user_id),
+        "auth_codes": delete(AuthCode).where(AuthCode.user_id == user_id),
         "shares": delete(Share).where(or_(Share.owner_id == user_id, Share.grantee_id == user_id)),
         "decks": delete(Deck).where(Deck.user_id == user_id),
         "entries": delete(Entry).where(Entry.user_id == user_id),

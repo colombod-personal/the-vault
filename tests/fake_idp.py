@@ -95,3 +95,15 @@ class FakeIdP:
             claims.update(grant["claims"])
             body["id_token"] = jwt.encode({"alg": "RS256", "kid": "fake-1"}, claims, self.key)
         return httpx.Response(200, content=json.dumps(body), headers={"content-type": "application/json"})
+
+    # -- tokens a native SDK (Sign in with Apple, Google Sign-In for iOS) would hand the app --
+    def native_id_token(self, provider: str, *, sub: str, aud: str, nonce: str | None = None,
+                        email: str | None = None, key: RSAKey | None = None, **claims) -> str:
+        now = int(time.time())
+        body = {"iss": ISSUERS[provider], "aud": aud, "sub": sub, "iat": now, "exp": now + 600}
+        if nonce is not None:
+            body["nonce"] = nonce
+        if email:
+            body["email"] = email
+        body.update(claims)
+        return jwt.encode({"alg": "RS256", "kid": "fake-1"}, body, key or self.key)

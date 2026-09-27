@@ -26,6 +26,8 @@ This is an engineering document, not legal advice: have the privacy notice
 | `entries` | yes | collection rows, incl. purchase price/date and folders | `collection.csv`, `collection.json` | `purge_user` |
 | `decks` | yes | saved decklists | `decks.json`, `decks/*.txt` | `purge_user` |
 | `shares` | yes | who shared what with whom | `shares.json` (given and received) | `purge_user` (both directions) |
+| `api_sessions` | yes | signed-in apps: client, device name, dates, token hashes | `app_sessions.json` (no hashes) | `purge_user` |
+| `auth_codes` | yes | one-time sign-in codes for apps (2 minutes) | – (expire in minutes) | `purge_user` |
 | `collection_values` | yes | daily market value and cost | `value_history.json` | `purge_user` |
 | `cards`, `price_snapshots` | no | public Scryfall card data and prices | – | kept (not about people) |
 
@@ -54,9 +56,9 @@ per-user table:
 | Right (GDPR article) | How |
 |---|---|
 | Information (13) | `public/privacy.html`, linked from the sign-in screen, the footer and the account panel; `public/credits.html` lists every service and what it receives |
-| Access and portability (15, 20) | Account → Download my data → `GET /api/me/export` (ZIP of CSV and JSON) |
-| Rectification (16) | edit display name (`PATCH /api/me`); re-import the collection |
-| Erasure (17) | Account → Delete my account (download offered first) → `DELETE /api/me` with `{"confirm": "DELETE"}`; also Meta's data-deletion callback for Facebook sign-ins |
+| Access and portability (15, 20) | Account → Download my data → `GET /api/v1/me/export` (ZIP of CSV and JSON) |
+| Rectification (16) | edit display name (`PATCH /api/v1/me`); re-import the collection |
+| Erasure (17) | Account → Delete my account (download offered first) → `DELETE /api/v1/me` with `{"confirm": "DELETE"}`; also Meta's data-deletion callback for Facebook sign-ins |
 | Restriction / objection (18, 21) | by e-mail to the controller (the only processing is providing the service) |
 
 ## Operational checklist before going public

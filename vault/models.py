@@ -155,6 +155,41 @@ class Share(Base):
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ApiSession(Base):
+    """A signed-in app (e.g. the iOS app): bearer access token + rotating refresh token.
+
+    Only SHA-256 hashes of the tokens are stored. Presenting an already-rotated refresh
+    token revokes the session (refresh-token reuse detection).
+    """
+
+    __tablename__ = "api_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    client: Mapped[str] = mapped_column(String(40))  # e.g. "ios"
+    device_name: Mapped[str | None] = mapped_column(String(120))
+    access_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    access_expires: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    refresh_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    previous_refresh_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    refresh_expires: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AuthCode(Base):
+    """One-time code handing a browser sign-in over to a native app (PKCE, ~2 minutes)."""
+
+    __tablename__ = "auth_codes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    code_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    code_challenge: Mapped[str] = mapped_column(String(128))
+    redirect_uri: Mapped[str] = mapped_column(String(300))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class Card(Base):
     """Scryfall printing data for printings someone owns (refreshed by the daily sync)."""
 
@@ -176,6 +211,7 @@ class Card(Base):
     finishes: Mapped[list] = mapped_column(JSON, default=list)
     image_small: Mapped[str | None] = mapped_column(String(500))
     image_normal: Mapped[str | None] = mapped_column(String(500))
+    artist: Mapped[str | None] = mapped_column(String(200))  # credited wherever the image is shown
     scryfall_uri: Mapped[str | None] = mapped_column(String(500))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

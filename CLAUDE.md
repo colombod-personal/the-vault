@@ -7,8 +7,10 @@ React prototype as the front end (`public/`). Read `README.md` first.
   `colombod-personal/mtg-toolkits`, not here. Bump the pinned commit in both `pyproject.toml`
   and `requirements.txt` together.
 - Never commit collection data (CSV exports, collection.json). `.gitignore` blocks them.
-- The front end reads `/api/collection` in the prototype's `collection.json` shape; keep that shape
-  stable (add fields, don't rename).
+- One API for web and native apps: `/api/v1` (`docs/api.md`). Every list is paged with a cursor
+  (`vault.api.hal.paginate`, max 500); never add an endpoint whose response grows with the
+  collection. Add `_links`, a response model (OpenAPI drives the Swift client) and a test.
+  `public/lib/api.js` rebuilds the prototype's `collection.json` shape from the pages.
 - Keep `public/styles.css` and its design tokens unchanged.
 - Scryfall: the browser may call `/cards/collection` at most every 500 ms; bulk prices come from
   the daily `jobs/sync_prices.py` run.

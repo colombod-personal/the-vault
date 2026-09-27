@@ -45,9 +45,14 @@ vault/app.py          FastAPI app factory, sessions, static files for local dev
 vault/auth.py         Google / Microsoft / Apple / Facebook sign-in, account linking
 vault/models.py       users, identities, imports, entries, cards, price_snapshots, collection_values
 vault/importer.py     Dragon Shield CSV -> entries (records what changed since the last import)
-vault/vault_json.py   builds the collection.json the front end reads
+vault/collection_view.py  one user's collection as items, sets, timeline, stats (cached per version)
+vault/tokens.py       bearer access/refresh tokens and PKCE app codes for native apps
+vault/native.py       verifies Apple / Google ID tokens from the iOS SDKs
 vault/sync.py         daily Scryfall sync (offline matching, prices, per-user value)
-vault/routes/api.py   collection, imports, export, decks, sharing, account, Facebook data deletion
+vault/api/v1.py       the API (/api/v1): paged, linked (HAL), ETags, problem+json
+vault/api/hal.py      links, cursors, pages, ETags, problem details
+vault/api/schemas.py  response models (OpenAPI for Swift codegen)
+vault/api/meta.py     Facebook data deletion callback
 vault/sharing.py      invite links, access checks for shared collections and decks
 vault/privacy.py      GDPR data export (ZIP) and account erasure (purge_user)
 jobs/sync_prices.py   CLI run by .github/workflows/sync-prices.yml
@@ -56,32 +61,11 @@ public/               front end (React prototype, no build step yet)
 
 ## API
 
-| Method | Path | |
-|---|---|---|
-| GET | `/api/auth/providers` | enabled sign-in providers |
-| GET | `/api/auth/login/{provider}` | start sign-in (`google`, `microsoft`, `apple`, `facebook`) |
-| GET/POST | `/api/auth/callback/{provider}` | provider redirect target |
-| POST | `/api/auth/logout` | |
-| GET / PATCH | `/api/me` | current user / change display name |
-| GET | `/api/me/export` | everything held about you, as a ZIP (CSV and JSON) |
-| DELETE | `/api/me` | `{"confirm": "DELETE"}`: delete the account and all of its data |
-| GET | `/api/collection` | collection in the front end's `collection.json` shape, plus `history` |
-| GET | `/api/collection/export.csv` | Dragon Shield CSV (byte-identical round-trip of your import) |
-| POST / GET | `/api/imports` | upload a Dragon Shield CSV / list past imports with their changes |
-| GET | `/api/history` | daily market value and cost |
-| POST | `/api/decks/coverage` | `{"text": "<decklist>"}` → owned / partial / missing per card |
-| GET / POST | `/api/decks` | saved decks / save one (`{"name", "text", "source_url"}`) |
-| GET / PUT / DELETE | `/api/decks/{id}` | a saved deck with coverage / update / delete |
-| POST / GET | `/api/shares` | create an invite link (`{"kind": "collection" \| "deck", "deck_id", "show_costs"}`) / list what you've shared |
-| DELETE | `/api/shares/{id}` | revoke (owner) or leave (recipient) |
-| POST | `/api/shares/accept` | `{"token"}` from an invite link |
-| GET | `/api/shared` | what others have shared with you |
-| GET | `/api/shared/{id}/collection` | a shared collection, read-only (prices paid hidden unless allowed) |
-| GET | `/api/shared/{id}/deck` | a shared deck, with coverage against your own collection |
-| GET | `/api/archidekt/decks/{id}` | public Archidekt deck (fetched server-side) |
-| POST | `/api/facebook/data-deletion` | Meta's required data deletion callback |
-
-Interactive docs at `/api/docs`.
+The web app and native apps share one API under `/api/v1`: paged with cursors (at most 500
+items per response), linked (`_links`, start at `GET /api/v1`), ETag/304, errors as
+`application/problem+json`. Native apps sign in with Apple or Google ID tokens, or through the
+browser with PKCE, and use rotating bearer tokens. Full reference: [`docs/api.md`](docs/api.md).
+Interactive docs at `/api/docs`; OpenAPI at `/api/openapi.json`.
 
 ## Deploying on Vercel
 
@@ -205,7 +189,7 @@ Rules to keep (from [Scryfall's API terms](https://scryfall.com/docs/api) and
 ## Next steps
 
 - Card images and card details from the server's `cards` table, so the browser never calls Scryfall.
-- Real value-over-time chart from `history` (the data is already in `/api/collection`).
+- Real value-over-time chart from `/api/v1/collection/history`.
 - Precompiled front end (Vite + React + TypeScript) instead of in-browser Babel.
 - Alembic migrations once the schema settles (tables are currently created with `create_all`).
 - Graph features: Postgres link tables and recursive queries first; Apache AGE (Azure Postgres)

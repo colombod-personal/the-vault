@@ -29,6 +29,13 @@ class Settings:
     apple_key_id: str = field(default_factory=lambda: _env("APPLE_KEY_ID"))
     apple_private_key: str = field(default_factory=lambda: _env("APPLE_PRIVATE_KEY").replace("\\n", "\n"))
 
+    # Native iOS app
+    apple_app_bundle_id: str = field(default_factory=lambda: _env("APPLE_APP_BUNDLE_ID"))  # native Sign in with Apple
+    google_ios_client_id: str = field(default_factory=lambda: _env("GOOGLE_IOS_CLIENT_ID"))  # Google Sign-In for iOS
+    # Where a browser sign-in may hand over to an app (custom scheme or universal link), comma-separated.
+    app_redirect_uris: tuple[str, ...] = field(default_factory=lambda: tuple(
+        u.strip() for u in _env("APP_REDIRECT_URIS", "vault://auth").split(",") if u.strip()))
+
     @property
     def secure_cookies(self) -> bool:
         return self.base_url.startswith("https://")

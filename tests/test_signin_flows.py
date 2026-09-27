@@ -77,23 +77,23 @@ def test_google(client, idp):
     assert q["client_id"] == "google-app" and q["redirect_uri"] == "http://testserver/api/auth/callback/google"
     assert set(q["scope"].split()) == {"openid", "email", "profile"} and q["nonce"]
     assert finish(client, "google", idp.authorize(location, sub="g-1", email="ann@gmail.com", name="Ann")) == "/"
-    me = client.get("/api/me").json()
+    me = client.get("/api/v1/me").json()
     assert (me["email"], me["name"], me["providers"]) == ("ann@gmail.com", "Ann", ["google"])
 
     # a later sign-in with the same Google account reopens the same vault
     client.cookies.clear()
     sign_in(client, idp, "google", "g-1", "ann@gmail.com", "Ann")
-    assert client.get("/api/me").json()["id"] == me["id"]
+    assert client.get("/api/v1/me").json()["id"] == me["id"]
 
 
 def test_microsoft_checks_issuer_against_tenant(client, idp):
     assert sign_in(client, idp, "microsoft", "m-1", "bo@outlook.com", "Bo") == "/"
-    assert client.get("/api/me").json()["providers"] == ["microsoft"]
+    assert client.get("/api/v1/me").json()["providers"] == ["microsoft"]
 
     client.cookies.clear()
     forged = {"iss": "https://login.microsoftonline.com/some-other-tenant/v2.0"}
     assert sign_in(client, idp, "microsoft", "m-2", claims=forged).startswith("/?signin_error=")
-    assert client.get("/api/me").status_code == 401
+    assert client.get("/api/v1/me").status_code == 401
 
 
 def test_apple_form_post_signed_secret_and_one_time_name(client, idp):
@@ -102,7 +102,7 @@ def test_apple_form_post_signed_secret_and_one_time_name(client, idp):
     answer = idp.authorize(location, sub="a-1", email="x1y2@privaterelay.appleid.com")
     user_json = json.dumps({"name": {"firstName": "Cy", "lastName": "Doe"}})
     assert finish(client, "apple", answer, post=True, user=user_json) == "/"
-    me = client.get("/api/me").json()
+    me = client.get("/api/v1/me").json()
     assert (me["name"], me["email"], me["providers"]) == ("Cy Doe", "x1y2@privaterelay.appleid.com", ["apple"])
 
     # the client secret sent to Apple is an ES256 JWT signed with our key
@@ -115,7 +115,7 @@ def test_apple_form_post_signed_secret_and_one_time_name(client, idp):
     # Apple sends the name only the first time; the account keeps it
     client.cookies.clear()
     sign_in(client, idp, "apple", "a-1")
-    assert client.get("/api/me").json()["name"] == "Cy Doe"
+    assert client.get("/api/v1/me").json()["name"] == "Cy Doe"
 
 
 def test_facebook(client, idp):
@@ -123,28 +123,28 @@ def test_facebook(client, idp):
     assert location.startswith("https://www.facebook.com/v23.0/dialog/oauth")
     assert q["client_id"] == "fb-app" and set(q["scope"].split()) == {"email", "public_profile"}
     assert finish(client, "facebook", idp.authorize(location, sub="f-1", email="dee@fb.test", name="Dee")) == "/"
-    me = client.get("/api/me").json()
+    me = client.get("/api/v1/me").json()
     assert (me["email"], me["name"], me["providers"]) == ("dee@fb.test", "Dee", ["facebook"])
 
 
 def test_signing_in_with_a_second_provider_links_it(client, idp):
     sign_in(client, idp, "google", "g-9", "eve@gmail.com", "Eve")
-    first = client.get("/api/me").json()["id"]
+    first = client.get("/api/v1/me").json()["id"]
     sign_in(client, idp, "facebook", "f-9", "eve@fb.test", "Eve")  # still signed in -> link
-    me = client.get("/api/me").json()
+    me = client.get("/api/v1/me").json()
     assert me["id"] == first and me["providers"] == ["facebook", "google"]
 
     client.cookies.clear()  # either provider now opens the same account
     sign_in(client, idp, "facebook", "f-9")
-    assert client.get("/api/me").json()["id"] == first
+    assert client.get("/api/v1/me").json()["id"] == first
 
 
 def test_same_email_on_another_provider_is_a_separate_account(client, idp):
     sign_in(client, idp, "google", "g-5", "sam@example.com", "Sam")
-    first = client.get("/api/me").json()["id"]
+    first = client.get("/api/v1/me").json()["id"]
     client.cookies.clear()
     sign_in(client, idp, "microsoft", "m-5", "sam@example.com", "Sam")
-    assert client.get("/api/me").json()["id"] != first  # never merged by e-mail
+    assert client.get("/api/v1/me").json()["id"] != first  # never merged by e-mail
 
 
 @pytest.mark.parametrize("provider", ["google", "microsoft", "apple", "facebook"])
@@ -156,7 +156,7 @@ def test_user_cancels(client, idp, provider):
     else:
         res = client.get(f"/api/auth/callback/{provider}", params=error, follow_redirects=False)
     assert res.status_code == 303 and res.headers["location"].startswith("/?signin_error=")
-    assert client.get("/api/me").status_code == 401
+    assert client.get("/api/v1/me").status_code == 401
 
 
 def test_replayed_or_forged_callbacks_are_rejected(client, idp):
@@ -170,4 +170,4 @@ def test_replayed_or_forged_callbacks_are_rejected(client, idp):
     assert sign_in(client, idp, "google", "g-8", claims={"nonce": "not-ours"}).startswith("/?signin_error=")
     # a token issued for another app
     assert sign_in(client, idp, "google", "g-8", claims={"aud": "someone-else"}).startswith("/?signin_error=")
-    assert client.get("/api/me").status_code == 401
+    assert client.get("/api/v1/me").status_code == 401

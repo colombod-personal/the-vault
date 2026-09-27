@@ -6,32 +6,113 @@ from mtg_toolkits.scryfall import Card
 from vault.sync import sync
 
 CSV = (Path(__file__).parent / "fixtures" / "collection.csv").read_bytes()
+V1 = "/api/v1"
 
 
 def upload(client, content=CSV, name="export.csv"):
-    return client.post("/api/imports", files={"file": (name, content, "text/csv")})
+    return client.post(f"{V1}/imports", files={"file": (name, content, "text/csv")})
 
 
-def test_requires_sign_in(client):
-    assert client.get("/api/collection").status_code == 401
+def all_cards(client, path=f"{V1}/collection/cards", **params):
+    """Follow `next` links to the end, like a client would."""
+    items = []
+    res = client.get(path, params=params)
+    while True:
+        body = res.json()
+        items += body["items"]
+        if "next" not in body["_links"]:
+            return items
+        res = client.get(body["_links"]["next"]["href"])
+
+
+def card(id, name, set_code, number, finishes=("nonfoil",), **prices):
+    return Card.from_json({
+        "id": id, "name": name, "set": set_code, "collector_number": number, "finishes": list(finishes),
+        "prices": {k: str(v) for k, v in prices.items()}, "type_line": "Artifact", "artist": "Mark Tedin",
+        "image_uris": {"small": f"https://img.test/{id}-s.jpg", "normal": f"https://img.test/{id}.jpg"},
+        "scryfall_uri": f"https://scryfall.com/card/{set_code}/{number}",
+    })
+
+
+BULK = [
+    card("kil", "A Killer Among Us", "mkm", "167", usd=0.12),
+    card("sol", "Sol Ring", "c21", "263", ("nonfoil", "foil"), usd=1.0, usd_foil=3.0),
+    card("acc", "Accursed Marauder", "mh3", "512", ("etched",), usd_etched=0.8),
+    card("bel", "Belfry Spirit", "gk2", "29", usd=0.25),
+]
+
+
+def test_root_is_discoverable(client):
+    body = client.get(V1).json()
+    assert body["signed_in"] is False and "collection" not in body["_links"] and body["_links"]["auth"]
+    client.post("/api/auth/dev-login")
+    links = client.get(V1).json()["_links"]
+    assert {"me", "collection", "cards", "imports", "decks", "shares", "shared"} <= set(links)
+
+
+def test_requires_sign_in_with_problem_details(client):
+    res = client.get(f"{V1}/collection")
+    assert res.status_code == 401 and res.headers["content-type"].startswith("application/problem+json")
+    assert res.json()["title"] == "Sign-in required" and res.json()["status"] == 401
     assert client.get("/api/auth/providers").json() == {"providers": [], "dev_login": True}
 
 
-def test_import_and_collection_json(signed_in):
+def test_import_summary_and_cards(signed_in):
     res = upload(signed_in)
-    assert res.status_code == 200
+    assert res.status_code == 201
     assert res.json()["changes"]["added"] == 4 and res.json()["copies"] == 7
 
-    data = signed_in.get("/api/collection").json()
-    assert set(data) >= {"meta", "sets", "timeline", "cards", "byName", "history"}
-    killer = next(c for c in data["cards"] if c["n"] == "A Killer Among Us")
-    # same grouping and totals as the prototype's collection.json
-    assert (killer["q"], killer["pd"], killer["fd"], killer["ld"], killer["mk"]) == (4, 0.23, "2024-02-17", "2024-03-05", 0.09)
-    assert killer["src"] == "file"
-    belfry = next(c for c in data["cards"] if c["n"] == "Belfry Spirit")
-    assert belfry["s"] == "GK2_ORZHOV"  # shown with the file's set code
-    assert data["meta"]["totalQty"] == 7 and data["meta"]["uniqueEntries"] == 4
-    assert data["byName"]["a killer among us"]["total"] == 4
+    summary = signed_in.get(f"{V1}/collection").json()
+    assert (summary["copies"], summary["printings"], summary["sets"]) == (7, 4, 4)
+    assert summary["paid"] == 2.83 and summary["costs_hidden"] is False
+    assert {"cards", "sets", "timeline", "history", "stats", "imports", "export"} <= set(summary["_links"])
+
+    cards = all_cards(signed_in)
+    killer = next(c for c in cards if c["name"] == "A Killer Among Us")
+    # same grouping and totals as the prototype: 3 + 1 copies over two purchases
+    assert (killer["quantity"], killer["paid"], killer["acquired"]) == (4, 0.23, {"first": "2024-02-17", "last": "2024-03-05"})
+    assert killer["price"] == {"market": 0.09, "low": 0.01, "mid": 0.2, "currency": "USD", "source": "file"}
+    assert next(c for c in cards if c["name"] == "Belfry Spirit")["set"]["code"] == "GK2_ORZHOV"
+    detail = signed_in.get(killer["_links"]["self"]["href"]).json()
+    assert [c["quantity"] for c in detail["copies"]] == [3, 1] and detail["card"] is None
+
+
+def test_cursor_pagination_filters_and_sorting(signed_in):
+    upload(signed_in)
+    first = signed_in.get(f"{V1}/collection/cards", params={"limit": 3}).json()
+    assert first["count"] == 3 and first["total"] == 4 and "next" in first["_links"]
+    rest = signed_in.get(first["_links"]["next"]["href"]).json()
+    assert rest["count"] == 1 and "next" not in rest["_links"]
+    names = [c["name"] for c in first["items"] + rest["items"]]
+    assert names == sorted(names, key=str.lower)
+    assert [c["name"] for c in all_cards(signed_in, sort="-value", limit=1)][0] == "Sol Ring"
+    assert [c["name"] for c in all_cards(signed_in, set="MKM")] == ["A Killer Among Us"]
+    assert [c["name"] for c in all_cards(signed_in, q="ring")] == ["Sol Ring"]
+    assert signed_in.get(f"{V1}/collection/cards", params={"sort": "nope"}).status_code == 400
+    assert signed_in.get(f"{V1}/collection/cards", params={"cursor": "%%%"}).status_code == 400
+    assert signed_in.get(f"{V1}/collection/cards", params={"limit": 100000}).json()["count"] == 4  # capped, not an error
+
+
+def test_pages_stay_small_for_huge_collections(signed_in):
+    """No response grows with the collection: pages are capped at 500 items."""
+    header = CSV.decode().split("\r\n")[:2]
+    rows = [f"my cards,1,0,Card {i},SET{i % 300},Set {i % 300},{i},Mint,Normal,English,0.10,2024-01-01,0.01,0.20,0.15"
+            for i in range(3000)]
+    assert upload(signed_in, ("\r\n".join(header + rows) + "\r\n").encode()).status_code == 201
+    page = signed_in.get(f"{V1}/collection/cards", params={"limit": 500}, headers={"Accept-Encoding": "gzip"})
+    assert page.json()["count"] == 500 and page.json()["total"] == 3000
+    assert len(page.content) < 400_000 and int(page.headers["content-length"]) < 100_000
+    assert len(signed_in.get(f"{V1}/collection").content) < 5_000  # the summary doesn't list cards
+    assert signed_in.get(f"{V1}/collection/sets", params={"limit": 500}).json()["total"] == 300
+
+
+def test_etags_give_304_until_the_collection_changes(signed_in):
+    upload(signed_in)
+    res = signed_in.get(f"{V1}/collection/cards")
+    tag = res.headers["etag"]
+    assert signed_in.get(f"{V1}/collection/cards", headers={"If-None-Match": tag}).status_code == 304
+    upload(signed_in, CSV.replace(b",3,0,", b",5,0,"))
+    assert signed_in.get(f"{V1}/collection/cards", headers={"If-None-Match": tag}).status_code == 200
 
 
 def test_reimport_records_changes_and_export_round_trips(signed_in):
@@ -40,91 +121,76 @@ def test_reimport_records_changes_and_export_round_trips(signed_in):
     changed = "\r\n".join([lines[0], lines[1], lines[2].replace(",3,0,", ",5,0,")] + lines[3:]).encode()
     res = upload(signed_in, changed).json()
     assert res["changes"]["increased"] == 1 and res["changes"]["copies_in"] == 2
-    assert len(signed_in.get("/api/imports").json()) == 2
-    assert signed_in.get("/api/collection/export.csv").content == changed
+    imports = signed_in.get(f"{V1}/imports").json()
+    assert imports["total"] == 2 and imports["items"][0]["id"] == res["id"]  # newest first
+    assert signed_in.get(imports["items"][0]["_links"]["self"]["href"]).json()["rows"] == 5
+    assert signed_in.get(f"{V1}/collection/export.csv").content == changed
 
 
 def test_bad_upload(signed_in):
-    assert upload(signed_in, b"hello").status_code == 400
+    res = upload(signed_in, b"hello")
+    assert res.status_code == 400 and res.json()["detail"].startswith("No cards found")
 
 
-def card(id, name, set_code, number, finishes=("nonfoil",), **prices):
-    return Card.from_json({
-        "id": id, "name": name, "set": set_code, "collector_number": number, "finishes": list(finishes),
-        "prices": {k: str(v) for k, v in prices.items()}, "type_line": "Artifact",
-    })
-
-
-def test_daily_sync_prices_and_history(app, signed_in):
+def test_daily_sync_card_data_history_and_stats(app, signed_in):
     upload(signed_in)
-    bulk = [
-        card("kil", "A Killer Among Us", "mkm", "167", usd=0.12),
-        card("sol", "Sol Ring", "c21", "263", ("nonfoil", "foil"), usd=1.0, usd_foil=3.0),
-        card("acc", "Accursed Marauder", "mh3", "512", ("etched",), usd_etched=0.8),
-        card("bel", "Belfry Spirit", "gk2", "29", usd=0.25),
-    ]
     with app.state.db.sessions() as db:
-        stats = sync(db, bulk, day=date(2026, 9, 27))
+        stats = sync(db, BULK, day=date(2026, 9, 27))
     assert stats["methods"] == {"set_number": 5} and stats["unmatched"] == 0
 
-    data = signed_in.get("/api/collection").json()
-    prices = {c["n"]: (c["mk"], c["fin"], c["src"]) for c in data["cards"]}
-    assert prices["Sol Ring"] == (3.0, "foil", "scryfall")
-    assert prices["Accursed Marauder"] == (0.8, "etched", "scryfall")  # blank Printing fixed to etched
-    assert data["meta"]["totalMarket"] == round(4 * 0.12 + 3.0 + 0.8 + 0.25, 2)
-    assert data["history"] == [{"day": "2026-09-27", "market": 4.53, "cost": 2.83, "copies": 7, "priced": 7}]
+    cards = {c["name"]: c for c in all_cards(signed_in)}
+    assert (cards["Sol Ring"]["price"]["market"], cards["Sol Ring"]["finish"], cards["Sol Ring"]["price"]["source"]) == (3.0, "foil", "scryfall")
+    assert (cards["Accursed Marauder"]["price"]["market"], cards["Accursed Marauder"]["finish"]) == (0.8, "etched")
 
+    detail = signed_in.get(cards["Sol Ring"]["_links"]["self"]["href"]).json()
+    assert detail["card"]["type_line"] == "Artifact"
+    assert detail["card"]["image"] == {"small": "https://img.test/sol-s.jpg", "normal": "https://img.test/sol.jpg",
+                                       "artist": "Mark Tedin", "credit": "Image via Scryfall · © Wizards of the Coast"}
+    assert detail["price_history"] == [{"day": "2026-09-27", "price": 3.0}]
+    assert detail["_links"]["scryfall"]["href"] == "https://scryfall.com/card/c21/263"
 
-def test_deck_coverage(signed_in):
-    upload(signed_in)
-    res = signed_in.post("/api/decks/coverage", json={"text": "1 Sol Ring\n4 A Killer Among Us\n1 Rhystic Study"})
-    status = {c["name"]: (c["status"], c["missing"]) for c in res.json()["cards"]}
-    assert status == {"Sol Ring": ("owned", 0), "A Killer Among Us": ("owned", 0), "Rhystic Study": ("missing", 1)}
-
-
+    summary = signed_in.get(f"{V1}/collection").json()
+    assert summary["market_value"] == round(4 * 0.12 + 3.0 + 0.8 + 0.25, 2) and summary["prices_as_of"] == "2026-09-27"
+    history = signed_in.get(f"{V1}/collection/history").json()
+    assert history["items"] == [{"day": "2026-09-27", "market": 4.53, "cost": 2.83, "copies": 7, "priced": 7}]
+    st = signed_in.get(f"{V1}/collection/stats").json()
+    assert st["most_valuable"][0]["name"] == "Sol Ring" and st["biggest_gains"][0]["name"] == "Sol Ring"
+    months = signed_in.get(f"{V1}/collection/timeline").json()["months"]
+    assert [m["month"] for m in months] == ["2022-11", "2023-01", "2024-02", "2024-03", "2024-06"]
 
 
 def test_sync_keeps_imported_finish_and_does_not_lock_in_name_guesses(app, signed_in):
     upload(signed_in)
-    bulk = [
-        card("kil", "A Killer Among Us", "mkm", "999", usd=0.12),          # number mismatch -> name_set match
-        card("sol", "Sol Ring", "c21", "263", ("nonfoil", "foil"), usd=1.0, usd_foil=3.0),
-        card("acc", "Accursed Marauder", "mh3", "512", ("etched",), usd_etched=0.8),
-        card("bel", "Belfry Spirit", "gk2", "29", usd=0.25),
-    ]
+    bulk = [card("kil", "A Killer Among Us", "mkm", "999", usd=0.12)] + BULK[1:]  # number mismatch -> name_set
     with app.state.db.sessions() as db:
         sync(db, bulk, day=date(2026, 9, 27))
         again = sync(db, bulk, day=date(2026, 9, 28))
-    # the name_set guess is re-resolved each day, never relabelled as an exact "id" match
-    assert again["methods"] == {"name_set": 2}
-    data = signed_in.get("/api/collection").json()
-    acc = next(c for c in data["cards"] if c["n"] == "Accursed Marauder")
-    assert (acc["fin"], acc["mk"], acc["p"]) == ("etched", 0.8, "")  # priced as etched, imported Printing kept
-    # re-importing the unchanged file reports no changes and keeps the exact matches
+    assert again["methods"] == {"name_set": 2}  # re-resolved each day, never relabelled as exact
+    cards = {c["name"]: c for c in all_cards(signed_in)}
+    assert (cards["Accursed Marauder"]["finish"], cards["Accursed Marauder"]["printing"]) == ("etched", "")
     res = upload(signed_in).json()
     assert res["changes"]["unchanged"] == 4 and res["changes"]["added"] == res["changes"]["removed"] == 0
-    assert signed_in.get("/api/collection/export.csv").content == CSV
-    prices = {c["n"]: c["src"] for c in signed_in.get("/api/collection").json()["cards"]}
-    assert prices["Sol Ring"] == "scryfall" and prices["A Killer Among Us"] == "file"  # guess not carried over
+    assert signed_in.get(f"{V1}/collection/export.csv").content == CSV
+    sources = {c["name"]: c["price"]["source"] for c in all_cards(signed_in)}
+    assert sources["Sol Ring"] == "scryfall" and sources["A Killer Among Us"] == "file"
 
 
-def test_parse_deck_uses_library_parser(signed_in):
+def test_deck_coverage_and_parsing(signed_in):
+    upload(signed_in)
+    res = signed_in.post(f"{V1}/decks/coverage", json={"text": "1 Sol Ring\n4 A Killer Among Us\n1 Rhystic Study"})
+    status = {c["name"]: (c["status"], c["missing"]) for c in res.json()["cards"]}
+    assert status == {"Sol Ring": ("owned", 0), "A Killer Among Us": ("owned", 0), "Rhystic Study": ("missing", 1)}
     text = "1x Sol Ring (c21) 263 [Ramp]\n1x Duress [Sideboard]\n1 Kenrith, the Returned King (CMM) 1 *F*"
-    cards = signed_in.post("/api/decks/parse", json={"text": text}).json()["cards"]
+    cards = signed_in.post(f"{V1}/decks/parse", json={"text": text}).json()["cards"]
     assert [(c["name"], c["set"], c["collector_number"], c["section"]) for c in cards] == [
         ("Sol Ring", "c21", "263", "main"), ("Duress", "", "", "sideboard"), ("Kenrith, the Returned King", "cmm", "1", "main"),
     ]
 
 
-def test_collection_is_compressed_well_under_vercels_limit(signed_in):
-    """Vercel rejects function responses over 4.5 MB; check the collection stays far below it."""
-    header = CSV.decode().split("\r\n")[:2]
-    rows = [f"my cards,1,0,Card {i},SET{i % 300},Set {i % 300},{i},Mint,Normal,English,0.10,2024-01-01,0.01,0.20,0.15"
-            for i in range(3000)]
-    assert upload(signed_in, ("\r\n".join(header + rows) + "\r\n").encode()).status_code == 200
-    res = signed_in.get("/api/collection", headers={"Accept-Encoding": "gzip"})
-    assert res.headers["content-encoding"] == "gzip"
-    compressed = int(res.headers["content-length"])
-    per_printing = compressed / 3000
-    # at this rate a 4.5 MB response would hold this many distinct printings
-    assert 4.5e6 / per_printing > 50_000, per_printing
+def test_openapi_documents_the_api(client):
+    spec = client.get("/api/openapi.json").json()
+    paths = spec["paths"]
+    for p in ["/api/v1", "/api/v1/collection", "/api/v1/collection/cards", "/api/v1/collection/cards/{card_id}",
+              "/api/v1/auth/native/{provider}", "/api/v1/auth/token", "/api/v1/me/sessions", "/api/v1/decks"]:
+        assert p in paths, p
+    assert "CardItem" in spec["components"]["schemas"] and "TokenResponse" in spec["components"]["schemas"]

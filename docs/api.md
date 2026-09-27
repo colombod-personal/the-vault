@@ -1,0 +1,141 @@
+# The Vault API (v1)
+
+One API for the web app and native apps (the planned iOS app), under `/api/v1`.
+
+- **Discover by links.** `GET /api/v1` returns `_links` to everything the caller may use.
+  Every resource carries HAL-style `_links` (`self`, `next`, related resources).
+  Clients follow links instead of building URLs.
+- **Never a huge response.** Lists come in pages: at most 500 items (default 100), with a
+  `next` link carrying an opaque cursor. The cursor is keyset-based, so pages stay stable
+  while you walk them. A collection of 20,000 printings is ~22 pages of about 26 KB gzipped each.
+  The summary (`/collection`) never lists cards.
+- **Cheap to re-check.** Collection resources send an `ETag`. Send it back as `If-None-Match`
+  and you get `304 Not Modified` until an import or the daily price sync changes something.
+- **Errors are `application/problem+json`** (RFC 9457): `{"type", "title", "status", "detail"}`.
+  A missing or expired sign-in is `401` with `WWW-Authenticate: Bearer`. Another user's ids
+  answer `404`, never `403`.
+- **OpenAPI 3.1** at `/api/openapi.json` (interactive at `/api/docs`). Swift clients can be
+  generated from it with [swift-openapi-generator](https://github.com/apple/swift-openapi-generator).
+
+## Page shape
+
+```json
+{
+  "items": [ ... ],
+  "count": 100,
+  "total": 10645,
+  "_links": {
+    "self":  {"href": "/api/v1/collection/cards?limit=100"},
+    "first": {"href": "/api/v1/collection/cards?limit=100"},
+    "next":  {"href": "/api/v1/collection/cards?limit=100&cursor=WyJi..."}
+  }
+}
+```
+
+There is no `next` on the last page. `limit` above 500 is capped, not refused.
+
+## Authentication
+
+The web app uses a session cookie (set by `/api/auth/login/{provider}`). Native apps use
+**bearer tokens**: `Authorization: Bearer <access_token>`. Bearer requests never use cookies,
+so they need no CSRF protection.
+
+| Token | Lifetime | Notes |
+|---|---|---|
+| access token | 1 hour | opaque |
+| refresh token | 60 days | **rotated on every use**; presenting an old one revokes the session (reuse detection) |
+| app code | 2 minutes | one-time, bound to a PKCE S256 challenge |
+
+The server stores only SHA-256 hashes of tokens.
+
+### Option A: native SDK sign-in (Apple, Google)
+
+1. The app signs in with *Sign in with Apple* (`ASAuthorizationAppleIDProvider`) or Google
+   Sign-In for iOS. It passes a random nonce (Apple: `SHA-256(nonce)` as the request nonce).
+2. `POST /api/v1/auth/native/{apple|google}`:
+
+   ```json
+   {"id_token": "<JWT from the SDK>", "nonce": "<raw nonce>", "name": "Cy Doe", "device_name": "Cy's iPhone"}
+   ```
+
+   Apple gives the app the user's name only on the first sign-in; send it as `name`.
+3. The server checks the token against the provider's published keys, issuer, audience,
+   expiry and nonce. It answers with:
+
+   ```json
+   {"access_token": "...", "token_type": "Bearer", "expires_in": 3600, "refresh_token": "...", "session_id": 7}
+   ```
+
+Audiences: `APPLE_APP_BUNDLE_ID` for Apple and `GOOGLE_IOS_CLIENT_ID` for Google. The web client
+ids are accepted too.
+
+### Option B: browser sign-in handed to the app (any provider, including Microsoft and Facebook)
+
+1. The app makes a `code_verifier` and opens this in `ASWebAuthenticationSession`:
+   `/api/auth/login/{provider}?app_redirect_uri=vault://auth&code_challenge=<BASE64URL(SHA256(verifier))>&code_challenge_method=S256`
+2. After sign-in the browser is sent to `vault://auth?code=...`, or to `?error=...` if it failed.
+   `app_redirect_uri` must be listed in `APP_REDIRECT_URIS`.
+3. `POST /api/v1/auth/token`:
+
+   ```json
+   {"grant_type": "authorization_code", "code": "...", "code_verifier": "...", "redirect_uri": "vault://auth"}
+   ```
+
+### Keeping and ending sessions
+
+- Refresh: `POST /api/v1/auth/token` with
+  `{"grant_type": "refresh_token", "refresh_token": "..."}`. Store the new refresh token and
+  discard the old one.
+- Sign out this app: `POST /api/v1/auth/revoke` with its bearer token.
+- `GET /api/v1/me/sessions` lists signed-in apps. `DELETE /api/v1/me/sessions/{id}` signs one out remotely.
+
+## Endpoints
+
+| Method | Path | |
+|---|---|---|
+| GET | `/api/v1` | entry point: links for the caller |
+| GET | `/api/v1/auth` | enabled web and native providers, app redirect URIs |
+| POST | `/api/v1/auth/native/{provider}` | native ID token → tokens |
+| POST | `/api/v1/auth/token` | redeem an app code (PKCE) or rotate a refresh token |
+| POST | `/api/v1/auth/revoke` | sign this app out |
+| GET / PATCH / DELETE | `/api/v1/me` | profile / change display name / delete account (`{"confirm": "DELETE"}`) |
+| GET | `/api/v1/me/export` | everything held about you, as a ZIP (GDPR) |
+| GET / DELETE | `/api/v1/me/sessions[/{id}]` | signed-in apps |
+| GET | `/api/v1/collection` | summary: copies, printings, value, cost, dates, links |
+| GET | `/api/v1/collection/cards` | printings, paged. Filters: `q`, `set`, `name`, `finish`, `condition`. `sort`: `name`, `-value`, `value`, `-quantity`, `set`, `-acquired` |
+| GET | `/api/v1/collection/cards/{id}` | one printing: copies, card data, image with artist credit, 90-day price history |
+| GET | `/api/v1/collection/sets` | value by set, paged |
+| GET | `/api/v1/collection/timeline` | copies acquired per month |
+| GET | `/api/v1/collection/history` | daily market value and cost, paged (`since`) |
+| GET | `/api/v1/collection/stats` | most valuable, biggest gains and losses, duplicates |
+| GET | `/api/v1/collection/export.csv` | Dragon Shield CSV, byte-identical to your import |
+| POST / GET | `/api/v1/imports` | upload a Dragon Shield CSV (multipart `file`, 201) / list imports with changes |
+| GET | `/api/v1/imports/{id}` | one import |
+| POST | `/api/v1/decks/parse` | parse a pasted decklist |
+| POST | `/api/v1/decks/coverage` | owned / partial / missing per card |
+| GET / POST | `/api/v1/decks` | saved decks / save one |
+| GET / PUT / DELETE | `/api/v1/decks/{id}` | a deck with coverage / update / delete |
+| GET | `/api/v1/archidekt/decks/{id}` | a public Archidekt deck, fetched server-side |
+| POST / GET | `/api/v1/shares` | create a one-time invite link / list what you share |
+| DELETE | `/api/v1/shares/{id}` | revoke (owner) or leave (recipient) |
+| POST | `/api/v1/shares/accept` | `{"token"}` from an invite link |
+| GET | `/api/v1/shared` | what others share with you |
+| GET | `/api/v1/shared/{id}/collection[/…]` | a shared collection, read-only. Same sub-resources as `/collection` except `export.csv`. Prices paid are hidden unless the owner allowed them |
+| GET | `/api/v1/shared/{id}/deck` | a shared deck, checked against your collection |
+
+Outside v1 (web and provider callbacks): `/api/auth/*` (browser sign-in),
+`/api/facebook/data-deletion` (Meta's callback) and `/api/health`.
+
+## Attribution in clients
+
+Card data carries what a client needs to credit its sources: `image.artist`, `image.credit`,
+and a `scryfall` link on each card. Native apps must show these the way the web app does:
+artist and copyright next to card images, and a Credits screen. See README → "Attribution".
+
+## Server notes
+
+Collection resources are built from one per-user view. It is cached in-process, keyed by a
+version: user, latest import, latest price day, latest card update, and whether costs are hidden.
+Paging through a big collection therefore costs one build, not one per page. Each request
+checks the version, so stale data is never served. Each serverless instance keeps its own
+cache of 16 views.
