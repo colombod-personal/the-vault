@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Credits &amp; thanks · The Vault</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    body { padding: 32px 16px; }
+    main { max-width: 780px; margin: 0 auto; line-height: 1.6; }
+    h2 { font-family: var(--display); margin-top: 36px; }
+    .card { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; margin: 12px 0; background: var(--surface); }
+    .card h3 { margin: 0 0 4px; font-family: var(--display); font-size: 20px; }
+    .card h3 a { color: var(--gold); }
+    .card p { margin: 6px 0; }
+    .card .how { font-family: var(--mono); font-size: 12px; color: var(--text-2); }
+    .thanks { color: var(--gold); }
+    table { border-collapse: collapse; width: 100%; font-size: 14px; }
+    td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+    .legal { font-size: 12px; color: var(--muted); border-top: 1px solid var(--border); margin-top: 40px; padding-top: 16px; }
+  </style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">The Vault</p>
+  <h1 class="h1">Credits &amp; thanks</h1>
+  <p>The Vault is a small, free, fan-made tool. It exists because other people built wonderful things
+    and share them generously. This page lists every service and project the Vault relies on:
+    what it does for you, what (if anything) the Vault sends to it, and where to find it.
+    <strong>Thank you all.</strong></p>
+
+  <h2>Card data, images and prices</h2>
+
+  <div class="card">
+    <h3><a href="https://scryfall.com" target="_blank" rel="noopener">Scryfall</a></h3>
+    <p>Almost everything you see about a card comes from Scryfall: names, rules text, types, mana costs,
+      set information, card images and daily prices. Scryfall's free API and daily bulk data files
+      are the foundation of the Vault.</p>
+    <p class="how">How we use it: the server downloads Scryfall's daily bulk file once a day to match your
+      cards and record prices. Your browser loads card images from Scryfall and, when you press
+      "Update now", asks Scryfall's API for current prices of the cards on screen. Scryfall sees your
+      IP address for those requests, but never your name or account.</p>
+    <p class="thanks">Thank you, Scryfall. If the Vault is useful to you, please consider
+      <a href="https://scryfall.com/donate" target="_blank" rel="noopener">supporting Scryfall</a>.</p>
+    <p class="how">The Vault isn't produced by or endorsed by Scryfall.</p>
+  </div>
+
+  <div class="card">
+    <h3>Card prices: <a href="https://www.tcgplayer.com" target="_blank" rel="noopener">TCGplayer</a>,
+      <a href="https://www.cardmarket.com" target="_blank" rel="noopener">Cardmarket</a> and
+      <a href="https://www.cardhoarder.com" target="_blank" rel="noopener">Cardhoarder</a></h3>
+    <p>The prices Scryfall publishes come from these marketplaces: US dollar prices from TCGplayer,
+      euro prices from Cardmarket, and MTGO ticket prices from Cardhoarder. They're refreshed about once a day,
+      so treat them as an estimate, not a live quote.</p>
+    <p class="how">How we use it: indirectly, through Scryfall. The Vault never contacts these marketplaces.</p>
+  </div>
+
+  <div class="card">
+    <h3>Artists</h3>
+    <p>Every card image is the work of an illustrator, credited under the image wherever the Vault shows
+      one ("Illustrated by …"). Card images are shown whole, without cropping or covering the artist
+      and copyright lines.</p>
+  </div>
+
+  <h2>Decks and collections</h2>
+
+  <div class="card">
+    <h3><a href="https://archidekt.com" target="_blank" rel="noopener">Archidekt</a></h3>
+    <p>When you paste an Archidekt deck link on the Decks tab, the Vault reads that public deck from
+      Archidekt and links back to it ("View on Archidekt"). Deck lists and their authors belong to the
+      Archidekt community. Credit and thanks to every brewer.</p>
+    <p class="how">How we use it: the Vault's server fetches only the public deck you asked for, once,
+      sending the deck id and nothing about you.</p>
+    <p class="thanks">Thank you, Archidekt, for keeping public decks open to tools like this one.
+      <a href="https://patreon.com/archidekt" target="_blank" rel="noopener">Support Archidekt on Patreon</a>.</p>
+  </div>
+
+  <div class="card">
+    <h3><a href="https://mtg.dragonshield.com" target="_blank" rel="noopener">Dragon Shield</a> Card Manager</h3>
+    <p>The Vault imports the CSV file the Dragon Shield app exports, and exports your collection back in
+      the same format, so you can keep scanning and organising in Dragon Shield.</p>
+    <p class="how">How we use it: only the file you choose to upload. The Vault never connects to your
+      Dragon Shield account. Dragon Shield is a trademark of Arcane Tinmen ApS, and the Vault isn't
+      affiliated with or endorsed by them.</p>
+  </div>
+
+  <h2>Signing in</h2>
+  <div class="card">
+    <h3><a href="https://developers.google.com/identity" target="_blank" rel="noopener">Google</a>,
+      <a href="https://learn.microsoft.com/entra/identity-platform/" target="_blank" rel="noopener">Microsoft</a>,
+      <a href="https://developer.apple.com/sign-in-with-apple/" target="_blank" rel="noopener">Apple</a> and
+      <a href="https://developers.facebook.com/docs/facebook-login/" target="_blank" rel="noopener">Facebook</a></h3>
+    <p>Sign-in is handled by the account you already have, so the Vault never sees or stores a password.</p>
+    <p class="how">How we use it: only the provider you pick. It tells the Vault your name, e-mail address
+      and an account id, and nothing else.</p>
+  </div>
+
+  <h2>Where the Vault runs</h2>
+  <div class="card">
+    <h3><a href="https://vercel.com" target="_blank" rel="noopener">Vercel</a>,
+      <a href="https://neon.tech" target="_blank" rel="noopener">Neon</a> and
+      <a href="https://github.com" target="_blank" rel="noopener">GitHub</a></h3>
+    <p>Vercel hosts the app, Neon hosts the database, and GitHub hosts the code and runs the daily price
+      update. See the <a href="privacy.html">privacy notice</a> for exactly what each one handles.</p>
+  </div>
+
+  <h2>Open source</h2>
+  <p>The Vault is built on open-source software. Thank you to every maintainer and contributor.</p>
+  <table>
+    <tr><th>Project</th><th>What it does here</th><th>License</th></tr>
+    <tr><td><a href="https://github.com/colombod-personal/mtg-toolkits" target="_blank" rel="noopener">mtg-toolkits</a></td><td>reading Dragon Shield files, matching cards to Scryfall, collection changes, decklists</td><td>MIT</td></tr>
+    <tr><td><a href="https://react.dev" target="_blank" rel="noopener">React</a></td><td>the user interface</td><td>MIT</td></tr>
+    <tr><td><a href="https://babeljs.io" target="_blank" rel="noopener">Babel</a></td><td>runs the interface code in your browser</td><td>MIT</td></tr>
+    <tr><td><a href="https://js.cytoscape.org" target="_blank" rel="noopener">Cytoscape.js</a></td><td>the Graph view</td><td>MIT</td></tr>
+    <tr><td><a href="https://fastapi.tiangolo.com" target="_blank" rel="noopener">FastAPI</a> &amp; <a href="https://www.starlette.io" target="_blank" rel="noopener">Starlette</a></td><td>the server</td><td>MIT / BSD-3-Clause</td></tr>
+    <tr><td><a href="https://docs.pydantic.dev" target="_blank" rel="noopener">Pydantic</a></td><td>validating requests</td><td>MIT</td></tr>
+    <tr><td><a href="https://www.sqlalchemy.org" target="_blank" rel="noopener">SQLAlchemy</a></td><td>the database layer</td><td>MIT</td></tr>
+    <tr><td><a href="https://www.psycopg.org" target="_blank" rel="noopener">Psycopg</a></td><td>connecting to Postgres</td><td>LGPL-3.0</td></tr>
+    <tr><td><a href="https://authlib.org" target="_blank" rel="noopener">Authlib</a> &amp; <a href="https://jose.authlib.org" target="_blank" rel="noopener">joserfc</a></td><td>signing in with Google, Microsoft, Apple and Facebook</td><td>BSD-3-Clause</td></tr>
+    <tr><td><a href="https://cryptography.io" target="_blank" rel="noopener">cryptography</a></td><td>signing and verifying tokens</td><td>Apache-2.0 or BSD-3-Clause</td></tr>
+    <tr><td><a href="https://www.python-httpx.org" target="_blank" rel="noopener">HTTPX</a></td><td>talking to Scryfall and Archidekt</td><td>BSD-3-Clause</td></tr>
+    <tr><td><a href="https://itsdangerous.palletsprojects.com" target="_blank" rel="noopener">ItsDangerous</a></td><td>signed session cookies</td><td>BSD-3-Clause</td></tr>
+    <tr><td><a href="https://github.com/Kludex/python-multipart" target="_blank" rel="noopener">python-multipart</a></td><td>file uploads</td><td>Apache-2.0</td></tr>
+  </table>
+
+  <div class="legal">
+    <p>The Vault is unofficial Fan Content permitted under the
+      <a href="https://company.wizards.com/en/legal/fancontentpolicy" target="_blank" rel="noopener">Fan Content Policy</a>.
+      Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast.
+      ©Wizards of the Coast LLC. Magic: The Gathering, card names, mana symbols and card images are
+      property of Wizards of the Coast LLC.</p>
+    <p>Scryfall, Archidekt, Dragon Shield, TCGplayer, Cardmarket, Cardhoarder and the sign-in providers
+      are trademarks of their respective owners. Naming them here is an acknowledgement, not a claim
+      of partnership or endorsement.</p>
+    <p><a class="btn sm" href="/">Back to the Vault</a> <a class="btn sm ghost" href="privacy.html">Privacy notice</a></p>
+  </div>
+</main>
+</body>
+</html>

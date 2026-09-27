@@ -178,6 +178,11 @@ function DeckView({ data, openCard, initialText }) {
             <div className="panel" style={{ marginTop: 16 }}>
               <p className="eyebrow" style={{ marginBottom: 8 }}>{deck?.title}</p>
               {deck?.author && <p className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)' }}>by {deck.author}</p>}
+              {deck?.url && /archidekt\.com/.test(deck.url) && (
+                <p className="muted" style={{ fontSize: 10, fontFamily: 'var(--mono)' }}>
+                  Deck list from <a href={deck.url} target="_blank" rel="noopener noreferrer">Archidekt</a>. Thanks to its author.
+                </p>
+              )}
               <button className="btn xs" style={{ marginTop: 8 }} disabled={!!saved} onClick={saveDeck}>
                 {saved ? 'Saved ✓ (share it from Account)' : 'Save deck'}
               </button>
@@ -224,7 +229,7 @@ function DeckView({ data, openCard, initialText }) {
 
               {deck?.url && (
                 <a href={deck.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', marginTop: 16, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)', textDecoration: 'underline' }}>
-                  Open original deck ↗
+                  {/archidekt\.com/.test(deck.url) ? 'View this deck on Archidekt ↗' : 'Open original deck ↗'}
                 </a>
               )}
             </div>

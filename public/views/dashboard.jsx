@@ -69,6 +69,12 @@ function Dashboard({ data, gotoBrowse, gotoSet, gotoValuation, openCard, onRefre
           </div>
           <div className="value"><span className="currency">$</span>{m.totalMarket.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
           <div className="delta">market price across {m.totalQty.toLocaleString()} cards</div>
+          <div className="delta" style={{ fontSize: 10 }}>
+            {m.pricedFromScryfall
+              ? `prices: Scryfall (TCGplayer) for ${m.pricedFromScryfall.toLocaleString()}` +
+                (m.pricedFromScryfall < m.totalQty ? `, your Dragon Shield export for the rest` : '')
+              : 'prices: from your Dragon Shield export (Scryfall prices arrive with the daily update)'}
+          </div>
           <div className={`freshness ${fresh.tone}`} title={`Prices calculated ${fresh.abs}`}>
             <span className="dot"></span>
             <span>{fresh.rel}</span>

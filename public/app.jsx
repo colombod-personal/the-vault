@@ -272,6 +272,7 @@ function App() {
         </header>
         {noticeBanner}
         <main><EmptyVault onImported={onImported} /></main>
+        <VaultFooter />
         {accountPanel}
       </div>
     );
@@ -366,6 +367,7 @@ function App() {
         )}
       </main>
 
+      <VaultFooter />
       {drawerCard && <CardDrawer card={drawerCard} onClose={() => setDrawerCard(null)} />}
       {accountPanel}
 
@@ -473,7 +475,8 @@ function CardDrawer({ card, onClose }) {
         <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 20, marginBottom: 24 }}>
           <div style={{ aspectRatio: '488 / 680', background: 'var(--bg-2)', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border)' }}>
             {scry?.img_normal ? (
-              <img src={scry.img_normal} alt={card.n} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              <img src={scry.img_normal} alt={card.n + (scry.artist ? ', illustrated by ' + scry.artist : '')}
+                style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
             ) : (
               <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', color: 'var(--muted)', padding: 12, textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 11, background: 'repeating-linear-gradient(135deg, var(--surface-2) 0 8px, var(--surface) 8px 16px)' }}>
                 {card.n}
@@ -481,6 +484,13 @@ function CardDrawer({ card, onClose }) {
             )}
           </div>
           <div>
+            {scry?.img_normal && (
+              <p className="label-mono" style={{ fontSize: 10, marginBottom: 8 }}>
+                {scry.artist ? <>Illustrated by <strong>{scry.artist}</strong> · </> : null}
+                image via <a href={scry.scryfall_uri || 'https://scryfall.com'} target="_blank" rel="noopener noreferrer">Scryfall</a>
+                {' · '}© Wizards of the Coast
+              </p>
+            )}
             <h2 className="h2" style={{ fontSize: 26, marginBottom: 6 }}>{card.n}</h2>
             {scry?.mana_cost && <p style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)' }}>{scry.mana_cost}</p>}
             {scry?.type_line && <p style={{ fontSize: 13, marginTop: 8 }}>{scry.type_line}</p>}
@@ -556,7 +566,11 @@ function CardDrawer({ card, onClose }) {
 
         {scry?.prices && (
           <div className="panel">
-            <p className="eyebrow" style={{ marginBottom: 12 }}>Live Scryfall prices</p>
+            <p className="eyebrow" style={{ marginBottom: 4 }}>Live Scryfall prices</p>
+            <p className="label-mono" style={{ fontSize: 10, marginBottom: 12 }}>
+              Scryfall sources USD prices from <a href="https://www.tcgplayer.com" target="_blank" rel="noopener noreferrer">TCGplayer</a>{' '}
+              and EUR prices from <a href="https://www.cardmarket.com" target="_blank" rel="noopener noreferrer">Cardmarket</a>, updated about daily.
+            </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
               <Stat label="USD" value={scry.prices.usd ? `$${scry.prices.usd}` : '—'} />
               <Stat label="USD Foil" value={scry.prices.usd_foil ? `$${scry.prices.usd_foil}` : '—'} />

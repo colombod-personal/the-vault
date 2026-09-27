@@ -40,9 +40,12 @@ function SignIn() {
           <p className="label-mono" style={{ marginTop: 16 }}>Sign in to accept the invite you opened.</p>
         )}
         <p className="label-mono" style={{ marginTop: 20 }}>
-          Your collection stays private unless you share it. <a href="/privacy.html">Privacy notice</a>
+          Your collection stays private unless you share it.{' '}
+          <a href="/privacy.html" style={{ color: 'var(--gold)', textDecoration: 'underline' }}>Privacy notice</a>
+          {' · '}<a href="/credits.html" style={{ color: 'var(--gold)', textDecoration: 'underline' }}>Credits &amp; thanks</a>
         </p>
       </div>
+      <div style={{ width: 'min(720px, 100%)' }}><VaultFooter /></div>
     </div>
   );
 }
@@ -91,8 +94,10 @@ function EmptyVault({ onImported }) {
         <p className="eyebrow">Your vault is empty</p>
         <h1 className="h1" style={{ margin: '8px 0 12px' }}>Import your collection</h1>
         <p className="label-mono" style={{ marginBottom: 20 }}>
-          Export a CSV from the Dragon Shield app (Inventory → Export) and upload it here.
-          Re-import any time: the Vault records what changed.
+          Export a CSV from the{' '}
+          <a href="https://mtg.dragonshield.com" target="_blank" rel="noopener noreferrer">Dragon Shield Card Manager</a>{' '}
+          (Inventory → Export) and upload it here. Re-import any time: the Vault records what changed.
+          Only the file you choose is read. The Vault never connects to your Dragon Shield account.
         </p>
         <ImportButton className="btn primary" label="Choose CSV file" onImported={onImported} />
       </div>
@@ -301,4 +306,31 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged }) {
   );
 }
 
-Object.assign(window, { AccountPanel });
+// ---- Credits footer: shown on every screen, including sign-in ----
+
+function VaultFooter() {
+  const style = { color: 'var(--gold)', textDecoration: 'underline', textUnderlineOffset: 2 };
+  const link = (href, label) => <a href={href} target="_blank" rel="noopener noreferrer" style={style}>{label}</a>;
+  return (
+    <footer className="vault-footer" style={{ margin: '48px 24px 24px', paddingTop: 16, borderTop: '1px solid var(--border)',
+      fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.7, color: 'var(--muted)' }}>
+      <p>
+        Card data, images &amp; prices from {link('https://scryfall.com', 'Scryfall')} (prices sourced by Scryfall from{' '}
+        {link('https://www.tcgplayer.com', 'TCGplayer')} and {link('https://www.cardmarket.com', 'Cardmarket')})
+        {' · '}Decks from {link('https://archidekt.com', 'Archidekt')}
+        {' · '}Collections imported from {link('https://mtg.dragonshield.com', 'Dragon Shield')}
+        {' · '}Card art by the credited artists
+        {' · '}<a href="/credits.html" style={style}><strong>Credits &amp; thanks</strong></a>
+        {' · '}<a href="/privacy.html" style={style}>Privacy</a>
+      </p>
+      <p>
+        The Vault is unofficial Fan Content permitted under the{' '}
+        {link('https://company.wizards.com/en/legal/fancontentpolicy', 'Fan Content Policy')}. Not approved/endorsed by
+        Wizards. Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC.
+        Not affiliated with or endorsed by Scryfall, Archidekt or Dragon Shield.
+      </p>
+    </footer>
+  );
+}
+
+Object.assign(window, { AccountPanel, VaultFooter });

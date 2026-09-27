@@ -17,4 +17,7 @@ React prototype as the front end (`public/`). Read `README.md` first.
   that aren't the caller's. Add a `tests/test_tenancy.py` case for every new endpoint taking an id.
 - Every new per-user table must be added to `vault.privacy.personal_data` (erasure; a test enforces
   this) and to `export_archive` (data export), and documented in `docs/gdpr.md` and `public/privacy.html`.
+- Attribution is a requirement, not decoration (README → "Attribution"): keep the footer, the
+  Fan Content notice, artist credits and source links; never crop card images; keep the app free.
+  New services or libraries go on `public/credits.html`.
 - Run `pytest` before pushing.

@@ -12,6 +12,8 @@ decks against what you own.
 - **Storage:** Postgres in production (Neon via the Vercel Marketplace), SQLite locally.
 - **Prices:** a daily GitHub Actions job downloads Scryfall's bulk file, matches every
   collection offline and stores that day's prices, so the value chart is real history.
+- **Credits:** every service the Vault relies on is credited where it's used, in the footer of
+  every screen, and on `/credits.html` (see "Attribution" below).
 - **Privacy:** multi-tenant and private by default. Users share their collection or a deck
   with someone through a one-time invite link, and can revoke it. Everyone can download all
   their data and delete their account, which removes every row (see `docs/gdpr.md`).
@@ -108,6 +110,34 @@ on the sign-in screen only when its client id is set.
 
 Accounts are **not** merged by e-mail. Signing in with a second provider while signed in
 links it to the same account; otherwise each provider identity is its own account.
+
+## Attribution
+
+The Vault depends on other people's work, and says so visibly:
+
+| Where | What is credited |
+|---|---|
+| Footer on every screen, including sign-in | Scryfall (card data, images, prices), TCGplayer and Cardmarket (price sources), Archidekt, Dragon Shield, the artists, links to Credits and Privacy, and the Wizards of the Coast Fan Content notice |
+| Card drawer | "Illustrated by *artist*", image via Scryfall, © Wizards of the Coast; where prices come from |
+| Market value tile | how many cards are priced by Scryfall and how many by your Dragon Shield export |
+| Decks tab | "Deck list from Archidekt", with the author and a "View this deck on Archidekt" link |
+| Import screen | the Dragon Shield Card Manager, and that only the uploaded file is read |
+| `/credits.html` | every service and open-source library: what it does, what data (if any) it receives, a link, and a thank-you |
+| Data export `README.txt` | Scryfall and the Fan Content notice |
+
+Rules to keep (from [Scryfall's API terms](https://scryfall.com/docs/api) and
+[Wizards' Fan Content Policy](https://company.wizards.com/en/legal/fancontentpolicy)):
+
+- **The Vault must stay free.** Wizards' policy forbids charging for fan content, and
+  Scryfall forbids paywalling its data. Sign-in only protects each user's private collection,
+  and the credits and privacy pages stay public.
+- Keep the Fan Content notice visible. Don't use Scryfall's logo or imply that Scryfall,
+  Archidekt, Dragon Shield or Wizards endorse the Vault.
+- Card images: never crop, cover, stretch, recolour or watermark them, and keep the
+  artist and copyright lines visible. If you ever show `art_crop` images, credit the artist next to them.
+- Link back to Archidekt decks, as Archidekt asks.
+- When you add a service or library, add it to `public/credits.html` (and to the footer
+  if users see its data).
 
 ## Next steps
 

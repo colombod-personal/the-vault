@@ -38,7 +38,12 @@ value_history.json   your collection's daily market value and cost
 decks.json           your saved decks (each also as a .txt file in decks/)
 shares.json          who you have given access to, and what others have shared with you
 
-Card data and prices come from Scryfall (https://scryfall.com) and are not personal data.
+Card data, images and prices come from Scryfall (https://scryfall.com), which sources prices
+from TCGplayer and Cardmarket. They are not personal data. Thank you, Scryfall.
+Full credits: /credits.html in the app.
+
+The Vault is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed
+by Wizards. Portions of the materials used are property of Wizards of the Coast. (c)Wizards of the Coast LLC.
 """
 
 

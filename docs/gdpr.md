@@ -53,7 +53,7 @@ per-user table:
 
 | Right (GDPR article) | How |
 |---|---|
-| Information (13) | `public/privacy.html`, linked from the sign-in screen and the account panel |
+| Information (13) | `public/privacy.html`, linked from the sign-in screen, the footer and the account panel; `public/credits.html` lists every service and what it receives |
 | Access and portability (15, 20) | Account → Download my data → `GET /api/me/export` (ZIP of CSV and JSON) |
 | Rectification (16) | edit display name (`PATCH /api/me`); re-import the collection |
 | Erasure (17) | Account → Delete my account (download offered first) → `DELETE /api/me` with `{"confirm": "DELETE"}`; also Meta's data-deletion callback for Facebook sign-ins |

@@ -4,7 +4,7 @@
 // Caches results in localStorage by card identifier.
 window.Scryfall = (() => {
   const SCRY_BASE = 'https://api.scryfall.com';
-  const CACHE_KEY = 'scry_cache_v2';
+  const CACHE_KEY = 'scry_cache_v3'; // v3: adds artist (credited wherever art is shown)
   const RATE_MS = 500;
   let lastCall = 0;
 
@@ -50,6 +50,7 @@ window.Scryfall = (() => {
       img_normal: img?.normal || null,
       prices: c.prices || {},
       scryfall_uri: c.scryfall_uri,
+      artist: c.artist || c.card_faces?.[0]?.artist || null,
       oracle_text: c.oracle_text || c.card_faces?.map(f => f.oracle_text).join(' // ') || '',
       power: c.power, toughness: c.toughness, loyalty: c.loyalty,
       layout: c.layout,
