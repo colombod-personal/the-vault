@@ -227,3 +227,5 @@ __marimo__/
 data/
 *.csv
 !tests/fixtures/*.csv
+# twin seed data is public, twin-made card data (not personal)
+!twins/data/
