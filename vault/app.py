@@ -17,7 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import auth as auth_module
 from . import outbound, tokens
-from .api import meta, v1
+from .api import mcp, meta, v1
 from .api.hal import problem
 from .config import Settings
 from .db import Database
@@ -29,6 +29,8 @@ PUBLIC_DIR = Path(__file__).resolve().parent.parent / "public"
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 # Called cross-site by design: OAuth providers (Apple POSTs) and Meta's deletion callback.
 CROSS_SITE_ALLOWED = ("/api/auth/callback/", "/api/facebook/data-deletion")
+# POSTs a read-only token may call: they only compute an answer, or revoke the token itself.
+READ_ONLY_POSTS = {"/api/v1/decks/parse", "/api/v1/decks/coverage", "/api/v1/auth/revoke"}
 
 
 def _origin(url: str) -> str:
@@ -104,11 +106,17 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
         yield from db.session()
 
     def optional_user(request: Request, session: Session = Depends(get_db)) -> User | None:
-        """The caller: a bearer token (native apps) or the web session cookie."""
+        """The caller: a bearer token (native apps, or a personal access token for agents) or
+        the web session cookie. ``request.state.scopes`` says what the caller may do."""
         header = request.headers.get("authorization", "")
+        request.state.scopes = {"read", "write", "account"}
         if header[:7].lower() == "bearer ":
             bearer = header[7:].strip()
-            user = tokens.authenticate(session, bearer)
+            if tokens.is_pat(bearer):
+                found = tokens.authenticate_pat(session, bearer)
+                user, request.state.scopes = found if found else (None, set())
+            else:
+                user = tokens.authenticate(session, bearer)
             if user is not None:
                 request.state.bearer = bearer
             return user
@@ -120,11 +128,24 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
             bearer = request.headers.get("authorization", "")[:7].lower() == "bearer "
             raise HTTPException(401, "Invalid or expired access token" if bearer else "Sign in required",
                                 headers={"WWW-Authenticate": 'Bearer error="invalid_token"' if bearer else "Bearer"})
+        scopes = request.state.scopes
+        writes = request.method in UNSAFE_METHODS and request.url.path not in READ_ONLY_POSTS
+        if writes and "write" not in scopes:
+            raise HTTPException(403, "This access token is read-only. Create one with the write scope to make changes.",
+                                headers={"WWW-Authenticate": 'Bearer error="insufficient_scope", scope="write"'})
+        return user
+
+    def account_user(request: Request, user: User = Depends(current_user)) -> User:
+        """Account-level actions (creating tokens, deleting the account) need the person, signed in
+        on the web or in the app. Personal access tokens can't do them."""
+        if "account" not in request.state.scopes:
+            raise HTTPException(403, "Personal access tokens can't manage the account. Use the web or iOS app.")
         return user
 
     app.include_router(auth_module.build_router(auth, get_db))
     app.include_router(v1.build_router(get_db, current_user, optional_user, settings, verifier,
-                                       lambda: auth.enabled, transport))
+                                       lambda: auth.enabled, transport, account_user))
+    app.include_router(mcp.build_router(optional_user))
     app.include_router(meta.build_router(get_db, settings))
 
     @app.get("/api/health")

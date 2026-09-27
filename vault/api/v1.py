@@ -11,6 +11,7 @@ reachable only through shares they granted, and ids that aren't yours answer 404
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import date
 from urllib.parse import urlencode
@@ -28,12 +29,13 @@ from .. import outbound, tokens
 from ..auth import Profile, find_or_create
 from ..collection_view import SORTS, CollectionView, filtered, history_days
 from ..importer import ImportError_, export_dragonshield, import_dragonshield, user_entries
-from ..models import ApiSession, Deck, Import, Share, User
+from ..models import AccessToken, ApiSession, Deck, Import, Share, User
 from ..native import NativeTokenError, NativeVerifier, ProviderUnavailable
 from ..privacy import export_archive, purge_user
 from ..sharing import accept_invite, create_invite, display_name, incoming_share, owned_deck
 from . import schemas as S
 from .hal import etag_response, link, page_body, paginate
+from .idempotency import idempotent
 
 V1 = "/api/v1"
 DELETE_CONFIRMATION = "DELETE"
@@ -44,7 +46,8 @@ def _iso(dt) -> str | None:
 
 
 def build_router(get_db, current_user, optional_user, settings, verifier: NativeVerifier, auth_providers,
-                 transport=None) -> APIRouter:
+                 transport=None, account_user=None) -> APIRouter:
+    account_user = account_user or current_user
     router = APIRouter(prefix=V1)
 
     # -- entry point ------------------------------------------------------------------------
@@ -62,6 +65,12 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 "cards": link(f"{V1}/collection/cards"), "imports": link(f"{V1}/imports"),
                 "decks": link(f"{V1}/decks"), "shares": link(f"{V1}/shares"), "shared": link(f"{V1}/shared"),
             }
+        links |= {
+            "mcp": link("/api/mcp", title="Model Context Protocol server for AI agents (Streamable HTTP)"),
+            "llms": link("/llms.txt", title="How to use this API, written for AI agents"),
+        }
+        if user:
+            links["tokens"] = link(f"{V1}/me/tokens", title="Personal access tokens for agents and scripts")
         if settings.twins_url:  # local development: the front end sends its Scryfall calls there too
             links["twins"] = link(settings.twins_url, title="Digital twin universe (development)")
         return {"version": "1", "signed_in": user is not None, "_links": links}
@@ -116,6 +125,10 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         bearer = getattr(request.state, "bearer", None)
         if not bearer:
             raise HTTPException(400, "Only bearer-token sessions can be revoked here; web sessions use /api/auth/logout")
+        if tokens.is_pat(bearer):
+            db.execute(delete(AccessToken).where(AccessToken.token_hash == tokens._hash(bearer)))
+            db.commit()
+            return {"revoked": True}
         return {"revoked": tokens.revoke_by_access(db, bearer)}
 
     # -- account ------------------------------------------------------------------------------------
@@ -124,6 +137,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             "id": user.id, "name": user.name, "email": user.email,
             "providers": sorted({i.provider for i in user.identities}),
             "_links": {"self": link(f"{V1}/me"), "sessions": link(f"{V1}/me/sessions"),
+                       "tokens": link(f"{V1}/me/tokens", title="Personal access tokens for agents and scripts"),
                        "export": link(f"{V1}/me/export", title="Download all my data (ZIP)"),
                        "collection": link(f"{V1}/collection")},
         }
@@ -139,13 +153,13 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return _me(user)
 
     @router.get("/me/export", tags=["account"], summary="Everything held about you, as a ZIP (GDPR)")
-    def export_me(user: User = Depends(current_user), db: Session = Depends(get_db)) -> Response:
+    def export_me(user: User = Depends(account_user), db: Session = Depends(get_db)) -> Response:
         name = f"vault-data-{date.today().isoformat()}.zip"
         return Response(export_archive(db, user), media_type="application/zip",
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
     @router.delete("/me", tags=["account"], summary='Delete the account and all its data ({"confirm": "DELETE"})')
-    def delete_me(body: S.DeleteRequest, request: Request, user: User = Depends(current_user),
+    def delete_me(body: S.DeleteRequest, request: Request, user: User = Depends(account_user),
                   db: Session = Depends(get_db)) -> dict:
         if body.confirm != DELETE_CONFIRMATION:
             raise HTTPException(400, f'Send {{"confirm": "{DELETE_CONFIRMATION}"}} to delete your account')
@@ -156,7 +170,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     @router.get("/me/sessions", tags=["account"], response_model=S.SessionPage,
                 summary="Apps signed in to this account")
     def sessions(request: Request, cursor: str | None = None, limit: int | None = None,
-                 user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+                 user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
         rows = list(db.scalars(select(ApiSession).where(ApiSession.user_id == user.id)))
         current = tokens._hash(request.state.bearer) if getattr(request.state, "bearer", None) else None
         page, nxt = paginate(rows, lambda s: (-s.id,), lambda s: s.id, cursor=cursor, limit=limit)
@@ -166,11 +180,39 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return page_body(request, items, nxt, len(rows), limit=limit)
 
     @router.delete("/me/sessions/{session_id}", tags=["account"], summary="Sign an app out remotely")
-    def end_session(session_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    def end_session(session_id: int, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
         s = db.get(ApiSession, session_id)
         if s is None or s.user_id != user.id:
             raise HTTPException(404, "Session not found")
         db.delete(s)
+        db.commit()
+        return {"deleted": True}
+
+    # -- personal access tokens (agents, scripts, MCP) ------------------------------------------
+    def _token(t: AccessToken) -> dict:
+        return {"id": t.id, "name": t.name, "prefix": t.prefix, "scopes": t.scopes.split(),
+                "created_at": _iso(t.created_at), "expires_at": _iso(t.expires_at), "last_used_at": _iso(t.last_used_at),
+                "_links": {"self": link(f"{V1}/me/tokens/{t.id}")}}
+
+    @router.post("/me/tokens", tags=["account"], response_model=S.NewAccessToken, status_code=201,
+                 summary="Create a personal access token for your own agents and scripts (shown once)")
+    def create_token(body: S.AccessTokenIn, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+        row, token = tokens.create_pat(db, user, body.name.strip() or "Agent", body.scopes, body.expires_in_days)
+        return {**_token(row), "token": token, "mcp_url": f"{settings.base_url}/api/mcp"}
+
+    @router.get("/me/tokens", tags=["account"], response_model=S.AccessTokenPage, summary="Your personal access tokens")
+    def list_tokens(request: Request, cursor: str | None = None, limit: int | None = None,
+                    user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+        rows = list(db.scalars(select(AccessToken).where(AccessToken.user_id == user.id)))
+        page, nxt = paginate(rows, lambda t: (-t.id,), lambda t: t.id, cursor=cursor, limit=limit)
+        return page_body(request, [_token(t) for t in page], nxt, len(rows), limit=limit)
+
+    @router.delete("/me/tokens/{token_id}", tags=["account"], summary="Revoke a personal access token")
+    def delete_token(token_id: int, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+        row = db.get(AccessToken, token_id)
+        if row is None or row.user_id != user.id:
+            raise HTTPException(404, "Token not found")
+        db.delete(row)
         db.commit()
         return {"deleted": True}
 
@@ -214,7 +256,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 }
                 if ctx.own:
                     links |= {"imports": link(f"{V1}/imports"), "export": link(f"{ctx.base}/export.csv")}
-                return {**view.summary(), "owner": ctx.owner_name, "_links": links}
+                version = hashlib.sha256(view.version.encode()).hexdigest()[:16]  # changes whenever the data does
+                return {**view.summary(), "owner": ctx.owner_name, "version": version, "_links": links}
 
             return etag_response(request, view.version, body)
 
@@ -322,13 +365,17 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     @router.post("/imports", tags=["imports"], response_model=S.ImportItem, status_code=201,
                  summary="Upload a Dragon Shield CSV export (replaces the collection, records what changed)")
-    async def create_import(file: UploadFile, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    async def create_import(request: Request, file: UploadFile, user: User = Depends(current_user),
+                            db: Session = Depends(get_db)):
         content = await file.read()
-        try:
-            imp = import_dragonshield(db, user, file.filename or "upload.csv", content)
-        except ImportError_ as exc:
-            raise HTTPException(400, str(exc)) from exc
-        return _import(imp)
+
+        def run():
+            try:
+                return _import(import_dragonshield(db, user, file.filename or "upload.csv", content))
+            except ImportError_ as exc:
+                raise HTTPException(400, str(exc)) from exc
+
+        return idempotent(request, db, user, 201, run)
 
     @router.get("/imports", tags=["imports"], response_model=S.ImportPage)
     def list_imports(request: Request, cursor: str | None = None, limit: int | None = None,
@@ -382,14 +429,18 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return page_body(request, [_deck(d) for d in page], nxt, len(rows), limit=limit)
 
     @router.post("/decks", tags=["decks"], response_model=S.Deck, status_code=201)
-    def create_deck(body: S.DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    def create_deck(request: Request, body: S.DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
         if not decklist.parse_text(body.text).lines:
             raise HTTPException(400, "No cards found in the decklist")
-        deck = Deck(user_id=user.id, name=body.name.strip()[:200] or "Untitled deck", text=body.text,
-                    source_url=body.source_url)
-        db.add(deck)
-        db.commit()
-        return _deck(deck)
+
+        def run():
+            deck = Deck(user_id=user.id, name=body.name.strip()[:200] or "Untitled deck", text=body.text,
+                        source_url=body.source_url)
+            db.add(deck)
+            db.flush()
+            return _deck(deck)
+
+        return idempotent(request, db, user, 201, run)
 
     @router.get("/decks/{deck_id}", tags=["decks"], response_model=S.Deck, summary="A saved deck, with coverage")
     def get_deck(deck_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
@@ -425,10 +476,13 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     # -- sharing ------------------------------------------------------------------------------
     @router.post("/shares", tags=["sharing"], response_model=S.Invite, status_code=201,
                  summary="Create a one-time invite link for your collection or a deck")
-    def create_share(body: S.ShareIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-        share, token = create_invite(db, user, body.kind, body.deck_id, body.show_costs)
-        return {"id": share.id, "url": f"{settings.base_url}/?invite={token}", "expires_at": _iso(share.expires_at),
-                "_links": {"self": link(f"{V1}/shares/{share.id}")}}
+    def create_share(request: Request, body: S.ShareIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+        def run():
+            share, token = create_invite(db, user, body.kind, body.deck_id, body.show_costs)
+            return {"id": share.id, "url": f"{settings.base_url}/?invite={token}", "expires_at": _iso(share.expires_at),
+                    "_links": {"self": link(f"{V1}/shares/{share.id}")}}
+
+        return idempotent(request, db, user, 201, run)
 
     @router.get("/shares", tags=["sharing"], response_model=S.SharePage, response_model_by_alias=True,
                 summary="What you have shared, and with whom")

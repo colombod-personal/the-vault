@@ -190,6 +190,42 @@ class AuthCode(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class AccessToken(Base):
+    """A personal access token: how a user's own agents, scripts and MCP clients call the API.
+
+    Scoped ("read", or "read write"), named, revocable and expiring. Only a SHA-256 hash is
+    stored; the token is shown once, when created.
+    """
+
+    __tablename__ = "access_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    prefix: Mapped[str] = mapped_column(String(20))  # shown in lists, e.g. "vault_pat_Ab3x"
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    scopes: Mapped[str] = mapped_column(String(40))  # space-separated
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class IdempotentRequest(Base):
+    """The stored answer to a POST sent with an ``Idempotency-Key``, so a retry after a lost
+    response returns the same answer instead of doing the work twice. Kept 24 hours."""
+
+    __tablename__ = "idempotent_requests"
+    __table_args__ = (UniqueConstraint("user_id", "key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    key: Mapped[str] = mapped_column(String(100))
+    endpoint: Mapped[str] = mapped_column(String(120))
+    status: Mapped[int] = mapped_column(Integer)
+    body: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
 class Card(Base):
     """Scryfall printing data for printings someone owns (refreshed by the daily sync)."""
 

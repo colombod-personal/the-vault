@@ -189,6 +189,7 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged }) {
   });
   const deleteAccount = wrap(async () => {
     await api.deleteAccount();
+    await api.clearLocalData();
     alert('Your account and all of its data have been deleted.');
     location.href = '/';
   });
@@ -255,6 +256,8 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged }) {
           </div>
         ))}
       </Section>
+
+      <AgentsSection />
 
       <Section title="Shared with me">
         {incoming.length === 0 && <p className="label-mono">Nothing yet. When someone sends you an invite link, open it while signed in.</p>}
@@ -334,3 +337,67 @@ function VaultFooter() {
 }
 
 Object.assign(window, { AccountPanel, VaultFooter });
+
+
+// Personal access tokens: let people connect their own AI agents and scripts (MCP or HTTP API).
+function AgentsSection() {
+  const api = window.VaultApi;
+  const [tokens, setTokens] = useStateAcc([]);
+  const [name, setName] = useStateAcc('My agent');
+  const [write, setWrite] = useStateAcc(false);
+  const [created, setCreated] = useStateAcc(null);
+  const [error, setError] = useStateAcc(null);
+  const reload = () => { api.tokens().then(setTokens).catch((e) => setError(e.message)); };
+  useEffectAcc(reload, []);
+  const create = async () => {
+    setError(null);
+    try {
+      setCreated(await api.createToken(name, write ? ['read', 'write'] : ['read']));
+      reload();
+    } catch (e) { setError(e.message); }
+  };
+  const remove = async (id) => { await api.deleteToken(id); reload(); };
+  const copy = (text) => navigator.clipboard && navigator.clipboard.writeText(text);
+  const claudeCmd = created && `claude mcp add --transport http vault ${created.mcp_url} --header "Authorization: Bearer ${created.token}"`;
+  return (
+    <Section title="Agents & API">
+      <p className="label-mono" style={{ marginBottom: 8 }}>
+        Connect your own AI agents (Claude, ChatGPT, scripts) to your vault through its MCP server or HTTP API.
+        A token acts as you. Read-only unless you allow changes; revoke it any time.{' '}
+        <a href="/llms.txt" target="_blank" rel="noopener">How agents use it</a> ·{' '}
+        <a href="/api/docs" target="_blank" rel="noopener">API docs</a>
+      </p>
+      {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
+      <div style={rowStyle}>
+        <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Token name" style={{ flex: 1 }} />
+        <label className="label-mono" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input type="checkbox" checked={write} onChange={(e) => setWrite(e.target.checked)} /> allow changes
+        </label>
+        <button className="btn sm" onClick={create}>Create token</button>
+      </div>
+      {created && (
+        <div className="panel panel-tight" style={{ marginTop: 10 }}>
+          <p className="label-mono">Copy it now: it won't be shown again. Expires {new Date(created.expires_at).toLocaleDateString()}.</p>
+          <div style={rowStyle}>
+            <input className="input" readOnly value={created.token} style={{ flex: 1 }} onFocus={(e) => e.target.select()} />
+            <button className="btn xs" onClick={() => copy(created.token)}>Copy</button>
+          </div>
+          <p className="label-mono" style={{ marginTop: 8 }}>MCP server: {created.mcp_url} · Claude Code:</p>
+          <div style={rowStyle}>
+            <input className="input" readOnly value={claudeCmd} style={{ flex: 1 }} onFocus={(e) => e.target.select()} />
+            <button className="btn xs" onClick={() => copy(claudeCmd)}>Copy</button>
+          </div>
+        </div>
+      )}
+      {tokens.map((t) => (
+        <div key={t.id} style={rowStyle}>
+          <span className="label-mono">
+            {t.name} · {t.prefix}… · {t.scopes.includes('write') ? 'read & write' : 'read-only'} ·{' '}
+            {t.last_used_at ? 'used ' + new Date(t.last_used_at).toLocaleDateString() : 'never used'}
+          </span>
+          <button className="btn xs ghost" onClick={() => remove(t.id)}>Revoke</button>
+        </div>
+      ))}
+    </Section>
+  );
+}

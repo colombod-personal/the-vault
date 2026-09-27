@@ -61,6 +61,8 @@ vault/sync.py         daily Scryfall sync (offline matching, prices, per-user va
 vault/api/v1.py       the API (/api/v1): paged, linked (HAL), ETags, problem+json
 vault/api/hal.py      links, cursors, pages, ETags, problem details
 vault/api/schemas.py  response models (OpenAPI for Swift codegen)
+vault/api/mcp.py      MCP server for people's own agents (tools wrap /api/v1)
+vault/api/idempotency.py  Idempotency-Key replay for retried POSTs
 vault/api/meta.py     Facebook data deletion callback
 vault/sharing.py      invite links, access checks for shared collections and decks
 vault/privacy.py      GDPR data export (ZIP) and account erasure (purge_user)
@@ -77,6 +79,11 @@ items per response), linked (`_links`, start at `GET /api/v1`), ETag/304, errors
 `application/problem+json`. Native apps sign in with Apple or Google ID tokens, or through the
 browser with PKCE, and use rotating bearer tokens. Full reference: [`docs/api.md`](docs/api.md).
 Interactive docs at `/api/docs`; OpenAPI at `/api/openapi.json`.
+
+**Agents.** People can connect their own AI agents: personal access tokens (read, or read and
+write), an MCP server at `/api/mcp`, and `/llms.txt`. See [`docs/agents.md`](docs/agents.md).
+The web app keeps collections in IndexedDB, keyed by version, and retries failed pages. It
+reopens with one small request and works offline.
 
 ## Deploying on Vercel
 

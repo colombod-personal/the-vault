@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from .models import ApiSession, AuthCode, User
+from .models import AccessToken, ApiSession, AuthCode, User
 
 ACCESS_TTL = timedelta(hours=1)
 REFRESH_TTL = timedelta(days=60)
@@ -131,3 +131,34 @@ def redeem_code(db: Session, code: str, code_verifier: str, redirect_uri: str, d
     if not secrets.compare_digest(s256(code_verifier), row.code_challenge):
         raise TokenError("invalid_grant", "PKCE verification failed")
     return issue(db, db.get(User, row.user_id), "app", device_name)
+
+
+# -- personal access tokens (agents, scripts, MCP clients) ---------------------------------
+
+PAT_PREFIX = "vault_pat_"
+SCOPES = ("read", "write")
+PAT_MAX_DAYS = 365
+
+
+def is_pat(bearer: str) -> bool:
+    return bearer.startswith(PAT_PREFIX)
+
+
+def create_pat(db: Session, user: User, name: str, scopes: list[str], days: int) -> tuple[AccessToken, str]:
+    token = PAT_PREFIX + secrets.token_urlsafe(32)
+    row = AccessToken(user_id=user.id, name=name[:80], prefix=token[:len(PAT_PREFIX) + 4], token_hash=_hash(token),
+                      scopes=" ".join(s for s in SCOPES if s in scopes), expires_at=_now() + timedelta(days=days))
+    db.add(row)
+    db.commit()
+    return row, token
+
+
+def authenticate_pat(db: Session, bearer: str) -> tuple[User, set[str]] | None:
+    row = db.scalar(select(AccessToken).where(AccessToken.token_hash == _hash(bearer)))
+    if row is None or _aware(row.expires_at) < _now():
+        return None
+    now = _now()
+    if row.last_used_at is None or now - _aware(row.last_used_at) > timedelta(minutes=5):
+        row.last_used_at = now
+        db.commit()
+    return db.get(User, row.user_id), set(row.scopes.split())

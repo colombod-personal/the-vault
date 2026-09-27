@@ -32,20 +32,72 @@ window.VaultApi = (() => {
     constructor(status, message) { super(message); this.status = status; }
   }
 
+  // Retries: GETs, and POSTs carrying an Idempotency-Key, are retried on network errors and on
+  // 408/425/429/5xx with exponential backoff (honouring Retry-After), so a flaky connection costs
+  // one page, not the whole load.
+  const RETRYABLE = new Set([408, 425, 429, 500, 502, 503, 504]);
+  const MAX_RETRIES = 4;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const backoff = (attempt, resp) => {
+    const after = resp && Number(resp.headers.get('retry-after'));
+    return after > 0 ? Math.min(after, 30) * 1000 : Math.min(8000, 400 * 2 ** attempt) * (0.75 + Math.random() / 2);
+  };
+  const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).slice(2));
+
   async function call(path, opts = {}) {
     if (opts.json !== undefined) {
-      opts = { ...opts, body: JSON.stringify(opts.json), headers: { 'Content-Type': 'application/json' } };
+      opts = { ...opts, body: JSON.stringify(opts.json), headers: { ...(opts.headers || {}), 'Content-Type': 'application/json' } };
       delete opts.json;
     }
-    const resp = await fetch(path, { credentials: 'same-origin', ...opts });
-    if (!resp.ok) {
-      let msg = 'HTTP ' + resp.status;
-      try { const p = await resp.json(); msg = p.detail || p.title || msg; } catch {}
-      throw new ApiError(resp.status, msg);
+    const method = (opts.method || 'GET').toUpperCase();
+    const retryable = method === 'GET' || !!(opts.headers && opts.headers['Idempotency-Key']);
+    for (let attempt = 0; ; attempt++) {
+      let resp;
+      try {
+        resp = await fetch(path, { credentials: 'same-origin', ...opts });
+      } catch (e) {
+        if (retryable && attempt < MAX_RETRIES) { await sleep(backoff(attempt)); continue; }
+        throw new ApiError(0, 'Network error: ' + e.message);
+      }
+      if (!resp.ok) {
+        if (retryable && RETRYABLE.has(resp.status) && attempt < MAX_RETRIES) { await sleep(backoff(attempt, resp)); continue; }
+        let msg = 'HTTP ' + resp.status;
+        try { const p = await resp.json(); msg = p.detail || p.title || msg; } catch {}
+        throw new ApiError(resp.status, msg);
+      }
+      const type = resp.headers.get('content-type') || '';
+      return type.includes('json') ? resp.json() : resp.text();
     }
-    const type = resp.headers.get('content-type') || '';
-    return type.includes('json') ? resp.json() : resp.text();
   }
+  // Creating things: safe to retry because the server replays the first answer for the same key.
+  const create = (path, opts) => call(path, { method: 'POST', ...opts, headers: { ...(opts.headers || {}), 'Idempotency-Key': newKey() } });
+
+  // Local copy of collections in IndexedDB, keyed by the collection's `version`: while the
+  // version is unchanged, opening the vault costs one small request. Offline, the last copy is
+  // shown. Cleared on sign-out and account deletion.
+  const localStore = (() => {
+    let dbp = null;
+    const open = () => dbp || (dbp = new Promise((resolve, reject) => {
+      const req = indexedDB.open('the-vault', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('kv');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    }));
+    const run = async (mode, fn) => {
+      const db = await open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('kv', mode);
+        const req = fn(tx.objectStore('kv'));
+        tx.oncomplete = () => resolve(req.result);
+        tx.onerror = () => reject(tx.error);
+      });
+    };
+    return {
+      get: (k) => run('readonly', (st) => st.get(k)).catch(() => undefined),
+      set: (k, v) => run('readwrite', (st) => st.put(v, k)).catch(() => undefined),
+      clear: () => run('readwrite', (st) => st.clear()).catch(() => undefined),
+    };
+  })();
 
   // Follow `next` links and return every item. The browser revalidates each page with its
   // ETag, so unchanged pages come back as cheap 304s.
@@ -66,9 +118,22 @@ window.VaultApi = (() => {
   const LANGUAGE = { en: 'English', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian', pt: 'Portuguese',
     ja: 'Japanese', ko: 'Korean', ru: 'Russian', zhs: 'Simplified Chinese', zht: 'Traditional Chinese' };
 
-  // Assemble the shape the views were designed around from the paginated resources.
+  // Load a collection: from the local copy when its version is current, else page by page.
   async function loadCollection(base, onProgress) {
-    const summary = await call(base);
+    const key = 'collection:' + base;
+    let summary;
+    try {
+      summary = await call(base);
+    } catch (e) {
+      if (e.status === 401) await localStore.clear();
+      const saved = e.status === 0 ? await localStore.get(key) : null; // offline: last copy
+      if (saved) return assemble(saved, { offline: true, savedAt: saved.savedAt });
+      throw e;
+    }
+    const saved = await localStore.get(key);
+    if (saved && saved.version && saved.version === summary.version) {
+      return assemble({ ...saved, summary }, { fromCache: true, savedAt: saved.savedAt });
+    }
     const L = summary._links;
     const [items, sets, timeline, history] = await Promise.all([
       all(withLimit(L.cards.href), onProgress),
@@ -76,6 +141,13 @@ window.VaultApi = (() => {
       call(L.timeline.href),
       all(withLimit(L.history.href)),
     ]);
+    const fresh = { version: summary.version, savedAt: new Date().toISOString(), summary, items, sets, timeline, history };
+    localStore.set(key, fresh);
+    return assemble(fresh, {});
+  }
+
+  // Assemble the shape the views were designed around from the paginated resources.
+  function assemble({ summary, items, sets, timeline, history }, origin) {
     const cards = items.map((c) => ({
       key: c.id, n: c.name, s: c.set.code, sn: c.set.name, cn: c.collector_number, p: c.printing,
       c: CONDITION[c.condition] || c.condition, l: LANGUAGE[c.language] || c.language, q: c.quantity,
@@ -99,6 +171,7 @@ window.VaultApi = (() => {
         uniqueEntries: summary.printings, uniqueSets: summary.sets, printings: summary.by_printing, conditions,
         generatedAt: summary.prices_as_of || summary.imported_at, importedAt: summary.imported_at,
         pricedFromScryfall: summary.priced_by_scryfall, costsHidden: summary.costs_hidden, sharedBy: summary.owner,
+        version: summary.version, offline: !!origin.offline, fromCache: !!origin.fromCache, savedAt: origin.savedAt,
       },
       sets: sets.map((s) => ({ code: s.code, name: s.name, qty: s.copies, value: s.market_value, unique: s.printings })),
       timeline: timeline.months.map((m) => ({ month: m.month, qty: m.copies })),
@@ -115,10 +188,11 @@ window.VaultApi = (() => {
     importCsv: (file) => {
       const body = new FormData();
       body.append('file', file);
-      return call(V1 + '/imports', { method: 'POST', body });
+      return create(V1 + '/imports', { body });
     },
     archidektDeck: (id) => call(V1 + '/archidekt/decks/' + encodeURIComponent(id)),
-    logout: () => call('/api/auth/logout', { method: 'POST' }),
+    logout: () => call('/api/auth/logout', { method: 'POST' }).finally(() => localStore.clear()),
+    clearLocalData: () => localStore.clear(),
     devLogin: () => call('/api/auth/dev-login', { method: 'POST' }),
 
     // account & GDPR
@@ -126,16 +200,21 @@ window.VaultApi = (() => {
     exportUrl: V1 + '/me/export',
     deleteAccount: () => call(V1 + '/me', { method: 'DELETE', json: { confirm: 'DELETE' } }),
 
+    // agents: personal access tokens
+    tokens: () => all(V1 + '/me/tokens'),
+    createToken: (name, scopes) => call(V1 + '/me/tokens', { method: 'POST', json: { name, scopes } }),
+    deleteToken: (id) => call(V1 + '/me/tokens/' + id, { method: 'DELETE' }),
+
     // decks
     parseDeck: (text) => call(V1 + '/decks/parse', { method: 'POST', json: { text } }),
     decks: () => all(V1 + '/decks'),
     deck: (id) => call(V1 + '/decks/' + id),
-    saveDeck: (name, text, source_url) => call(V1 + '/decks', { method: 'POST', json: { name, text, source_url } }),
+    saveDeck: (name, text, source_url) => create(V1 + '/decks', { json: { name, text, source_url } }),
     deleteDeck: (id) => call(V1 + '/decks/' + id, { method: 'DELETE' }),
 
     // sharing
     shares: () => all(V1 + '/shares'),
-    createShare: (kind, deck_id, show_costs) => call(V1 + '/shares', { method: 'POST', json: { kind, deck_id, show_costs } }),
+    createShare: (kind, deck_id, show_costs) => create(V1 + '/shares', { json: { kind, deck_id, show_costs } }),
     removeShare: (id) => call(V1 + '/shares/' + id, { method: 'DELETE' }),
     acceptInvite: (token) => call(V1 + '/shares/accept', { method: 'POST', json: { token } }),
     sharedWithMe: () => all(V1 + '/shared'),

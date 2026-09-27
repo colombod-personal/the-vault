@@ -113,6 +113,7 @@ class CardPage(Page):
 
 
 class CollectionSummary(Hal):
+    version: str = Field("", description="Changes whenever the collection or its prices change; clients cache by it")
     copies: int
     printings: int
     cards: int
@@ -328,3 +329,30 @@ class SharedItem(Hal):
 
 class SharedPage(Page):
     items: list[SharedItem]
+
+
+# -- personal access tokens ---------------------------------------------------------------------
+
+class AccessTokenIn(BaseModel):
+    name: str = Field("Agent", max_length=80, description="What the token is for, e.g. 'Claude desktop'")
+    scopes: list[Literal["read", "write"]] = Field(["read"], description='"read", or "read" and "write"')
+    expires_in_days: int = Field(90, ge=1, le=365)
+
+
+class AccessTokenItem(Hal):
+    id: int
+    name: str
+    prefix: str
+    scopes: list[str]
+    created_at: str
+    expires_at: str
+    last_used_at: str | None = None
+
+
+class NewAccessToken(AccessTokenItem):
+    token: str = Field(description="The token. It is shown only once; store it safely.")
+    mcp_url: str = Field(description="The MCP server to point agents at, with this token as the bearer")
+
+
+class AccessTokenPage(Page):
+    items: list[AccessTokenItem]

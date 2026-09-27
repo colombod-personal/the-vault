@@ -20,7 +20,7 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from .importer import export_dragonshield
-from .models import ApiSession, AuthCode, CollectionValue, Deck, Entry, Identity, Import, Share, User
+from .models import AccessToken, ApiSession, IdempotentRequest, AuthCode, CollectionValue, Deck, Entry, Identity, Import, Share, User
 from .prices import history
 from .collection_view import CollectionView
 
@@ -38,6 +38,7 @@ value_history.json   your collection's daily market value and cost
 decks.json           your saved decks (each also as a .txt file in decks/)
 shares.json          who you have given access to, and what others have shared with you
 app_sessions.json    apps signed in to your account (tokens are never exported)
+access_tokens.json   personal access tokens you created for agents and scripts (names and dates only)
 
 Card data, images and prices come from Scryfall (https://scryfall.com), which sources prices
 from TCGplayer and Cardmarket. They are not personal data. Thank you, Scryfall.
@@ -112,6 +113,11 @@ def export_archive(db: Session, user: User) -> bytes:
             safe = "".join(ch if ch.isalnum() or ch in " -_" else "_" for ch in d.name).strip() or "deck"
             z.writestr(f"decks/{d.id}-{safe[:60]}.txt", d.text)
         z.writestr("shares.json", _json(shares))
+        z.writestr("access_tokens.json", _json([
+            {"name": t.name, "prefix": t.prefix, "scopes": t.scopes.split(), "created_at": t.created_at.isoformat(),
+             "expires_at": t.expires_at.isoformat(), "last_used_at": t.last_used_at and t.last_used_at.isoformat()}
+            for t in db.scalars(select(AccessToken).where(AccessToken.user_id == user.id))
+        ]))
         z.writestr("app_sessions.json", _json([
             {"client": a.client, "device_name": a.device_name, "created_at": a.created_at.isoformat(),
              "last_used_at": a.last_used_at and a.last_used_at.isoformat()}
@@ -128,6 +134,8 @@ def personal_data(user_id: int) -> dict:
     """
     return {
         "api_sessions": delete(ApiSession).where(ApiSession.user_id == user_id),
+        "access_tokens": delete(AccessToken).where(AccessToken.user_id == user_id),
+        "idempotent_requests": delete(IdempotentRequest).where(IdempotentRequest.user_id == user_id),
         "auth_codes": delete(AuthCode).where(AuthCode.user_id == user_id),
         "shares": delete(Share).where(or_(Share.owner_id == user_id, Share.grantee_id == user_id)),
         "decks": delete(Deck).where(Deck.user_id == user_id),

@@ -11,6 +11,14 @@ One API for the web app and native apps (the planned iOS app), under `/api/v1`.
   The summary (`/collection`) never lists cards.
 - **Cheap to re-check.** Collection resources send an `ETag`. Send it back as `If-None-Match`
   and you get `304 Not Modified` until an import or the daily price sync changes something.
+- **Safe retries.** GETs can always be repeated. POSTs that create something (imports, decks,
+  shares) accept `Idempotency-Key: <uuid>`: a retry with the same key replays the first answer
+  (`Idempotent-Replayed: true`) instead of doing the work twice.
+- **A version to cache by.** `GET /api/v1/collection` has a `version` that changes whenever the
+  collection or its prices change. The web app keeps a copy in IndexedDB and refetches the
+  pages only when the version moves.
+- **For agents.** There are personal access tokens (read, or read and write) and an MCP server at
+  `/api/mcp`; `/llms.txt` explains both to an agent. See [`agents.md`](agents.md).
 - **Errors are `application/problem+json`** (RFC 9457): `{"type", "title", "status", "detail"}`.
   A missing or expired sign-in is `401` with `WWW-Authenticate: Bearer`. Another user's ids
   answer `404`, never `403`.
@@ -101,6 +109,7 @@ ids are accepted too.
 | GET / PATCH / DELETE | `/api/v1/me` | profile / change display name / delete account (`{"confirm": "DELETE"}`) |
 | GET | `/api/v1/me/export` | everything held about you, as a ZIP (GDPR) |
 | GET / DELETE | `/api/v1/me/sessions[/{id}]` | signed-in apps |
+| POST / GET / DELETE | `/api/v1/me/tokens[/{id}]` | personal access tokens for agents and scripts (shown once) |
 | GET | `/api/v1/collection` | summary: copies, printings, value, cost, dates, links |
 | GET | `/api/v1/collection/cards` | printings, paged. Filters: `q`, `set`, `name`, `finish`, `condition`. `sort`: `name`, `-value`, `value`, `-quantity`, `set`, `-acquired` |
 | GET | `/api/v1/collection/cards/{id}` | one printing: copies, card data, image with artist credit, 90-day price history |
@@ -123,7 +132,7 @@ ids are accepted too.
 | GET | `/api/v1/shared/{id}/collection[/…]` | a shared collection, read-only. Same sub-resources as `/collection` except `export.csv`. Prices paid are hidden unless the owner allowed them |
 | GET | `/api/v1/shared/{id}/deck` | a shared deck, checked against your collection |
 
-Outside v1 (web and provider callbacks): `/api/auth/*` (browser sign-in),
+Outside v1: `POST /api/mcp` (the MCP server for agents, [`agents.md`](agents.md)), plus the web and provider callbacks: `/api/auth/*` (browser sign-in),
 `/api/facebook/data-deletion` (Meta's callback) and `/api/health`.
 
 ## Attribution in clients

@@ -116,8 +116,12 @@ function App() {
     try {
       setLoadProgress('Opening your vault…');
       const progress = (n, total) => setLoadProgress(`Opening your vault… ${n.toLocaleString()} / ${total.toLocaleString()} printings`);
-      const [who, j] = await Promise.all([window.VaultApi.me(), window.VaultApi.collection(progress)]);
-      setMe(who);
+      const j = await window.VaultApi.collection(progress);
+      if (j.meta.offline) {
+        setNotice(`You're offline: showing your collection as saved on this device ${new Date(j.meta.savedAt).toLocaleString()}.`);
+      } else {
+        setMe(await window.VaultApi.me());
+      }
       setAuth('signed-in');
       setViewing(null);
       acceptPendingInvite();
