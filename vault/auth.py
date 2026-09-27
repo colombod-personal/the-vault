@@ -23,10 +23,14 @@ Provider quirks handled here:
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass
 
-from authlib.integrations.starlette_client import OAuth, OAuthError
+import httpx
+from authlib.common.errors import AuthlibBaseError
+from authlib.integrations.starlette_client import OAuth
+from joserfc.errors import JoseError
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from joserfc import jwt
@@ -37,7 +41,12 @@ from sqlalchemy.orm import Session
 from .config import Settings
 from .models import Identity, User
 
+log = logging.getLogger(__name__)
+
 PROVIDERS = ("google", "microsoft", "apple", "facebook")
+# Anything that can go wrong validating a provider's response: OAuth errors, bad/expired
+# tokens, wrong issuer or nonce, bad signatures, missing claims, provider outages.
+SIGN_IN_ERRORS = (AuthlibBaseError, JoseError, KeyError, ValueError, httpx.HTTPError)
 APPLE_SECRET_TTL = 3600  # seconds; Apple allows up to 6 months
 
 
@@ -69,7 +78,9 @@ def apple_client_secret(settings: Settings, now: int | None = None) -> str:
 
 
 class Auth:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
+        """``transport`` replaces the network for all provider calls (used by the tests'
+        fake identity provider)."""
         self.settings = settings
         self.oauth = OAuth()
         self._apple_secret_at = 0.0
@@ -103,6 +114,12 @@ class Auth:
                 api_base_url=f"https://graph.facebook.com/{v}/",
                 client_kwargs={"scope": "email public_profile"},
             )
+
+        if transport is not None:
+            for name in PROVIDERS:
+                client = self.oauth.create_client(name)
+                if client is not None:
+                    client.client_kwargs["transport"] = transport
 
     @property
     def enabled(self) -> list[str]:
@@ -183,8 +200,10 @@ def build_router(auth: Auth, get_db) -> APIRouter:
     async def callback(provider: str, request: Request, db: Session = Depends(get_db)):
         try:
             profile = await auth.profile(provider, request)
-        except OAuthError as exc:
-            return RedirectResponse(f"/?signin_error={exc.error or 'oauth'}", status_code=303)
+        except SIGN_IN_ERRORS as exc:
+            code = getattr(exc, "error", None) or "invalid_response"
+            log.warning("sign-in with %s failed: %s", provider, exc)
+            return RedirectResponse(f"/?signin_error={code}", status_code=303)
         sign_in(db, request, profile)
         return RedirectResponse("/", status_code=303)
 

@@ -122,3 +122,17 @@ def test_cross_site_writes_are_refused(client):
     assert client.get("/api/collection", headers=evil).status_code == 200  # reads aren't state-changing
     # OAuth callbacks and Meta's deletion callback are cross-site by design
     assert client.post("/api/facebook/data-deletion", data={"signed_request": "x.y"}, headers=evil).status_code == 400
+
+
+def test_vercel_without_database_explains_itself(monkeypatch):
+    import importlib
+    import sys
+
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    sys.modules.pop("api.index", None)
+    index = importlib.import_module("api.index")
+    res = TestClient(index.app).get("/api/collection")
+    assert res.status_code == 503 and "DATABASE_URL is not set" in res.json()["detail"]

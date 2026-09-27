@@ -34,6 +34,11 @@ class Settings:
         return self.base_url.startswith("https://")
 
     def check(self) -> None:
+        if os.environ.get("VERCEL") and self.database_url.startswith("sqlite"):
+            raise RuntimeError(
+                "DATABASE_URL is not set. Connect a Neon Postgres database to the Vercel project "
+                "(Storage -> Neon) and redeploy."
+            )
         if self.secure_cookies and self.session_secret == "dev-insecure-secret":
             raise RuntimeError("SESSION_SECRET must be set when BASE_URL is https")
         if self.secure_cookies and self.dev_login:

@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -30,16 +31,18 @@ def _origin(url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}".lower()
 
 
-def create_app(settings: Settings | None = None, *, serve_static: bool = True) -> FastAPI:
+def create_app(settings: Settings | None = None, *, serve_static: bool = True, auth_transport=None) -> FastAPI:
     settings = settings or Settings()
     settings.check()
     db = Database(settings.database_url)
     db.create_all()
-    auth = auth_module.Auth(settings)
+    auth = auth_module.Auth(settings, transport=auth_transport)
 
     app = FastAPI(title="The Vault", docs_url="/api/docs", openapi_url="/api/openapi.json")
     app.state.db = db
     app.state.settings = settings
+    # Vercel caps a function response at 4.5 MB; the collection JSON compresses ~10x.
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.session_secret,

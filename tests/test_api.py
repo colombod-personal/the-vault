@@ -114,3 +114,17 @@ def test_parse_deck_uses_library_parser(signed_in):
     assert [(c["name"], c["set"], c["collector_number"], c["section"]) for c in cards] == [
         ("Sol Ring", "c21", "263", "main"), ("Duress", "", "", "sideboard"), ("Kenrith, the Returned King", "cmm", "1", "main"),
     ]
+
+
+def test_collection_is_compressed_well_under_vercels_limit(signed_in):
+    """Vercel rejects function responses over 4.5 MB; check the collection stays far below it."""
+    header = CSV.decode().split("\r\n")[:2]
+    rows = [f"my cards,1,0,Card {i},SET{i % 300},Set {i % 300},{i},Mint,Normal,English,0.10,2024-01-01,0.01,0.20,0.15"
+            for i in range(3000)]
+    assert upload(signed_in, ("\r\n".join(header + rows) + "\r\n").encode()).status_code == 200
+    res = signed_in.get("/api/collection", headers={"Accept-Encoding": "gzip"})
+    assert res.headers["content-encoding"] == "gzip"
+    compressed = int(res.headers["content-length"])
+    per_printing = compressed / 3000
+    # at this rate a 4.5 MB response would hold this many distinct printings
+    assert 4.5e6 / per_printing > 50_000, per_printing

@@ -85,16 +85,52 @@ Interactive docs at `/api/docs`.
 
 ## Deploying on Vercel
 
-1. **Database:** add Neon Postgres from the Vercel Marketplace. It sets `DATABASE_URL`
-   (`postgres://…` URLs are handled). Tables are created on first start.
-2. **Environment variables** (Project → Settings → Environment Variables): `SESSION_SECRET`
-   (long random string), `BASE_URL` (e.g. `https://vault.example.com`), and the provider
-   credentials below. Never set `DEV_LOGIN` in production (the app refuses to start).
-3. **Price sync:** add `DATABASE_URL` as a GitHub Actions repository secret. The
-   `sync-prices` workflow runs daily, or run it by hand from the Actions tab.
-4. **Domain:** add it in Vercel and point DNS at Vercel from wherever it's registered.
+The app runs on Vercel's free Hobby plan (fine while the Vault is free and non-commercial)
+with a Neon Postgres database, in Frankfurt (`fra1`) for GDPR. HTTPS is automatic.
+Deploys go through GitHub Actions (`.github/workflows/deploy.yml`) with the Vercel CLI,
+because Vercel's Hobby dashboard can't import a repository owned by a GitHub organization.
+Every push to `main` runs the tests and then deploys to production.
 
-Vercel's Hobby plan is for non-commercial use. A public app with other users needs Pro.
+**One-time setup** (in this order):
+
+1. **Vercel account:** sign up at [vercel.com](https://vercel.com) with GitHub (Hobby plan).
+2. **Token:** Vercel → Account Settings → Tokens → *Create*, scoped to your account. In GitHub:
+   `the-vault` → Settings → Secrets and variables → Actions → *New repository secret*
+   `VERCEL_TOKEN` with that value.
+3. **First deploy:** merge to `main` (or run the *deploy* workflow). It creates the Vercel
+   project `the-vault`. Until step 4 is done the site answers
+   "not configured yet: DATABASE_URL is not set". That's expected.
+4. **Database:** Vercel → project `the-vault` → Storage → *Create Database* → **Neon**,
+   region **Frankfurt**, connect it to the project (Production and Preview). This sets
+   `DATABASE_URL`. The Neon free plan is enough to start (see "Costs" below).
+5. **Environment variables** (project → Settings → Environment Variables, Production):
+   - `SESSION_SECRET`: a long random string (`openssl rand -hex 32`)
+   - `BASE_URL`: the production address, e.g. `https://the-vault.vercel.app` (shown on the
+     project page), or your own domain once added
+   - at least one sign-in provider's credentials (next section). Google is the quickest.
+   - never `DEV_LOGIN` (the app refuses to start with it on HTTPS)
+6. **Redeploy:** Actions → *deploy* → *Run workflow*.
+7. **Prices:** GitHub → Settings → Secrets → `DATABASE_URL` with the same Neon connection
+   string, then Actions → *sync-prices* → *Run workflow* once. After that it runs daily.
+8. **Optional:**
+   - Add the repository variable `VAULT_URL` (the site address) so each deploy checks the live site.
+   - Add your own domain under project → Settings → Domains. Point its DNS at Vercel and
+     the certificate is issued automatically. Then update `BASE_URL` and each provider's
+     redirect URI.
+
+**Costs:**
+- Vercel Hobby: $0.
+- Neon: free for 0.5 GB and 100 compute-hours a month. The daily price history grows about
+  0.5 GB a year for a ~10k-printing collection, so after that Neon's pay-as-you-go plan costs
+  about $0.35 per GB-month plus compute while in use (a few dollars a month).
+- GitHub Actions: $0.
+- A domain: about $10/year at Cloudflare or Porkbun.
+
+**Limits to know:**
+- Vercel caps a request or response at 4.5 MB. Responses are gzip-compressed (a 21k-card
+  collection is 0.5 MB on the wire, and a test guards this). CSV uploads over about 4.5 MB
+  (roughly 38k rows) would be refused.
+- After a quiet spell the first request takes 1–2 s while the function and database wake up.
 
 ### Sign-in providers
 
@@ -110,6 +146,33 @@ on the sign-in screen only when its client id is set.
 
 Accounts are **not** merged by e-mail. Signing in with a second provider while signed in
 links it to the same account; otherwise each provider identity is its own account.
+
+### Testing sign-in
+
+**Automated, on every push:** `tests/test_signin_flows.py` runs the real redirect → provider →
+callback → session flow for all four providers against a fake identity provider
+(`tests/fake_idp.py`). It covers:
+- scopes and redirect URIs
+- Microsoft's per-tenant issuer check (a forged issuer is refused)
+- Apple's `form_post` callback, signed client secret and one-time name
+- Facebook's Graph profile
+- linking a second provider while signed in, and no merging by e-mail
+- cancelled sign-ins, replayed or forged callbacks, wrong nonce or audience
+
+**With real accounts** (needs the credentials above):
+- Google, Microsoft and Facebook also work locally with `BASE_URL=http://localhost:8000` and
+  redirect URI `http://localhost:8000/api/auth/callback/<provider>`.
+- Apple needs the HTTPS deployment.
+- Keep Google's consent screen in *Testing* with your accounts as test users, and Facebook's
+  app in *Development* with testers added under App roles.
+
+Check each provider:
+1. The first sign-in creates your vault, and signing in again reopens it.
+2. *Cancel* on the provider's page returns you to the sign-in screen with an error.
+3. While signed in, signing in with a second provider links it (Account shows both).
+4. Apple: your name appears after the first sign-in. With *Hide my email* you get a relay address.
+5. Account → Delete my account, then sign in again: you get a fresh, empty vault.
+6. Facebook: Meta's app dashboard → *Data Deletion Request Callback* test.
 
 ## Attribution
 

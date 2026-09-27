@@ -1,0 +1,82 @@
+name: deploy
+# Deploys to Vercel with the Vercel CLI. (Vercel's Hobby plan can't connect repositories owned by a
+# GitHub organization in its dashboard; the CLI path works on every plan.)
+#
+# Needs the VERCEL_TOKEN repository secret. Optional repository variables:
+#   VERCEL_SCOPE  a Vercel team slug (leave unset for a personal Hobby account)
+#   VAULT_URL     the public URL (e.g. https://the-vault.vercel.app) for the post-deploy check
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "production or preview"
+        type: choice
+        options: [production, preview]
+        default: production
+concurrency: deploy-${{ github.ref }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE }}
+      TARGET: ${{ inputs.target || 'production' }}
+    steps:
+      - name: Check for the Vercel token
+        id: token
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::notice::VERCEL_TOKEN is not set, so nothing was deployed. See README → Deploying on Vercel."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.ready == 'true'
+
+      - uses: actions/setup-python@v5
+        if: steps.token.outputs.ready == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Tests must pass before deploying
+        if: steps.token.outputs.ready == 'true'
+        run: |
+          pip install -e ".[dev]"
+          pytest -q
+
+      - uses: actions/setup-node@v4
+        if: steps.token.outputs.ready == 'true'
+        with:
+          node-version: "20"
+
+      - name: Deploy to Vercel
+        id: deploy
+        if: steps.token.outputs.ready == 'true'
+        run: |
+          npm install --global vercel@latest
+          scope=(); [ -n "$VERCEL_SCOPE" ] && scope=(--scope "$VERCEL_SCOPE")
+          prod=(); [ "$TARGET" = "production" ] && prod=(--prod)
+          # Creates the "the-vault" project on the first run, links to it afterwards.
+          vercel link --yes --project the-vault --token "$VERCEL_TOKEN" "${scope[@]}"
+          vercel pull --yes --environment="$TARGET" --token "$VERCEL_TOKEN" "${scope[@]}"
+          vercel build "${prod[@]}" --token "$VERCEL_TOKEN" "${scope[@]}"
+          url=$(vercel deploy --prebuilt "${prod[@]}" --token "$VERCEL_TOKEN" "${scope[@]}")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "### Deployed ($TARGET): $url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check the live site
+        if: steps.token.outputs.ready == 'true' && vars.VAULT_URL != '' && env.TARGET == 'production'
+        run: |
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -o health.json -w '%{http_code}' "${{ vars.VAULT_URL }}/api/health" || true)
+            [ "$code" = "200" ] && { cat health.json; exit 0; }
+            [ "$code" = "503" ] && { echo "::warning::Deployed, but not configured yet:"; cat health.json; exit 0; }
+            sleep 10
+          done
+          echo "::error::${{ vars.VAULT_URL }}/api/health did not answer"; exit 1
