@@ -84,3 +84,9 @@ def test_facebook_data_deletion_endpoint(client, app):
     assert res.status_code == 200 and set(res.json()) == {"url", "confirmation_code"}
     with app.state.db.sessions() as s:
         assert s.query(User).count() == 0
+
+
+def test_apple_requests_openid_scope():
+    s = Settings(apple_client_id="com.example.vault", apple_team_id="T", apple_key_id="K", apple_private_key="x")
+    client = Auth(s).oauth.create_client("apple")
+    assert "openid" in client.client_kwargs["scope"].split()  # needed for the id_token / user id

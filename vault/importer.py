@@ -41,10 +41,11 @@ def import_dragonshield(db: Session, user: User, filename: str, content: bytes) 
     old = [r.to_collection_entry() for r in old_rows]
     changes = delta.diff(old, entries)
 
+    # Carry over exact matches only; name-only guesses are re-resolved by the next sync.
     known = {}
     for row in old_rows:
-        if row.scryfall_id:
-            known[delta.key_of(row.to_collection_entry())] = (row.scryfall_id, row.match_method)
+        if row.scryfall_id and row.match_method in ("set_number", "id"):
+            known[delta.key_of(row.to_collection_entry())] = (row.scryfall_id, row.match_method, row.price_finish)
 
     imp = Import(
         user_id=user.id, filename=filename[:255], rows=len(entries),
@@ -54,10 +55,11 @@ def import_dragonshield(db: Session, user: User, filename: str, content: bytes) 
     db.flush()
     db.execute(delete(Entry).where(Entry.user_id == user.id))
     for position, e in enumerate(entries):
-        scryfall_id, method = known.get(delta.key_of(e), (None, None))
+        scryfall_id, method, price_finish = known.get(delta.key_of(e), (None, None, None))
         e.scryfall_id = scryfall_id
         db.add(Entry.from_collection_entry(
             e, user_id=user.id, import_id=imp.id, position=position, match_method=method,
+            price_finish=price_finish,
         ))
     db.commit()
     return imp

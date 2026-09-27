@@ -82,3 +82,35 @@ def test_deck_coverage(signed_in):
     assert status == {"Sol Ring": ("owned", 0), "A Killer Among Us": ("owned", 0), "Rhystic Study": ("missing", 1)}
 
 
+
+
+def test_sync_keeps_imported_finish_and_does_not_lock_in_name_guesses(app, signed_in):
+    upload(signed_in)
+    bulk = [
+        card("kil", "A Killer Among Us", "mkm", "999", usd=0.12),          # number mismatch -> name_set match
+        card("sol", "Sol Ring", "c21", "263", ("nonfoil", "foil"), usd=1.0, usd_foil=3.0),
+        card("acc", "Accursed Marauder", "mh3", "512", ("etched",), usd_etched=0.8),
+        card("bel", "Belfry Spirit", "gk2", "29", usd=0.25),
+    ]
+    with app.state.db.sessions() as db:
+        sync(db, bulk, day=date(2026, 9, 27))
+        again = sync(db, bulk, day=date(2026, 9, 28))
+    # the name_set guess is re-resolved each day, never relabelled as an exact "id" match
+    assert again["methods"] == {"name_set": 2}
+    data = signed_in.get("/api/collection").json()
+    acc = next(c for c in data["cards"] if c["n"] == "Accursed Marauder")
+    assert (acc["fin"], acc["mk"], acc["p"]) == ("etched", 0.8, "")  # priced as etched, imported Printing kept
+    # re-importing the unchanged file reports no changes and keeps the exact matches
+    res = upload(signed_in).json()
+    assert res["changes"]["unchanged"] == 4 and res["changes"]["added"] == res["changes"]["removed"] == 0
+    assert signed_in.get("/api/collection/export.csv").content == CSV
+    prices = {c["n"]: c["src"] for c in signed_in.get("/api/collection").json()["cards"]}
+    assert prices["Sol Ring"] == "scryfall" and prices["A Killer Among Us"] == "file"  # guess not carried over
+
+
+def test_parse_deck_uses_library_parser(signed_in):
+    text = "1x Sol Ring (c21) 263 [Ramp]\n1x Duress [Sideboard]\n1 Kenrith, the Returned King (CMM) 1 *F*"
+    cards = signed_in.post("/api/decks/parse", json={"text": text}).json()["cards"]
+    assert [(c["name"], c["set"], c["collector_number"], c["section"]) for c in cards] == [
+        ("Sol Ring", "c21", "263", "main"), ("Duress", "", "", "sideboard"), ("Kenrith, the Returned King", "cmm", "1", "main"),
+    ]

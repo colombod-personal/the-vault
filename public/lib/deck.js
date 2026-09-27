@@ -64,36 +64,14 @@ window.DeckSrc = (() => {
     };
   }
 
-  // Raw decklist text parser. Supports:
-  //  "4 Lightning Bolt"
-  //  "4x Lightning Bolt"
-  //  "4 Lightning Bolt (M11) 149"
-  //  "1 Sol Ring [CMR]"
-  //  "// Sideboard" headers (skipped — only mainboard)
-  function parseText(text) {
-    const lines = text.split(/\r?\n/);
-    let inSideboard = false;
-    const cards = [];
-    for (let raw of lines) {
-      const line = raw.trim();
-      if (!line) continue;
-      if (/^(\/\/|#)\s*(sideboard|maybeboard|considering)/i.test(line)) { inSideboard = true; continue; }
-      if (/^(\/\/|#)\s*(mainboard|deck|commander)/i.test(line)) { inSideboard = false; continue; }
-      if (/^(SIDEBOARD|MAYBEBOARD):?$/i.test(line)) { inSideboard = true; continue; }
-      if (inSideboard) continue;
-      // Match "[qty]x? Name (SET) num"
-      // A collector number only counts after a (SET) code, otherwise "1 Sol Ring" would parse as
-      // card "Sol", number "Ring". Also tolerates Archidekt/Moxfield *F*/*E* finish markers.
-      const m = line.match(/^(\d+)x?\s+(.+?)(?:\s+[\(\[]([A-Za-z0-9_]+)[\)\]](?:\s+([A-Za-z0-9★†-]+))?)?(?:\s+\*[FE]\*)?\s*$/i);
-      if (!m) continue;
-      const qty = parseInt(m[1]);
-      const name = m[2].trim();
-      const set = (m[3] || '').toLowerCase();
-      const num = m[4] || '';
-      if (!name) continue;
-      cards.push({ name, set, collector_number: num, qty });
-    }
-    return { title: 'Pasted decklist', url: '', author: '', cards };
+  // Pasted decklists are parsed on the server by mtg_toolkits.decklist, the one parser the whole
+  // app uses (Archidekt / Moxfield / Arena / MTGO formats, sections, categories, *F* / *E*).
+  // Only cards that are played (main deck, commander, companion) are returned.
+  const PLAYED = new Set(['main', 'commander', 'companion']);
+  async function parseText(text) {
+    const res = await window.VaultApi.parseDeck(text);
+    const cards = res.cards.filter(c => PLAYED.has(c.section));
+    return { title: 'Pasted decklist', url: '', author: '', cards, unparsed: res.unparsed };
   }
 
   async function fetchUrl(url) {

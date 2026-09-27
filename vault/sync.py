@@ -21,6 +21,9 @@ from .models import Entry, PriceSnapshot
 from .prices import compute_values
 
 
+EXACT = ("set_number", "id")
+
+
 def _front(name: str) -> str:
     return name.split(" // ")[0].strip().lower()
 
@@ -79,19 +82,30 @@ def sync(db: Session, cards: Iterable[Card], day: date | None = None) -> dict:
 
     # Rows already matched by exact printing keep their id; everything else is (re)resolved,
     # so a later-added alias or better set code upgrades name-only matches.
-    todo = [r for r in rows if not (r.scryfall_id in by_id and r.match_method in ("set_number", "id"))]
+    todo = []
     for r in rows:
-        if r not in todo:
+        if r.scryfall_id in by_id and r.match_method in EXACT:
             matched[r.scryfall_id] = by_id[r.scryfall_id]
-    for row, res in zip(todo, resolve_offline([r.to_collection_entry() for r in todo], cards)):
+        else:
+            todo.append(r)
+
+    def fresh(r: Entry):
+        # Drop the previous guess: re-resolving by its id would relabel a name-only match as exact.
+        e = r.to_collection_entry()
+        e.scryfall_id = None
+        return e
+
+    for row, res in zip(todo, resolve_offline([fresh(r) for r in todo], cards)):
         if res.card is None:
+            row.scryfall_id = row.match_method = row.price_finish = None
             continue
-        # finish fix: a printing that only exists in one finish (e.g. blank Printing on etched cards)
-        if len(res.card.finishes) == 1 and res.card.finishes[0] != row.finish and res.card.finishes[0] in (
-            "nonfoil", "foil", "etched"
-        ):
-            row.finish = res.card.finishes[0]
         row.scryfall_id, row.match_method = res.card.id, res.method
+        row.price_finish = None
+        # Price an etched-only (or foil-only) printing by its real finish, but only when we
+        # know the exact printing; a name-only match picks an arbitrary one.
+        only = res.card.finishes[0] if len(res.card.finishes) == 1 else None
+        if res.method in EXACT and only in ("nonfoil", "foil", "etched") and only != row.finish:
+            row.price_finish = only
         matched[res.card.id] = res.card
         methods[res.method] = methods.get(res.method, 0) + 1
 

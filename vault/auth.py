@@ -90,7 +90,8 @@ class Auth:
             self.oauth.register(
                 "apple", client_id=s.apple_client_id, client_secret="",
                 server_metadata_url="https://appleid.apple.com/.well-known/openid-configuration",
-                client_kwargs={"scope": "name email", "token_endpoint_auth_method": "client_secret_post"},
+                # "openid" is required for an id_token (and the nonce check); without it there's no user id.
+                client_kwargs={"scope": "openid name email", "token_endpoint_auth_method": "client_secret_post"},
                 authorize_params={"response_mode": "form_post"},
             )
         if s.facebook_client_id:

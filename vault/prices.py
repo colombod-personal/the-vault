@@ -32,7 +32,7 @@ def latest_prices(db: Session, scryfall_ids: set[str]) -> dict[str, PriceSnapsho
 def unit_price(row: Entry, snap: PriceSnapshot | None) -> tuple[float, bool]:
     """(price, from_scryfall). Falls back to the file's own market price."""
     if snap is not None:
-        price = snap.for_finish(row.finish)
+        price = snap.for_finish(row.price_finish or row.finish)
         if price is not None:
             return price, True
     return float((row.source_prices or {}).get("market") or 0.0), False

@@ -48,7 +48,8 @@ def build(db: Session, user: User, *, hide_costs: bool = False) -> dict:
                 "sn": r.set_name or "", "cn": r.collector_number or "", "p": p, "c": cond, "l": lang,
                 "q": r.quantity, "pd": (r.purchase_price or 0.0) * r.quantity,
                 "lo": sp.get("low"), "mi": sp.get("mid"), "mk": price, "fd": day, "ld": day,
-                "id": r.scryfall_id, "fin": r.finish, "src": "scryfall" if from_scryfall else "file",
+                "id": r.scryfall_id, "fin": r.price_finish or r.finish,
+                "src": "scryfall" if from_scryfall else "file",
             }
             continue
         g["q"] += r.quantity

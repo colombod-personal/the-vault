@@ -157,6 +157,20 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         except ApiError as exc:
             raise HTTPException(exc.status_code if exc.status_code == 404 else 502, str(exc)) from exc
 
+    @router.post("/decks/parse")
+    def parse_deck(req: CoverageRequest, user: User = Depends(current_user)) -> dict:
+        """Parse a pasted decklist with mtg_toolkits.decklist (the one parser for the whole app)."""
+        deck = decklist.parse_text(req.text)
+        return {
+            "cards": [
+                {"name": line.name, "set": line.set_code or "", "collector_number": line.collector_number or "",
+                 "qty": line.quantity, "finish": line.finish.value, "section": line.section,
+                 "categories": line.categories}
+                for line in deck.lines
+            ],
+            "unparsed": deck.unparsed,
+        }
+
     @router.post("/decks/coverage")
     def deck_coverage(req: CoverageRequest, user: User = Depends(current_user), db: Session = Depends(get_db)):
         return _coverage(req.text, user_entries(db, user))

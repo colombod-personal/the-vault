@@ -14,8 +14,18 @@ function DeckView({ data, openCard, initialText }) {
   const [progress, setProgress] = useStateD({ done: 0, total: 0 });
   const [filter, setFilter] = useStateD('all'); // 'all'|'missing'|'partial'|'owned'
 
-  // Index of owned cards by lowercase name
+  // Index of owned cards by lowercase name, plus by front face for double-faced cards
   const byName = data.byName;
+  const frontFace = (name) => name.split(' // ')[0].trim();
+  const byFront = useMemoD(() => {
+    const out = {};
+    for (const [k, v] of Object.entries(byName)) {
+      const f = frontFace(k);
+      if (!out[f]) out[f] = { ...v, entries: [...v.entries] };
+      else if (out[f] !== v) { out[f] = { ...out[f], total: out[f].total + v.total, entries: out[f].entries.concat(v.entries) }; }
+    }
+    return out;
+  }, [byName]);
 
   async function loadFromUrl() {
     setError(''); setDeck(null); setEnriched(null); setLoading(true);
@@ -30,7 +40,7 @@ function DeckView({ data, openCard, initialText }) {
   async function loadFromText() {
     setError(''); setDeck(null); setEnriched(null); setLoading(true);
     try {
-      const d = window.DeckSrc.parseText(src);
+      const d = await window.DeckSrc.parseText(src);
       if (!d.cards.length) throw new Error('No cards parsed. Use "4 Card Name" per line.');
       await processDeck(d);
     } catch (e) {
@@ -56,8 +66,10 @@ function DeckView({ data, openCard, initialText }) {
     setProgress({ done: 0, total: ids.length });
     const scry = await window.Scryfall.collection(ids, (p) => setProgress({ done: p.done, total: p.total }));
     const rows = d.cards.map((c, i) => {
+      // Match on the full name, then on the front face: Dragon Shield stores double-faced cards as
+      // "Front // Back" while Arena-style lists often name only the front face.
       const key = c.name.toLowerCase().trim();
-      const own = byName[key];
+      const own = byName[key] || byFront[frontFace(key)];
       let owned = 0, ownEntries = [];
       if (own) {
         owned = own.total;

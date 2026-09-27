@@ -42,6 +42,7 @@ window.VaultApi = (() => {
     // saved decks
     decks: () => call('/api/decks'),
     deck: (id) => call('/api/decks/' + id),
+    parseDeck: (text) => call('/api/decks/parse', { method: 'POST', json: { text } }),
     saveDeck: (name, text, source_url) => call('/api/decks', { method: 'POST', json: { name, text, source_url } }),
     deleteDeck: (id) => call('/api/decks/' + id, { method: 'DELETE' }),
 

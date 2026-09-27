@@ -93,6 +93,10 @@ class Entry(Base):
 
     scryfall_id: Mapped[str | None] = mapped_column(String(36), index=True)
     match_method: Mapped[str | None] = mapped_column(String(12))  # set_number | name_set | name | id
+    # Finish to price with when the matched printing exists in only one finish (e.g. Dragon Shield
+    # leaves Printing blank on etched-only cards). Kept apart from `finish` so the imported data,
+    # its delta keys and the CSV export stay exactly as imported.
+    price_finish: Mapped[str | None] = mapped_column(String(10))
 
     def to_collection_entry(self) -> CollectionEntry:
         return CollectionEntry(
