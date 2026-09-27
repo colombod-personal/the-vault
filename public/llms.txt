@@ -17,7 +17,8 @@ read-write, and it expires.
     `get_collection_stats`, `get_value_history`, `get_acquisition_timeline`
   - decks: `check_decklist`, `parse_decklist`, `list_decks`, `get_deck`, `save_deck`,
     `update_deck`, `get_archidekt_deck`
-  - imports and sharing: `list_imports`, `import_collection_csv`, `list_shared_with_me`,
+  - imports, exports and sharing: `list_imports`, `import_collection_csv`
+    (Dragon Shield, Moxfield or generic CSV), `list_export_formats`, `list_shared_with_me`,
     `get_shared_deck`
 - A read-only token doesn't list the write tools.
 
@@ -34,6 +35,9 @@ read-write, and it expires.
   After a 429 or 503, wait for `Retry-After`.
 - Errors are `application/problem+json`: `{"title", "status", "detail"}`. A 403 with
   `insufficient_scope` means the token is read-only.
+- Move a collection between apps: `POST /api/v1/imports` accepts Dragon Shield, Moxfield and
+  generic CSV. `GET /api/v1/collection/exports` lists the export formats (Dragon Shield,
+  Moxfield, Archidekt, generic CSV, text), each downloadable at `/api/v1/collection/export/{format}`.
 - Useful endpoints:
   - `/api/v1/collection/cards?sort=-value&limit=25`
   - `/api/v1/collection/cards?q=bolt`

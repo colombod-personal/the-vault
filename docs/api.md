@@ -117,8 +117,10 @@ ids are accepted too.
 | GET | `/api/v1/collection/timeline` | copies acquired per month |
 | GET | `/api/v1/collection/history` | daily market value and cost, paged (`since`) |
 | GET | `/api/v1/collection/stats` | most valuable, biggest gains and losses, duplicates |
-| GET | `/api/v1/collection/export.csv` | Dragon Shield CSV, byte-identical to your import |
-| POST / GET | `/api/v1/imports` | upload a Dragon Shield CSV (multipart `file`, 201) / list imports with changes |
+| GET | `/api/v1/collection/exports` | export formats (Dragon Shield, Moxfield, Archidekt, generic CSV, text list), each with a download link |
+| GET | `/api/v1/collection/export/{format}` | the collection in that format. Other apps get Scryfall set codes and numbers for matched printings |
+| GET | `/api/v1/collection/export.csv` | Dragon Shield CSV, byte-identical to a Dragon Shield import |
+| POST / GET | `/api/v1/imports` | upload a Dragon Shield, Moxfield or generic CSV, detected from the header (multipart `file`, 201; the import's `source` says which) / list imports with changes |
 | GET | `/api/v1/imports/{id}` | one import |
 | POST | `/api/v1/decks/parse` | parse a pasted decklist |
 | POST | `/api/v1/decks/coverage` | owned / partial / missing per card |

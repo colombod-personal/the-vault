@@ -20,6 +20,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from mtg_toolkits import decklist, delta
+from mtg_toolkits.formats import FORMATS
 from mtg_toolkits.archidekt import ArchidektClient
 from mtg_toolkits.http import ApiError
 from sqlalchemy import delete, select
@@ -28,7 +29,7 @@ from sqlalchemy.orm import Session
 from .. import outbound, tokens
 from ..auth import Profile, find_or_create
 from ..collection_view import SORTS, CollectionView, filtered, history_days
-from ..importer import ImportError_, export_dragonshield, import_dragonshield, user_entries
+from ..importer import ImportError_, export_collection, import_collection, user_entries
 from ..models import AccessToken, ApiSession, Deck, Import, Share, User
 from ..native import NativeTokenError, NativeVerifier, ProviderUnavailable
 from ..privacy import export_archive, purge_user
@@ -255,7 +256,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                     "stats": link(f"{ctx.base}/stats"),
                 }
                 if ctx.own:
-                    links |= {"imports": link(f"{V1}/imports"), "export": link(f"{ctx.base}/export.csv")}
+                    links |= {"imports": link(f"{V1}/imports"), "export": link(f"{ctx.base}/export.csv"),
+                              "exports": link(f"{ctx.base}/exports", title="Export to Moxfield, Archidekt, CSV, text")}
                 version = hashlib.sha256(view.version.encode()).hexdigest()[:16]  # changes whenever the data does
                 return {**view.summary(), "owner": ctx.owner_name, "version": version, "_links": links}
 
@@ -350,28 +352,49 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     own = collection_routes(own_ctx)
 
-    @own.get("/export.csv", summary="Your collection as a Dragon Shield CSV (re-importable)")
+    def _download(ctx: Ctx, fmt: str) -> Response:
+        f = FORMATS[fmt]
+        name = f"vault-collection-{fmt}-{date.today().isoformat()}.{f.extension}"
+        return Response(export_collection(ctx.db, ctx.owner, fmt), media_type=f"{f.media_type}; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @own.get("/exports", response_model=S.ExportFormats,
+             summary="Formats you can export your collection in, to move it to another app")
+    def exports(ctx: Ctx = Depends(own_ctx)) -> dict:
+        items = [{"format": f.name, "label": f.label, "description": f.description, "media_type": f.media_type,
+                  "extension": f.extension, "reimportable": f.parse is not None,
+                  "_links": {"download": link(f"{V1}/collection/export/{f.name}")}} for f in FORMATS.values()]
+        return {"items": items, "_links": {"self": link(f"{V1}/collection/exports")}}
+
+    @own.get("/export/{fmt}", summary="Download your collection in one format (see /collection/exports)")
+    def export_as(fmt: str, ctx: Ctx = Depends(own_ctx)) -> Response:
+        if fmt not in FORMATS:
+            raise HTTPException(404, f"Unknown format. Available: {', '.join(FORMATS)}")
+        return _download(ctx, fmt)
+
+    @own.get("/export.csv", summary="Your collection as a Dragon Shield CSV (same as /collection/export/dragonshield)")
     def export_csv(ctx: Ctx = Depends(own_ctx)) -> Response:
-        return Response(export_dragonshield(ctx.db, ctx.owner), media_type="text/csv",
-                        headers={"Content-Disposition": 'attachment; filename="vault-export.csv"'})
+        return _download(ctx, "dragonshield")
 
     router.include_router(own, prefix="/collection")
     router.include_router(collection_routes(shared_ctx), prefix="/shared/{share_id}/collection")
 
     # -- imports ------------------------------------------------------------------------------
     def _import(i: Import) -> dict:
-        return {"id": i.id, "filename": i.filename, "rows": i.rows, "copies": i.copies, "changes": i.summary,
+        return {"id": i.id, "filename": i.filename, "source": i.source, "rows": i.rows, "copies": i.copies,
+                "changes": i.summary,
                 "created_at": _iso(i.created_at), "_links": {"self": link(f"{V1}/imports/{i.id}")}}
 
     @router.post("/imports", tags=["imports"], response_model=S.ImportItem, status_code=201,
-                 summary="Upload a Dragon Shield CSV export (replaces the collection, records what changed)")
+                 summary="Upload a collection file: Dragon Shield, Moxfield or generic CSV, detected automatically "
+                         "(replaces the collection, records what changed)")
     async def create_import(request: Request, file: UploadFile, user: User = Depends(current_user),
                             db: Session = Depends(get_db)):
         content = await file.read()
 
         def run():
             try:
-                return _import(import_dragonshield(db, user, file.filename or "upload.csv", content))
+                return _import(import_collection(db, user, file.filename or "upload.csv", content))
             except ImportError_ as exc:
                 raise HTTPException(400, str(exc)) from exc
 

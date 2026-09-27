@@ -124,10 +124,15 @@ TOOLS = [
          {"deck_id": {"type": "integer"}}, ["deck_id"], path=lambda a: f"{V1}/archidekt/decks/{int(a['deck_id'])}"),
     Tool("list_imports", "Past collection imports, newest first, with what changed each time.", dict(PAGING),
          path=lambda a: f"{V1}/imports", query=("limit", "cursor")),
-    Tool("import_collection_csv", "Replace the collection with a Dragon Shield CSV export and record what changed.",
+    Tool("import_collection_csv", "Replace the collection with a collection file and record what changed. Dragon "
+         "Shield, Moxfield and generic CSV exports are detected automatically.",
          {"csv": {"type": "string", "description": "The CSV file's content"},
           "filename": {"type": "string", "default": "agent-import.csv"}}, ["csv"],
          method="POST", path=lambda a: f"{V1}/imports", write=True),
+    Tool("list_export_formats", "Formats the collection can be exported in to move it to another app (Dragon "
+         "Shield, Moxfield, Archidekt, generic CSV, text list), each with a download link. The files can be "
+         "large; give the person the link rather than reading the whole file.",
+         path=lambda a: f"{V1}/collection/exports"),
     Tool("list_shared_with_me", "Collections and decks other people have shared with this person.",
          path=lambda a: f"{V1}/shared"),
     Tool("get_shared_deck", "A deck someone shared, checked against this person's collection.",

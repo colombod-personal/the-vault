@@ -16,7 +16,7 @@ dependencies = [
     "httpx>=0.27",
     "itsdangerous>=2.1",
     "python-multipart>=0.0.9",
-    "mtg-toolkits @ git+https://github.com/colombod-personal/mtg-toolkits@aa099784ae0784dfea3aab157619c36d06390a8d",
+    "mtg-toolkits @ git+https://github.com/colombod-personal/mtg-toolkits@a1d78e539629b8f32c880141e2a090b57b717d92",
 ]
 
 [project.optional-dependencies]

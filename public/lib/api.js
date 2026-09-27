@@ -171,7 +171,7 @@ window.VaultApi = (() => {
         uniqueEntries: summary.printings, uniqueSets: summary.sets, printings: summary.by_printing, conditions,
         generatedAt: summary.prices_as_of || summary.imported_at, importedAt: summary.imported_at,
         pricedFromScryfall: summary.priced_by_scryfall, costsHidden: summary.costs_hidden, sharedBy: summary.owner,
-        version: summary.version, offline: !!origin.offline, fromCache: !!origin.fromCache, savedAt: origin.savedAt,
+        version: summary.version, source: summary.source, offline: !!origin.offline, fromCache: !!origin.fromCache, savedAt: origin.savedAt,
       },
       sets: sets.map((s) => ({ code: s.code, name: s.name, qty: s.copies, value: s.market_value, unique: s.printings })),
       timeline: timeline.months.map((m) => ({ month: m.month, qty: m.copies })),
@@ -198,6 +198,7 @@ window.VaultApi = (() => {
     // account & GDPR
     updateName: (name) => call(V1 + '/me', { method: 'PATCH', json: { name } }),
     exportUrl: V1 + '/me/export',
+    exportFormats: () => call(V1 + '/collection/exports').then((r) => r.items),
     deleteAccount: () => call(V1 + '/me', { method: 'DELETE', json: { confirm: 'DELETE' } }),
 
     // agents: personal access tokens

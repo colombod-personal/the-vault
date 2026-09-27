@@ -19,7 +19,7 @@ from datetime import date, datetime, timezone
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
-from .importer import export_dragonshield
+from .importer import export_collection
 from .models import AccessToken, ApiSession, IdempotentRequest, AuthCode, CollectionValue, Deck, Entry, Identity, Import, Share, User
 from .prices import history
 from .collection_view import CollectionView
@@ -32,6 +32,8 @@ Created {created} for account #{user_id}.
 
 account.json         your profile and the sign-in methods linked to it
 collection.csv       your collection in Dragon Shield's CSV format (re-importable)
+collection-moxfield.csv   the same, ready for Moxfield (Collection → More → Import CSV)
+collection-generic.csv    the same with every field and Scryfall ids, for any other app
 collection.json      your collection as the app shows it, with current prices
 imports.json         every CSV you imported, with what changed each time
 value_history.json   your collection's daily market value and cost
@@ -94,7 +96,10 @@ def export_archive(db: Session, user: User) -> bytes:
         now = datetime.now(timezone.utc)
         z.writestr("README.txt", README.format(created=now.isoformat(timespec="seconds"), user_id=user.id))
         z.writestr("account.json", _json(account))
-        z.writestr("collection.csv", export_dragonshield(db, user))
+        z.writestr("collection.csv", export_collection(db, user, "dragonshield"))
+        # the same collection in formats other apps import, so you can take it anywhere (Art. 20)
+        z.writestr("collection-moxfield.csv", export_collection(db, user, "moxfield"))
+        z.writestr("collection-generic.csv", export_collection(db, user, "csv"))
         view = CollectionView(db, user)
         z.writestr("collection.json", _json({"summary": view.summary(), "sets": view.sets(),
                                              "cards": [view.item(g) for g in view.groups]}))

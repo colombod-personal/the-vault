@@ -6,6 +6,8 @@ function Dashboard({ data, gotoBrowse, gotoSet, gotoValuation, openCard, onRefre
   const pnl = m.totalMarket - m.totalPaid;
   const pnlPct = m.totalPaid ? (pnl / m.totalPaid) * 100 : 0;
   const fresh = window.vaultFreshness(m.generatedAt);
+  // Nothing priced yet (e.g. a Moxfield file, which carries no market prices): don't show a fake loss.
+  const unpriced = m.totalQty > 0 && !m.totalMarket;
 
   const topCards = useMemo(() => {
     return data.cards.slice()
@@ -70,14 +72,21 @@ function Dashboard({ data, gotoBrowse, gotoSet, gotoValuation, openCard, onRefre
           <div className="value"><span className="currency">$</span>{m.totalMarket.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
           <div className="delta">market price across {m.totalQty.toLocaleString()} cards</div>
           <div className="delta" style={{ fontSize: 10 }}>
-            {m.pricedFromScryfall
-              ? `prices: Scryfall (TCGplayer) for ${m.pricedFromScryfall.toLocaleString()}` +
-                (m.pricedFromScryfall < m.totalQty ? `, your Dragon Shield export for the rest` : '')
-              : 'prices: from your Dragon Shield export (Scryfall prices arrive with the daily update)'}
+            {(() => {
+              const file = { dragonshield: 'your Dragon Shield export', moxfield: 'your Moxfield export', csv: 'your imported file' }[m.source] || 'your import';
+              const filePrices = m.source === 'dragonshield'; // only Dragon Shield files carry market prices
+              if (m.pricedFromScryfall) {
+                return `prices: Scryfall (TCGplayer) for ${m.pricedFromScryfall.toLocaleString()}` +
+                  (m.pricedFromScryfall < m.totalQty ? (filePrices ? `, ${file} for the rest` : ', the rest arrive with the daily update') : '');
+              }
+              return filePrices
+                ? `prices: from ${file} (Scryfall prices arrive with the daily update)`
+                : `prices: ${file} has none. Scryfall prices arrive with the daily update, or press Update now`;
+            })()}
           </div>
-          <div className={`freshness ${fresh.tone}`} title={`Prices calculated ${fresh.abs}`}>
+          <div className={`freshness ${unpriced ? 'aging' : fresh.tone}`} title={`Prices calculated ${fresh.abs}`}>
             <span className="dot"></span>
-            <span>{fresh.rel}</span>
+            <span>{unpriced ? 'no prices yet' : fresh.rel}</span>
             <span className="sep">·</span>
             <span className="asof">as of {fresh.abs}</span>
           </div>
@@ -96,12 +105,21 @@ function Dashboard({ data, gotoBrowse, gotoSet, gotoValuation, openCard, onRefre
             </>
           )}
         </div>
-        <div className={`stat ${pnl >= 0 ? 'good' : 'bad'}`} style={{ display: window.__vault?.showPnL === false || m.costsHidden ? 'none' : undefined }}>
+        <div className={`stat ${unpriced ? '' : pnl >= 0 ? 'good' : 'bad'}`} style={{ display: window.__vault?.showPnL === false || m.costsHidden ? 'none' : undefined }}>
           <div className="label">Unrealised P&amp;L</div>
-          <div className="value" style={{ color: pnl >= 0 ? 'var(--good)' : 'var(--danger)' }}>
-            <span className="currency">$</span>{pnl >= 0 ? '+' : '−'}{Math.abs(pnl).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-          </div>
-          <div className={`delta ${pnl >= 0 ? 'up' : 'down'}`}>{pnl >= 0 ? '▲' : '▼'} {Math.abs(pnlPct).toFixed(1)}% on cost basis</div>
+          {unpriced ? (
+            <>
+              <div className="value">—</div>
+              <div className="delta">waiting for market prices</div>
+            </>
+          ) : (
+            <>
+              <div className="value" style={{ color: pnl >= 0 ? 'var(--good)' : 'var(--danger)' }}>
+                <span className="currency">$</span>{pnl >= 0 ? '+' : '−'}{Math.abs(pnl).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </div>
+              <div className={`delta ${pnl >= 0 ? 'up' : 'down'}`}>{pnl >= 0 ? '▲' : '▼'} {Math.abs(pnlPct).toFixed(1)}% on cost basis</div>
+            </>
+          )}
         </div>
         <div className="stat">
           <div className="label">Breadth</div>

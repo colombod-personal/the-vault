@@ -89,13 +89,16 @@ class CollectionView:
                 _CACHE[key] = cached
                 while len(_CACHE) > _CACHE_SIZE:
                     _CACHE.popitem(last=False)
-        self.groups, self.months, self.imported_at = cached
+        self.groups, self.months, self.imported_at, self.source = cached
         self.by_id = {g.id: g for g in self.groups}
 
     def _build(self) -> tuple:
         db, user = self.db, self.user
         rows = user_entries(db, user)
-        prices = latest_prices(db, {r.scryfall_id for r in rows if r.scryfall_id})
+        ids = {r.scryfall_id for r in rows if r.scryfall_id}
+        prices = latest_prices(db, ids)
+        # Files without set names (Moxfield) get Scryfall's, once the printing is matched.
+        set_names = dict(db.execute(select(Card.scryfall_id, Card.set_name).where(Card.scryfall_id.in_(ids))).all()) if ids else {}
         groups: dict[str, Group] = {}
         months: Counter = Counter()
         spend: Counter = Counter()
@@ -108,7 +111,7 @@ class CollectionView:
             g = groups.get(gid)
             if g is None:
                 g = groups[gid] = Group(
-                    id=gid, name=r.name, set_code=set_code, set_name=r.set_name or "",
+                    id=gid, name=r.name, set_code=set_code, set_name=r.set_name or set_names.get(r.scryfall_id) or "",
                     number=r.collector_number or "", printing=printing, finish=r.price_finish or r.finish,
                     condition=r.condition, language=r.language, price=price,
                     price_source="scryfall" if from_scryfall else "file",
@@ -129,8 +132,9 @@ class CollectionView:
                 spend[day[:7]] += (r.purchase_price or 0.0) * r.quantity
         ordered = sorted(groups.values(), key=lambda g: (g.name.lower(), g.set_code, g.number, g.id))
         timeline = [(m, months[m], round(spend[m], 2)) for m in sorted(months)]
-        last_import = db.scalar(select(func.max(Import.created_at)).where(Import.user_id == user.id))
-        return ordered, timeline, last_import
+        latest = db.execute(select(Import.created_at, Import.source).where(Import.user_id == user.id)
+                            .order_by(Import.id.desc()).limit(1)).first()
+        return ordered, timeline, latest[0] if latest else None, latest[1] if latest else None
 
     # -- shapes ------------------------------------------------------------------------------
     def item(self, g: Group) -> dict:
@@ -187,6 +191,7 @@ class CollectionView:
             "by_printing": dict(printings),
             "by_condition": dict(conditions),
             "imported_at": last_import.isoformat() if last_import else None,
+            "source": self.source,  # format of the last import: dragonshield, moxfield or csv
             "prices_as_of": last_prices.isoformat() if last_prices else None,
         }
 

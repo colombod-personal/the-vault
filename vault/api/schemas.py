@@ -114,6 +114,7 @@ class CardPage(Page):
 
 class CollectionSummary(Hal):
     version: str = Field("", description="Changes whenever the collection or its prices change; clients cache by it")
+    source: str | None = Field(None, description="Format of the last import: dragonshield, moxfield or csv")
     copies: int
     printings: int
     cards: int
@@ -222,6 +223,7 @@ class TokenRequest(BaseModel):
 class ImportItem(Hal):
     id: int
     filename: str
+    source: str = Field("dragonshield", description="Detected format: dragonshield, moxfield or csv")
     rows: int
     copies: int
     changes: dict[str, int]
@@ -356,3 +358,16 @@ class NewAccessToken(AccessTokenItem):
 
 class AccessTokenPage(Page):
     items: list[AccessTokenItem]
+
+
+class ExportFormat(Hal):
+    format: str
+    label: str
+    description: str
+    media_type: str
+    extension: str
+    reimportable: bool = Field(description="The Vault (and the app it's named after) can read it back")
+
+
+class ExportFormats(Hal):
+    items: list[ExportFormat]

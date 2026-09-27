@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from mtg_toolkits.models import CollectionEntry, Condition, Finish
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Index, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -230,6 +230,7 @@ class Card(Base):
     """Scryfall printing data for printings someone owns (refreshed by the daily sync)."""
 
     __tablename__ = "cards"
+    __table_args__ = (Index("ix_cards_set_number", "set_code", "collector_number"),)  # import-time matching
 
     scryfall_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     oracle_id: Mapped[str | None] = mapped_column(String(36))

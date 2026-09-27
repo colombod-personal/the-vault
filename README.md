@@ -26,7 +26,7 @@ pip install -e ".[dev]"
 cp .env.example .env            # DEV_LOGIN=1 gives you a "Local dev sign-in" button
 set -a && . ./.env && set +a
 uvicorn --factory vault.app:create_app --reload --port 8000
-# open http://localhost:8000, sign in, import your Dragon Shield CSV
+# open http://localhost:8000, sign in, import your Dragon Shield or Moxfield CSV
 ```
 
 Get prices without waiting for the daily job:
@@ -79,6 +79,12 @@ items per response), linked (`_links`, start at `GET /api/v1`), ETag/304, errors
 `application/problem+json`. Native apps sign in with Apple or Google ID tokens, or through the
 browser with PKCE, and use rotating bearer tokens. Full reference: [`docs/api.md`](docs/api.md).
 Interactive docs at `/api/docs`; OpenAPI at `/api/openapi.json`.
+
+**Moving collections.** Imports accept Dragon Shield, Moxfield and generic CSV; the format is
+detected from the header. Exports cover Dragon Shield (byte-identical to a Dragon Shield
+import), Moxfield, Archidekt, generic CSV (lossless, with Scryfall ids) and a text list. They
+are in Account → Move your collection and at `/api/v1/collection/exports`. Matched printings go
+out with Scryfall's set codes, so other apps recognise them.
 
 **Agents.** People can connect their own AI agents: personal access tokens (read, or read and
 write), an MCP server at `/api/mcp`, and `/llms.txt`. See [`docs/agents.md`](docs/agents.md).

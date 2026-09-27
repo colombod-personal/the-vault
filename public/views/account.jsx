@@ -96,8 +96,11 @@ function EmptyVault({ onImported }) {
         <p className="label-mono" style={{ marginBottom: 20 }}>
           Export a CSV from the{' '}
           <a href="https://mtg.dragonshield.com" target="_blank" rel="noopener noreferrer">Dragon Shield Card Manager</a>{' '}
-          (Inventory → Export) and upload it here. Re-import any time: the Vault records what changed.
-          Only the file you choose is read. The Vault never connects to your Dragon Shield account.
+          (Inventory → Export) or{' '}
+          <a href="https://moxfield.com/collection" target="_blank" rel="noopener noreferrer">Moxfield</a>{' '}
+          (Collection → More → Export CSV) and upload it here. The format is detected for you. Re-import any
+          time: the Vault records what changed. Only the file you choose is read. The Vault never connects
+          to your accounts there.
         </p>
         <ImportButton className="btn primary" label="Choose CSV file" onImported={onImported} />
       </div>
@@ -257,6 +260,8 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged }) {
         ))}
       </Section>
 
+      <MoveSection />
+
       <AgentsSection />
 
       <Section title="Shared with me">
@@ -321,7 +326,7 @@ function VaultFooter() {
         Card data, images &amp; prices from {link('https://scryfall.com', 'Scryfall')} (prices sourced by Scryfall from{' '}
         {link('https://www.tcgplayer.com', 'TCGplayer')} and {link('https://www.cardmarket.com', 'Cardmarket')})
         {' · '}Decks from {link('https://archidekt.com', 'Archidekt')}
-        {' · '}Collections imported from {link('https://mtg.dragonshield.com', 'Dragon Shield')}
+        {' · '}Collections imported from {link('https://mtg.dragonshield.com', 'Dragon Shield')} or {link('https://moxfield.com', 'Moxfield')}
         {' · '}Card art by the credited artists
         {' · '}<a href="/credits.html" style={style}><strong>Credits &amp; thanks</strong></a>
         {' · '}<a href="/privacy.html" style={style}>Privacy</a>
@@ -330,7 +335,7 @@ function VaultFooter() {
         The Vault is unofficial Fan Content permitted under the{' '}
         {link('https://company.wizards.com/en/legal/fancontentpolicy', 'Fan Content Policy')}. Not approved/endorsed by
         Wizards. Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC.
-        Not affiliated with or endorsed by Scryfall, Archidekt or Dragon Shield.
+        Not affiliated with or endorsed by Scryfall, Archidekt, Dragon Shield or Moxfield.
       </p>
     </footer>
   );
@@ -396,6 +401,28 @@ function AgentsSection() {
             {t.last_used_at ? 'used ' + new Date(t.last_used_at).toLocaleDateString() : 'never used'}
           </span>
           <button className="btn xs ghost" onClick={() => remove(t.id)}>Revoke</button>
+        </div>
+      ))}
+    </Section>
+  );
+}
+
+
+// Take the collection anywhere: every export format, and what imports are accepted.
+function MoveSection() {
+  const [formats, setFormats] = useStateAcc([]);
+  useEffectAcc(() => { window.VaultApi.exportFormats().then(setFormats).catch(() => setFormats([])); }, []);
+  return (
+    <Section title="Move your collection">
+      <p className="label-mono" style={{ marginBottom: 8 }}>
+        Your collection is yours. Download it for another app, or bring one in: imports accept Dragon Shield,
+        Moxfield and generic CSV files. Printings matched on Scryfall are exported with Scryfall's set codes
+        and numbers, so other apps recognise them.
+      </p>
+      {formats.map((f) => (
+        <div key={f.format} style={rowStyle}>
+          <span className="label-mono"><strong>{f.label}</strong> · {f.description}</span>
+          <a className="btn xs" href={f._links.download.href} download>Download</a>
         </div>
       ))}
     </Section>
