@@ -36,6 +36,9 @@ class Settings:
     app_redirect_uris: tuple[str, ...] = field(default_factory=lambda: tuple(
         u.strip() for u in _env("APP_REDIRECT_URIS", "vault://auth").split(",") if u.strip()))
 
+    # Local development only: send every outbound call to the digital twin universe (python -m twins).
+    twins_url: str = field(default_factory=lambda: _env("VAULT_TWINS_URL"))
+
     @property
     def secure_cookies(self) -> bool:
         return self.base_url.startswith("https://")
@@ -48,5 +51,7 @@ class Settings:
             )
         if self.secure_cookies and self.session_secret == "dev-insecure-secret":
             raise RuntimeError("SESSION_SECRET must be set when BASE_URL is https")
+        if self.twins_url and (self.secure_cookies or os.environ.get("VERCEL")):
+            raise RuntimeError("VAULT_TWINS_URL is for local development only")
         if self.secure_cookies and self.dev_login:
             raise RuntimeError("DEV_LOGIN must not be enabled on a public deployment")

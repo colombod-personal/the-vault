@@ -37,6 +37,15 @@ python -m jobs.sync_prices      # downloads Scryfall's default_cards file (~75 M
 
 Tests: `pytest`
 
+Everything offline, without real accounts or Scryfall: run the **digital twin universe**,
+behavioural clones of Google, Microsoft, Apple, Facebook, Scryfall and Archidekt. See
+[`docs/twins.md`](docs/twins.md).
+
+```bash
+python -m twins --port 9000                                          # control panel at /_twins
+VAULT_TWINS_URL=http://localhost:9000 uvicorn --factory vault.app:create_app --reload
+```
+
 ## Layout
 
 ```
@@ -55,7 +64,9 @@ vault/api/schemas.py  response models (OpenAPI for Swift codegen)
 vault/api/meta.py     Facebook data deletion callback
 vault/sharing.py      invite links, access checks for shared collections and decks
 vault/privacy.py      GDPR data export (ZIP) and account erasure (purge_user)
+vault/outbound.py     sends outbound calls to the twin universe in local development (VAULT_TWINS_URL)
 jobs/sync_prices.py   CLI run by .github/workflows/sync-prices.yml
+twins/                digital twins of every outside service, for tests and offline development
 public/               front end (React prototype, no build step yet)
 ```
 
@@ -133,15 +144,24 @@ links it to the same account; otherwise each provider identity is its own accoun
 
 ### Testing sign-in
 
-**Automated, on every push:** `tests/test_signin_flows.py` runs the real redirect → provider →
-callback → session flow for all four providers against a fake identity provider
-(`tests/fake_idp.py`). It covers:
-- scopes and redirect URIs
-- Microsoft's per-tenant issuer check (a forged issuer is refused)
-- Apple's `form_post` callback, signed client secret and one-time name
-- Facebook's Graph profile
-- linking a second provider while signed in, and no merging by e-mail
-- cancelled sign-ins, replayed or forged callbacks, wrong nonce or audience
+**Automated, on every push:** `tests/test_signin_flows.py` and `tests/test_native_auth.py`
+run the real sign-in flows against the providers' digital twins (`twins/`, see
+[`docs/twins.md`](docs/twins.md)). The twins check what the real providers check. The tests cover:
+- scopes, registered redirect URIs, and single-use codes
+- Microsoft's per-tenant issuer, and its ID tokens without `email`
+- Apple's `form_post`, its ES256 client secret (verified by the twin), a name sent only once,
+  and Hide My Email
+- Facebook users who don't share their e-mail
+- linking a second provider, and no merging by e-mail
+- cancelled sign-ins, and replayed or forged callbacks (wrong nonce, audience or issuer)
+- provider outages
+- signing-key rotation
+- native ID tokens and the PKCE app handoff
+
+**Nightly:** `tests/conformance` compares each twin with the real service, so the twins stay faithful.
+
+**By hand, offline:** `python -m twins` plus `VAULT_TWINS_URL`. Each sign-in button opens the
+twin's sign-in page.
 
 **With real accounts** (needs the credentials above):
 - Google, Microsoft and Facebook also work locally with `BASE_URL=http://localhost:8000` and

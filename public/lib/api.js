@@ -1,3 +1,28 @@
+// Local development against the digital twin universe (python -m twins, docs/twins.md): when
+// the API root links to the twins, the browser's own Scryfall calls go there too. In production
+// there is no such link and nothing changes.
+(() => {
+  const TWIN_HOSTS = ['api.scryfall.com', 'cards.scryfall.io', 'svgs.scryfall.io'];
+  const realFetch = window.fetch.bind(window);
+  const twins = realFetch('/api/v1', { credentials: 'same-origin' })
+    .then((r) => r.json()).then((j) => (j._links && j._links.twins && j._links.twins.href) || null)
+    .catch(() => null);
+  window.fetch = async (input, init) => {
+    const url = typeof input === 'string' ? input : input.url;
+    let u = null;
+    try { u = new URL(url, location.href); } catch {}
+    if (u && TWIN_HOSTS.includes(u.host)) {
+      const base = await twins;
+      if (base) {
+        const headers = new Headers((init && init.headers) || {});
+        headers.set('X-Twin-Browser', '1'); // image and icon URLs in the answer point at the twins too
+        return realFetch(`${base}/h/${u.host}${u.pathname}${u.search}`, { ...(init || {}), headers });
+      }
+    }
+    return realFetch(input, init);
+  };
+})();
+
 // Client for the Vault API (/api/v1; see /api/docs). Same origin, session cookie.
 // Lists are cursor-paginated with HAL `_links`; this client follows `next` links.
 window.VaultApi = (() => {

@@ -39,6 +39,7 @@ from joserfc.jwk import ECKey
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import outbound
 from .config import Settings
 from .models import Identity, User
 
@@ -80,8 +81,7 @@ def apple_client_secret(settings: Settings, now: int | None = None) -> str:
 
 class Auth:
     def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
-        """``transport`` replaces the network for all provider calls (used by the tests'
-        fake identity provider)."""
+        """``transport`` replaces the network for all provider calls (tests: the twin universe)."""
         self.settings = settings
         self.oauth = OAuth()
         self._apple_secret_at = 0.0
@@ -137,12 +137,17 @@ class Auth:
 
     async def profile(self, provider: str, request: Request) -> Profile:
         client = self.client(provider)
-        if provider == "microsoft":
-            token = await client.authorize_access_token(
-                request, claims_options={"iss": {"essential": True, "validate": microsoft_issuer_ok}}
-            )
-        else:
+        if provider == "facebook":  # plain OAuth 2.0, no ID token
             token = await client.authorize_access_token(request)
+        else:
+            # Authlib checks only what claims_options asks for, and "aud" isn't checked by default.
+            # OpenID Connect requires it, so check it here, along with the issuer.
+            if provider == "microsoft":  # "common" issues per-tenant issuers
+                iss = {"essential": True, "validate": microsoft_issuer_ok}
+            else:
+                iss = {"essential": True, "values": [(await client.load_server_metadata())["issuer"]]}
+            options = {"iss": iss, "aud": {"essential": True, "value": client.client_id}}
+            token = await client.authorize_access_token(request, claims_options=options)
 
         if provider == "facebook":
             me = (await client.get("me", params={"fields": "id,name,email"}, token=token)).json()
@@ -219,7 +224,18 @@ def build_router(auth: Auth, get_db) -> APIRouter:
                 raise HTTPException(400, "A PKCE code_challenge (S256) is required")
             request.session["app_flow"] = {"app_redirect_uri": app_redirect_uri, "code_challenge": code_challenge}
         redirect_uri = f"{auth.settings.base_url}/api/auth/callback/{provider}"
-        return await auth.client(provider).authorize_redirect(request, redirect_uri)
+        client = auth.client(provider)
+        try:
+            response = await client.authorize_redirect(request, redirect_uri)
+        except SIGN_IN_ERRORS as exc:  # e.g. the provider's discovery document is unreachable
+            log.warning("sign-in with %s could not start: %s", provider, exc)
+            app_flow = request.session.pop("app_flow", None)
+            target = app_flow["app_redirect_uri"] if app_flow else "/"
+            key = "error" if app_flow else "signin_error"
+            return RedirectResponse(f"{target}?{urlencode({key: 'temporarily_unavailable'})}", status_code=303)
+        if auth.settings.twins_url:  # local development: the browser goes to the twin, not the real provider
+            response.headers["location"] = outbound.browser_url(auth.settings, response.headers["location"])
+        return response
 
     @router.api_route("/callback/{provider}", methods=["GET", "POST"])
     async def callback(provider: str, request: Request, db: Session = Depends(get_db)):

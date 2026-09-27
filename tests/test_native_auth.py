@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from joserfc.jwk import RSAKey
 
-from fake_idp import FakeIdP
+from twins import Universe
 from vault.app import create_app
 from vault.config import Settings
 from vault.tokens import s256
@@ -20,18 +20,30 @@ V1 = "/api/v1"
 
 
 @pytest.fixture
-def idp():
-    return FakeIdP()
-
-
-@pytest.fixture
-def app(tmp_path, idp):
-    settings = Settings(
+def settings(tmp_path):
+    return Settings(
         database_url=f"sqlite:///{tmp_path}/native.db", session_secret="test", base_url="http://testserver",
         google_client_id="google-web", google_client_secret="x", apple_app_bundle_id=BUNDLE,
         google_ios_client_id=GOOGLE_IOS, app_redirect_uris=("vault://auth",),
     )
-    return create_app(settings, serve_static=False, auth_transport=idp.transport)
+
+
+@pytest.fixture
+def idp(settings):
+    """The twin universe (named for what these tests use it as: the identity providers)."""
+    universe = Universe()
+    universe.register_vault(settings)
+    yield universe
+    assert not universe.escapes
+
+
+@pytest.fixture
+def app(settings, idp):
+    return create_app(settings, serve_static=False, transport=idp.transport)
+
+
+def web_callback(client, cb):
+    return client.get(cb.url.replace("http://testserver", ""), follow_redirects=False)
 
 
 @pytest.fixture
@@ -46,8 +58,8 @@ def bearer(tokens):
 
 def apple_sign_in(client, idp, sub="a-1", **extra):
     raw = secrets.token_urlsafe(16)
-    token = idp.native_id_token("apple", sub=sub, aud=BUNDLE, nonce=hashlib.sha256(raw.encode()).hexdigest(),
-                                email="cy@privaterelay.appleid.com")
+    idp.apple.add_account(sub, "cy@privaterelay.appleid.com")
+    token = idp.apple.native_id_token(BUNDLE, sub, nonce=hashlib.sha256(raw.encode()).hexdigest())
     return client.post(f"{V1}/auth/native/apple", json={"id_token": token, "nonce": raw, **extra})
 
 
@@ -75,7 +87,7 @@ def test_native_apple_sign_in_and_bearer_access(client, idp):
 
 
 def test_native_google(client, idp):
-    token = idp.native_id_token("google", sub="g-1", aud=GOOGLE_IOS, email="ann@gmail.com", name="Ann")
+    token = idp.google.native_id_token(GOOGLE_IOS, idp.google.add_account("g-1", "ann@gmail.com", "Ann"))
     tokens = client.post(f"{V1}/auth/native/google", json={"id_token": token}).json()
     assert client.get(f"{V1}/me", headers=bearer(tokens)).json()["email"] == "ann@gmail.com"
 
@@ -83,19 +95,19 @@ def test_native_google(client, idp):
 @pytest.mark.parametrize("case", ["wrong_audience", "expired", "wrong_nonce", "forged", "wrong_issuer", "not_configured"])
 def test_native_tokens_are_verified(client, idp, case):
     raw = "n0nce-value"
-    kwargs = {"sub": "a-9", "aud": BUNDLE, "nonce": hashlib.sha256(raw.encode()).hexdigest()}
-    provider = "apple"
+    kwargs = {"nonce": hashlib.sha256(raw.encode()).hexdigest()}
+    provider, aud = "apple", BUNDLE
     if case == "wrong_audience":
-        kwargs["aud"] = "com.someone.else"
+        aud = "com.someone.else"
     elif case == "expired":
         kwargs["exp"] = int(time.time()) - 3600
     elif case == "wrong_nonce":
         kwargs["nonce"] = hashlib.sha256(b"other").hexdigest()
-    elif case == "forged":
-        kwargs["key"] = RSAKey.generate_key(2048, parameters={"kid": "fake-1"})
+    elif case == "forged":  # signed by someone else, claiming Apple's key id
+        kwargs["key"] = RSAKey.generate_key(2048, parameters={"kid": idp.apple.keys[0].kid})
     elif case == "wrong_issuer":
         kwargs["iss"] = "https://evil.example"
-    token = idp.native_id_token(provider, **kwargs)
+    token = idp.apple.native_id_token(aud, "a-9", **kwargs)
     url = f"{V1}/auth/native/{'microsoft' if case == 'not_configured' else provider}"
     res = client.post(url, json={"id_token": token, "nonce": raw})
     assert res.status_code == 401 and res.headers["content-type"].startswith("application/problem+json")
@@ -133,8 +145,7 @@ def test_browser_sign_in_handed_to_the_app_with_pkce(client, idp):
     verifier = secrets.token_urlsafe(48)
     res = client.get("/api/auth/login/google", params={"app_redirect_uri": "vault://auth", "code_challenge": s256(verifier),
                                                        "code_challenge_method": "S256"}, follow_redirects=False)
-    answer = idp.authorize(res.headers["location"], sub="g-2", email="bo@gmail.com", name="Bo")
-    back = client.get("/api/auth/callback/google", params=answer, follow_redirects=False)
+    back = web_callback(client, idp.google.approve(res.headers["location"], "g-2", email="bo@gmail.com", name="Bo"))
     assert back.status_code == 303 and back.headers["location"].startswith("vault://auth?code=")
     code = parse_qs(urlsplit(back.headers["location"]).query)["code"][0]
 
@@ -147,8 +158,7 @@ def test_browser_sign_in_handed_to_the_app_with_pkce(client, idp):
     # start again and redeem properly
     res = client.get("/api/auth/login/google", params={"app_redirect_uri": "vault://auth", "code_challenge": s256(verifier)},
                      follow_redirects=False)
-    back = client.get("/api/auth/callback/google", params=idp.authorize(res.headers["location"], sub="g-2"),
-                      follow_redirects=False)
+    back = web_callback(client, idp.google.approve(res.headers["location"], "g-2"))
     code = parse_qs(urlsplit(back.headers["location"]).query)["code"][0]
     tokens = redeem().json()
     assert client.get(f"{V1}/me", headers=bearer(tokens)).json()["providers"] == ["google"]
@@ -167,14 +177,13 @@ def test_app_handoff_rejects_unknown_redirects_and_missing_pkce(client):
 def test_cancelled_app_sign_in_returns_error_to_the_app(client, idp):
     res = client.get("/api/auth/login/google", params={"app_redirect_uri": "vault://auth",
                                                        "code_challenge": s256("v" * 50)}, follow_redirects=False)
-    state = parse_qs(urlsplit(res.headers["location"]).query)["state"][0]
-    back = client.get("/api/auth/callback/google", params={"error": "access_denied", "state": state}, follow_redirects=False)
+    back = web_callback(client, idp.google.deny(res.headers["location"]))
     assert back.headers["location"].startswith("vault://auth?error=")
 
 
 def test_native_sign_in_while_signed_in_on_the_web_links_accounts(client, idp):
     res = client.get("/api/auth/login/google", follow_redirects=False)
-    client.get("/api/auth/callback/google", params=idp.authorize(res.headers["location"], sub="g-3"), follow_redirects=False)
+    web_callback(client, idp.google.approve(res.headers["location"], "g-3"))
     web_id = client.get(f"{V1}/me").json()["id"]
     tokens = apple_sign_in(client, idp, sub="a-3").json()  # cookie present -> link to the web account
     me = client.get(f"{V1}/me", headers=bearer(tokens)).json()
@@ -186,3 +195,19 @@ def test_deleting_the_account_ends_app_sessions(client, idp):
     res = client.request("DELETE", f"{V1}/me", json={"confirm": "DELETE"}, headers=bearer(tokens))
     assert res.json()["removed"]["api_sessions"] == 1
     assert client.get(f"{V1}/me", headers=bearer(tokens)).status_code == 401
+
+
+def test_provider_key_rotation(client, idp):
+    """Apple rotates its signing keys: the vault refetches them instead of refusing sign-ins."""
+    assert apple_sign_in(client, idp).status_code == 200  # keys now cached
+    idp.apple.rotate_keys(keep_old=False)
+    assert apple_sign_in(client, idp).status_code == 200
+    assert sum(c.path == "/auth/keys" for c in idp.apple.calls) == 2
+
+
+def test_provider_outage_is_a_503_the_app_can_retry(client, idp):
+    idp.apple.outage = True
+    res = apple_sign_in(client, idp)
+    assert res.status_code == 503 and res.headers["content-type"].startswith("application/problem+json")
+    idp.apple.outage = False
+    assert apple_sign_in(client, idp).status_code == 200

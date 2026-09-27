@@ -7,7 +7,6 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 from sqlalchemy.orm import Session
@@ -17,7 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import auth as auth_module
-from . import tokens
+from . import outbound, tokens
 from .api import meta, v1
 from .api.hal import problem
 from .config import Settings
@@ -37,14 +36,17 @@ def _origin(url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}".lower()
 
 
-def create_app(settings: Settings | None = None, *, serve_static: bool = True, auth_transport=None) -> FastAPI:
-    """``auth_transport`` routes all calls to identity providers elsewhere (tests: the twins)."""
+def create_app(settings: Settings | None = None, *, serve_static: bool = True, transport=None) -> FastAPI:
+    """``transport`` replaces the network for every outbound call: sign-in providers, Archidekt
+    (tests pass the twin universe's). Without one, ``VAULT_TWINS_URL`` routes calls to the twin
+    server; otherwise they go to the real services."""
     settings = settings or Settings()
     settings.check()
+    transport = transport or outbound.transport(settings)
     db = Database(settings.database_url)
     db.create_all()
-    auth = auth_module.Auth(settings, transport=auth_transport)
-    verifier = NativeVerifier(settings, transport=auth_transport)
+    auth = auth_module.Auth(settings, transport=transport)
+    verifier = NativeVerifier(settings, transport=transport)
 
     app = FastAPI(
         title="The Vault API", version="1",
@@ -79,6 +81,8 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, a
     )
 
     allowed_origin = _origin(settings.base_url)
+    # Local development with twins: the twin Apple page POSTs the sign-in back from the twin server.
+    cross_site_origins = {_origin(settings.twins_url)} if settings.twins_url else set()
 
     @app.middleware("http")
     async def reject_cross_site_writes(request: Request, call_next):
@@ -91,6 +95,7 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, a
             and origin
             and _origin(origin) != allowed_origin
             and not request.url.path.startswith(CROSS_SITE_ALLOWED)
+            and _origin(origin) not in cross_site_origins
         ):
             return problem(403, "Cross-site request refused")
         return await call_next(request)
@@ -119,7 +124,7 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, a
 
     app.include_router(auth_module.build_router(auth, get_db))
     app.include_router(v1.build_router(get_db, current_user, optional_user, settings, verifier,
-                                       lambda: auth.enabled))
+                                       lambda: auth.enabled, transport))
     app.include_router(meta.build_router(get_db, settings))
 
     @app.get("/api/health")

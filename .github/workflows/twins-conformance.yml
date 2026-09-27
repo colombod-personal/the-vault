@@ -1,0 +1,19 @@
+name: twins-conformance
+# Compares each digital twin with the real service it clones (tests/conformance).
+# A failure means a real service changed, or a twin drifted: update the twin first.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: pytest -q -m live tests/conformance
+        env:
+          TWINS_LIVE: "1"

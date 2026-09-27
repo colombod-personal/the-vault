@@ -13,7 +13,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from urllib.parse import urlencode
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from mtg_toolkits import decklist, delta
@@ -22,12 +24,12 @@ from mtg_toolkits.http import ApiError
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from .. import tokens
+from .. import outbound, tokens
 from ..auth import Profile, find_or_create
 from ..collection_view import SORTS, CollectionView, filtered, history_days
 from ..importer import ImportError_, export_dragonshield, import_dragonshield, user_entries
 from ..models import ApiSession, Deck, Import, Share, User
-from ..native import NativeTokenError, NativeVerifier
+from ..native import NativeTokenError, NativeVerifier, ProviderUnavailable
 from ..privacy import export_archive, purge_user
 from ..sharing import accept_invite, create_invite, display_name, incoming_share, owned_deck
 from . import schemas as S
@@ -41,7 +43,8 @@ def _iso(dt) -> str | None:
     return dt.isoformat() if dt else None
 
 
-def build_router(get_db, current_user, optional_user, settings, verifier: NativeVerifier, auth_providers) -> APIRouter:
+def build_router(get_db, current_user, optional_user, settings, verifier: NativeVerifier, auth_providers,
+                 transport=None) -> APIRouter:
     router = APIRouter(prefix=V1)
 
     # -- entry point ------------------------------------------------------------------------
@@ -59,10 +62,12 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 "cards": link(f"{V1}/collection/cards"), "imports": link(f"{V1}/imports"),
                 "decks": link(f"{V1}/decks"), "shares": link(f"{V1}/shares"), "shared": link(f"{V1}/shared"),
             }
+        if settings.twins_url:  # local development: the front end sends its Scryfall calls there too
+            links["twins"] = link(settings.twins_url, title="Digital twin universe (development)")
         return {"version": "1", "signed_in": user is not None, "_links": links}
 
     # -- auth for native apps -------------------------------------------------------------------
-    @router.get(f"/auth", tags=["auth"], summary="How to sign in (web and native)")
+    @router.get("/auth", tags=["auth"], summary="How to sign in (web and native)")
     def auth_info() -> dict:
         return {
             "web_providers": auth_providers(),
@@ -86,6 +91,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             claims = await verifier.verify(provider, body.id_token, body.nonce)
         except NativeTokenError as exc:
             raise HTTPException(401, str(exc)) from exc
+        except ProviderUnavailable as exc:
+            raise HTTPException(503, f"{exc}. Try again shortly.", headers={"Retry-After": "30"}) from exc
         name = body.name if provider == "apple" else claims.get("name")
         user = find_or_create(db, Profile(provider, str(claims["sub"]), claims.get("email"), name), current)
         return tokens.issue(db, user, "app", body.device_name)
@@ -238,8 +245,11 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             def body():
                 copies = [dict(c, purchase_price=None if ctx.hide_costs else c["purchase_price"]) for c in g.copies]
                 links = card_links(ctx, g) | {"collection": link(ctx.base),
-                                              "same_card": link(f"{ctx.base}/cards?name={g.name.split(' // ')[0]}")}
+                                              "same_card": link(f"{ctx.base}/cards?{urlencode({'name': g.name.split(' // ')[0]})}")}
                 card_data = view.card_data(g)
+                if card_data and settings.twins_url:  # local development: images come from the Scryfall twin
+                    card_data["image"] = {k: outbound.browser_url(settings, v) if k in ("small", "normal") and v else v
+                                          for k, v in card_data["image"].items()}
                 if card_data and card_data.get("scryfall_uri"):
                     links["scryfall"] = link(card_data["scryfall_uri"], title="View on Scryfall")
                 return {**view.item(g), "card": card_data, "price_history": view.price_history(g),
@@ -407,7 +417,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     @router.get("/archidekt/decks/{deck_id}", tags=["decks"], summary="A public Archidekt deck (fetched server-side)")
     def archidekt_deck(deck_id: int, user: User = Depends(current_user)) -> dict:
         try:
-            with ArchidektClient() as client:
+            with ArchidektClient(client=httpx.Client(transport=transport, timeout=30, follow_redirects=True)) as client:
                 return client.get_deck(deck_id).raw
         except ApiError as exc:
             raise HTTPException(exc.status_code if exc.status_code == 404 else 502, str(exc)) from exc

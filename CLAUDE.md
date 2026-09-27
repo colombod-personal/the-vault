@@ -22,4 +22,7 @@ React prototype as the front end (`public/`). Read `README.md` first.
 - Attribution is a requirement, not decoration (README → "Attribution"): keep the footer, the
   Fan Content notice, artist credits and source links; never crop card images; keep the app free.
   New services or libraries go on `public/credits.html`.
+- Tests never reach real services: use the twin universe (`twins/`, `docs/twins.md`). When the
+  Vault starts using a new endpoint or field of an outside service, teach the twin and add a
+  conformance check in `tests/conformance`. A new outside service gets a new twin.
 - Run `pytest` before pushing.

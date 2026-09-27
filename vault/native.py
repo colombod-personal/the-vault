@@ -33,6 +33,10 @@ class NativeTokenError(Exception):
     pass
 
 
+class ProviderUnavailable(Exception):
+    """The provider's keys couldn't be fetched; the app should retry later."""
+
+
 class NativeVerifier:
     def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
         self.audiences = {
@@ -50,9 +54,12 @@ class NativeVerifier:
         cached = self._keys.get(provider)
         if cached and not refresh and time.time() - cached[0] < CACHE_SECONDS:
             return cached[1]
-        async with httpx.AsyncClient(transport=self.transport, timeout=10) as client:
-            meta = (await client.get(DISCOVERY[provider])).raise_for_status().json()
-            jwks = (await client.get(meta["jwks_uri"])).raise_for_status().json()
+        try:
+            async with httpx.AsyncClient(transport=self.transport, timeout=10) as client:
+                meta = (await client.get(DISCOVERY[provider])).raise_for_status().json()
+                jwks = (await client.get(meta["jwks_uri"])).raise_for_status().json()
+        except (httpx.HTTPError, ValueError, KeyError) as exc:
+            raise ProviderUnavailable(f"Could not reach {provider}: {exc}") from exc
         keys = KeySet.import_key_set(jwks)
         self._keys[provider] = (time.time(), keys)
         return keys

@@ -30,3 +30,5 @@ packages = ["vault"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = [".", "tests"]
+markers = ["live: talks to the real third-party services (conformance checks for the twins)"]
