@@ -1,6 +1,7 @@
 name: sync-prices
 # Daily: download Scryfall's bulk card file, match every collection, store prices
-# and each user's collection value. Needs the DATABASE_URL repository secret.
+# and each user's collection value. Uses the DATABASE_URL repository secret if set; otherwise it
+# reads the database address from the Vercel project (Neon integration) with VERCEL_TOKEN.
 on:
   schedule:
     - cron: "17 10 * * *"   # Scryfall regenerates bulk files around 09:00 UTC
@@ -16,6 +17,22 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e .
-      - run: python -m jobs.sync_prices
+      - name: Database address
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            [ -n "$VERCEL_TOKEN" ] || { echo "::error::Set VERCEL_TOKEN (or DATABASE_URL) in the repository secrets"; exit 1; }
+            npm install --global vercel@latest
+            scope=(); [ -n "$VERCEL_SCOPE" ] && scope=(--scope "$VERCEL_SCOPE")
+            vercel link --yes --project the-vault --token "$VERCEL_TOKEN" "${scope[@]}" >/dev/null
+            vercel env pull .env.vercel --yes --environment=production --token "$VERCEL_TOKEN" "${scope[@]}" >/dev/null
+            DATABASE_URL=$(python -c 'import re; t=open(".env.vercel").read(); m=re.search(r"^DATABASE_URL=\"?([^\"\n]*)", t, re.M); print(m.group(1) if m else "")')
+            rm -f .env.vercel
+            [ -n "$DATABASE_URL" ] || { echo "::error::No DATABASE_URL in Vercel yet: connect Neon (Vercel → Storage), or add the secret"; exit 1; }
+          fi
+          echo "::add-mask::$DATABASE_URL"
+          echo "DATABASE_URL=$DATABASE_URL" >> "$GITHUB_ENV"
+      - run: python -m jobs.sync_prices

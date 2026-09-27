@@ -4,7 +4,9 @@ name: deploy
 #
 # Needs the VERCEL_TOKEN repository secret. Optional repository variables:
 #   VERCEL_SCOPE  a Vercel team slug (leave unset for a personal Hobby account)
-#   VAULT_URL     the public URL (e.g. https://the-vault.vercel.app) for the post-deploy check
+#   VAULT_URL     the public URL for the post-deploy check (normally found automatically)
+# jobs/vercel_setup.py sets SESSION_SECRET and BASE_URL in Vercel and writes a checklist of what
+# is still missing (database, sign-in providers, redirect URIs) to the job summary.
 on:
   push:
     branches: [main]
@@ -62,21 +64,37 @@ jobs:
           npm install --global vercel@latest
           scope=(); [ -n "$VERCEL_SCOPE" ] && scope=(--scope "$VERCEL_SCOPE")
           prod=(); [ "$TARGET" = "production" ] && prod=(--prod)
+          ship() {
+            vercel pull --yes --environment="$TARGET" --token "$VERCEL_TOKEN" "${scope[@]}"
+            vercel build "${prod[@]}" --token "$VERCEL_TOKEN" "${scope[@]}"
+            vercel deploy --prebuilt "${prod[@]}" --token "$VERCEL_TOKEN" "${scope[@]}"
+          }
           # Creates the "the-vault" project on the first run, links to it afterwards.
           vercel link --yes --project the-vault --token "$VERCEL_TOKEN" "${scope[@]}"
-          vercel pull --yes --environment="$TARGET" --token "$VERCEL_TOKEN" "${scope[@]}"
-          vercel build "${prod[@]}" --token "$VERCEL_TOKEN" "${scope[@]}"
-          url=$(vercel deploy --prebuilt "${prod[@]}" --token "$VERCEL_TOKEN" "${scope[@]}")
+          # Sets SESSION_SECRET (and BASE_URL once the project has an address); reports what's missing.
+          before=$(python -m jobs.vercel_setup)
+          url=$(ship | tail -n 1)
+          if [ "$(echo "$before" | python -c 'import json,sys; print(json.load(sys.stdin)["base_url"] or "")')" = "" ]; then
+            # First deploy: the production address exists now. Record it as BASE_URL and redeploy with it.
+            after=$(GITHUB_STEP_SUMMARY=/dev/null python -m jobs.vercel_setup)
+            if echo "$after" | python -c 'import json,sys; sys.exit(0 if "BASE_URL" in json.load(sys.stdin)["changed"] else 1)'; then
+              url=$(ship | tail -n 1)
+              python -m jobs.vercel_setup >/dev/null  # refresh the checklist with the redirect URIs
+            fi
+          fi
+          base=$(python -m jobs.vercel_setup --project the-vault 2>/dev/null | python -c 'import json,sys; print(json.load(sys.stdin)["base_url"] or "")' || true)
           echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "base=${base:-${{ vars.VAULT_URL }}}" >> "$GITHUB_OUTPUT"
           echo "### Deployed ($TARGET): $url" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check the live site
-        if: steps.token.outputs.ready == 'true' && vars.VAULT_URL != '' && env.TARGET == 'production'
+        if: steps.token.outputs.ready == 'true' && env.TARGET == 'production' && steps.deploy.outputs.base != ''
         run: |
+          site="${{ steps.deploy.outputs.base }}"
           for i in 1 2 3 4 5 6; do
-            code=$(curl -s -o health.json -w '%{http_code}' "${{ vars.VAULT_URL }}/api/health" || true)
+            code=$(curl -s -o health.json -w '%{http_code}' "$site/api/health" || true)
             [ "$code" = "200" ] && { cat health.json; exit 0; }
-            [ "$code" = "503" ] && { echo "::warning::Deployed, but not configured yet:"; cat health.json; exit 0; }
+            [ "$code" = "503" ] && { echo "::warning::Deployed, but not configured yet (see the job summary checklist):"; cat health.json; exit 0; }
             sleep 10
           done
-          echo "::error::${{ vars.VAULT_URL }}/api/health did not answer"; exit 1
+          echo "::error::$site/api/health did not answer"; exit 1

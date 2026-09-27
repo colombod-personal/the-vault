@@ -112,14 +112,15 @@ Every push to `main` runs the tests and then deploys to production.
    region **Frankfurt**, connect it to the project (Production and Preview). This sets
    `DATABASE_URL`. The Neon free plan is enough to start (see "Costs" below).
 5. **Environment variables** (project → Settings → Environment Variables, Production):
-   - `SESSION_SECRET`: a long random string (`openssl rand -hex 32`)
-   - `BASE_URL`: the production address, e.g. `https://the-vault.vercel.app` (shown on the
-     project page), or your own domain once added
+   - `SESSION_SECRET` and `BASE_URL` are set by the deploy workflow (`jobs/vercel_setup.py`).
+     It also writes a checklist of what's missing, plus the redirect URIs to register, to the
+     workflow run's summary.
    - at least one sign-in provider's credentials (next section). Google is the quickest.
    - never `DEV_LOGIN` (the app refuses to start with it on HTTPS)
 6. **Redeploy:** Actions → *deploy* → *Run workflow*.
-7. **Prices:** GitHub → Settings → Secrets → `DATABASE_URL` with the same Neon connection
-   string, then Actions → *sync-prices* → *Run workflow* once. After that it runs daily.
+7. **Prices:** Actions → *sync-prices* → *Run workflow* once; after that it runs daily. It reads
+   the database address from Vercel with `VERCEL_TOKEN`. A `DATABASE_URL` repository secret
+   overrides that, if you prefer.
 8. **Optional:**
    - Add the repository variable `VAULT_URL` (the site address) so each deploy checks the live site.
    - Add your own domain under project → Settings → Domains. Point its DNS at Vercel and
