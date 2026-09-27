@@ -1,0 +1,44 @@
+"""Database engine and session handling (SQLite locally, Postgres in production)."""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+def normalise_url(url: str) -> str:
+    """Neon/Vercel hand out ``postgres://`` URLs; SQLAlchemy wants an explicit driver."""
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix):]
+    return url
+
+
+def make_engine(url: str) -> Engine:
+    url = normalise_url(url)
+    if url.startswith("sqlite"):
+        return create_engine(url, connect_args={"check_same_thread": False})
+    # Serverless functions come and go: check connections before use, keep the pool small.
+    return create_engine(url, pool_pre_ping=True, pool_size=2, max_overflow=2)
+
+
+class Database:
+    def __init__(self, url: str):
+        self.engine = make_engine(url)
+        self.sessions = sessionmaker(self.engine, expire_on_commit=False)
+
+    def create_all(self) -> None:
+        from . import models  # noqa: F401  (register tables)
+
+        Base.metadata.create_all(self.engine)
+
+    def session(self) -> Iterator[Session]:
+        with self.sessions() as s:
+            yield s

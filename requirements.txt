@@ -1,0 +1,10 @@
+# Installed by Vercel for the Python function in api/. Keep in sync with pyproject.toml.
+fastapi>=0.115
+sqlalchemy>=2.0
+psycopg[binary]>=3.2
+authlib>=1.3
+cryptography>=42
+httpx>=0.27
+itsdangerous>=2.1
+python-multipart>=0.0.9
+mtg-toolkits @ git+https://github.com/colombod-personal/mtg-toolkits@47eb7058c0096cc3437b66a54a4716a2b0a948c7

@@ -14,8 +14,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -216,3 +216,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- The Vault ---
+# (lib/ and lib64/ above are anchored to the repo root so public/lib/ is kept)
+!.env.example
+*.db
+*.jsonl.gz
+.vercel/
+# personal collection data never goes in the repo
+data/
+*.csv
+!tests/fixtures/*.csv
