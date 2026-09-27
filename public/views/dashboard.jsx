@@ -78,10 +78,19 @@ function Dashboard({ data, gotoBrowse, gotoSet, gotoValuation, openCard, onRefre
         </div>
         <div className="stat accent">
           <div className="label">Total spent</div>
-          <div className="value"><span className="currency">$</span>{m.totalPaid.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
-          <div className="delta">avg ${(m.totalPaid / m.totalQty).toFixed(2)} / card</div>
+          {m.costsHidden ? (
+            <>
+              <div className="value">Private</div>
+              <div className="delta">not shared by the owner</div>
+            </>
+          ) : (
+            <>
+              <div className="value"><span className="currency">$</span>{m.totalPaid.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
+              <div className="delta">avg ${(m.totalPaid / m.totalQty).toFixed(2)} / card</div>
+            </>
+          )}
         </div>
-        <div className={`stat ${pnl >= 0 ? 'good' : 'bad'}`} style={{ display: window.__vault?.showPnL === false ? 'none' : undefined }}>
+        <div className={`stat ${pnl >= 0 ? 'good' : 'bad'}`} style={{ display: window.__vault?.showPnL === false || m.costsHidden ? 'none' : undefined }}>
           <div className="label">Unrealised P&amp;L</div>
           <div className="value" style={{ color: pnl >= 0 ? 'var(--good)' : 'var(--danger)' }}>
             <span className="currency">$</span>{pnl >= 0 ? '+' : '−'}{Math.abs(pnl).toLocaleString(undefined, { maximumFractionDigits: 0 })}

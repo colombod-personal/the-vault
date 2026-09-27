@@ -5,6 +5,10 @@ window.VaultApi = (() => {
   }
 
   async function call(path, opts = {}) {
+    if (opts.json !== undefined) {
+      opts = { ...opts, body: JSON.stringify(opts.json), headers: { 'Content-Type': 'application/json' } };
+      delete opts.json;
+    }
     const resp = await fetch(path, { credentials: 'same-origin', ...opts });
     if (!resp.ok) {
       let msg = 'HTTP ' + resp.status;
@@ -29,6 +33,25 @@ window.VaultApi = (() => {
     archidektDeck: (id) => call('/api/archidekt/decks/' + encodeURIComponent(id)),
     logout: () => call('/api/auth/logout', { method: 'POST' }),
     devLogin: () => call('/api/auth/dev-login', { method: 'POST' }),
-    deleteAccount: () => call('/api/me', { method: 'DELETE' }),
+
+    // account & GDPR
+    updateName: (name) => call('/api/me', { method: 'PATCH', json: { name } }),
+    exportUrl: '/api/me/export',
+    deleteAccount: () => call('/api/me', { method: 'DELETE', json: { confirm: 'DELETE' } }),
+
+    // saved decks
+    decks: () => call('/api/decks'),
+    deck: (id) => call('/api/decks/' + id),
+    saveDeck: (name, text, source_url) => call('/api/decks', { method: 'POST', json: { name, text, source_url } }),
+    deleteDeck: (id) => call('/api/decks/' + id, { method: 'DELETE' }),
+
+    // sharing
+    shares: () => call('/api/shares'),
+    createShare: (kind, deck_id, show_costs) => call('/api/shares', { method: 'POST', json: { kind, deck_id, show_costs } }),
+    removeShare: (id) => call('/api/shares/' + id, { method: 'DELETE' }),
+    acceptInvite: (token) => call('/api/shares/accept', { method: 'POST', json: { token } }),
+    sharedWithMe: () => call('/api/shared'),
+    sharedCollection: (id) => call('/api/shared/' + id + '/collection'),
+    sharedDeck: (id) => call('/api/shared/' + id + '/deck'),
   };
 })();

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from urllib.parse import urlsplit
+
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
@@ -16,6 +19,15 @@ from .models import User
 from .routes import api
 
 PUBLIC_DIR = Path(__file__).resolve().parent.parent / "public"
+
+UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+# Called cross-site by design: OAuth providers (Apple POSTs) and Meta's deletion callback.
+CROSS_SITE_ALLOWED = ("/api/auth/callback/", "/api/facebook/data-deletion")
+
+
+def _origin(url: str) -> str:
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}".lower()
 
 
 def create_app(settings: Settings | None = None, *, serve_static: bool = True) -> FastAPI:
@@ -37,6 +49,23 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True) -
         same_site="none" if settings.secure_cookies else "lax",
         https_only=settings.secure_cookies,
     )
+
+    allowed_origin = _origin(settings.base_url)
+
+    @app.middleware("http")
+    async def reject_cross_site_writes(request: Request, call_next):
+        """CSRF protection. The session cookie is SameSite=None in production (Apple's
+        form_post callback needs it), so browsers would attach it to a form another site
+        submits to us. Browsers always send Origin on such requests: refuse foreign ones."""
+        origin = request.headers.get("origin")
+        if (
+            request.method in UNSAFE_METHODS
+            and origin
+            and _origin(origin) != allowed_origin
+            and not request.url.path.startswith(CROSS_SITE_ALLOWED)
+        ):
+            return JSONResponse({"detail": "Cross-site request refused"}, status_code=403)
+        return await call_next(request)
 
     def get_db():
         yield from db.session()

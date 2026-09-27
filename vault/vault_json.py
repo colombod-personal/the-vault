@@ -27,7 +27,8 @@ def _printing(row) -> str:
     return {"foil": "Foil", "etched": "Etched"}.get(row.finish, "Normal")
 
 
-def build(db: Session, user: User) -> dict:
+def build(db: Session, user: User, *, hide_costs: bool = False) -> dict:
+    """The user's collection. ``hide_costs`` blanks prices paid (for viewers of a share)."""
     rows = user_entries(db, user)
     prices = latest_prices(db, {r.scryfall_id for r in rows if r.scryfall_id})
 
@@ -61,7 +62,7 @@ def build(db: Session, user: User) -> dict:
 
     cards = sorted(groups.values(), key=lambda c: (c["n"].lower(), c["s"], c["cn"]))
     for c in cards:
-        c["pd"] = round(c["pd"], 2)
+        c["pd"] = 0.0 if hide_costs else round(c["pd"], 2)
 
     sets: dict[str, dict] = {}
     by_name: dict[str, dict] = {}
@@ -104,10 +105,11 @@ def build(db: Session, user: User) -> dict:
                             last_import.isoformat() if last_import else None),
             "importedAt": last_import.isoformat() if last_import else None,
             "pricedFromScryfall": sum(c["q"] for c in cards if c["src"] == "scryfall"),
+            "costsHidden": hide_costs,
         },
         "sets": sorted(sets.values(), key=lambda s: -s["value"]),
         "timeline": [{"month": m, "qty": q} for m, q in sorted(timeline.items())],
         "cards": cards,
         "byName": by_name,
-        "history": history(db, user),
+        "history": [dict(h, cost=None) for h in history(db, user)] if hide_costs else history(db, user),
     }

@@ -12,6 +12,9 @@ decks against what you own.
 - **Storage:** Postgres in production (Neon via the Vercel Marketplace), SQLite locally.
 - **Prices:** a daily GitHub Actions job downloads Scryfall's bulk file, matches every
   collection offline and stores that day's prices, so the value chart is real history.
+- **Privacy:** multi-tenant and private by default. Users share their collection or a deck
+  with someone through a one-time invite link, and can revoke it. Everyone can download all
+  their data and delete their account, which removes every row (see `docs/gdpr.md`).
 
 ## Run it locally
 
@@ -42,7 +45,9 @@ vault/models.py       users, identities, imports, entries, cards, price_snapshot
 vault/importer.py     Dragon Shield CSV -> entries (records what changed since the last import)
 vault/vault_json.py   builds the collection.json the front end reads
 vault/sync.py         daily Scryfall sync (offline matching, prices, per-user value)
-vault/routes/api.py   collection, imports, export, decks, account deletion, Facebook data deletion
+vault/routes/api.py   collection, imports, export, decks, sharing, account, Facebook data deletion
+vault/sharing.py      invite links, access checks for shared collections and decks
+vault/privacy.py      GDPR data export (ZIP) and account erasure (purge_user)
 jobs/sync_prices.py   CLI run by .github/workflows/sync-prices.yml
 public/               front end (React prototype, no build step yet)
 ```
@@ -55,12 +60,22 @@ public/               front end (React prototype, no build step yet)
 | GET | `/api/auth/login/{provider}` | start sign-in (`google`, `microsoft`, `apple`, `facebook`) |
 | GET/POST | `/api/auth/callback/{provider}` | provider redirect target |
 | POST | `/api/auth/logout` | |
-| GET / DELETE | `/api/me` | current user / delete account and all data |
+| GET / PATCH | `/api/me` | current user / change display name |
+| GET | `/api/me/export` | everything held about you, as a ZIP (CSV and JSON) |
+| DELETE | `/api/me` | `{"confirm": "DELETE"}`: delete the account and all of its data |
 | GET | `/api/collection` | collection in the front end's `collection.json` shape, plus `history` |
 | GET | `/api/collection/export.csv` | Dragon Shield CSV (byte-identical round-trip of your import) |
 | POST / GET | `/api/imports` | upload a Dragon Shield CSV / list past imports with their changes |
 | GET | `/api/history` | daily market value and cost |
 | POST | `/api/decks/coverage` | `{"text": "<decklist>"}` → owned / partial / missing per card |
+| GET / POST | `/api/decks` | saved decks / save one (`{"name", "text", "source_url"}`) |
+| GET / PUT / DELETE | `/api/decks/{id}` | a saved deck with coverage / update / delete |
+| POST / GET | `/api/shares` | create an invite link (`{"kind": "collection" \| "deck", "deck_id", "show_costs"}`) / list what you've shared |
+| DELETE | `/api/shares/{id}` | revoke (owner) or leave (recipient) |
+| POST | `/api/shares/accept` | `{"token"}` from an invite link |
+| GET | `/api/shared` | what others have shared with you |
+| GET | `/api/shared/{id}/collection` | a shared collection, read-only (prices paid hidden unless allowed) |
+| GET | `/api/shared/{id}/deck` | a shared deck, with coverage against your own collection |
 | GET | `/api/archidekt/decks/{id}` | public Archidekt deck (fetched server-side) |
 | POST | `/api/facebook/data-deletion` | Meta's required data deletion callback |
 
@@ -102,3 +117,5 @@ links it to the same account; otherwise each provider identity is its own accoun
 - Alembic migrations once the schema settles (tables are currently created with `create_all`).
 - Graph features: Postgres link tables and recursive queries first; Apache AGE (Azure Postgres)
   or pgvector for "similar cards" if needed.
+- Before opening to other people, work through the operational checklist in `docs/gdpr.md`
+  (privacy notice details, processor agreements, backup and log retention).

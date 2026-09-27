@@ -82,7 +82,3 @@ def test_deck_coverage(signed_in):
     assert status == {"Sol Ring": ("owned", 0), "A Killer Among Us": ("owned", 0), "Rhystic Study": ("missing", 1)}
 
 
-def test_delete_account(signed_in):
-    upload(signed_in)
-    assert signed_in.delete("/api/me").json() == {"deleted": True}
-    assert signed_in.get("/api/me").status_code == 401

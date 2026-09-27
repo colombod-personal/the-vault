@@ -1,11 +1,12 @@
 // Deck view — paste Archidekt/Moxfield URL or list, get coverage report
-const { useState: useStateD, useMemo: useMemoD, useRef: useRefD } = React;
+const { useState: useStateD, useMemo: useMemoD, useRef: useRefD, useEffect: useEffectD } = React;
 
 const SAMPLE_URL = 'https://archidekt.com/decks/5292775/the_dragon_in_the_night';
 
-function DeckView({ data, openCard }) {
-  const [src, setSrc] = useStateD(SAMPLE_URL);
-  const [tab, setTab] = useStateD('url'); // 'url' | 'text'
+function DeckView({ data, openCard, initialText }) {
+  const [src, setSrc] = useStateD(initialText || SAMPLE_URL);
+  const [tab, setTab] = useStateD(initialText ? 'text' : 'url'); // 'url' | 'text'
+  const [saved, setSaved] = useStateD(null);
   const [deck, setDeck] = useStateD(null);
   const [enriched, setEnriched] = useStateD(null); // [{...deckCard, scry, owned, ownEntries}]
   const [loading, setLoading] = useStateD(false);
@@ -37,6 +38,16 @@ function DeckView({ data, openCard }) {
       setLoading(false);
     }
   }
+
+  async function saveDeck() {
+    const text = deck.cards.map(c => `${c.qty} ${c.name}` + (c.set && c.collector_number ? ` (${c.set.toUpperCase()}) ${c.collector_number}` : '')).join('\n');
+    const name = deck.title === 'Pasted decklist' ? (prompt('Name this deck', 'My deck') || 'My deck') : deck.title;
+    try { setSaved(await window.VaultApi.saveDeck(name, text, deck.url || null)); }
+    catch (e) { setError('Saving failed: ' + e.message); }
+  }
+
+  // A deck opened from Account (saved or shared with you): analyse it straight away.
+  useEffectD(() => { if (initialText) loadFromText(); }, []);
 
   async function processDeck(d) {
     setDeck(d);
@@ -122,7 +133,7 @@ function DeckView({ data, openCard }) {
                 />
                 <p className="muted" style={{ fontSize: 11, marginTop: 8, fontFamily: 'var(--mono)', lineHeight: 1.5 }}>
                   Sample: <span style={{ color: 'var(--gold)' }}>The Dragon in the Night</span> is pre-loaded.<br />
-                  Auto-routes through a CORS proxy. If it still fails,<br />use the <em>Paste list</em> tab.
+                  Archidekt decks are fetched by the Vault server.<br />For Moxfield, use the <em>Paste list</em> tab.
                 </p>
                 <div className="row" style={{ marginTop: 12 }}>
                   <button className="btn primary" onClick={loadFromUrl} disabled={loading}>
@@ -167,6 +178,9 @@ function DeckView({ data, openCard }) {
             <div className="panel" style={{ marginTop: 16 }}>
               <p className="eyebrow" style={{ marginBottom: 8 }}>{deck?.title}</p>
               {deck?.author && <p className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)' }}>by {deck.author}</p>}
+              <button className="btn xs" style={{ marginTop: 8 }} disabled={!!saved} onClick={saveDeck}>
+                {saved ? 'Saved ✓ (share it from Account)' : 'Save deck'}
+              </button>
 
               <div style={{ marginTop: 20 }}>
                 <CoverageDonut summary={summary} />

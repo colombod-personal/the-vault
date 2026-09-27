@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Privacy notice · The Vault</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    body { padding: 32px 16px; }
+    main { max-width: 720px; margin: 0 auto; line-height: 1.6; }
+    h1 { margin-bottom: 4px; }
+    h2 { font-family: var(--display); margin-top: 28px; }
+    td, th { text-align: left; vertical-align: top; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+    table { border-collapse: collapse; width: 100%; }
+    .todo { color: var(--danger); }
+  </style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">The Vault</p>
+  <h1 class="h1">Privacy notice</h1>
+  <p class="label-mono">Last updated: <span class="todo">[date]</span></p>
+
+  <h2>Who is responsible</h2>
+  <p>The Vault is run by <span class="todo">[name / organisation, address]</span>
+    (the "controller"). Contact: <span class="todo">[privacy e-mail]</span>.</p>
+
+  <h2>What we store and why</h2>
+  <table>
+    <tr><th>Data</th><th>Why</th></tr>
+    <tr><td>Your name and e-mail address, and an id from the sign-in provider you use
+      (Google, Microsoft, Apple or Facebook)</td><td>To create your account and let you sign in.</td></tr>
+    <tr><td>The collection you import: cards, quantities, condition, folders, and the
+      price and date you bought them</td><td>To show and value your collection.</td></tr>
+    <tr><td>Your import history, saved decks and daily collection value</td>
+      <td>To show what changed and how your collection's value develops.</td></tr>
+    <tr><td>Who you have shared your collection or decks with</td><td>To give those people access.</td></tr>
+  </table>
+  <p>The legal basis is the contract with you: we process this data to provide the
+    service you signed up for (GDPR Art. 6(1)(b)). We don't sell data, show ads or use
+    analytics trackers.</p>
+
+  <h2>Who can see your data</h2>
+  <p>Only you. If you create an invite link for your collection or a deck, the person who
+    accepts it can view that collection or deck (read-only), and sees your display name.
+    What you paid for cards stays hidden unless you choose to include it. You can revoke
+    access at any time from your account page.</p>
+
+  <h2>Service providers</h2>
+  <ul>
+    <li><strong>Vercel</strong> hosts the app. Its request logs include IP addresses for a short period.</li>
+    <li><strong>Neon</strong> hosts the database.</li>
+    <li><strong>GitHub</strong> runs the daily job that updates card prices. It reads collection
+      rows but not names or e-mail addresses.</li>
+    <li>Your <strong>sign-in provider</strong> (Google, Microsoft, Apple or Facebook) confirms who you are.</li>
+    <li><strong>Scryfall</strong>: your browser loads card images and, when you press
+      "Update now", card lists directly from Scryfall, which sees your IP address.</li>
+  </ul>
+  <p>Some providers are in the United States. Transfers are covered by their data
+    processing agreements (EU Standard Contractual Clauses / EU-US Data Privacy Framework).
+    <span class="todo">[confirm]</span></p>
+
+  <h2>How long we keep it</h2>
+  <p>Until you delete your account. Deleted data disappears from database backups within
+    <span class="todo">[7]</span> days.</p>
+
+  <h2>Your rights</h2>
+  <ul>
+    <li><strong>See and take your data:</strong> Account → Download my data gives you everything
+      as a ZIP file (CSV and JSON).</li>
+    <li><strong>Correct it:</strong> change your display name in Account, or re-import your collection.</li>
+    <li><strong>Delete it:</strong> Account → Delete my account removes your account and all of its
+      data, and first offers you the download.</li>
+    <li><strong>Object or restrict processing:</strong> e-mail <span class="todo">[privacy e-mail]</span>.</li>
+    <li>You can complain to your data protection authority.</li>
+  </ul>
+
+  <h2>Cookies and local storage</h2>
+  <p>One strictly necessary cookie keeps you signed in. Your browser also stores your display
+    preferences and a cache of public card data. There are no tracking cookies.</p>
+
+  <h2>Children</h2>
+  <p>The Vault is not intended for children under 16.</p>
+
+  <p style="margin-top: 32px"><a class="btn sm" href="/">Back to the Vault</a></p>
+</main>
+</body>
+</html>

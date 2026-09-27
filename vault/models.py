@@ -1,8 +1,10 @@
 """Tables.
 
-Per user: ``users``, ``identities`` (one per linked OAuth account), ``imports``
-(each uploaded CSV with its change summary) and ``entries`` (the collection,
-one row per source-file row so exports round-trip).
+Per user (tenant data, private unless shared): ``users``, ``identities`` (one per
+linked OAuth account), ``imports`` (each uploaded CSV with its change summary),
+``entries`` (the collection, one row per source-file row so exports round-trip),
+``decks`` and ``collection_values``. ``shares`` records access a user has granted
+to someone else. :func:`vault.privacy.purge_user` removes all of it.
 
 Shared: ``cards`` (Scryfall data for printings someone owns), ``price_snapshots``
 (one row per printing per day, written by the daily sync) and
@@ -14,7 +16,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from mtg_toolkits.models import CollectionEntry, Condition, Finish
-from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -111,6 +113,42 @@ class Entry(Base):
             purchase_price=e.purchase_price, purchase_date=e.purchase_date, scryfall_id=e.scryfall_id,
             source_prices=dict(e.source_prices), extra=dict(e.extra), **kwargs,
         )
+
+
+class Deck(Base):
+    """A saved decklist (plain text, any common format)."""
+
+    __tablename__ = "decks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    text: Mapped[str] = mapped_column(Text)
+    source_url: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Share(Base):
+    """Read access one user grants another, to their collection or to one deck.
+
+    Created as a pending invite (only a SHA-256 of the one-time token is stored);
+    accepting binds it to the recipient's account. The owner can revoke it and the
+    recipient can leave at any time.
+    """
+
+    __tablename__ = "shares"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(12))  # "collection" | "deck"
+    deck_id: Mapped[int | None] = mapped_column(ForeignKey("decks.id", ondelete="CASCADE"))
+    grantee_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    show_costs: Mapped[bool] = mapped_column(Boolean, default=False)  # reveal prices paid?
+    token_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Card(Base):

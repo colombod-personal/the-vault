@@ -47,6 +47,18 @@ window.vaultRecompute = function (base, at) {
 };
 
 const VAULT_REFRESH_KEY = 'vault_refreshed_at';
+const VAULT_INVITE_KEY = 'vault_pending_invite';
+
+// An invite link (/?invite=TOKEN) may arrive before sign-in: park the token, clean the URL.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const token = params.get('invite');
+  if (token) {
+    try { localStorage.setItem(VAULT_INVITE_KEY, token); } catch {}
+    params.delete('invite');
+    history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params : ''));
+  }
+})();
 const { useTweaks, TweaksPanel, TweakSection, TweakSlider, TweakToggle, TweakRadio, TweakSelect, TweakColor, TweakButton } = window;
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -72,6 +84,9 @@ function App() {
   const [auth, setAuth] = useStateApp('checking'); // 'checking' | 'signed-out' | 'signed-in'
   const [me, setMe] = useStateApp(null);
   const [notice, setNotice] = useStateApp(null);
+  const [accountOpen, setAccountOpen] = useStateApp(false);
+  const [viewing, setViewing] = useStateApp(null); // { id, from } while looking at someone's shared collection
+  const [deckText, setDeckText] = useStateApp(null); // deck opened from saved/shared decks
 
   // Apply theme tweaks to CSS variables
   useEffectApp(() => {
@@ -103,6 +118,8 @@ function App() {
       const [who, j] = await Promise.all([window.VaultApi.me(), window.VaultApi.collection()]);
       setMe(who);
       setAuth('signed-in');
+      setViewing(null);
+      acceptPendingInvite();
       // If the user pulled live prices in this browser since the server's last sync, replay them.
       const at = localStorage.getItem(VAULT_REFRESH_KEY);
       const serverAt = j.meta.generatedAt;
@@ -117,6 +134,64 @@ function App() {
     }
   };
   useEffectApp(() => { loadCollection(); }, []);
+
+  async function acceptPendingInvite() {
+    let token = null;
+    try { token = localStorage.getItem(VAULT_INVITE_KEY); localStorage.removeItem(VAULT_INVITE_KEY); } catch {}
+    if (!token) return;
+    try {
+      const res = await window.VaultApi.acceptInvite(token);
+      const what = res.kind === 'deck' ? `their deck “${res.deck_name}”` : 'their collection';
+      setNotice(`${res.from} shared ${what} with you. Open it from Account → Shared with me.`);
+    } catch (e) {
+      setNotice('Invite link: ' + e.message);
+    }
+  }
+
+  const openShared = async (s) => {
+    setAccountOpen(false);
+    try {
+      if (s.kind === 'collection') {
+        const j = await window.VaultApi.sharedCollection(s.id);
+        setData(j);
+        setViewing({ id: s.id, from: s.from });
+        setRoute({ view: 'dashboard' });
+      } else {
+        const d = await window.VaultApi.sharedDeck(s.id);
+        setDeckText(d.text);
+        setNotice(`${d.from}'s deck “${d.name}”, checked against your collection.`);
+        if (viewing) await backToMine();
+        setRoute({ view: 'decks' });
+      }
+    } catch (e) {
+      setNotice('Could not open: ' + e.message);
+    }
+  };
+  const backToMine = async () => {
+    setViewing(null);
+    setData(null);
+    await loadCollection();
+  };
+  const openDeck = (text) => {
+    setAccountOpen(false);
+    setDeckText(text);
+    setRoute({ view: 'decks' });
+  };
+  const noticeBanner = notice && (
+    <div className="panel panel-tight" style={{ margin: '12px 24px 0', display: 'flex', justifyContent: 'space-between' }}>
+      <span className="label-mono">{notice}</span>
+      <button className="btn xs ghost" onClick={() => setNotice(null)}>✕</button>
+    </div>
+  );
+  const accountPanel = accountOpen && (
+    <AccountPanel
+      me={me}
+      onClose={() => setAccountOpen(false)}
+      onOpenShared={openShared}
+      onOpenDeck={openDeck}
+      onMeChanged={() => window.VaultApi.me().then(setMe)}
+    />
+  );
 
   const onImported = (res) => {
     setNotice(`Imported ${res.copies.toLocaleString()} cards: ${window.describeChanges(res.changes)}.`);
@@ -176,7 +251,7 @@ function App() {
     setRefreshing(true);
     try {
       localStorage.removeItem(VAULT_REFRESH_KEY);
-      const j = await window.VaultApi.collection();
+      const j = viewing ? await window.VaultApi.sharedCollection(viewing.id) : await window.VaultApi.collection();
       setData(j);
       setRefreshError(j.meta.generatedAt ? null : 'The server has not synced prices yet; values use your file\'s prices.');
     } catch (e) {
@@ -193,9 +268,11 @@ function App() {
       <div className="app">
         <header className="topbar">
           <div className="brand"><span className="mark"><span>V</span></span><span className="title">The Vault</span></div>
-          <AccountMenu me={me} onImported={onImported} />
+          <AccountMenu me={me} onImported={onImported} onAccount={() => setAccountOpen(true)} />
         </header>
+        {noticeBanner}
         <main><EmptyVault onImported={onImported} /></main>
+        {accountPanel}
       </div>
     );
   }
@@ -230,14 +307,17 @@ function App() {
           <button className={route.view === 'lab' ? 'active' : ''} onClick={() => nav('lab')}>Lab</button>
           <button className={route.view === 'graph' ? 'active' : ''} onClick={() => nav('graph')}>Graph</button>
         </nav>
-        <AccountMenu me={me} onImported={onImported} />
+        <AccountMenu me={me} onImported={onImported} onAccount={() => setAccountOpen(true)} readOnly={!!viewing} />
       </header>
-      {notice && (
-        <div className="panel panel-tight" style={{ margin: '12px 24px 0', display: 'flex', justifyContent: 'space-between' }}>
-          <span className="label-mono">{notice}</span>
-          <button className="btn xs ghost" onClick={() => setNotice(null)}>✕</button>
+      {viewing && (
+        <div className="panel panel-tight" style={{ margin: '12px 24px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderColor: 'var(--gold)' }}>
+          <span className="label-mono">
+            Viewing {viewing.from}'s collection · read-only{data.meta.costsHidden ? ' · prices paid are private' : ''}
+          </span>
+          <button className="btn xs" onClick={backToMine}>Back to my vault</button>
         </div>
       )}
+      {noticeBanner}
 
       <main>
         {route.view === 'dashboard' && (
@@ -264,7 +344,7 @@ function App() {
           <SetDetail data={data} code={route.code} onBack={() => nav('sets')} openCard={c => setDrawerCard(c)} />
         )}
         {route.view === 'decks' && (
-          <DeckView data={data} openCard={c => setDrawerCard(c)} />
+          <DeckView key={deckText || 'deck'} data={data} openCard={c => setDrawerCard(c)} initialText={deckText} />
         )}
         {route.view === 'lab' && (
           <Lab data={data} openCard={c => setDrawerCard(c)} />
@@ -287,6 +367,7 @@ function App() {
       </main>
 
       {drawerCard && <CardDrawer card={drawerCard} onClose={() => setDrawerCard(null)} />}
+      {accountPanel}
 
       <TweaksPanel title="Tweaks">
         <TweakSection label="Theme" />

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -24,7 +24,13 @@ def normalise_url(url: str) -> str:
 def make_engine(url: str) -> Engine:
     url = normalise_url(url)
     if url.startswith("sqlite"):
-        return create_engine(url, connect_args={"check_same_thread": False})
+        engine = create_engine(url, connect_args={"check_same_thread": False})
+
+        @event.listens_for(engine, "connect")
+        def _foreign_keys(dbapi_conn, _record):  # SQLite ignores ON DELETE CASCADE without this
+            dbapi_conn.execute("PRAGMA foreign_keys=ON")
+
+        return engine
     # Serverless functions come and go: check connections before use, keep the pool small.
     return create_engine(url, pool_pre_ping=True, pool_size=2, max_overflow=2)
 

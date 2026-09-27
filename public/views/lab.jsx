@@ -147,8 +147,13 @@ function Lab({ data, openCard }) {
       </div>
 
       {/* Hero stats — no enrichment required */}
+      {data.meta.costsHidden && (
+        <p className="label-mono" style={{ marginBottom: 12 }}>
+          Prices paid are private for this shared collection, so profit &amp; loss isn't shown.
+        </p>
+      )}
       <div className="stat-grid">
-        <div className="stat good">
+        <div className="stat good" style={data.meta.costsHidden ? { display: 'none' } : undefined}>
           <div className="label">Biggest winner</div>
           <div className="value" style={{ fontSize: 28 }}>
             <span className="currency">$</span>+{stats.biggestGain ? stats.biggestGain.pnl.toFixed(0) : 0}
@@ -157,7 +162,7 @@ function Lab({ data, openCard }) {
             <div className="delta">{stats.biggestGain.c.n} [{stats.biggestGain.c.s}]</div>
           )}
         </div>
-        <div className="stat bad">
+        <div className="stat bad" style={data.meta.costsHidden ? { display: 'none' } : undefined}>
           <div className="label">Biggest loser</div>
           <div className="value" style={{ fontSize: 28, color: 'var(--danger)' }}>
             <span className="currency">$</span>{stats.biggestLoss ? stats.biggestLoss.pnl.toFixed(0) : 0}
@@ -171,7 +176,7 @@ function Lab({ data, openCard }) {
           <div className="value">{stats.foilPct.toFixed(1)}<span style={{ fontSize: 18, color: 'var(--muted)' }}>%</span></div>
           <div className="delta">${stats.foilValue.toFixed(0)} of foil cards</div>
         </div>
-        <div className="stat">
+        <div className="stat" style={data.meta.costsHidden ? { display: 'none' } : undefined}>
           <div className="label">Avg paid per card</div>
           <div className="value"><span className="currency">$</span>{stats.avgPaidPerCard.toFixed(2)}</div>
           <div className="delta">your average pull cost</div>
@@ -179,7 +184,7 @@ function Lab({ data, openCard }) {
       </div>
 
       {/* P&L panel */}
-      <div className="section">
+      <div className="section" style={data.meta.costsHidden ? { display: 'none' } : undefined}>
         <div className="section-head">
           <div>
             <p className="eyebrow">Profit &amp; loss</p>

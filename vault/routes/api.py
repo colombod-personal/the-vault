@@ -1,4 +1,9 @@
-"""Collection, import, deck and account endpoints (all require sign-in)."""
+"""Collection, import, deck, sharing and account endpoints (all require sign-in).
+
+Tenant isolation: every query is scoped to the signed-in user. Another user's data
+is reachable only through a share they granted, and ids that aren't yours answer
+404, so their existence isn't revealed.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +12,7 @@ import hashlib
 import hmac
 import json
 import secrets
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import PlainTextResponse, Response
@@ -18,13 +24,59 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from ..importer import ImportError_, export_dragonshield, import_dragonshield, user_entries
-from ..models import Identity, Import, User
+from ..models import Deck, Identity, Import, Share, User
 from ..prices import history
+from ..privacy import export_archive, purge_user
+from ..sharing import accept_invite, create_invite, display_name, incoming_share, owned_deck
 from ..vault_json import build
+
+DELETE_CONFIRMATION = "DELETE"
 
 
 class CoverageRequest(BaseModel):
     text: str  # a pasted decklist, any common format
+
+
+class ProfileUpdate(BaseModel):
+    name: str
+
+
+class DeleteRequest(BaseModel):
+    confirm: str  # must be "DELETE"
+
+
+class DeckIn(BaseModel):
+    name: str
+    text: str
+    source_url: str | None = None
+
+
+class ShareIn(BaseModel):
+    kind: str  # "collection" | "deck"
+    deck_id: int | None = None
+    show_costs: bool = False
+
+
+class AcceptIn(BaseModel):
+    token: str
+
+
+def _coverage(deck_text: str, owned_rows) -> dict:
+    deck = decklist.parse_text(deck_text)
+    lines = delta.coverage(deck.to_entries(), [r.to_collection_entry() for r in owned_rows])
+    return {
+        "cards": [
+            {"name": c.entry.name, "set": c.entry.set_code, "number": c.entry.collector_number,
+             "need": c.need, "have": c.have, "missing": c.missing, "status": c.status}
+            for c in lines
+        ],
+        "unparsed": deck.unparsed,
+    }
+
+
+def _deck_json(d: Deck) -> dict:
+    return {"id": d.id, "name": d.name, "text": d.text, "source_url": d.source_url,
+            "created_at": d.created_at.isoformat(), "updated_at": d.updated_at.isoformat()}
 
 
 def build_router(get_db, current_user, settings) -> APIRouter:
@@ -38,12 +90,28 @@ def build_router(get_db, current_user, settings) -> APIRouter:
             "providers": sorted({i.provider for i in user.identities}),
         }
 
-    @router.delete("/me")
-    def delete_me(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-        db.delete(user)
+    @router.patch("/me")
+    def update_me(body: ProfileUpdate, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        user.name = body.name.strip()[:200] or None  # right to rectification
         db.commit()
+        return {"id": user.id, "name": user.name}
+
+    @router.get("/me/export")
+    def export_me(user: User = Depends(current_user), db: Session = Depends(get_db)) -> Response:
+        """Everything held about you, as a ZIP (GDPR access and portability)."""
+        name = f"vault-data-{date.today().isoformat()}.zip"
+        return Response(export_archive(db, user), media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @router.delete("/me")
+    def delete_me(body: DeleteRequest, request: Request, user: User = Depends(current_user),
+                  db: Session = Depends(get_db)) -> dict:
+        """Erase the account and all of its data. Download /api/me/export first to keep a copy."""
+        if body.confirm != DELETE_CONFIRMATION:
+            raise HTTPException(400, f'Send {{"confirm": "{DELETE_CONFIRMATION}"}} to delete your account')
+        removed = purge_user(db, user.id)
         request.session.clear()
-        return {"deleted": True}
+        return {"deleted": True, "removed": removed}
 
     # -- collection --------------------------------------------------------------
     @router.get("/collection")
@@ -91,17 +159,109 @@ def build_router(get_db, current_user, settings) -> APIRouter:
 
     @router.post("/decks/coverage")
     def deck_coverage(req: CoverageRequest, user: User = Depends(current_user), db: Session = Depends(get_db)):
-        deck = decklist.parse_text(req.text)
-        owned = [r.to_collection_entry() for r in user_entries(db, user)]
-        lines = delta.coverage(deck.to_entries(), owned)
-        return {
-            "cards": [
-                {"name": c.entry.name, "set": c.entry.set_code, "number": c.entry.collector_number,
-                 "need": c.need, "have": c.have, "missing": c.missing, "status": c.status}
-                for c in lines
-            ],
-            "unparsed": deck.unparsed,
-        }
+        return _coverage(req.text, user_entries(db, user))
+
+    @router.get("/decks")
+    def list_decks(user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict]:
+        return [_deck_json(d) for d in db.scalars(select(Deck).where(Deck.user_id == user.id).order_by(Deck.name))]
+
+    @router.post("/decks")
+    def create_deck(body: DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        if not decklist.parse_text(body.text).lines:
+            raise HTTPException(400, "No cards found in the decklist")
+        deck = Deck(user_id=user.id, name=body.name.strip()[:200] or "Untitled deck", text=body.text,
+                    source_url=body.source_url)
+        db.add(deck)
+        db.commit()
+        return _deck_json(deck)
+
+    @router.get("/decks/{deck_id}")
+    def get_deck(deck_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        deck = owned_deck(db, user, deck_id)
+        return {**_deck_json(deck), "coverage": _coverage(deck.text, user_entries(db, user))}
+
+    @router.put("/decks/{deck_id}")
+    def update_deck(deck_id: int, body: DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+        deck = owned_deck(db, user, deck_id)
+        deck.name, deck.text, deck.source_url = body.name.strip()[:200] or deck.name, body.text, body.source_url
+        deck.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        return _deck_json(deck)
+
+    @router.delete("/decks/{deck_id}")
+    def delete_deck(deck_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        deck = owned_deck(db, user, deck_id)
+        db.execute(delete(Share).where(Share.deck_id == deck.id))
+        db.delete(deck)
+        db.commit()
+        return {"deleted": True}
+
+    # -- sharing: what I've shared --------------------------------------------------------
+    @router.post("/shares")
+    def create_share(body: ShareIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        share, token = create_invite(db, user, body.kind, body.deck_id, body.show_costs)
+        return {"id": share.id, "url": f"{settings.base_url}/?invite={token}",
+                "expires_at": share.expires_at.isoformat()}
+
+    @router.get("/shares")
+    def list_shares(user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict]:
+        rows = db.scalars(select(Share).where(Share.owner_id == user.id).order_by(Share.created_at.desc()))
+        out = []
+        for s in rows:
+            deck = db.get(Deck, s.deck_id) if s.deck_id else None
+            out.append({
+                "id": s.id, "kind": s.kind, "deck_id": s.deck_id, "deck_name": deck.name if deck else None,
+                "show_costs": s.show_costs, "status": "active" if s.grantee_id else "pending",
+                "with": display_name(db.get(User, s.grantee_id)) if s.grantee_id else None,
+                "created_at": s.created_at.isoformat(),
+                "expires_at": s.expires_at.isoformat() if s.expires_at and not s.grantee_id else None,
+            })
+        return out
+
+    @router.delete("/shares/{share_id}")
+    def remove_share(share_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        """The owner revokes access, or the recipient leaves."""
+        share = db.get(Share, share_id)
+        if share is None or user.id not in (share.owner_id, share.grantee_id):
+            raise HTTPException(404, "Not found")
+        db.delete(share)
+        db.commit()
+        return {"deleted": True}
+
+    # -- sharing: what others have shared with me -----------------------------------------
+    @router.post("/shares/accept")
+    def accept_share(body: AcceptIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        share = accept_invite(db, user, body.token)
+        deck = db.get(Deck, share.deck_id) if share.deck_id else None
+        return {"id": share.id, "kind": share.kind, "from": display_name(db.get(User, share.owner_id)),
+                "deck_name": deck.name if deck else None}
+
+    @router.get("/shared")
+    def shared_with_me(user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict]:
+        rows = db.scalars(select(Share).where(Share.grantee_id == user.id).order_by(Share.accepted_at.desc()))
+        out = []
+        for s in rows:
+            deck = db.get(Deck, s.deck_id) if s.deck_id else None
+            out.append({"id": s.id, "kind": s.kind, "from": display_name(db.get(User, s.owner_id)),
+                        "deck_name": deck.name if deck else None, "show_costs": s.show_costs})
+        return out
+
+    @router.get("/shared/{share_id}/collection")
+    def shared_collection(share_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+        share = incoming_share(db, user, share_id, "collection")
+        owner = db.get(User, share.owner_id)
+        data = build(db, owner, hide_costs=not share.show_costs)
+        data["meta"]["sharedBy"] = display_name(owner)
+        return data
+
+    @router.get("/shared/{share_id}/deck")
+    def shared_deck(share_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        """A deck someone shared, with coverage against *your* collection."""
+        share = incoming_share(db, user, share_id, "deck")
+        deck = db.get(Deck, share.deck_id)
+        return {"name": deck.name, "text": deck.text, "source_url": deck.source_url,
+                "from": display_name(db.get(User, share.owner_id)),
+                "coverage": _coverage(deck.text, user_entries(db, user))}
 
     # -- Facebook data deletion callback (required by Meta for Facebook Login) ----------
     @router.post("/facebook/data-deletion")
@@ -113,8 +273,7 @@ def build_router(get_db, current_user, settings) -> APIRouter:
             select(Identity).where(Identity.provider == "facebook", Identity.subject == str(payload["user_id"]))
         )
         if identity:
-            db.execute(delete(User).where(User.id == identity.user_id))
-            db.commit()
+            purge_user(db, identity.user_id)
         code = secrets.token_urlsafe(12)
         return {"url": f"{settings.base_url}/api/facebook/deletion-status?code={code}", "confirmation_code": code}
 
