@@ -1,4 +1,4 @@
-name: deploy
+name: deploy (manual fallback)
 # Deploys to Vercel with the Vercel CLI. (Vercel's Hobby plan can't connect repositories owned by a
 # GitHub organization in its dashboard; the CLI path works on every plan.)
 #
@@ -7,10 +7,9 @@ name: deploy
 #   VAULT_URL     the public URL for the post-deploy check (normally found automatically)
 # jobs/vercel_setup.py sets SESSION_SECRET and BASE_URL in Vercel and writes a checklist of what
 # is still missing (database, sign-in providers, redirect URIs) to the job summary.
+# Vercel's GitHub integration deploys on every push (see vercel-check.yml for the checks that follow).
+# This workflow is the manual fallback: a CLI deploy for when the integration isn't connected.
 on:
-  push:
-    # The first-release branch deploys too, until PR #1 is merged; then remove it and keep main only.
-    branches: [main, claude/festive-mendel-9vr6vt]
   workflow_dispatch:
     inputs:
       target:

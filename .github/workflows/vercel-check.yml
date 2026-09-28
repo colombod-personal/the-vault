@@ -1,0 +1,47 @@
+name: vercel-check
+# Vercel's GitHub integration deploys every push (main → production, other branches → previews).
+# When a deployment succeeds, this configures the Vercel project (jobs/vercel_setup.py:
+# SESSION_SECRET, BASE_URL, checklist) and smoke-tests that exact deployment from outside
+# (jobs/smoke_test.py). Secrets: VERCEL_TOKEN (configure step); optional
+# VERCEL_AUTOMATION_BYPASS_SECRET to test protected previews.
+on:
+  deployment_status:
+jobs:
+  check:
+    if: github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE || 'wintermute2' }}
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+      URL: ${{ github.event.deployment_status.environment_url || github.event.deployment_status.target_url }}
+      ENVIRONMENT: ${{ github.event.deployment.environment }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.deployment.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Configure the Vercel project
+        run: |
+          echo "Deployment: $ENVIRONMENT $URL" >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::warning::VERCEL_TOKEN is not visible to Actions: add it under Settings → Secrets and variables → Actions → Repository secrets"
+            echo "⚠️ VERCEL_TOKEN is not visible to GitHub Actions, so the project wasn't configured." >> "$GITHUB_STEP_SUMMARY"
+          else
+            python -m jobs.vercel_setup
+          fi
+      - name: Smoke-test this deployment
+        env:
+          SMOKE_EXPECT_REGION: ${{ startsWith(github.event.deployment.environment, 'Production') && 'fra1' || '' }}
+        run: |
+          [ -n "$SMOKE_EXPECT_REGION" ] || unset SMOKE_EXPECT_REGION
+          for i in 1 2 3 4 5 6; do  # a cold start can take a few seconds
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/health" || true)
+            [ "$code" = "000" ] || break
+            sleep 10
+          done
+          python -m jobs.smoke_test "$URL"

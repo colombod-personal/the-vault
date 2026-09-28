@@ -19,8 +19,16 @@ def run(base: str, transport: httpx.BaseTransport | None = None) -> tuple[list[t
     base = base.rstrip("/")
     results: list[tuple[str, bool, str]] = []
     configured = True
-    with httpx.Client(base_url=base, timeout=30, follow_redirects=False, transport=transport,
-                      headers={"User-Agent": "the-vault-smoke-test"}) as http:
+    headers = {"User-Agent": "the-vault-smoke-test"}
+    bypass = os.environ.get("VERCEL_AUTOMATION_BYPASS_SECRET")
+    if bypass:  # Vercel Deployment Protection (previews): the project's automation bypass
+        headers["x-vercel-protection-bypass"] = bypass
+    with httpx.Client(base_url=base, timeout=30, follow_redirects=False, transport=transport, headers=headers) as http:
+        first = http.get("/")
+        if first.status_code == 401 and "vercel" in first.text.lower() and "The Vault" not in first.text:
+            return [("Deployment protection", True, "this deployment is behind Vercel Authentication; set the "
+                     "VERCEL_AUTOMATION_BYPASS_SECRET repository secret to test it")], False
+
         def check(name, method, path, want, test=None, **kw):
             try:
                 res = http.request(method, path, **kw)
@@ -74,6 +82,8 @@ def main(argv: list[str] | None = None) -> int:
         with open(summary, "a", encoding="utf-8") as fh:
             fh.write(text)
     broken = [n for n, ok, _ in results if not ok and not (not configured and n == "GET /api/health")]
+    if os.environ.get("SMOKE_EXPECT_REGION") is None:  # previews may run elsewhere; only production must be fra1
+        broken = [n for n in broken if n != "Function region (x-vercel-id)"]
     return 1 if broken else 0
 
 

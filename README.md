@@ -93,39 +93,43 @@ reopens with one small request and works offline.
 
 ## Deploying on Vercel
 
-The app runs on Vercel's free Hobby plan (fine while the Vault is free and non-commercial)
-with a Neon Postgres database, in Frankfurt (`fra1`) for GDPR. HTTPS is automatic.
-Deploys go through GitHub Actions (`.github/workflows/deploy.yml`) with the Vercel CLI,
-because Vercel's Hobby dashboard can't import a repository owned by a GitHub organization.
-Every push to `main` runs the tests and then deploys to production.
+The app runs on Vercel's free Hobby plan (fine while the Vault is free and non-commercial),
+with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic.
 
-**One-time setup** (in this order):
+**How deploys work**
+- **Vercel's GitHub integration** deploys every push: `main` goes to production, other branches
+  to preview URLs.
+- The **vercel-check** workflow runs when a deployment succeeds (`deployment_status`):
+  - configures the project with `jobs/vercel_setup.py`, setting `SESSION_SECRET` and `BASE_URL`
+    and writing a checklist of what's missing, with the OAuth redirect URIs;
+  - smoke-tests that exact deployment from outside with `jobs/smoke_test.py`.
+- **deploy (manual fallback)** is a Vercel CLI deploy, for when the integration isn't connected.
 
-1. **Vercel account:** sign up at [vercel.com](https://vercel.com) with GitHub (Hobby plan).
-2. **Token:** Vercel → Account Settings → Tokens → *Create*, scoped to your account. In GitHub:
-   `the-vault` → Settings → Secrets and variables → Actions → *New repository secret*
-   `VERCEL_TOKEN` with that value.
-3. **First deploy:** merge to `main` (or run the *deploy* workflow). It creates the Vercel
-   project `the-vault`. Until step 4 is done the site answers
-   "not configured yet: DATABASE_URL is not set". That's expected.
-4. **Database:** Vercel → project `the-vault` → Storage → *Create Database* → **Neon**,
-   region **Frankfurt**, connect it to the project (Production and Preview). This sets
-   `DATABASE_URL`. The Neon free plan is enough to start (see "Costs" below).
-5. **Environment variables** (project → Settings → Environment Variables, Production):
-   - `SESSION_SECRET` and `BASE_URL` are set by the deploy workflow (`jobs/vercel_setup.py`).
-     It also writes a checklist of what's missing, plus the redirect URIs to register, to the
-     workflow run's summary.
-   - at least one sign-in provider's credentials (next section). Google is the quickest.
-   - never `DEV_LOGIN` (the app refuses to start with it on HTTPS)
-6. **Redeploy:** Actions → *deploy* → *Run workflow*.
-7. **Prices:** Actions → *sync-prices* → *Run workflow* once; after that it runs daily. It reads
-   the database address from Vercel with `VERCEL_TOKEN`. A `DATABASE_URL` repository secret
-   overrides that, if you prefer.
-8. **Optional:**
-   - Add the repository variable `VAULT_URL` (the site address) so each deploy checks the live site.
-   - Add your own domain under project → Settings → Domains. Point its DNS at Vercel and
-     the certificate is issued automatically. Then update `BASE_URL` and each provider's
-     redirect URI.
+**One-time setup:**
+
+1. **Vercel:** sign up at [vercel.com](https://vercel.com) with GitHub (Hobby). Import or connect
+   `colombod-personal/the-vault` (project `the-vault`). Vercel detects FastAPI from
+   `pyproject.toml` (`[tool.vercel] entrypoint = "api.index:app"`).
+2. **Token for Actions:** Vercel → Account Settings → Tokens → *Create*. In GitHub, add it under
+   `the-vault` → Settings → Secrets and variables → Actions → **Repository secrets** as
+   `VERCEL_TOKEN`. Not an environment, Codespaces or Dependabot secret: those aren't visible to
+   these workflows. For a Vercel team, also set the repository *variable* `VERCEL_SCOPE`
+   (e.g. `wintermute2`).
+3. **Database:** Vercel → project → Storage → *Create Database* → **Neon**, region
+   **Frankfurt**, connected to Production and Preview. This sets `DATABASE_URL`.
+4. **Sign-in:** at least one provider (next section; Google is the quickest). The vercel-check
+   summary lists the redirect URIs to register.
+5. **Go live:** merge to `main`, or promote a preview in Vercel. Environment changes apply
+   from the next deployment.
+6. **Prices:** the *sync-prices* workflow runs daily; run it once by hand after the first
+   deploy. It reads the database address from Vercel through `VERCEL_TOKEN`. A `DATABASE_URL`
+   repository secret overrides that.
+7. **Optional:**
+   - Your own domain, under project → Settings → Domains. Update `BASE_URL` and each
+     provider's redirect URI afterwards.
+   - `VERCEL_AUTOMATION_BYPASS_SECRET` (a repository secret, with the value from Vercel →
+     Deployment Protection → Protection Bypass for Automation), so previews behind Vercel
+     Authentication can be smoke-tested too.
 
 **Costs:**
 - Vercel Hobby: $0.
