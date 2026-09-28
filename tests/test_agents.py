@@ -231,3 +231,19 @@ def test_mcp_tool_calls_honour_the_idempotency_key(agent, bot):
     answers = bot.post("/api/mcp", json=batch, headers={**auth(token), "Idempotency-Key": "batch-1"}).json()
     assert [a["result"]["isError"] for a in answers] == [False, False]
     assert agent.get(f"{V1}/decks").json()["total"] == 3  # a batch's calls are separate operations
+
+
+def test_mcp_arguments_must_be_an_object(agent, bot):
+    token = make_token(agent)
+    res = rpc(bot, "tools/call", {"name": "get_card", "arguments": ["not", "an", "object"]}, token)  # has required args
+    assert res.status_code == 200 and res.json()["error"]["code"] == -32602
+
+
+def test_a_retried_token_creation_never_makes_a_second_token(signed_in):
+    key = {"Idempotency-Key": "token-1"}
+    first = signed_in.post(f"{V1}/me/tokens", json={"name": "bot"}, headers=key)
+    assert first.status_code == 201 and first.json()["token"].startswith("vault_pat_")
+    again = signed_in.post(f"{V1}/me/tokens", json={"name": "bot"}, headers=key)
+    assert again.status_code == 409 and again.headers["location"].endswith(f"/me/tokens/{first.json()['id']}")
+    assert "vault_pat_" not in again.text  # the secret is never stored or shown again
+    assert signed_in.get(f"{V1}/me/tokens").json()["total"] == 1

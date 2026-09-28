@@ -272,7 +272,7 @@ function DeckView({ data, openCard, initialText }) {
               {rowsFiltered.map((r, i) => {
                 const status = r.owned >= r.qty ? 'owned' : (r.owned > 0 ? 'partial' : 'missing');
                 return (
-                  <div className={`deck-row ${status}`} key={i} onClick={() => r.scry && openCard({ n: r.name, s: r.scry.set, cn: r.scry.collector_number, p: 'Normal', c: 'Mint', l: 'English', q: r.owned, mk: r.unitPrice, lo: 0, mi: 0, pd: 0, fd: '', ld: '', _scry: r.scry, _ownEntries: r.ownEntries, _deckRow: r })} style={{ cursor: 'pointer' }}>
+                  <div className={`deck-row ${status}`} key={i} {...(r.scry ? window.vaultPressable(() => openCard({ n: r.name, s: r.scry.set, cn: r.scry.collector_number, p: 'Normal', c: 'Mint', l: 'English', q: r.owned, mk: r.unitPrice, lo: 0, mi: 0, pd: 0, fd: '', ld: '', _scry: r.scry, _ownEntries: r.ownEntries, _deckRow: r }), r.name) : {})} style={{ cursor: r.scry ? 'pointer' : 'default' }}>
                     <div className="qty">{r.qty}×</div>
                     <div>
                       <div style={{ fontWeight: 600 }}>{r.name}</div>

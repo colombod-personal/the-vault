@@ -50,7 +50,7 @@ function Sets({ data, onSetClick }) {
 
       <div className="set-grid">
         {sets.map(s => (
-          <div key={s.code} className="set-tile" style={{ '--pct': `${(s.value / maxVal) * 100}%` }} onClick={() => onSetClick(s.code)}>
+          <div key={s.code} className="set-tile" style={{ '--pct': `${(s.value / maxVal) * 100}%` }} {...window.vaultPressable(() => onSetClick(s.code), `${s.name} (${s.code})`)}>
             <div className="code-row">
               <span className="code" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 {window.SetIcon && <SetIcon code={s.code} size={18} />}

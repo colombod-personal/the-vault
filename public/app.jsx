@@ -46,6 +46,15 @@ window.vaultRecompute = function (base, at) {
   return { ...base, cards, sets, meta };
 };
 
+// Props that make a clickable tile work from the keyboard and for screen readers, like a button:
+// focusable, announced as a button, activated with Enter or Space.
+window.vaultPressable = (action, label) => ({
+  role: 'button', tabIndex: 0, onClick: action, ...(label ? { 'aria-label': label } : {}),
+  onKeyDown: (e) => {
+    if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); action(); }
+  },
+});
+
 const VAULT_REFRESH_KEY = 'vault_refreshed_at';
 const VAULT_INVITE_KEY = 'vault_pending_invite';
 

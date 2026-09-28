@@ -199,3 +199,20 @@ def test_openapi_documents_the_api(client):
               "/api/v1/auth/native/{provider}", "/api/v1/auth/token", "/api/v1/me/sessions", "/api/v1/decks"]:
         assert p in paths, p
     assert "CardItem" in spec["components"]["schemas"] and "TokenResponse" in spec["components"]["schemas"]
+
+
+def test_uploads_are_read_only_up_to_the_limit(signed_in, monkeypatch):
+    from starlette.datastructures import UploadFile
+
+    from vault.importer import MAX_UPLOAD_BYTES
+
+    asked = []
+    real = UploadFile.read
+
+    async def read(self, size=-1):
+        asked.append(size)
+        return await real(self, size)
+
+    monkeypatch.setattr(UploadFile, "read", read)
+    assert upload(signed_in).status_code == 201
+    assert asked == [MAX_UPLOAD_BYTES + 1]  # never the whole body, whatever its size

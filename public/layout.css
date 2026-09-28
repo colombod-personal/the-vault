@@ -22,3 +22,6 @@ button.brand:focus-visible, .nav button:focus-visible { outline: 1px solid var(-
   .nav button { flex: 0 0 auto; padding: 10px 12px; }
   main { padding: 16px; }
 }
+
+/* Clickable tiles and rows (window.vaultPressable) show where keyboard focus is. */
+[role="button"]:focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }

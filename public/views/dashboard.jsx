@@ -154,7 +154,7 @@ function Dashboard({ data, gotoBrowse, gotoSet, gotoValuation, openCard, onRefre
           </div>
           <div>
             {topSets.map(s => (
-              <div className="bar-row" key={s.code} onClick={() => gotoSet(s.code)} style={{ cursor: 'pointer' }}>
+              <div className="bar-row" key={s.code} {...window.vaultPressable(() => gotoSet(s.code), `${s.name || s.code} (${s.code})`)} style={{ cursor: 'pointer' }}>
                 <div className="code" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   {window.SetIcon && <SetIcon code={s.code} size={14} />}
                   <span>{s.code}</span>
@@ -258,7 +258,7 @@ function CardTile({ c, onClick }) {
 
   const totalVal = (c.mk * c.q).toFixed(2);
   return (
-    <div className="card-tile" onClick={onClick}>
+    <div className="card-tile" {...window.vaultPressable(onClick, c.n)}>
       <div className="img-wrap">
         {enriched && enriched.img_normal ? (
           <img src={enriched.img_normal} alt={c.n} loading="lazy" />

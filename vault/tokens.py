@@ -134,8 +134,12 @@ def redeem_code(db: Session, code: str, code_verifier: str, redirect_uri: str, d
     row = db.scalar(select(AuthCode).where(AuthCode.code_hash == _hash(code)))
     if row is None:
         raise TokenError("invalid_grant", "Unknown or already used code")
-    db.delete(row)  # single use, whatever happens next
+    # Single use, whatever happens next: claim it with a conditional delete, so of two requests
+    # racing with the same code only one gets past here.
+    claimed = db.execute(delete(AuthCode).where(AuthCode.id == row.id)).rowcount
     db.commit()
+    if not claimed:
+        raise TokenError("invalid_grant", "Unknown or already used code")
     if _aware(row.expires_at) < _now():
         raise TokenError("invalid_grant", "Code expired")
     if row.redirect_uri != redirect_uri:

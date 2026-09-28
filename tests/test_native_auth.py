@@ -276,3 +276,27 @@ def test_personal_access_tokens_cannot_link_sign_ins(client, idp):
                             headers={"Authorization": f"Bearer {pat}"}).json()
         assert agent.get(f"{V1}/me", headers=bearer(tokens)).json()["providers"] == ["apple"]  # its own account
     assert client.get(f"{V1}/me").json()["providers"] == ["google"]
+
+
+def test_racing_code_redemptions_issue_one_session(app, client, idp):
+    from vault import tokens
+
+    verifier = secrets.token_urlsafe(48)
+    res = client.get("/api/auth/login/google", params={"app_redirect_uri": "vault://auth", "code_challenge": s256(verifier)},
+                     follow_redirects=False)
+    back = web_callback(client, idp.google.approve(res.headers["location"], "g-9"))
+    code = parse_qs(urlsplit(back.headers["location"]).query)["code"][0]
+    with app.state.db.sessions() as db:
+        real_scalar, raced = db.scalar, []
+
+        def scalar(stmt):  # the other request redeems the code right after this one has read it
+            row = real_scalar(stmt)
+            if not raced:
+                raced.append(True)
+                assert client.post(f"{V1}/auth/token", json={"grant_type": "authorization_code", "code": code,
+                                   "code_verifier": verifier, "redirect_uri": "vault://auth"}).status_code == 200
+            return row
+
+        db.scalar = scalar
+        with pytest.raises(tokens.TokenError, match="already used"):
+            tokens.redeem_code(db, code, verifier, "vault://auth", None)

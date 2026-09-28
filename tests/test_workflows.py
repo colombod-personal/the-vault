@@ -57,6 +57,19 @@ def test_secrets_only_reach_main(path):
         assert not {"push", "pull_request", "pull_request_target"} & set(triggers), f"{name}: no push/PR triggers"
 
 
+@pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
+def test_secrets_reach_single_steps_that_install_nothing(path):
+    """A secret goes in one step's env, never the job's (every step, even checkout and installs, would
+    see it), and never next to a package install whose scripts could read it."""
+    for name, job in load(path)["jobs"].items():
+        assert "secrets." not in yaml.safe_dump(job.get("env") or {}), f"{name}: secret in the job-level env"
+        for step in job.get("steps", []):
+            if "secrets." in yaml.safe_dump(step.get("env") or {}):
+                assert "uses" not in step, f"{name}: secret passed to an action"
+                assert not re.search(r"\b(pip|npm|npx|yarn|pnpm)\b[^\n]*\binstall\b", step.get("run", "")), \
+                    f"{name}: installs a package in a step that holds a secret"
+
+
 def test_no_secret_outside_its_job_env():
     for path in WORKFLOWS:
         wf = load(path)

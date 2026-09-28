@@ -240,7 +240,7 @@ function Lab({ data, openCard }) {
           <p className="eyebrow">Biggest stockpiles</p>
           <h2 className="h2" style={{ marginTop: 4, fontSize: 22, marginBottom: 14 }}>Cards you own most copies of</h2>
           {stockpiles.map((s, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid oklch(0.36 0.014 65 / 0.4)', cursor: 'pointer' }} onClick={() => openCard(s.firstC)}>
+            <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid oklch(0.36 0.014 65 / 0.4)', cursor: 'pointer' }} {...window.vaultPressable(() => openCard(s.firstC), s.name)}>
               <span style={{ flex: 1, fontWeight: 500 }}>{s.name}</span>
               <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)', marginRight: 12 }}>{s.entries.length} prints</span>
               <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--gold)', minWidth: 50, textAlign: 'right' }}>×{s.total}</span>

@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 from .. import outbound, tokens
 from ..auth import IdentityInUse, Profile, find_or_create
 from ..collection_view import SORTS, CollectionView, filtered, history_days
-from ..importer import ImportError_, export_collection, import_collection, user_entries
+from ..importer import MAX_UPLOAD_BYTES, ImportError_, export_collection, import_collection, user_entries
 from ..models import AccessToken, ApiSession, Deck, Import, Passkey, Share, User
 from ..native import NativeTokenError, NativeVerifier, ProviderUnavailable
 from ..privacy import export_archive, purge_user
@@ -232,9 +232,21 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     @router.post("/me/tokens", tags=["account"], response_model=S.NewAccessToken, status_code=201,
                  summary="Create a personal access token for your own agents and scripts (shown once)")
-    def create_token(body: S.AccessTokenIn, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
-        row, token = tokens.create_pat(db, user, body.name.strip() or "Agent", body.scopes, body.expires_in_days)
-        return {**_token(row), "token": token, "mcp_url": f"{settings.base_url}/api/mcp"}
+    def create_token(request: Request, body: S.AccessTokenIn, user: User = Depends(account_user),
+                     db: Session = Depends(get_db)):
+        def run() -> dict:
+            row, token = tokens.create_pat(db, user, body.name.strip() or "Agent", body.scopes, body.expires_in_days)
+            return {**_token(row), "token": token, "mcp_url": f"{settings.base_url}/api/mcp"}
+
+        def already_created(stored: dict):
+            # The secret is shown once and never stored, so a retry can't show it again. It gets the
+            # token's id instead of a second token: revoke that one and create a new one.
+            raise HTTPException(409, f"This token was already created (id {stored['id']}) and its secret is shown "
+                                     "only once. Revoke it and create a new one.",
+                                headers={"Location": f"{V1}/me/tokens/{stored['id']}"})
+
+        return idempotent(request, db, user, 201, run, redact=lambda answer: {"id": answer["id"]},
+                          replay=already_created)
 
     @router.get("/me/tokens", tags=["account"], response_model=S.AccessTokenPage, summary="Your personal access tokens")
     def list_tokens(request: Request, cursor: str | None = None, limit: int | None = None,
@@ -425,7 +437,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                          "(replaces the collection, records what changed)")
     async def create_import(request: Request, file: UploadFile, user: User = Depends(current_user),
                             db: Session = Depends(get_db)):
-        content = await file.read()
+        content = await file.read(MAX_UPLOAD_BYTES + 1)  # enough to reject an oversized file, no more
 
         def run():
             try:

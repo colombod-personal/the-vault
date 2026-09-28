@@ -230,9 +230,11 @@ def build_router(optional_user) -> APIRouter:
             args = params.get("arguments") or {}
             if tool is None:
                 return _rpc_error(id_, -32602, f"Unknown tool: {params.get('name')}")
+            if not isinstance(args, dict):
+                return _rpc_error(id_, -32602, "Invalid arguments: must be an object")
             missing = [r for r in tool.required if args.get(r) in (None, "")]
             unknown = [k for k in args if k not in tool.properties]
-            if missing or unknown or not isinstance(args, dict):
+            if missing or unknown:
                 return _rpc_error(id_, -32602, f"Invalid arguments: missing {missing}, unknown {unknown}")
             status, body = await call_api(request, tool, args, part)
             body = _with_cursor(body)

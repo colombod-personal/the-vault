@@ -12,10 +12,13 @@ One API for the web app and native apps (the planned iOS app), under `/api/v1`.
 - **Cheap to re-check.** Collection resources send an `ETag`. Send it back as `If-None-Match`
   and you get `304 Not Modified` until an import or the daily price sync changes something.
 - **Safe retries.** GETs can always be repeated. POSTs that create something (imports, decks,
-  shares) accept `Idempotency-Key: <uuid>`: a retry with the same key replays the first answer
+  shares, access tokens) accept `Idempotency-Key: <uuid>`: a retry with the same key replays the first answer
   (`Idempotent-Replayed: true`) instead of doing the work twice. A retry that arrives while the
   first attempt is still running gets `409` with `Retry-After`. A replayed invite has a fresh
   link (the stored answer never keeps one; the earlier link stops working).
+  An access token's secret is shown once and never stored, so a retried token creation answers
+  `409` with the token's id (in `Location`) instead of making a second one: revoke it and create
+  a new one.
 - **A version to cache by.** `GET /api/v1/collection` has a `version` that changes whenever the
   collection or its prices change. The web app keeps a copy in IndexedDB and refetches the
   pages only when the version moves.

@@ -11,7 +11,7 @@ from jobs import vercel_setup
 class FakeVercel:
     def __init__(self, domains=(), envs=None):
         self.domains = [{"name": d, "verified": True, "redirect": None} for d in domains]
-        self.envs = list(envs or [])
+        self.envs = [{"id": f"env{i}", **e} for i, e in enumerate(envs or [])]
         self.transport = httpx.MockTransport(self.handle)
 
     def handle(self, req: httpx.Request) -> httpx.Response:
@@ -20,14 +20,18 @@ class FakeVercel:
         if path == "/v10/projects/the-vault/env" and req.method == "GET":
             return httpx.Response(200, json={"envs": self.envs})
         if path == "/v10/projects/the-vault/env" and req.method == "POST":
-            self.envs.append(json.loads(req.content))
+            self.envs.append({"id": f"env{len(self.envs)}", **json.loads(req.content)})
             return httpx.Response(201, json={"created": self.envs[-1]})
+        if path.startswith("/v9/projects/the-vault/env/") and req.method == "PATCH":
+            env = next(e for e in self.envs if e["id"] == path.rsplit("/", 1)[1])
+            env.update(json.loads(req.content))
+            return httpx.Response(200, json=env)
         if path == "/v9/projects/the-vault/domains":
             return httpx.Response(200, json={"domains": self.domains})
         return httpx.Response(404, json={"error": {"code": "not_found"}})
 
-    def value(self, key):
-        return next(e["value"] for e in self.envs if e["key"] == key)
+    def value(self, key, target="production"):
+        return next(e["value"] for e in self.envs if e["key"] == key and target in e["target"])
 
 
 @pytest.fixture(autouse=True)
@@ -40,8 +44,9 @@ def token(monkeypatch, tmp_path):
 def test_first_run_before_any_deploy():
     fake = FakeVercel()
     state = vercel_setup.main([], fake.transport)
-    assert state["changed"] == ["SESSION_SECRET"] and state["base_url"] is None
+    assert state["changed"] == ["SESSION_SECRET (production)", "SESSION_SECRET (preview)"] and state["base_url"] is None
     assert len(fake.value("SESSION_SECRET")) == 64
+    assert fake.value("SESSION_SECRET", "preview") != fake.value("SESSION_SECRET")  # previews can't sign production cookies
 
 
 def test_after_first_deploy_sets_base_url_once_and_keeps_secrets(token):
@@ -59,6 +64,7 @@ def test_after_first_deploy_sets_base_url_once_and_keeps_secrets(token):
 def test_custom_domain_wins_and_ready_state():
     envs = [{"key": k, "target": ["production"]} for k in
             ("SESSION_SECRET", "DATABASE_URL", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET")]
+    envs.append({"key": "SESSION_SECRET", "target": ["preview"]})
     fake = FakeVercel(domains=["the-vault.vercel.app", "vault.example.com"], envs=envs)
     state = vercel_setup.main([], fake.transport)
     assert state["base_url"] == "https://vault.example.com" and state["changed"] == ["BASE_URL"]
@@ -68,3 +74,18 @@ def test_custom_domain_wins_and_ready_state():
 def test_shortest_custom_domain_is_preferred():
     fake = FakeVercel(domains=["the-vault.vercel.app", "www.vault.example.com", "vault.example.com"])
     assert vercel_setup.main([], fake.transport)["base_url"] == "https://vault.example.com"
+
+
+def test_a_shared_session_secret_is_split_per_target():
+    fake = FakeVercel(envs=[{"key": "SESSION_SECRET", "value": "shared", "target": ["production", "preview"]}])
+    state = vercel_setup.main([], fake.transport)
+    assert state["changed"] == ["SESSION_SECRET (production only)", "SESSION_SECRET (preview)"]
+    assert fake.value("SESSION_SECRET") == "shared"  # production keeps its secret: nobody is signed out
+    assert fake.value("SESSION_SECRET", "preview") not in ("shared", None)
+    assert vercel_setup.main([], fake.transport)["changed"] == []
+
+
+def test_only_variables_production_can_read_count():
+    envs = [{"key": k, "target": ["preview"]} for k in ("DATABASE_URL", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET")]
+    state = vercel_setup.main([], FakeVercel(envs=envs).transport)
+    assert state["database"] is False and state["providers"] == []

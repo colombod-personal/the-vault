@@ -20,7 +20,6 @@ jobs:
     timeout-minutes: 5
     environment: vercel-production
     env:
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE || 'wintermute2' }}
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +31,8 @@ jobs:
           python-version: "3.12"
       - run: pip install "httpx>=0.27"
       - name: Configure the Vercel project
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}  # this step only: nothing is installed here
         run: |
           if [ -z "$VERCEL_TOKEN" ]; then
             echo "::warning::VERCEL_TOKEN is not set: add it to the vercel-production environment (Settings → Environments)"
