@@ -23,14 +23,14 @@ from mtg_toolkits import decklist, delta
 from mtg_toolkits.formats import FORMATS
 from mtg_toolkits.archidekt import ArchidektClient
 from mtg_toolkits.http import ApiError
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from .. import outbound, tokens
 from ..auth import Profile, find_or_create
 from ..collection_view import SORTS, CollectionView, filtered, history_days
 from ..importer import ImportError_, export_collection, import_collection, user_entries
-from ..models import AccessToken, ApiSession, Deck, Import, Share, User
+from ..models import AccessToken, ApiSession, Deck, Import, Passkey, Share, User
 from ..native import NativeTokenError, NativeVerifier, ProviderUnavailable
 from ..privacy import export_archive, purge_user
 from ..sharing import accept_invite, create_invite, display_name, incoming_share, owned_deck
@@ -139,6 +139,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             "providers": sorted({i.provider for i in user.identities}),
             "_links": {"self": link(f"{V1}/me"), "sessions": link(f"{V1}/me/sessions"),
                        "tokens": link(f"{V1}/me/tokens", title="Personal access tokens for agents and scripts"),
+                       "passkeys": link(f"{V1}/me/passkeys", title="Passkeys that can sign in to this account"),
                        "export": link(f"{V1}/me/export", title="Download all my data (ZIP)"),
                        "collection": link(f"{V1}/collection")},
         }
@@ -186,6 +187,35 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         if s is None or s.user_id != user.id:
             raise HTTPException(404, "Session not found")
         db.delete(s)
+        db.commit()
+        return {"deleted": True}
+
+    # -- passkeys ------------------------------------------------------------------------------
+    def _passkey(p: Passkey) -> dict:
+        return {"id": p.id, "name": p.name, "synced": p.backed_up, "created_at": _iso(p.created_at),
+                "last_used_at": _iso(p.last_used_at), "_links": {"self": link(f"{V1}/me/passkeys/{p.id}")}}
+
+    @router.get("/me/passkeys", tags=["account"], response_model=S.PasskeyPage,
+                summary="Passkeys that can sign in to this account (add one at POST /api/auth/passkey/register/options)")
+    def list_passkeys(request: Request, cursor: str | None = None, limit: int | None = None,
+                      user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+        rows = list(db.scalars(select(Passkey).where(Passkey.user_id == user.id)))
+        page, nxt = paginate(rows, lambda p: (-p.id,), lambda p: p.id, cursor=cursor, limit=limit)
+        return page_body(request, [_passkey(p) for p in page], nxt, len(rows), limit=limit)
+
+    @router.delete("/me/passkeys/{passkey_id}", tags=["account"], summary="Remove a passkey")
+    def delete_passkey(passkey_id: int, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+        passkey = db.get(Passkey, passkey_id)
+        if passkey is None or passkey.user_id != user.id:
+            raise HTTPException(404, "Passkey not found")
+        others = db.scalar(select(func.count(Passkey.id)).where(Passkey.user_id == user.id, Passkey.id != passkey.id))
+        other_providers = {i.provider for i in user.identities} - {"passkey"}
+        if not others and not other_providers:
+            raise HTTPException(409, "This is your only way to sign in. Add another passkey or sign-in method first.")
+        db.delete(passkey)
+        if not others:  # no passkeys left: the passkey identity goes too
+            for identity in [i for i in user.identities if i.provider == "passkey"]:
+                db.delete(identity)
         db.commit()
         return {"deleted": True}
 

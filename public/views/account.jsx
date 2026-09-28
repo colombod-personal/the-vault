@@ -10,8 +10,18 @@ const PROVIDER_LABELS = {
 
 function SignIn() {
   const [info, setInfo] = useStateAcc(null);
+  const [pkError, setPkError] = useStateAcc(null);
+  const [creating, setCreating] = useStateAcc(false);
+  const [newName, setNewName] = useStateAcc('');
+  const [busy, setBusy] = useStateAcc(false);
   const error = new URLSearchParams(location.search).get('signin_error');
   useEffectAcc(() => { window.VaultApi.providers().then(setInfo).catch(() => setInfo({ providers: [] })); }, []);
+  const pk = window.VaultApi.passkeys;
+  const withPasskeys = info && info.passkeys && pk.supported();
+  const run = async (fn) => {
+    setPkError(null); setBusy(true);
+    try { await fn(); location.href = '/'; } catch (e) { setPkError(pk.explain(e)); } finally { setBusy(false); }
+  };
 
   return (
     <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh', padding: 16 }}>
@@ -23,6 +33,22 @@ function SignIn() {
         {!info && <div className="spinner" style={{ width: 18, height: 18, margin: '0 auto' }}></div>}
         {info && (
           <div style={{ display: 'grid', gap: 10 }}>
+            {withPasskeys && (
+              <>
+                <button className="btn primary" disabled={busy} onClick={() => run(pk.signIn)}>Sign in with a passkey</button>
+                {!creating ? (
+                  <button className="btn ghost" disabled={busy} onClick={() => setCreating(true)}>New here? Create an account with a passkey</button>
+                ) : (
+                  <div className="panel panel-tight" style={{ display: 'grid', gap: 8, textAlign: 'left' }}>
+                    <p className="label-mono">Your device creates a passkey (Face ID, Touch ID, Windows Hello or your phone). No password, no e-mail needed.</p>
+                    <input className="input" placeholder="Your name (optional)" value={newName} onChange={(e) => setNewName(e.target.value)} />
+                    <button className="btn primary" disabled={busy} onClick={() => run(() => pk.signUp(newName))}>Create my vault</button>
+                  </div>
+                )}
+                {pkError && <p style={{ color: 'var(--danger)' }}>{pkError}</p>}
+                {info.providers.length > 0 && <p className="label-mono">or</p>}
+              </>
+            )}
             {info.providers.map((p) => (
               <a key={p} className="btn" href={`/api/auth/login/${p}`}>{PROVIDER_LABELS[p] || p}</a>
             ))}
@@ -31,7 +57,7 @@ function SignIn() {
                 Local dev sign-in
               </button>
             )}
-            {!info.providers.length && !info.dev_login && (
+            {!info.providers.length && !info.dev_login && !withPasskeys && (
               <p className="label-mono">No sign-in providers are configured on this server.</p>
             )}
           </div>
@@ -260,6 +286,8 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged }) {
         ))}
       </Section>
 
+      <SignInMethods me={me} onChanged={onMeChanged} />
+
       <MoveSection />
 
       <AgentsSection />
@@ -425,6 +453,49 @@ function MoveSection() {
           <a className="btn xs" href={f._links.download.href} download>Download</a>
         </div>
       ))}
+    </Section>
+  );
+}
+
+
+// Passkeys and linked providers: add a passkey to this account, remove one, link another provider.
+function SignInMethods({ me, onChanged }) {
+  const api = window.VaultApi;
+  const [keys, setKeys] = useStateAcc([]);
+  const [info, setInfo] = useStateAcc(null);
+  const [error, setError] = useStateAcc(null);
+  const reload = () => { api.passkeys.list().then(setKeys).catch(() => setKeys([])); };
+  useEffectAcc(() => { reload(); api.providers().then(setInfo).catch(() => {}); }, []);
+  const add = async () => {
+    setError(null);
+    try { await api.passkeys.add(); reload(); onChanged && onChanged(); } catch (e) { setError(api.passkeys.explain(e)); }
+  };
+  const remove = async (id) => {
+    setError(null);
+    try { await api.passkeys.remove(id); reload(); onChanged && onChanged(); } catch (e) { setError(e.message); }
+  };
+  const linked = new Set((me && me.providers) || []);
+  const linkable = info ? info.providers.filter((p) => !linked.has(p)) : [];
+  return (
+    <Section title="Sign-in methods">
+      <p className="label-mono" style={{ marginBottom: 8 }}>
+        Signed in with: {[...linked].join(', ') || '—'}. Add a passkey to sign in with Face ID, Touch ID, Windows Hello
+        or your phone. Linking another provider lets you use either.
+      </p>
+      {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
+      {keys.map((k) => (
+        <div key={k.id} style={rowStyle}>
+          <span className="label-mono">
+            {k.name}{k.synced ? ' · synced' : ''} · added {new Date(k.created_at).toLocaleDateString()}
+            {k.last_used_at ? ' · used ' + new Date(k.last_used_at).toLocaleDateString() : ''}
+          </span>
+          <button className="btn xs ghost" onClick={() => remove(k.id)}>Remove</button>
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+        {info && info.passkeys && api.passkeys.supported() && <button className="btn sm" onClick={add}>Add a passkey</button>}
+        {linkable.map((p) => <a key={p} className="btn sm ghost" href={`/api/auth/login/${p}`}>Link {p[0].toUpperCase() + p.slice(1)}</a>)}
+      </div>
     </Section>
   );
 }

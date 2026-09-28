@@ -371,3 +371,15 @@ class ExportFormat(Hal):
 
 class ExportFormats(Hal):
     items: list[ExportFormat]
+
+
+class PasskeyItem(Hal):
+    id: int
+    name: str
+    synced: bool = Field(description="Backed up by the platform (e.g. iCloud Keychain, Google Password Manager)")
+    created_at: str
+    last_used_at: str | None = None
+
+
+class PasskeyPage(Page):
+    items: list[PasskeyItem]

@@ -54,7 +54,7 @@ def test_requires_sign_in_with_problem_details(client):
     res = client.get(f"{V1}/collection")
     assert res.status_code == 401 and res.headers["content-type"].startswith("application/problem+json")
     assert res.json()["title"] == "Sign-in required" and res.json()["status"] == 401
-    assert client.get("/api/auth/providers").json() == {"providers": [], "dev_login": True}
+    assert client.get("/api/auth/providers").json() == {"providers": [], "dev_login": True, "passkeys": False}
 
 
 def test_import_summary_and_cards(signed_in):

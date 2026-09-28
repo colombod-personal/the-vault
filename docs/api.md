@@ -89,6 +89,24 @@ ids are accepted too.
    {"grant_type": "authorization_code", "code": "...", "code_verifier": "...", "redirect_uri": "vault://auth"}
    ```
 
+### Passkeys (WebAuthn, web)
+
+Passkeys need no third party: Face ID, Touch ID, Windows Hello, a phone or a security key.
+Each ceremony is two POSTs. The challenge lives in the signed session cookie and can be used
+once, within 5 minutes.
+
+| Step | Endpoint |
+|---|---|
+| New account | `POST /api/auth/passkey/signup/options {"name"}`, then `.../signup/verify {"credential", "name"}` |
+| Sign in (discoverable credentials) | `POST /api/auth/passkey/login/options`, then `.../login/verify {"credential"}` |
+| Add a passkey to your account | `POST /api/auth/passkey/register/options`, then `.../register/verify {"credential", "name"}` |
+| List / remove | `GET /api/v1/me/passkeys`, `DELETE /api/v1/me/passkeys/{id}` (your last sign-in method can't be removed) |
+
+`credential` is `PublicKeyCredential.toJSON()`. The relying-party id is `BASE_URL`'s host; on
+Vercel, a deployment without `BASE_URL` uses its own address. Personal access tokens can't add
+passkeys. `GET /api/auth/providers` says whether passkeys are available (`"passkeys": true` on
+https and localhost).
+
 ### Keeping and ending sessions
 
 - Refresh: `POST /api/v1/auth/token` with

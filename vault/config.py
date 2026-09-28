@@ -10,11 +10,24 @@ def _env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
 
 
+def _default_base_url() -> str:
+    """BASE_URL if set. On Vercel it can be left out: production uses the project's production
+    domain (its shortest custom domain, else its vercel.app domain), and previews use their
+    branch URL. Locally the default is localhost."""
+    explicit = _env("BASE_URL")
+    if explicit:
+        return explicit
+    if os.environ.get("VERCEL_ENV") == "production" and _env("VERCEL_PROJECT_PRODUCTION_URL"):
+        return "https://" + _env("VERCEL_PROJECT_PRODUCTION_URL")
+    host = _env("VERCEL_BRANCH_URL") or _env("VERCEL_URL")
+    return "https://" + host if host else "http://localhost:8000"
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str = field(default_factory=lambda: _env("DATABASE_URL", "sqlite:///./vault.db"))
     session_secret: str = field(default_factory=lambda: _env("SESSION_SECRET", "dev-insecure-secret"))
-    base_url: str = field(default_factory=lambda: _env("BASE_URL", "http://localhost:8000").rstrip("/"))
+    base_url: str = field(default_factory=lambda: _default_base_url().rstrip("/"))
     dev_login: bool = field(default_factory=lambda: _env("DEV_LOGIN") in ("1", "true", "yes"))
 
     google_client_id: str = field(default_factory=lambda: _env("GOOGLE_CLIENT_ID"))

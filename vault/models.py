@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from mtg_toolkits.models import CollectionEntry, Condition, Finish
-from sqlalchemy import JSON, Boolean, Index, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Index, LargeBinary, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -188,6 +188,29 @@ class AuthCode(Base):
     code_challenge: Mapped[str] = mapped_column(String(128))
     redirect_uri: Mapped[str] = mapped_column(String(300))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Passkey(Base):
+    """A WebAuthn credential (passkey: Face ID, Touch ID, Windows Hello, a phone or a security key).
+
+    The account's WebAuthn user handle is its ``Identity(provider="passkey")`` subject, so
+    passkeys are one more sign-in method, linked like the OAuth providers. Only the public key
+    is stored.
+    """
+
+    __tablename__ = "passkeys"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    credential_id: Mapped[str] = mapped_column(String(1400), unique=True)  # base64url
+    public_key: Mapped[bytes] = mapped_column(LargeBinary)  # COSE
+    sign_count: Mapped[int] = mapped_column(Integer, default=0)
+    transports: Mapped[list] = mapped_column(JSON, default=list)
+    name: Mapped[str] = mapped_column(String(80))
+    aaguid: Mapped[str | None] = mapped_column(String(36))
+    backed_up: Mapped[bool] = mapped_column(Boolean, default=False)  # synced passkey
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AccessToken(Base):

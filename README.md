@@ -117,8 +117,9 @@ with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic
    (e.g. `wintermute2`).
 3. **Database:** Vercel → project → Storage → *Create Database* → **Neon**, region
    **Frankfurt**, connected to Production and Preview. This sets `DATABASE_URL`.
-4. **Sign-in:** at least one provider (next section; Google is the quickest). The vercel-check
-   summary lists the redirect URIs to register.
+4. **Sign-in:** passkeys work as soon as the site is up. Google, Microsoft, Apple and
+   Facebook are optional (next section); the vercel-check summary lists the redirect URIs to
+   register.
 5. **Go live:** merge to `main`, or promote a preview in Vercel. Environment changes apply
    from the next deployment.
 6. **Prices:** the *sync-prices* workflow runs daily; run it once by hand after the first
@@ -146,6 +147,10 @@ with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic
 - After a quiet spell the first request takes 1–2 s while the function and database wake up.
 
 ### Sign-in providers
+
+**Passkeys work without any setup**: Face ID, Touch ID, Windows Hello, a phone or a security
+key. People can create an account with a passkey alone, or add one to an account from another
+provider. The OAuth providers below are optional extras.
 
 Each redirect URI is `{BASE_URL}/api/auth/callback/{provider}`. A provider appears
 on the sign-in screen only when its client id is set.

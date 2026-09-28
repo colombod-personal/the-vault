@@ -57,3 +57,20 @@ def test_entrypoint_is_named_explicitly_for_vercel():
     config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     module, attr = config["tool"]["vercel"]["entrypoint"].split(":")
     assert (ROOT / (module.replace(".", "/") + ".py")).is_file() and attr == "app"
+
+
+def test_base_url_comes_from_vercel_when_not_set(monkeypatch):
+    from vault.config import Settings
+
+    for name in ("BASE_URL", "VERCEL_ENV", "VERCEL_PROJECT_PRODUCTION_URL", "VERCEL_BRANCH_URL", "VERCEL_URL"):
+        monkeypatch.delenv(name, raising=False)
+    assert Settings().base_url == "http://localhost:8000"
+    monkeypatch.setenv("VERCEL_ENV", "production")
+    monkeypatch.setenv("VERCEL_PROJECT_PRODUCTION_URL", "the-vault-wintermute2.vercel.app")
+    monkeypatch.setenv("VERCEL_URL", "the-vault-abc123-wintermute2.vercel.app")
+    assert Settings().base_url == "https://the-vault-wintermute2.vercel.app"
+    monkeypatch.setenv("VERCEL_ENV", "preview")
+    monkeypatch.setenv("VERCEL_BRANCH_URL", "the-vault-git-feature-wintermute2.vercel.app")
+    assert Settings().base_url == "https://the-vault-git-feature-wintermute2.vercel.app"
+    monkeypatch.setenv("BASE_URL", "https://vault.example.com/")
+    assert Settings().base_url == "https://vault.example.com"

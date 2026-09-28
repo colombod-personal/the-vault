@@ -16,7 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import auth as auth_module
-from . import outbound, tokens
+from . import outbound, passkeys, tokens
 from .api import mcp, meta, v1
 from .api.hal import problem
 from .config import Settings
@@ -145,6 +145,7 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
     app.include_router(auth_module.build_router(auth, get_db))
     app.include_router(v1.build_router(get_db, current_user, optional_user, settings, verifier,
                                        lambda: auth.enabled, transport, account_user))
+    app.include_router(passkeys.build_router(settings, get_db, auth_module.sign_in, account_user))
     app.include_router(mcp.build_router(optional_user))
     app.include_router(meta.build_router(get_db, settings))
 

@@ -179,8 +179,75 @@ window.VaultApi = (() => {
     };
   }
 
+  // -- passkeys (WebAuthn) ------------------------------------------------------------------
+  // The server speaks WebAuthn JSON (base64url). Newer browsers convert natively
+  // (parse*OptionsFromJSON / credential.toJSON()); older ones use these helpers.
+  const fromB64u = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)),
+    (c) => c.charCodeAt(0)).buffer;
+  const toB64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const creationOptions = (o) => (PublicKeyCredential.parseCreationOptionsFromJSON
+    ? PublicKeyCredential.parseCreationOptionsFromJSON(o)
+    : { ...o, challenge: fromB64u(o.challenge), user: { ...o.user, id: fromB64u(o.user.id) },
+        excludeCredentials: (o.excludeCredentials || []).map((c) => ({ ...c, id: fromB64u(c.id) })) });
+  const requestOptions = (o) => (PublicKeyCredential.parseRequestOptionsFromJSON
+    ? PublicKeyCredential.parseRequestOptionsFromJSON(o)
+    : { ...o, challenge: fromB64u(o.challenge),
+        allowCredentials: (o.allowCredentials || []).map((c) => ({ ...c, id: fromB64u(c.id) })) });
+  function credentialJSON(c) {
+    if (typeof c.toJSON === 'function') return c.toJSON();
+    const r = c.response;
+    const out = { id: c.id, rawId: toB64u(c.rawId), type: c.type, authenticatorAttachment: c.authenticatorAttachment,
+      clientExtensionResults: c.getClientExtensionResults ? c.getClientExtensionResults() : {},
+      response: { clientDataJSON: toB64u(r.clientDataJSON) } };
+    if (r.attestationObject) {
+      out.response.attestationObject = toB64u(r.attestationObject);
+      out.response.transports = r.getTransports ? r.getTransports() : [];
+    } else {
+      out.response.authenticatorData = toB64u(r.authenticatorData);
+      out.response.signature = toB64u(r.signature);
+      out.response.userHandle = r.userHandle ? toB64u(r.userHandle) : null;
+    }
+    return out;
+  }
+  function deviceName() {
+    const p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+    const ua = navigator.userAgent;
+    if (/iPhone/.test(ua)) return 'iPhone';
+    if (/iPad/.test(ua)) return 'iPad';
+    if (/Android/.test(ua)) return 'Android';
+    if (/Mac/.test(p)) return 'Mac';
+    if (/Win/.test(p)) return 'Windows PC';
+    if (/Linux/.test(p)) return 'Linux';
+    return 'Passkey';
+  }
+  const PK = '/api/auth/passkey';
+  const passkeys = {
+    supported: () => !!window.PublicKeyCredential && !!navigator.credentials,
+    signUp: async (name) => {
+      const o = await call(PK + '/signup/options', { method: 'POST', json: { name: name || null } });
+      const c = await navigator.credentials.create({ publicKey: creationOptions(o) });
+      return call(PK + '/signup/verify', { method: 'POST', json: { credential: credentialJSON(c), name: deviceName() } });
+    },
+    signIn: async () => {
+      const o = await call(PK + '/login/options', { method: 'POST', json: {} });
+      const c = await navigator.credentials.get({ publicKey: requestOptions(o) });
+      return call(PK + '/login/verify', { method: 'POST', json: { credential: credentialJSON(c) } });
+    },
+    add: async () => {
+      const o = await call(PK + '/register/options', { method: 'POST', json: {} });
+      const c = await navigator.credentials.create({ publicKey: creationOptions(o) });
+      return call(PK + '/register/verify', { method: 'POST', json: { credential: credentialJSON(c), name: deviceName() } });
+    },
+    list: () => all(V1 + '/me/passkeys'),
+    remove: (id) => call(V1 + '/me/passkeys/' + id, { method: 'DELETE' }),
+    // Friendly text for the browser's WebAuthn errors.
+    explain: (e) => (e && e.name === 'NotAllowedError' ? 'Cancelled, or no passkey was chosen.'
+      : e && e.name === 'InvalidStateError' ? 'This device already has a passkey for your account.'
+      : (e && e.message) || String(e)),
+  };
+
   return {
-    ApiError, all,
+    ApiError, all, passkeys,
     providers: () => call('/api/auth/providers'),
     me: () => call(V1 + '/me'),
     collection: (onProgress) => loadCollection(V1 + '/collection', onProgress),

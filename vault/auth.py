@@ -208,7 +208,10 @@ def build_router(auth: Auth, get_db) -> APIRouter:
 
     @router.get("/providers")
     def providers() -> dict:
-        return {"providers": auth.enabled, "dev_login": auth.settings.dev_login}
+        from .passkeys import enabled as passkeys_enabled
+
+        return {"providers": auth.enabled, "dev_login": auth.settings.dev_login,
+                "passkeys": passkeys_enabled(auth.settings)}
 
     @router.get("/login/{provider}")
     async def login(provider: str, request: Request, app_redirect_uri: str | None = None,
