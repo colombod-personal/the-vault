@@ -24,11 +24,11 @@ function SignIn() {
   };
 
   return (
-    <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh', padding: 16 }}>
+    <main style={{ display: 'grid', placeItems: 'center', minHeight: '100vh', padding: 16 }}>
       <div className="panel" style={{ width: 'min(380px, 100%)', textAlign: 'center' }}>
         <div style={{ fontFamily: 'var(--display)', fontSize: 36, color: 'var(--gold)' }}>◇</div>
         <h1 className="h1" style={{ margin: '8px 0 4px' }}>The Vault</h1>
-        <p className="label-mono" style={{ marginBottom: 20 }}>Sign in to open your collection</p>
+        <p className="label-mono" style={{ marginBottom: 20, color: 'var(--text-2)' }}>Sign in to open your collection</p>
         {error && <p style={{ color: 'var(--danger)', marginBottom: 12 }}>Sign-in failed ({error}). Please try again.</p>}
         {!info && <div className="spinner" style={{ width: 18, height: 18, margin: '0 auto' }}></div>}
         {info && (
@@ -65,14 +65,14 @@ function SignIn() {
         {localStorage.getItem('vault_pending_invite') && (
           <p className="label-mono" style={{ marginTop: 16 }}>Sign in to accept the invite you opened.</p>
         )}
-        <p className="label-mono" style={{ marginTop: 20 }}>
+        <p className="label-mono" style={{ marginTop: 20, color: 'var(--text-2)' }}>
           Your collection stays private unless you share it.{' '}
           <a href="/privacy.html" style={{ color: 'var(--gold)', textDecoration: 'underline' }}>Privacy notice</a>
           {' · '}<a href="/credits.html" style={{ color: 'var(--gold)', textDecoration: 'underline' }}>Credits &amp; thanks</a>
         </p>
       </div>
       <div style={{ width: 'min(720px, 100%)' }}><VaultFooter /></div>
-    </div>
+    </main>
   );
 }
 

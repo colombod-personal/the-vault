@@ -109,6 +109,7 @@ function App() {
   const [route, setRouteState] = useStateApp(() => vaultRouteFromHash(t.landing || 'dashboard'));
   const [drawerCard, setDrawerCard] = useStateApp(null);
   const [loadProgress, setLoadProgress] = useStateApp('Reading vault…');
+  const [loadError, setLoadError] = useStateApp(null); // shown instead of a spinner that never ends
   const [refreshing, setRefreshing] = useStateApp(false);
   const [refreshProgress, setRefreshProgress] = useStateApp(null);
   const [refreshError, setRefreshError] = useStateApp(null);
@@ -176,6 +177,7 @@ function App() {
   // Load the signed-in user's collection from the server (prices are refreshed there daily).
   const loadCollection = async () => {
     try {
+      setLoadError(null);
       setLoadProgress('Opening your vault…');
       const progress = (n, total) => setLoadProgress(`Opening your vault… ${n.toLocaleString()} / ${total.toLocaleString()} printings`);
       const j = await window.VaultApi.collection(progress);
@@ -197,7 +199,7 @@ function App() {
       }
     } catch (e) {
       if (e.status === 401) setAuth('signed-out');
-      else setLoadProgress('Failed to load collection: ' + e.message);
+      else setLoadError(e.message || 'Unknown error');
     }
   };
   useEffectApp(() => { loadCollection(); }, []);
@@ -346,13 +348,23 @@ function App() {
     );
   } else if (!data) {
     body = (
-      <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh' }}>
-        <div style={{ textAlign: 'center' }}>
+      <main style={{ display: 'grid', placeItems: 'center', minHeight: '100vh' }}>
+        <div style={{ textAlign: 'center', maxWidth: 560, padding: 16 }}>
           <div style={{ fontFamily: 'var(--display)', fontSize: 36, color: 'var(--gold)', marginBottom: 16 }}>◇</div>
-          <p className="label-mono">{loadProgress}</p>
-          <div className="spinner" style={{ marginTop: 16, width: 18, height: 18 }}></div>
+          {loadError ? (
+            <div role="alert">
+              <h1 className="h1" style={{ fontSize: 24, margin: '0 0 8px' }}>Your vault couldn't be opened</h1>
+              <p className="label-mono" style={{ marginBottom: 16 }}>{loadError}</p>
+              <button className="btn" onClick={() => loadCollection()}>Try again</button>
+            </div>
+          ) : (
+            <>
+              <p className="label-mono" aria-live="polite">{loadProgress}</p>
+              <div className="spinner" style={{ margin: '16px auto 0', width: 18, height: 18 }}></div>
+            </>
+          )}
         </div>
-      </div>
+      </main>
     );
   } else {
     body = (
