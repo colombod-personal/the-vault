@@ -1,0 +1,24 @@
+/* Layout additions on top of styles.css (which stays unchanged): navigation and small screens.
+   Uses only the design tokens defined there. */
+
+/* The logo is the way home. */
+button.brand { padding: 0; text-align: left; }
+button.brand:hover .title { color: var(--gold); }
+button.brand:focus-visible, .nav button:focus-visible { outline: 1px solid var(--gold); outline-offset: 4px; }
+
+/* Grid items may shrink below their content's width, so one wide row can't widen the page. */
+.app > * { min-width: 0; }
+
+@media (max-width: 760px) {
+  /* Logo and account on the first row; the sections on their own row, scrolling sideways. */
+  .topbar { flex-wrap: wrap; gap: 8px 16px; padding: 10px 16px 0; }
+  .brand .subtitle { display: none; }
+  .topbar > :last-child { margin-left: auto; }
+  .nav {
+    order: 3; flex: 1 0 100%; margin-left: 0;
+    overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav button { flex: 0 0 auto; padding: 10px 12px; }
+  main { padding: 16px; }
+}

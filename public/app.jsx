@@ -67,6 +67,20 @@ const VAULT_START_NOTICE = (() => {
   }
   return linkError ? `Linking failed (${linkError}). Please try again.` : null;
 })();
+// Navigation lives in the URL hash (#/browse, #/sets/MKM, …), so the browser's Back and Forward
+// buttons, refresh and bookmarks work. Opening a card or the account panel adds a history
+// entry too, so Back closes it before leaving the view.
+const VAULT_VIEWS = ['dashboard', 'browse', 'sets', 'decks', 'lab', 'graph', 'valuation'];
+function vaultRouteFromHash(fallback) {
+  const [view, arg] = location.hash.replace(/^#\/?/, '').split('/').map((p) => decodeURIComponent(p || ''));
+  if (view === 'sets' && arg) return { view: 'setdetail', code: arg };
+  return { view: VAULT_VIEWS.includes(view) ? view : fallback };
+}
+function vaultHashFor(route) {
+  return route.view === 'setdetail' ? `#/sets/${encodeURIComponent(route.code)}` : `#/${route.view}`;
+}
+const vaultUrlFor = (route) => location.pathname + location.search + vaultHashFor(route);
+
 const { useTweaks, TweaksPanel, TweakSection, TweakSlider, TweakToggle, TweakRadio, TweakSelect, TweakColor, TweakButton } = window;
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -83,7 +97,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 function App() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [data, setData] = useStateApp(null);
-  const [route, setRoute] = useStateApp({ view: t.landing || 'dashboard' });
+  const [route, setRouteState] = useStateApp(() => vaultRouteFromHash(t.landing || 'dashboard'));
   const [drawerCard, setDrawerCard] = useStateApp(null);
   const [loadProgress, setLoadProgress] = useStateApp('Reading vault…');
   const [refreshing, setRefreshing] = useStateApp(false);
@@ -95,6 +109,37 @@ function App() {
   const [accountOpen, setAccountOpen] = useStateApp(false);
   const [viewing, setViewing] = useStateApp(null); // { id, from } while looking at someone's shared collection
   const [deckText, setDeckText] = useStateApp(null); // deck opened from saved/shared decks
+
+  // Go to a view: a new history entry, unless an open card or panel's entry can be reused.
+  const setRoute = (next) => {
+    setRouteState(next);
+    setDrawerCard(null);
+    setAccountOpen(false);
+    const entry = { route: next };
+    if (history.state && history.state.overlay) history.replaceState(entry, '', vaultUrlFor(next));
+    else if (location.hash !== vaultHashFor(next) || next.initialQuery) history.pushState(entry, '', vaultUrlFor(next));
+    window.scrollTo(0, 0);
+  };
+  // A card or the account panel: its own history entry, so Back closes it.
+  const openOverlay = () => {
+    if (!(history.state && history.state.overlay)) history.pushState({ route, overlay: true }, '', vaultUrlFor(route));
+  };
+  const closeOverlay = (close) => {
+    if (history.state && history.state.overlay) history.back(); // popstate closes it
+    else close();
+  };
+  const openCard = (c) => { setDrawerCard(c); openOverlay(); };
+  const openAccount = () => { setAccountOpen(true); openOverlay(); };
+  useEffectApp(() => {
+    history.replaceState({ route }, '', vaultUrlFor(route));
+    const onPop = (e) => {
+      const s = e.state || {};
+      if (!s.overlay) { setDrawerCard(null); setAccountOpen(false); }
+      setRouteState(s.route || vaultRouteFromHash(t.landing || 'dashboard'));
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   // Apply theme tweaks to CSS variables
   useEffectApp(() => {
@@ -199,7 +244,7 @@ function App() {
   const accountPanel = accountOpen && (
     <AccountPanel
       me={me}
-      onClose={() => setAccountOpen(false)}
+      onClose={() => closeOverlay(() => setAccountOpen(false))}
       onOpenShared={openShared}
       onOpenDeck={openDeck}
       onMeChanged={() => window.VaultApi.me().then(setMe)}
@@ -282,8 +327,8 @@ function App() {
     body = (
       <div className="app">
         <header className="topbar">
-          <div className="brand"><span className="mark"><span>V</span></span><span className="title">The Vault</span></div>
-          <AccountMenu me={me} onImported={onImported} onAccount={() => setAccountOpen(true)} />
+          <button className="brand" onClick={() => setRoute({ view: 'dashboard' })} aria-label="The Vault: home"><span className="mark"><span>V</span></span><span className="title">The Vault</span></button>
+          <AccountMenu me={me} onImported={onImported} onAccount={openAccount} />
         </header>
         {noticeBanner}
         <main><EmptyVault onImported={onImported} /></main>
@@ -304,12 +349,12 @@ function App() {
     body = (
       <div className="app">
         <header className="topbar">
-          <div className="brand">
+          <button className="brand" onClick={() => nav('dashboard')} aria-label="The Vault: home">
             <span className="mark"><span>V</span></span>
             <span className="title">The Vault</span>
             <span className="subtitle">MTG Collection</span>
-          </div>
-          <nav className="nav">
+          </button>
+          <nav className="nav" aria-label="Sections">
             <button className={route.view === 'dashboard' ? 'active' : ''} onClick={() => nav('dashboard')}>Vault</button>
             <button className={route.view === 'browse' ? 'active' : ''} onClick={() => nav('browse')}>Browse</button>
             <button className={route.view === 'sets' || route.view === 'setdetail' ? 'active' : ''} onClick={() => nav('sets')}>Sets</button>
@@ -317,7 +362,7 @@ function App() {
             <button className={route.view === 'lab' ? 'active' : ''} onClick={() => nav('lab')}>Lab</button>
             <button className={route.view === 'graph' ? 'active' : ''} onClick={() => nav('graph')}>Graph</button>
           </nav>
-          <AccountMenu me={me} onImported={onImported} onAccount={() => setAccountOpen(true)} readOnly={!!viewing} />
+          <AccountMenu me={me} onImported={onImported} onAccount={openAccount} readOnly={!!viewing} />
         </header>
         {viewing && (
           <div className="panel panel-tight" style={{ margin: '12px 24px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderColor: 'var(--gold)' }}>
@@ -341,26 +386,26 @@ function App() {
               refreshing={refreshing}
               refreshProgress={refreshProgress}
               refreshError={refreshError}
-              openCard={c => setDrawerCard(c)}
+              openCard={openCard}
             />
           )}
           {route.view === 'browse' && (
-            <Browse data={data} openCard={c => setDrawerCard(c)} initialQuery={route.initialQuery} />
+            <Browse data={data} openCard={openCard} initialQuery={route.initialQuery} />
           )}
           {route.view === 'sets' && (
             <Sets data={data} onSetClick={code => nav('setdetail', { code })} />
           )}
           {route.view === 'setdetail' && (
-            <SetDetail data={data} code={route.code} onBack={() => nav('sets')} openCard={c => setDrawerCard(c)} />
+            <SetDetail data={data} code={route.code} onBack={() => nav('sets')} openCard={openCard} />
           )}
           {route.view === 'decks' && (
-            <DeckView key={deckText || 'deck'} data={data} openCard={c => setDrawerCard(c)} initialText={deckText} />
+            <DeckView key={deckText || 'deck'} data={data} openCard={openCard} initialText={deckText} />
           )}
           {route.view === 'lab' && (
-            <Lab data={data} openCard={c => setDrawerCard(c)} />
+            <Lab data={data} openCard={openCard} />
           )}
           {route.view === 'graph' && (
-            <GraphView data={data} openCard={c => setDrawerCard(c)} />
+            <GraphView data={data} openCard={openCard} />
           )}
           {route.view === 'valuation' && (
             <Valuation
@@ -371,13 +416,13 @@ function App() {
               refreshing={refreshing}
               refreshProgress={refreshProgress}
               refreshError={refreshError}
-              openCard={c => setDrawerCard(c)}
+              openCard={openCard}
             />
           )}
         </main>
 
         <VaultFooter />
-        {drawerCard && <CardDrawer card={drawerCard} onClose={() => setDrawerCard(null)} />}
+        {drawerCard && <CardDrawer card={drawerCard} onClose={() => closeOverlay(() => setDrawerCard(null))} />}
 
         <TweaksPanel title="Tweaks">
           <TweakSection label="Theme" />

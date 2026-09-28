@@ -15,7 +15,10 @@ React prototype as the front end (`public/`). Read `README.md` first.
   MCP tool in `vault/api/mcp.py` and a line in `public/llms.txt`. POSTs that create things take
   `Idempotency-Key` (`vault.api.idempotency`). Personal access tokens never get account-level
   powers (`account_user`).
-- Keep `public/styles.css` and its design tokens unchanged.
+- Keep `public/styles.css` and its design tokens unchanged. Layout additions (navigation, small
+  screens) go in `public/layout.css`, using those tokens. Views live in the URL hash
+  (`#/browse`, `#/sets/MKM`): change views with `setRoute`, and open overlays (card drawer,
+  account panel) with `openCard`/`openAccount` so the browser's Back button closes them.
 - Scryfall: the browser may call `/cards/collection` at most every 500 ms; bulk prices come from
   the daily `jobs/sync_prices.py` run.
 - Multi-tenant and private by default (see `docs/gdpr.md`): scope every query by the signed-in
