@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "uvicorn[standard]>=0.30"]
+dev = ["pytest>=8", "uvicorn[standard]>=0.30", "pyyaml>=6"]
 
 [tool.hatch.metadata]
 allow-direct-references = true

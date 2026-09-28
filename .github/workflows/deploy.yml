@@ -1,99 +1,82 @@
 name: deploy (manual fallback)
-# Deploys to Vercel with the Vercel CLI. (Vercel's Hobby plan can't connect repositories owned by a
-# GitHub organization in its dashboard; the CLI path works on every plan.)
+# A manual production deploy with the Vercel CLI, for when Vercel's Git integration isn't
+# connected. Normally merging to main deploys (see vercel.json → ignoreCommand).
 #
-# Needs the VERCEL_TOKEN repository secret. Optional repository variables:
-#   VERCEL_SCOPE  a Vercel team slug (leave unset for a personal Hobby account)
-#   VAULT_URL     the public URL for the post-deploy check (normally found automatically)
-# jobs/vercel_setup.py sets SESSION_SECRET and BASE_URL in Vercel and writes a checklist of what
-# is still missing (database, sign-in providers, redirect URIs) to the job summary.
-# Vercel's GitHub integration deploys on every push (see vercel-check.yml for the checks that follow).
-# This workflow is the manual fallback: a CLI deploy for when the integration isn't connected.
+# Runs only from main, in the "vercel-production" environment, which holds VERCEL_TOKEN and
+# should only allow the main branch (README → Security). The token reaches only the steps that
+# talk to Vercel, never the dependency install or the tests.
+# Optional repository variables: VERCEL_SCOPE (team slug), VAULT_URL (public URL for the check).
 on:
-  workflow_dispatch:
-    inputs:
-      target:
-        description: "production or preview"
-        type: choice
-        options: [production, preview]
-        default: production
-concurrency: deploy-${{ github.ref }}
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency: deploy-production
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: vercel-production
     env:
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE || 'wintermute2' }}
-      TARGET: ${{ inputs.target || 'production' }}
+      VAULT_URL: ${{ vars.VAULT_URL }}
+      VERCEL_CLI: vercel@60.1.3  # pinned: this step holds the token
     steps:
-      - name: Check for the Vercel token
-        id: token
-        run: |
-          if [ -z "$VERCEL_TOKEN" ]; then
-            echo "::notice::VERCEL_TOKEN is not set, so nothing was deployed. See README → Deploying on Vercel."
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - uses: actions/checkout@v4
-        if: steps.token.outputs.ready == 'true'
-
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
-        if: steps.token.outputs.ready == 'true'
         with:
           python-version: "3.12"
-
-      - name: Tests must pass before deploying
-        if: steps.token.outputs.ready == 'true'
+      - name: Tests must pass before deploying (no secrets here)
         run: |
           pip install -e ".[dev]"
           pytest -q
-
       - uses: actions/setup-node@v4
-        if: steps.token.outputs.ready == 'true'
         with:
           node-version: "20"
-
+      - run: npm install --global "$VERCEL_CLI"
       - name: Deploy to Vercel
         id: deploy
-        if: steps.token.outputs.ready == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
-          npm install --global vercel@latest
+          [ -n "$VERCEL_TOKEN" ] || { echo "::error::VERCEL_TOKEN is not set in the vercel-production environment"; exit 1; }
           scope=(); [ -n "$VERCEL_SCOPE" ] && scope=(--scope "$VERCEL_SCOPE")
-          prod=(); [ "$TARGET" = "production" ] && prod=(--prod)
           ship() {
-            vercel pull --yes --environment="$TARGET" --token "$VERCEL_TOKEN" "${scope[@]}"
-            vercel build "${prod[@]}" --token "$VERCEL_TOKEN" "${scope[@]}"
-            vercel deploy --prebuilt "${prod[@]}" --token "$VERCEL_TOKEN" "${scope[@]}"
+            vercel pull --yes --environment=production --token "$VERCEL_TOKEN" "${scope[@]}"
+            vercel build --prod --token "$VERCEL_TOKEN" "${scope[@]}"
+            vercel deploy --prebuilt --prod --token "$VERCEL_TOKEN" "${scope[@]}"
           }
           # Creates the "the-vault" project on the first run, links to it afterwards.
           vercel link --yes --project the-vault --token "$VERCEL_TOKEN" "${scope[@]}"
+          rm -f .vercel/.env.*  # `vercel pull` writes the project's env vars to disk; keep them off the runner
           # Sets SESSION_SECRET (and BASE_URL once the project has an address); reports what's missing.
           before=$(python -m jobs.vercel_setup)
           url=$(ship | tail -n 1)
+          rm -f .vercel/.env.*
           if [ "$(echo "$before" | python -c 'import json,sys; print(json.load(sys.stdin)["base_url"] or "")')" = "" ]; then
             # First deploy: the production address exists now. Record it as BASE_URL and redeploy with it.
             after=$(GITHUB_STEP_SUMMARY=/dev/null python -m jobs.vercel_setup)
             if echo "$after" | python -c 'import json,sys; sys.exit(0 if "BASE_URL" in json.load(sys.stdin)["changed"] else 1)'; then
               url=$(ship | tail -n 1)
+              rm -f .vercel/.env.*
               python -m jobs.vercel_setup >/dev/null  # refresh the checklist with the redirect URIs
             fi
           fi
           base=$(python -m jobs.vercel_setup --project the-vault 2>/dev/null | python -c 'import json,sys; print(json.load(sys.stdin)["base_url"] or "")' || true)
           echo "url=$url" >> "$GITHUB_OUTPUT"
-          echo "base=${base:-${{ vars.VAULT_URL }}}" >> "$GITHUB_OUTPUT"
-          echo "### Deployed ($TARGET): $url" >> "$GITHUB_STEP_SUMMARY"
-
+          echo "base=${base:-$VAULT_URL}" >> "$GITHUB_OUTPUT"
+          echo "### Deployed (production): $url" >> "$GITHUB_STEP_SUMMARY"
       - name: Smoke-test the live site
-        if: steps.token.outputs.ready == 'true' && env.TARGET == 'production' && steps.deploy.outputs.base != ''
+        if: steps.deploy.outputs.base != ''
+        env:
+          SITE: ${{ steps.deploy.outputs.base }}
         run: |
-          site="${{ steps.deploy.outputs.base }}"
           for i in 1 2 3 4 5 6; do  # give a cold start a moment
-            code=$(curl -s -o /dev/null -w '%{http_code}' "$site/api/health" || true)
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$SITE/api/health" || true)
             [ "$code" = "200" ] || [ "$code" = "503" ] && break
             sleep 10
           done
-          python -m jobs.smoke_test "$site"
+          python -m jobs.smoke_test "$SITE"

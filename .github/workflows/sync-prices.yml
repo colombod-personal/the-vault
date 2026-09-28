@@ -1,23 +1,25 @@
 name: sync-prices
-# Daily: download Scryfall's bulk card file, match every collection, store prices
-# and each user's collection value. Uses the DATABASE_URL repository secret if set; otherwise it
-# reads the database address from the Vercel project (Neon integration) with VERCEL_TOKEN.
+# Daily: download Scryfall's bulk card file, match every collection, store prices and each
+# user's collection value. Runs only from main, in the "vercel-production" environment
+# (README → Security). Uses that environment's DATABASE_URL secret if set; otherwise it reads the
+# database address from the Vercel project (Neon integration) with VERCEL_TOKEN.
 on:
   schedule:
     - cron: "17 10 * * *"   # Scryfall regenerates bulk files around 09:00 UTC
   workflow_dispatch: {}
-  push:
-    # Lets the first-release branch run the sync (workflow_dispatch needs the file on main);
-    # runs only when this file changes. Remove with the deploy branch trigger after PR #1 merges.
-    branches: [claude/festive-mendel-9vr6vt]
-    paths: [.github/workflows/sync-prices.yml]
+permissions:
+  contents: read
 concurrency: sync-prices
 jobs:
   sync:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    environment: vercel-production
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -29,8 +31,8 @@ jobs:
           VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE || 'wintermute2' }}
         run: |
           if [ -z "$DATABASE_URL" ]; then
-            [ -n "$VERCEL_TOKEN" ] || { echo "::error::Set VERCEL_TOKEN (or DATABASE_URL) in the repository secrets"; exit 1; }
-            npm install --global vercel@latest
+            [ -n "$VERCEL_TOKEN" ] || { echo "::error::Set DATABASE_URL (or VERCEL_TOKEN) in the vercel-production environment"; exit 1; }
+            npm install --global vercel@60.1.3
             scope=(); [ -n "$VERCEL_SCOPE" ] && scope=(--scope "$VERCEL_SCOPE")
             vercel link --yes --project the-vault --token "$VERCEL_TOKEN" "${scope[@]}" >/dev/null
             vercel env pull .env.vercel --yes --environment=production --token "$VERCEL_TOKEN" "${scope[@]}" >/dev/null

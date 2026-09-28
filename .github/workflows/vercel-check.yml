@@ -1,20 +1,24 @@
 name: vercel-check
-# Vercel's GitHub integration deploys every push (main → production, other branches → previews).
+# Vercel's GitHub integration deploys merges to main (vercel.json → ignoreCommand skips other branches).
 # When a deployment succeeds:
-# - configure (production only): sets up the Vercel project with jobs/vercel_setup.py
-#   (SESSION_SECRET for production and preview, BASE_URL, checklist). It holds VERCEL_TOKEN, so
-#   it runs the default branch's code, never a preview branch's, and installs only httpx.
+# - configure (production deployments of main only): sets up the Vercel project with
+#   jobs/vercel_setup.py (SESSION_SECRET, BASE_URL, checklist). It holds VERCEL_TOKEN from the
+#   "vercel-production" environment, runs the default branch's code and installs only httpx.
 # - smoke: tests that exact deployment from outside (jobs/smoke_test.py), with no secrets.
 #   Previews behind Vercel Authentication are reported as protected.
 on:
   deployment_status:
+permissions:
+  contents: read
 jobs:
   configure:
     if: >-
       github.event.deployment_status.state == 'success' &&
-      startsWith(github.event.deployment.environment, 'Production')
+      startsWith(github.event.deployment.environment, 'Production') &&
+      github.event.deployment.ref == github.event.repository.default_branch
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    environment: vercel-production
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE || 'wintermute2' }}
@@ -30,8 +34,8 @@ jobs:
       - name: Configure the Vercel project
         run: |
           if [ -z "$VERCEL_TOKEN" ]; then
-            echo "::warning::VERCEL_TOKEN is not visible to Actions: add it under Settings → Secrets and variables → Actions → Repository secrets"
-            echo "⚠️ VERCEL_TOKEN is not visible to GitHub Actions, so the project wasn't configured." >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::VERCEL_TOKEN is not set: add it to the vercel-production environment (Settings → Environments)"
+            echo "⚠️ VERCEL_TOKEN is not set in the vercel-production environment, so the project wasn't configured." >> "$GITHUB_STEP_SUMMARY"
           else
             python -m jobs.vercel_setup
           fi

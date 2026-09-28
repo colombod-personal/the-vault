@@ -97,41 +97,59 @@ The app runs on Vercel's free Hobby plan (fine while the Vault is free and non-c
 with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic.
 
 **How deploys work**
-- **Vercel's GitHub integration** deploys every push: `main` goes to production, other branches
-  to preview URLs.
+- **Only merges to `main` deploy.** Vercel's GitHub integration runs `vercel.json` →
+  `ignoreCommand` before each deployment, which skips every branch but `main`. Branches get
+  no preview; test them locally with the twins (`docs/twins.md`).
 - The **vercel-check** workflow runs when a deployment succeeds (`deployment_status`):
-  - configures the project with `jobs/vercel_setup.py`, setting `SESSION_SECRET` and `BASE_URL`
-    and writing a checklist of what's missing, with the OAuth redirect URIs;
-  - smoke-tests that exact deployment from outside with `jobs/smoke_test.py`.
-- **deploy (manual fallback)** is a Vercel CLI deploy, for when the integration isn't connected.
+  - for production deployments of `main`, configures the project with `jobs/vercel_setup.py`,
+    setting `SESSION_SECRET` and `BASE_URL` and writing a checklist of what's missing, with the
+    OAuth redirect URIs;
+  - smoke-tests that exact deployment from outside with `jobs/smoke_test.py`, without secrets.
+- **deploy (manual fallback)** is a Vercel CLI deploy of `main`, for when the integration isn't
+  connected.
 
 **One-time setup:**
 
 1. **Vercel:** sign up at [vercel.com](https://vercel.com) with GitHub (Hobby). Import or connect
    `colombod-personal/the-vault` (project `the-vault`). Vercel detects FastAPI from
    `pyproject.toml` (`[tool.vercel] entrypoint = "api.index:app"`).
-2. **Token for Actions:** Vercel → Account Settings → Tokens → *Create*. In GitHub, add it under
-   `the-vault` → Settings → Secrets and variables → Actions → **Repository secrets** as
-   `VERCEL_TOKEN`. Not an environment, Codespaces or Dependabot secret: those aren't visible to
-   these workflows. For a Vercel team, also set the repository *variable* `VERCEL_SCOPE`
-   (e.g. `wintermute2`).
+2. **Token for Actions, in a protected environment** (see *Security* below): Vercel → Account
+   Settings → Tokens → *Create*, scoped to the team, with an expiry. In GitHub → `the-vault` →
+   Settings → Environments → **New environment** `vercel-production`:
+   - *Deployment branches and tags* → **Selected branches** → add `main`;
+   - *Environment secrets* → add `VERCEL_TOKEN` (and `DATABASE_URL` if you want the price sync to
+     skip Vercel).
+   For a Vercel team, also set the repository *variable* `VERCEL_SCOPE` (e.g. `wintermute2`).
 3. **Database:** Vercel → project → Storage → *Create Database* → **Neon**, region
    **Frankfurt**, connected to Production and Preview. This sets `DATABASE_URL`.
 4. **Sign-in:** passkeys work as soon as the site is up. Google, Microsoft, Apple and
    Facebook are optional (next section); the vercel-check summary lists the redirect URIs to
    register.
-5. **Go live:** merge to `main`, or promote a preview in Vercel. Environment changes apply
-   from the next deployment.
-6. **Prices:** the *sync-prices* workflow runs daily; run it once by hand after the first
-   deploy. It reads the database address from Vercel through `VERCEL_TOKEN`. A `DATABASE_URL`
-   repository secret overrides that.
-7. **Optional:**
-   - Your own domain, under project → Settings → Domains. Update `BASE_URL` and each
-     provider's redirect URI afterwards.
-   - To smoke-test a preview behind Vercel Authentication, run
-     `VERCEL_AUTOMATION_BYPASS_SECRET=... python -m jobs.smoke_test <preview URL>` locally, with
-     the value from Vercel → Deployment Protection → Protection Bypass for Automation. The
-     workflow's smoke test runs without secrets, so it reports those previews as protected.
+5. **Go live:** merge to `main`. Environment changes apply from the next deployment.
+6. **Prices:** the *sync-prices* workflow runs daily from `main`; run it once by hand after the
+   first deploy. It reads the database address from Vercel through `VERCEL_TOKEN`. A
+   `DATABASE_URL` secret in the `vercel-production` environment overrides that.
+7. **Optional:** your own domain, under project → Settings → Domains. Update `BASE_URL` and each
+   provider's redirect URI afterwards.
+
+### Security
+
+- **Secrets reach `main` only.** `VERCEL_TOKEN` and `DATABASE_URL` live in the
+  `vercel-production` GitHub environment, which only `main` may use. Repository-level secrets
+  are readable by a workflow on any branch, so keep none there: delete `VERCEL_TOKEN` and
+  `DATABASE_URL` under Settings → Secrets and variables → Actions → *Repository secrets* once
+  the environment has them.
+- **Jobs that hold a secret** run only for `main`, never on `push` or `pull_request`, and don't
+  install or run branch code next to the token (vercel-check's configure step runs the default
+  branch's code with only `httpx` installed).
+- **Least privilege:** every workflow's `GITHUB_TOKEN` is read-only, checkouts don't keep the
+  token, the Vercel CLI version is pinned, and values reach scripts through `env`, never
+  `${{ }}` inside the script.
+- **Protect `main`:** Settings → Branches → add a rule (or ruleset) for `main`: require a pull
+  request and the `test` check, and block force pushes and deletion.
+- **Vercel:** keep Deployment Protection on, give tokens an expiry, and never set `DEV_LOGIN`.
+- CDN scripts carry integrity hashes, so a tampered copy won't run.
+- `tests/test_workflows.py` fails if a workflow breaks one of these rules.
 
 **Costs:**
 - Vercel Hobby: $0.
