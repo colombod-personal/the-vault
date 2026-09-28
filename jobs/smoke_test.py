@@ -29,8 +29,8 @@ def run(base: str, transport: httpx.BaseTransport | None = None) -> tuple[list[t
         walled = (first.status_code in (301, 302, 303, 307, 308) and "vercel.com" in location) or \
             (first.status_code == 401 and "vercel" in first.text.lower() and "The Vault" not in first.text)
         if walled:  # Vercel Authentication: a redirect to vercel.com's login (or its 401 page)
-            return [("Deployment protection", True, "this deployment is behind Vercel Authentication; set the "
-                     "VERCEL_AUTOMATION_BYPASS_SECRET repository secret to test it")], False
+            return [("Deployment protection", True, "this deployment is behind Vercel Authentication; run the "
+                     "smoke test locally with VERCEL_AUTOMATION_BYPASS_SECRET to test it")], False
 
         def check(name, method, path, want, test=None, **kw):
             try:

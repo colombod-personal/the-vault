@@ -166,13 +166,25 @@ class Auth:
         return Profile(provider, str(info["sub"]), email, name)
 
 
+class IdentityInUse(Exception):
+    """Linking a sign-in that already belongs to another Vault account."""
+
+    def __init__(self) -> None:
+        super().__init__("This sign-in already belongs to another Vault account, so it can't be linked to this one")
+
+
 def find_or_create(db: Session, profile: Profile, current: User | None = None) -> User:
     """The user owning ``profile``'s identity. A new identity is linked to ``current`` when
-    someone is already signed in; otherwise it gets a new account. Never merged by e-mail."""
+    someone is already signed in; otherwise it gets a new account. Never merged by e-mail.
+
+    Raises IdentityInUse when ``current`` is set and the identity belongs to someone else:
+    linking never switches accounts."""
     identity = db.scalar(
         select(Identity).where(Identity.provider == profile.provider, Identity.subject == profile.subject)
     )
     if identity:
+        if current is not None and identity.user_id != current.id:
+            raise IdentityInUse()
         user = identity.user
         identity.email = profile.email or identity.email
     else:
@@ -188,9 +200,13 @@ def find_or_create(db: Session, profile: Profile, current: User | None = None) -
     return user
 
 
-def sign_in(db: Session, request: Request, profile: Profile) -> User:
-    """Find or create the user for ``profile`` and put them in the browser session."""
-    current = db.get(User, request.session.get("uid")) if request.session.get("uid") else None
+def sign_in(db: Session, request: Request, profile: Profile, link: bool = True) -> User:
+    """Find or create the user for ``profile`` and put them in the browser session.
+
+    With ``link`` (provider sign-ins), a new identity joins the account already signed in here.
+    Without it (passkey sign-in and sign-up, dev login) the browser simply switches accounts."""
+    uid = request.session.get("uid") if link else None
+    current = db.get(User, uid) if uid else None
     user = find_or_create(db, profile, current)
     app_flow = request.session.get("app_flow")
     request.session.clear()
@@ -252,7 +268,14 @@ def build_router(auth: Auth, get_db) -> APIRouter:
                 request.session.pop("app_flow", None)
                 return RedirectResponse(f"{app_flow['app_redirect_uri']}?{urlencode({'error': code})}", status_code=303)
             return RedirectResponse(f"/?signin_error={code}", status_code=303)
-        user = sign_in(db, request, profile)
+        try:
+            user = sign_in(db, request, profile)
+        except IdentityInUse:
+            if app_flow:
+                request.session.pop("app_flow", None)
+                return RedirectResponse(f"{app_flow['app_redirect_uri']}?{urlencode({'error': 'identity_in_use'})}",
+                                        status_code=303)
+            return RedirectResponse("/?link_error=identity_in_use", status_code=303)
         if app_flow:
             from . import tokens
 
@@ -270,7 +293,7 @@ def build_router(auth: Auth, get_db) -> APIRouter:
     def dev_login(request: Request, db: Session = Depends(get_db), email: str = "dev@localhost") -> dict:
         if not auth.settings.dev_login:
             raise HTTPException(404)
-        user = sign_in(db, request, Profile("dev", email, email, "Local developer"))
+        user = sign_in(db, request, Profile("dev", email, email, "Local developer"), link=False)
         return {"id": user.id}
 
     return router

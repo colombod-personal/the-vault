@@ -27,13 +27,13 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from .. import outbound, tokens
-from ..auth import Profile, find_or_create
+from ..auth import IdentityInUse, Profile, find_or_create
 from ..collection_view import SORTS, CollectionView, filtered, history_days
 from ..importer import ImportError_, export_collection, import_collection, user_entries
 from ..models import AccessToken, ApiSession, Deck, Import, Passkey, Share, User
 from ..native import NativeTokenError, NativeVerifier, ProviderUnavailable
 from ..privacy import export_archive, purge_user
-from ..sharing import accept_invite, create_invite, display_name, incoming_share, owned_deck
+from ..sharing import accept_invite, create_invite, display_name, incoming_share, owned_deck, reissue_invite
 from . import schemas as S
 from .hal import etag_response, link, page_body, paginate
 from .idempotency import idempotent
@@ -95,7 +95,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     @router.post("/auth/native/{provider}", tags=["auth"], response_model=S.TokenResponse,
                  summary="Sign in with a native Apple or Google ID token")
-    async def native_sign_in(provider: str, body: S.NativeSignIn, db: Session = Depends(get_db),
+    async def native_sign_in(provider: str, body: S.NativeSignIn, request: Request, db: Session = Depends(get_db),
                              current: User | None = Depends(optional_user)) -> dict:
         try:
             claims = await verifier.verify(provider, body.id_token, body.nonce)
@@ -104,7 +104,12 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         except ProviderUnavailable as exc:
             raise HTTPException(503, f"{exc}. Try again shortly.", headers={"Retry-After": "30"}) from exc
         name = body.name if provider == "apple" else claims.get("name")
-        user = find_or_create(db, Profile(provider, str(claims["sub"]), claims.get("email"), name), current)
+        if "account" not in request.state.scopes:  # a personal access token can't add sign-in methods
+            current = None
+        try:
+            user = find_or_create(db, Profile(provider, str(claims["sub"]), claims.get("email"), name), current)
+        except IdentityInUse as exc:
+            raise HTTPException(409, str(exc)) from exc
         return tokens.issue(db, user, "app", body.device_name)
 
     @router.post("/auth/token", tags=["auth"], response_model=S.TokenResponse,
@@ -149,7 +154,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return _me(user)
 
     @router.patch("/me", tags=["account"], response_model=S.Me)
-    def update_me(body: S.ProfileUpdate, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    def update_me(body: S.ProfileUpdate, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
         user.name = body.name.strip()[:200] or None  # right to rectification
         db.commit()
         return _me(user)
@@ -530,12 +535,15 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     @router.post("/shares", tags=["sharing"], response_model=S.Invite, status_code=201,
                  summary="Create a one-time invite link for your collection or a deck")
     def create_share(request: Request, body: S.ShareIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
-        def run():
-            share, token = create_invite(db, user, body.kind, body.deck_id, body.show_costs)
+        def invite(share: Share, token: str) -> dict:
             return {"id": share.id, "url": f"{settings.base_url}/?invite={token}", "expires_at": _iso(share.expires_at),
                     "_links": {"self": link(f"{V1}/shares/{share.id}")}}
 
-        return idempotent(request, db, user, 201, run)
+        # The stored answer keeps only the invite id, never the link: a retry gets a fresh link.
+        return idempotent(request, db, user, 201, lambda: invite(*create_invite(db, user, body.kind, body.deck_id,
+                                                                                body.show_costs)),
+                          redact=lambda answer: {"id": answer["id"]},
+                          replay=lambda stored: invite(*reissue_invite(db, user, stored["id"])))
 
     @router.get("/shares", tags=["sharing"], response_model=S.SharePage, response_model_by_alias=True,
                 summary="What you have shared, and with whom")

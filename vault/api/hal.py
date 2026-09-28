@@ -62,7 +62,13 @@ def paginate(items: list, key: Callable[[Any], tuple], ident: Callable[[Any], An
     keys = [k for k, _ in keyed]
     start = 0
     if cursor:
-        start = bisect.bisect_right(keys, decode_cursor(cursor))
+        after = decode_cursor(cursor)
+        try:  # a cursor this endpoint didn't make (wrong shape or types) can't be compared
+            if not isinstance(after, list):
+                raise TypeError
+            start = bisect.bisect_right(keys, after)
+        except TypeError:
+            raise HTTPException(400, "Invalid cursor") from None
     page = keyed[start:start + limit]
     more = start + limit < len(keyed)
     return [i for _, i in page], (encode_cursor(page[-1][0]) if more and page else None)

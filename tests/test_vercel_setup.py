@@ -63,3 +63,8 @@ def test_custom_domain_wins_and_ready_state():
     state = vercel_setup.main([], fake.transport)
     assert state["base_url"] == "https://vault.example.com" and state["changed"] == ["BASE_URL"]
     assert state["database"] is True and state["providers"] == ["google"]
+
+
+def test_shortest_custom_domain_is_preferred():
+    fake = FakeVercel(domains=["the-vault.vercel.app", "www.vault.example.com", "vault.example.com"])
+    assert vercel_setup.main([], fake.transport)["base_url"] == "https://vault.example.com"

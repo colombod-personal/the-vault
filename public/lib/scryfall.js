@@ -23,11 +23,16 @@ window.Scryfall = (() => {
   }
   function setCache(key, val) { cache[key] = val; scheduleWrite(); }
 
-  async function rateLimit() {
-    const now = Date.now();
-    const wait = Math.max(0, RATE_MS - (now - lastCall));
-    if (wait) await new Promise(r => setTimeout(r, wait));
-    lastCall = Date.now();
+  // Callers take turns through one promise chain, so concurrent lookups stay 500 ms apart.
+  let turns = Promise.resolve();
+  function rateLimit() {
+    const turn = turns.then(async () => {
+      const wait = Math.max(0, RATE_MS - (Date.now() - lastCall));
+      if (wait) await new Promise(r => setTimeout(r, wait));
+      lastCall = Date.now();
+    });
+    turns = turn.catch(() => {});
+    return turn;
   }
 
   function slimCard(c) {

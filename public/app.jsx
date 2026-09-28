@@ -50,14 +50,22 @@ const VAULT_REFRESH_KEY = 'vault_refreshed_at';
 const VAULT_INVITE_KEY = 'vault_pending_invite';
 
 // An invite link (/?invite=TOKEN) may arrive before sign-in: park the token, clean the URL.
-(() => {
+// A failed "Link Google" (etc.) comes back as /?link_error=CODE: show it once, clean the URL.
+const VAULT_START_NOTICE = (() => {
   const params = new URLSearchParams(location.search);
   const token = params.get('invite');
+  const linkError = params.get('link_error');
   if (token) {
     try { localStorage.setItem(VAULT_INVITE_KEY, token); } catch {}
     params.delete('invite');
-    history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params : ''));
   }
+  params.delete('link_error');
+  if (token || linkError) history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params : ''));
+  if (linkError === 'identity_in_use') {
+    return 'That sign-in is already used by another Vault account, so it was not linked. ' +
+      'Sign in with it to open that account, or remove it there first.';
+  }
+  return linkError ? `Linking failed (${linkError}). Please try again.` : null;
 })();
 const { useTweaks, TweaksPanel, TweakSection, TweakSlider, TweakToggle, TweakRadio, TweakSelect, TweakColor, TweakButton } = window;
 
@@ -83,7 +91,7 @@ function App() {
   const [refreshError, setRefreshError] = useStateApp(null);
   const [auth, setAuth] = useStateApp('checking'); // 'checking' | 'signed-out' | 'signed-in'
   const [me, setMe] = useStateApp(null);
-  const [notice, setNotice] = useStateApp(null);
+  const [notice, setNotice] = useStateApp(VAULT_START_NOTICE);
   const [accountOpen, setAccountOpen] = useStateApp(false);
   const [viewing, setViewing] = useStateApp(null); // { id, from } while looking at someone's shared collection
   const [deckText, setDeckText] = useStateApp(null); // deck opened from saved/shared decks

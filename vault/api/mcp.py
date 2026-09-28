@@ -160,8 +160,11 @@ def _with_cursor(body: Any) -> Any:
 def build_router(optional_user) -> APIRouter:
     router = APIRouter()
 
-    async def call_api(request: Request, tool: Tool, args: dict) -> tuple[int, Any]:
-        headers = {k: v for k, v in request.headers.items() if k.lower() in ("authorization", "cookie")}
+    async def call_api(request: Request, tool: Tool, args: dict, part: int | None) -> tuple[int, Any]:
+        forward = ("authorization", "cookie", "idempotency-key")  # a retried tool call must not create twice
+        headers = {k.lower(): v for k, v in request.headers.items() if k.lower() in forward}
+        if part is not None and "idempotency-key" in headers:  # a batch: one key per call in it
+            headers["idempotency-key"] = f"{headers['idempotency-key']}#{part}"
         kwargs: dict[str, Any] = {"headers": headers}
         params = {"q" if k == "query" else k: v for k, v in args.items() if v is not None}
         kwargs["params"] = {k: v for k, v in params.items() if k in tool.query}
@@ -193,7 +196,7 @@ def build_router(optional_user) -> APIRouter:
         except ValueError:
             return JSONResponse(_rpc_error(None, -32700, "Parse error"), status_code=400)
         if isinstance(message, list):  # JSON-RPC batch (older protocol versions)
-            answers = [a for a in [await handle(request, m) for m in message] if a is not None]
+            answers = [a for a in [await handle(request, m, i) for i, m in enumerate(message)] if a is not None]
             return JSONResponse(answers) if answers else Response(status_code=202)
         answer = await handle(request, message)
         return JSONResponse(answer) if answer is not None else Response(status_code=202)
@@ -203,7 +206,7 @@ def build_router(optional_user) -> APIRouter:
     def mcp_no_stream() -> Response:
         return Response(status_code=405, headers={"Allow": "POST"})
 
-    async def handle(request: Request, msg: Any) -> dict | None:
+    async def handle(request: Request, msg: Any, part: int | None = None) -> dict | None:
         if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0" or "method" not in msg:
             return _rpc_error(msg.get("id") if isinstance(msg, dict) else None, -32600, "Invalid request")
         id_, method, params = msg.get("id"), msg["method"], msg.get("params") or {}
@@ -231,7 +234,7 @@ def build_router(optional_user) -> APIRouter:
             unknown = [k for k in args if k not in tool.properties]
             if missing or unknown or not isinstance(args, dict):
                 return _rpc_error(id_, -32602, f"Invalid arguments: missing {missing}, unknown {unknown}")
-            status, body = await call_api(request, tool, args)
+            status, body = await call_api(request, tool, args, part)
             body = _with_cursor(body)
             text = json.dumps(body, separators=(",", ":"), default=str)
             result = {"content": [{"type": "text", "text": text}], "isError": status >= 400}

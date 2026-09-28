@@ -133,6 +133,9 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
         if writes and "write" not in scopes:
             raise HTTPException(403, "This access token is read-only. Create one with the write scope to make changes.",
                                 headers={"WWW-Authenticate": 'Bearer error="insufficient_scope", scope="write"'})
+        if not writes and "read" not in scopes:
+            raise HTTPException(403, "This access token can't read. Create one with the read scope.",
+                                headers={"WWW-Authenticate": 'Bearer error="insufficient_scope", scope="read"'})
         return user
 
     def account_user(request: Request, user: User = Depends(current_user)) -> User:

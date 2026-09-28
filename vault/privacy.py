@@ -20,7 +20,7 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from .importer import export_collection
-from .models import AccessToken, ApiSession, Passkey, IdempotentRequest, AuthCode, CollectionValue, Deck, Entry, Identity, Import, Share, User
+from .models import AccessToken, ApiSession, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionValue, Deck, Entry, Identity, Import, Share, User
 from .prices import history
 from .collection_view import CollectionView
 
@@ -144,6 +144,7 @@ def personal_data(user_id: int) -> dict:
     here, so a new table can't be forgotten on account deletion.
     """
     return {
+        "retired_refresh_tokens": delete(RetiredRefreshToken).where(RetiredRefreshToken.user_id == user_id),
         "api_sessions": delete(ApiSession).where(ApiSession.user_id == user_id),
         "access_tokens": delete(AccessToken).where(AccessToken.user_id == user_id),
         "passkeys": delete(Passkey).where(Passkey.user_id == user_id),

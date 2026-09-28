@@ -171,10 +171,22 @@ class ApiSession(Base):
     access_hash: Mapped[str] = mapped_column(String(64), unique=True)
     access_expires: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     refresh_hash: Mapped[str] = mapped_column(String(64), unique=True)
-    previous_refresh_hash: Mapped[str | None] = mapped_column(String(64), index=True)
     refresh_expires: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RetiredRefreshToken(Base):
+    """A refresh token that was already rotated (its hash only). If one comes back, it was
+    copied, and its whole session is revoked. Kept until the token would have expired."""
+
+    __tablename__ = "retired_refresh_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("api_sessions.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class AuthCode(Base):

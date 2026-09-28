@@ -67,7 +67,10 @@ tell the agent how to start, and remind it to credit artists and Scryfall.
   `version`, to skip unchanged data.
 - **Safe retries.** Every GET can be repeated. For POSTs, send `Idempotency-Key: <uuid>`: the
   first answer is stored for 24 hours and replayed (`Idempotent-Replayed: true`), so an import
-  or a new deck never happens twice. Reusing a key for a different request answers 422.
+  or a new deck never happens twice. Reusing a key for a different request answers 422; a
+  retry that arrives while the first attempt is still running answers 409 with `Retry-After`.
+  On `/api/mcp` the header covers the tool call (in a JSON-RPC batch, each call separately).
+  A retried invite gets a fresh link: stored answers never keep one.
 - **Errors say what to do.** Every error is problem+json with a `detail`. A 503 carries
   `Retry-After`.
 

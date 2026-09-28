@@ -61,7 +61,7 @@ class Vercel:
                    if not d.get("redirect") and d.get("verified", True) and not d.get("gitBranch")]
         custom = [d["name"] for d in domains if not d["name"].endswith(".vercel.app")]
         default = [d["name"] for d in domains if d["name"].endswith(".vercel.app")]
-        return (custom or sorted(default, key=len) or [None])[0]
+        return (sorted(custom, key=len) or sorted(default, key=len) or [None])[0]
 
 
 def configure(v: Vercel) -> dict:

@@ -13,7 +13,9 @@ One API for the web app and native apps (the planned iOS app), under `/api/v1`.
   and you get `304 Not Modified` until an import or the daily price sync changes something.
 - **Safe retries.** GETs can always be repeated. POSTs that create something (imports, decks,
   shares) accept `Idempotency-Key: <uuid>`: a retry with the same key replays the first answer
-  (`Idempotent-Replayed: true`) instead of doing the work twice.
+  (`Idempotent-Replayed: true`) instead of doing the work twice. A retry that arrives while the
+  first attempt is still running gets `409` with `Retry-After`. A replayed invite has a fresh
+  link (the stored answer never keeps one; the earlier link stops working).
 - **A version to cache by.** `GET /api/v1/collection` has a `version` that changes whenever the
   collection or its prices change. The web app keeps a copy in IndexedDB and refetches the
   pages only when the version moves.
@@ -74,6 +76,10 @@ The server stores only SHA-256 hashes of tokens.
    {"access_token": "...", "token_type": "Bearer", "expires_in": 3600, "refresh_token": "...", "session_id": 7}
    ```
 
+   Sent with the app's own bearer token, a new Apple or Google sign-in is linked to that
+   account. One already used by another account answers `409`. Personal access tokens can't
+   link sign-ins.
+
 Audiences: `APPLE_APP_BUNDLE_ID` for Apple and `GOOGLE_IOS_CLIENT_ID` for Google. The web client
 ids are accepted too.
 
@@ -81,7 +87,8 @@ ids are accepted too.
 
 1. The app makes a `code_verifier` and opens this in `ASWebAuthenticationSession`:
    `/api/auth/login/{provider}?app_redirect_uri=vault://auth&code_challenge=<BASE64URL(SHA256(verifier))>&code_challenge_method=S256`
-2. After sign-in the browser is sent to `vault://auth?code=...`, or to `?error=...` if it failed.
+2. After sign-in the browser is sent to `vault://auth?code=...`, or to `?error=...` if it failed
+   (`identity_in_use` when a signed-in person tries to link a sign-in owned by another account).
    `app_redirect_uri` must be listed in `APP_REDIRECT_URIS`.
 3. `POST /api/v1/auth/token`:
 

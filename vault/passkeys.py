@@ -151,7 +151,7 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         db.add(user)
         db.flush()
         passkey = save_credential(db, user, pending, body)
-        sign_in(db, request, _profile(pending["handle"]))
+        sign_in(db, request, _profile(pending["handle"]), link=False)
         return {"signed_in": True, "user_id": user.id, "passkey_id": passkey.id}
 
     # -- another passkey for the signed-in account --------------------------------------------
@@ -204,7 +204,7 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         passkey.sign_count = verified.new_sign_count
         passkey.last_used_at = _now()
         db.commit()
-        sign_in(db, request, _profile(identity.subject))
+        sign_in(db, request, _profile(identity.subject), link=False)
         return {"signed_in": True}
 
     return router

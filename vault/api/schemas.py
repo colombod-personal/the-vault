@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Link(BaseModel):
@@ -339,6 +339,13 @@ class AccessTokenIn(BaseModel):
     name: str = Field("Agent", max_length=80, description="What the token is for, e.g. 'Claude desktop'")
     scopes: list[Literal["read", "write"]] = Field(["read"], description='"read", or "read" and "write"')
     expires_in_days: int = Field(90, ge=1, le=365)
+
+    @field_validator("scopes")
+    @classmethod
+    def _needs_read(cls, scopes: list[str]) -> list[str]:
+        if "read" not in scopes:
+            raise ValueError('scopes must include "read" (a write-only token is not offered)')
+        return scopes
 
 
 class AccessTokenItem(Hal):

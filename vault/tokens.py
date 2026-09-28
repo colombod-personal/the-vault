@@ -17,10 +17,10 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import or_, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
-from .models import AccessToken, ApiSession, AuthCode, User
+from .models import AccessToken, ApiSession, AuthCode, RetiredRefreshToken, User
 
 ACCESS_TTL = timedelta(hours=1)
 REFRESH_TTL = timedelta(days=60)
@@ -46,19 +46,19 @@ def _aware(dt: datetime) -> datetime:
     return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
 
 
-def _pair(session: ApiSession) -> dict:
+def _new_pair() -> tuple[dict, dict]:
+    """(column values for the session, the token response)."""
     access, refresh = secrets.token_urlsafe(32), secrets.token_urlsafe(48)
-    session.access_hash, session.access_expires = _hash(access), _now() + ACCESS_TTL
-    session.refresh_hash, session.refresh_expires = _hash(refresh), _now() + REFRESH_TTL
-    return {
-        "access_token": access, "token_type": "Bearer", "expires_in": int(ACCESS_TTL.total_seconds()),
-        "refresh_token": refresh, "session_id": session.id,
-    }
+    values = {"access_hash": _hash(access), "access_expires": _now() + ACCESS_TTL,
+              "refresh_hash": _hash(refresh), "refresh_expires": _now() + REFRESH_TTL}
+    return values, {"access_token": access, "token_type": "Bearer", "expires_in": int(ACCESS_TTL.total_seconds()),
+                    "refresh_token": refresh}
 
 
 def issue(db: Session, user: User, client: str = "app", device_name: str | None = None) -> dict:
-    session = ApiSession(user_id=user.id, client=client[:40], device_name=(device_name or None) and device_name[:120])
-    tokens = _pair(session)
+    values, tokens = _new_pair()
+    session = ApiSession(user_id=user.id, client=client[:40], device_name=(device_name or None) and device_name[:120],
+                         **values)
     db.add(session)
     db.flush()
     tokens["session_id"] = session.id
@@ -79,21 +79,33 @@ def authenticate(db: Session, bearer: str) -> User | None:
 
 def refresh(db: Session, refresh_token: str) -> dict:
     h = _hash(refresh_token)
-    session = db.scalar(select(ApiSession).where(or_(ApiSession.refresh_hash == h, ApiSession.previous_refresh_hash == h)))
+    session = db.scalar(select(ApiSession).where(ApiSession.refresh_hash == h))
     if session is None:
-        raise TokenError("invalid_grant", "Unknown or revoked refresh token")
-    if session.previous_refresh_hash == h:  # an old token came back: someone copied it
-        db.delete(session)
+        retired = db.scalar(select(RetiredRefreshToken).where(RetiredRefreshToken.token_hash == h))
+        if retired is None:
+            raise TokenError("invalid_grant", "Unknown or revoked refresh token")
+        # Any already-rotated token coming back means it was copied: revoke the whole session.
+        db.execute(delete(RetiredRefreshToken).where(RetiredRefreshToken.session_id == retired.session_id))
+        db.execute(delete(ApiSession).where(ApiSession.id == retired.session_id))
         db.commit()
         raise TokenError("invalid_grant", "Refresh token reuse detected; the session was revoked")
     if _aware(session.refresh_expires) < _now():
+        db.execute(delete(RetiredRefreshToken).where(RetiredRefreshToken.session_id == session.id))
         db.delete(session)
         db.commit()
         raise TokenError("invalid_grant", "Refresh token expired; sign in again")
-    session.previous_refresh_hash = h
-    tokens = _pair(session)
+    retired_expires, values, tokens = session.refresh_expires, *_new_pair()
+    # Compare-and-swap: of two refreshes racing with the same token, only one rotates it.
+    if not db.execute(update(ApiSession).where(ApiSession.id == session.id, ApiSession.refresh_hash == h)
+                      .values(**values)).rowcount:
+        db.rollback()
+        raise TokenError("invalid_grant", "This refresh token was just used by another request")
+    db.execute(delete(RetiredRefreshToken).where(RetiredRefreshToken.session_id == session.id,
+                                                 RetiredRefreshToken.expires_at < _now()))
+    db.add(RetiredRefreshToken(user_id=session.user_id, session_id=session.id, token_hash=h,
+                               expires_at=retired_expires))
     db.commit()
-    return tokens
+    return {**tokens, "session_id": session.id}
 
 
 def revoke_by_access(db: Session, bearer: str) -> bool:

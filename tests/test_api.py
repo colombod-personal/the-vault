@@ -1,3 +1,5 @@
+import base64
+import json
 from datetime import date
 from pathlib import Path
 
@@ -90,6 +92,9 @@ def test_cursor_pagination_filters_and_sorting(signed_in):
     assert [c["name"] for c in all_cards(signed_in, q="ring")] == ["Sol Ring"]
     assert signed_in.get(f"{V1}/collection/cards", params={"sort": "nope"}).status_code == 400
     assert signed_in.get(f"{V1}/collection/cards", params={"cursor": "%%%"}).status_code == 400
+    for forged in (1, {}, [None], [1]):  # valid JSON, but not a cursor this endpoint made
+        cursor = base64.urlsafe_b64encode(json.dumps(forged).encode()).decode().rstrip("=")
+        assert signed_in.get(f"{V1}/collection/cards", params={"cursor": cursor}).status_code == 400, forged
     assert signed_in.get(f"{V1}/collection/cards", params={"limit": 100000}).json()["count"] == 4  # capped, not an error
 
 

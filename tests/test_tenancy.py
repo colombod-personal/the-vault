@@ -141,3 +141,26 @@ def test_vercel_without_database_explains_itself(monkeypatch):
     index = importlib.import_module("api.index")
     res = TestClient(index.app).get("/api/v1/collection")
     assert res.status_code == 503 and "DATABASE_URL is not set" in res.json()["detail"]
+
+
+def test_racing_accepts_claim_an_invite_once(client, monkeypatch):
+    from vault import sharing
+
+    login(client, "alice@example.com")
+    token = client.post("/api/v1/shares", json={"kind": "collection"}).json()["url"].split("invite=")[1]
+    real_aware, raced = sharing._aware, []
+
+    def carol_accepts_meanwhile(dt):  # runs after Bob's request has read the unused invite
+        if not raced:
+            raced.append(True)
+            with client.app.state.db.sessions() as db:
+                carol = sharing.User(email="carol@example.com")
+                db.add(carol)
+                db.commit()
+                sharing.accept_invite(db, carol, token)
+        return real_aware(dt)
+
+    login(client, "bob@example.com")
+    monkeypatch.setattr(sharing, "_aware", carol_accepts_meanwhile)
+    assert client.post("/api/v1/shares/accept", json={"token": token}).status_code == 404
+    assert raced and client.get("/api/v1/shared").json()["items"] == []

@@ -128,9 +128,10 @@ with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic
 7. **Optional:**
    - Your own domain, under project → Settings → Domains. Update `BASE_URL` and each
      provider's redirect URI afterwards.
-   - `VERCEL_AUTOMATION_BYPASS_SECRET` (a repository secret, with the value from Vercel →
-     Deployment Protection → Protection Bypass for Automation), so previews behind Vercel
-     Authentication can be smoke-tested too.
+   - To smoke-test a preview behind Vercel Authentication, run
+     `VERCEL_AUTOMATION_BYPASS_SECRET=... python -m jobs.smoke_test <preview URL>` locally, with
+     the value from Vercel → Deployment Protection → Protection Bypass for Automation. The
+     workflow's smoke test runs without secrets, so it reports those previews as protected.
 
 **Costs:**
 - Vercel Hobby: $0.

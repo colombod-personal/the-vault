@@ -211,3 +211,68 @@ def test_provider_outage_is_a_503_the_app_can_retry(client, idp):
     assert res.status_code == 503 and res.headers["content-type"].startswith("application/problem+json")
     idp.apple.outage = False
     assert apple_sign_in(client, idp).status_code == 200
+
+
+def refresh_with(client, tokens):
+    return client.post(f"{V1}/auth/token", json={"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"]})
+
+
+def test_any_already_rotated_refresh_token_revokes_the_session(client, idp):
+    first = apple_sign_in(client, idp).json()
+    second = refresh_with(client, first).json()
+    third = refresh_with(client, second).json()  # two rotations: `first` is two generations old
+    replay = refresh_with(client, first)
+    assert replay.status_code == 400 and "reuse" in replay.json()["detail"]
+    assert client.get(f"{V1}/me", headers=bearer(third)).status_code == 401
+    assert refresh_with(client, third).status_code == 400
+
+
+def test_racing_refreshes_rotate_once(app, client, idp, monkeypatch):
+    from vault import tokens
+
+    first = apple_sign_in(client, idp).json()
+    real, winner = tokens._new_pair, {}
+
+    def other_request_wins_meanwhile():
+        monkeypatch.setattr(tokens, "_new_pair", real)
+        with app.state.db.sessions() as other:
+            winner.update(tokens.refresh(other, first["refresh_token"]))
+        return real()
+
+    monkeypatch.setattr(tokens, "_new_pair", other_request_wins_meanwhile)
+    with app.state.db.sessions() as db, pytest.raises(tokens.TokenError, match="just used"):
+        tokens.refresh(db, first["refresh_token"])
+    assert client.get(f"{V1}/me", headers=bearer(winner)).status_code == 200  # the winner's pair is intact
+    assert refresh_with(client, winner).status_code == 200
+
+
+def test_linking_never_switches_accounts(client, idp):
+    with TestClient(client.app) as other:  # a-4 belongs to someone else's account
+        assert apple_sign_in(other, idp, sub="a-4").status_code == 200
+    res = client.get("/api/auth/login/google", follow_redirects=False)
+    web_callback(client, idp.google.approve(res.headers["location"], "g-4"))
+    mine = client.get(f"{V1}/me").json()["id"]
+
+    assert apple_sign_in(client, idp, sub="a-4").status_code == 409  # native, while signed in
+    with TestClient(client.app) as other:  # g-5 belongs to someone else's account
+        res = other.get("/api/auth/login/google", follow_redirects=False)
+        web_callback(other, idp.google.approve(res.headers["location"], "g-5"))
+    res = client.get("/api/auth/login/google", follow_redirects=False)  # "Link Google" with g-5
+    back = web_callback(client, idp.google.approve(res.headers["location"], "g-5"))
+    assert back.headers["location"] == "/?link_error=identity_in_use"
+    me = client.get(f"{V1}/me").json()
+    assert me["id"] == mine and me["providers"] == ["google"]
+
+
+def test_personal_access_tokens_cannot_link_sign_ins(client, idp):
+    res = client.get("/api/auth/login/google", follow_redirects=False)
+    web_callback(client, idp.google.approve(res.headers["location"], "g-6"))
+    pat = client.post(f"{V1}/me/tokens", json={"name": "bot", "scopes": ["read", "write"]}).json()["token"]
+    with TestClient(client.app) as agent:
+        raw = secrets.token_urlsafe(16)
+        idp.apple.add_account("a-6", "x@privaterelay.appleid.com")
+        token = idp.apple.native_id_token(BUNDLE, "a-6", nonce=hashlib.sha256(raw.encode()).hexdigest())
+        tokens = agent.post(f"{V1}/auth/native/apple", json={"id_token": token, "nonce": raw},
+                            headers={"Authorization": f"Bearer {pat}"}).json()
+        assert agent.get(f"{V1}/me", headers=bearer(tokens)).json()["providers"] == ["apple"]  # its own account
+    assert client.get(f"{V1}/me").json()["providers"] == ["google"]
