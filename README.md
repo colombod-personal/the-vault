@@ -239,3 +239,11 @@ Rules to keep (from [Scryfall's API terms](https://scryfall.com/docs/api) and
   or pgvector for "similar cards" if needed.
 - Before opening to other people, work through the operational checklist in `docs/gdpr.md`
   (privacy notice details, processor agreements, backup and log retention).
+
+## Licence
+
+Our code is [MIT](LICENSE). Dependencies keep their own licences; all are permissive except
+Psycopg (LGPL-3.0, used unmodified as a library, which is compatible with MIT) and certifi
+(MPL-2.0, unmodified). Magic: The Gathering content belongs to Wizards of the Coast (Fan
+Content Policy), and Scryfall data follows Scryfall's terms. Details are in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); `tests/test_licenses.py` keeps GPL out.
