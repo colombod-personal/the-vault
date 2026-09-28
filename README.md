@@ -148,6 +148,12 @@ with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic
 - **Protect `main`:** Settings → Branches → add a rule (or ruleset) for `main`: require a pull
   request and the `test` check, and block force pushes and deletion.
 - **Vercel:** keep Deployment Protection on, give tokens an expiry, and never set `DEV_LOGIN`.
+- **The "Vercel Preview Comments" check** on a pull request goes red while a comment left with
+  the Vercel toolbar on a preview is unresolved. It isn't a code failure. Resolve the comment in
+  Vercel (the check's *Go to feedback* link). Vercel re-posts the check only for a new commit, so
+  re-running it does nothing. Branches have no previews any more, so turn the toolbar's comments
+  off for Preview (Vercel → the-vault → Settings → General → Vercel Toolbar) to keep it from
+  coming back.
 - CDN scripts carry integrity hashes, so a tampered copy won't run.
 - `tests/test_workflows.py` fails if a workflow breaks one of these rules.
 
