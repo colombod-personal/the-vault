@@ -52,7 +52,7 @@ def test_after_first_deploy_sets_base_url_once_and_keeps_secrets(token):
     assert state["redirect_uris"]["google"] == "https://the-vault.vercel.app/api/auth/callback/google"
     again = vercel_setup.main([], fake.transport)
     assert again["changed"] == [] and fake.value("SESSION_SECRET") == secret  # never overwritten
-    text = token.read_text()
+    text = token.read_text(encoding="utf-8")
     assert "Storage → Create Database → Neon" in text and "no provider yet" in text
 
 

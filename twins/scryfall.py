@@ -51,7 +51,7 @@ class ScryfallTwin(Twin):
         self._locked_until = 0.0
         self.bulk_updated_at = datetime.now(timezone.utc).replace(microsecond=0)
         if seed:
-            for card in json.loads((DATA / "scryfall_cards.json").read_text()):
+            for card in json.loads((DATA / "scryfall_cards.json").read_text(encoding="utf-8")):
                 self.cards[card["id"]] = card
         a = "api.scryfall.com"
         self.route("GET", a, "/cards/named", self._named)

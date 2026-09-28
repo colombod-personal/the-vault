@@ -122,7 +122,7 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
     state = configure(Vercel(token, args.project, args.scope, transport))
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
-        with open(summary, "a") as fh:
+        with open(summary, "a", encoding="utf-8") as fh:
             fh.write(checklist(state))
     print(json.dumps(state))
     return state
