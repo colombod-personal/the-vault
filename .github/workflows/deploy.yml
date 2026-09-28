@@ -9,7 +9,8 @@ name: deploy
 # is still missing (database, sign-in providers, redirect URIs) to the job summary.
 on:
   push:
-    branches: [main]
+    # The first-release branch deploys too, until PR #1 is merged; then remove it and keep main only.
+    branches: [main, claude/festive-mendel-9vr6vt]
   workflow_dispatch:
     inputs:
       target:
@@ -25,7 +26,7 @@ jobs:
     timeout-minutes: 20
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE }}
+      VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE || 'wintermute2' }}
       TARGET: ${{ inputs.target || 'production' }}
     steps:
       - name: Check for the Vercel token
@@ -87,14 +88,13 @@ jobs:
           echo "base=${base:-${{ vars.VAULT_URL }}}" >> "$GITHUB_OUTPUT"
           echo "### Deployed ($TARGET): $url" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Check the live site
+      - name: Smoke-test the live site
         if: steps.token.outputs.ready == 'true' && env.TARGET == 'production' && steps.deploy.outputs.base != ''
         run: |
           site="${{ steps.deploy.outputs.base }}"
-          for i in 1 2 3 4 5 6; do
-            code=$(curl -s -o health.json -w '%{http_code}' "$site/api/health" || true)
-            [ "$code" = "200" ] && { cat health.json; exit 0; }
-            [ "$code" = "503" ] && { echo "::warning::Deployed, but not configured yet (see the job summary checklist):"; cat health.json; exit 0; }
+          for i in 1 2 3 4 5 6; do  # give a cold start a moment
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$site/api/health" || true)
+            [ "$code" = "200" ] || [ "$code" = "503" ] && break
             sleep 10
           done
-          echo "::error::$site/api/health did not answer"; exit 1
+          python -m jobs.smoke_test "$site"

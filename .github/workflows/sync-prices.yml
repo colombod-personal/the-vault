@@ -6,6 +6,11 @@ on:
   schedule:
     - cron: "17 10 * * *"   # Scryfall regenerates bulk files around 09:00 UTC
   workflow_dispatch: {}
+  push:
+    # Lets the first-release branch run the sync (workflow_dispatch needs the file on main);
+    # runs only when this file changes. Remove with the deploy branch trigger after PR #1 merges.
+    branches: [claude/festive-mendel-9vr6vt]
+    paths: [.github/workflows/sync-prices.yml]
 concurrency: sync-prices
 jobs:
   sync:
@@ -21,7 +26,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE }}
+          VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE || 'wintermute2' }}
         run: |
           if [ -z "$DATABASE_URL" ]; then
             [ -n "$VERCEL_TOKEN" ] || { echo "::error::Set VERCEL_TOKEN (or DATABASE_URL) in the repository secrets"; exit 1; }
