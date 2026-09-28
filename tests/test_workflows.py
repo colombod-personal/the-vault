@@ -11,6 +11,7 @@ The rules (README → Security):
 
 import json
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -73,3 +74,14 @@ def test_cdn_scripts_have_integrity_hashes():
     for page in (ROOT / "public").glob("*.html"):
         for tag in re.findall(r"<script[^>]*src=\"https?://[^>]*>", page.read_text(encoding="utf-8")):
             assert 'integrity="sha384-' in tag and 'crossorigin="anonymous"' in tag, f"{page.name}: {tag}"
+
+
+@pytest.mark.parametrize("path,ignored", [
+    (".env.local", True), (".env.production.local", True), (".env.vercel", True), (".env", True),
+    (".vercel/project.json", True), (".claude/settings.local.json", True), (".env.example", False),
+])
+def test_local_secrets_are_never_committed(path, ignored):
+    if shutil.which("git") is None or not (ROOT / ".git").exists():
+        pytest.skip("not a git checkout")
+    result = subprocess.run(["git", "check-ignore", "-q", "--no-index", path], cwd=ROOT)
+    assert (result.returncode == 0) is ignored, path

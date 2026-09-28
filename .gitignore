@@ -219,7 +219,11 @@ __marimo__/
 
 # --- The Vault ---
 # (lib/ and lib64/ above are anchored to the repo root so public/lib/ is kept)
+# every env file (.env.local from `vercel link`/`vercel env pull` holds tokens), except the example
+.env*
 !.env.example
+# personal Claude Code settings
+.claude/settings.local.json
 *.db
 *.jsonl.gz
 .vercel/
