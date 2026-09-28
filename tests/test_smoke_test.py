@@ -45,3 +45,10 @@ def test_not_configured_deployment(monkeypatch):
         return httpx.Response(200, text="<html>The Vault</html>")
     results, configured = smoke_test.run("https://x.test", httpx.MockTransport(handler))
     assert not configured and "not configured yet" in dict((n, d) for n, _, d in results)["GET /api/health"]
+
+
+def test_vercel_login_redirect_is_reported_as_protection():
+    sso = httpx.MockTransport(lambda r: httpx.Response(
+        302, headers={"location": "https://vercel.com/sso-api?url=https%3A%2F%2Fthe-vault-x.vercel.app%2F&nonce=1"}))
+    results, configured = smoke_test.run("https://the-vault-x.vercel.app", sso)
+    assert not configured and [(n, ok) for n, ok, _ in results] == [("Deployment protection", True)]

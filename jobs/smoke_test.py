@@ -25,7 +25,10 @@ def run(base: str, transport: httpx.BaseTransport | None = None) -> tuple[list[t
         headers["x-vercel-protection-bypass"] = bypass
     with httpx.Client(base_url=base, timeout=30, follow_redirects=False, transport=transport, headers=headers) as http:
         first = http.get("/")
-        if first.status_code == 401 and "vercel" in first.text.lower() and "The Vault" not in first.text:
+        location = first.headers.get("location", "")
+        walled = (first.status_code in (301, 302, 303, 307, 308) and "vercel.com" in location) or \
+            (first.status_code == 401 and "vercel" in first.text.lower() and "The Vault" not in first.text)
+        if walled:  # Vercel Authentication: a redirect to vercel.com's login (or its 401 page)
             return [("Deployment protection", True, "this deployment is behind Vercel Authentication; set the "
                      "VERCEL_AUTOMATION_BYPASS_SECRET repository secret to test it")], False
 
