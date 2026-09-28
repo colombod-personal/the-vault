@@ -31,8 +31,12 @@ def make_engine(url: str) -> Engine:
             dbapi_conn.execute("PRAGMA foreign_keys=ON")
 
         return engine
-    # Serverless functions come and go: check connections before use, keep the pool small.
-    return create_engine(url, pool_pre_ping=True, pool_size=2, max_overflow=2)
+    # Serverless functions come and go: check connections before use, keep the pool small, and
+    # recycle idle connections (Neon suspends idle compute after a few minutes).
+    # Neon's pooled endpoint (DATABASE_URL, host "...-pooler...") is PgBouncer in transaction mode,
+    # so psycopg's automatic server-side prepared statements are turned off (prepare_threshold=None).
+    return create_engine(url, pool_pre_ping=True, pool_size=2, max_overflow=2, pool_recycle=240,
+                         connect_args={"prepare_threshold": None})
 
 
 class Database:

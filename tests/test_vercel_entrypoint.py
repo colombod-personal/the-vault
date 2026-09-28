@@ -38,3 +38,22 @@ def test_misconfigured_deployment_explains_itself(monkeypatch, tmp_path):
     res = TestClient(index.app).get("/api/v1/collection")
     assert res.status_code == 503 and "not configured yet" in res.json()["detail"]
     sys.modules.pop("api.index", None)
+
+
+def test_postgres_engine_suits_neons_pooler(monkeypatch):
+    """Neon's pooled DATABASE_URL is PgBouncer (transaction mode): no server-side prepared statements."""
+    from vault import db
+
+    seen = {}
+    monkeypatch.setattr(db, "create_engine", lambda url, **kw: seen.update(url=url, **kw))
+    db.make_engine("postgres://u:p@ep-x-pooler.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require")
+    assert seen["url"].startswith("postgresql+psycopg://") and "channel_binding=require" in seen["url"]
+    assert seen["connect_args"] == {"prepare_threshold": None} and seen["pool_pre_ping"] is True
+
+
+def test_entrypoint_is_named_explicitly_for_vercel():
+    import tomllib
+
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    module, attr = config["tool"]["vercel"]["entrypoint"].split(":")
+    assert (ROOT / (module.replace(".", "/") + ".py")).is_file() and attr == "app"

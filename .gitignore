@@ -229,3 +229,6 @@ data/
 !tests/fixtures/*.csv
 # twin seed data is public, twin-made card data (not personal)
 !twins/data/
+# local agent tooling (e.g. the Neon agent-skills installer); never part of the app
+.agents/
+skills-lock.json

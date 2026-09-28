@@ -28,6 +28,10 @@ allow-direct-references = true
 [tool.hatch.build.targets.wheel]
 packages = ["vault"]
 
+[tool.vercel]
+# Tells Vercel's builder where the app is, so it doesn't have to find it by static analysis.
+entrypoint = "api.index:app"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = [".", "tests"]
