@@ -157,7 +157,8 @@ def test_daily_sync_card_data_history_and_stats(app, signed_in):
     summary = signed_in.get(f"{V1}/collection").json()
     assert summary["market_value"] == round(4 * 0.12 + 3.0 + 0.8 + 0.25, 2) and summary["prices_as_of"] == "2026-09-27"
     history = signed_in.get(f"{V1}/collection/history").json()
-    assert history["items"] == [{"day": "2026-09-27", "market": 4.53, "cost": 2.83, "copies": 7, "priced": 7}]
+    synced = {"day": "2026-09-27", "market": 4.53, "cost": 2.83, "copies": 7, "priced": 7}
+    assert history["items"][0] == synced  # the import's own day (today, at the file's prices) follows it
     st = signed_in.get(f"{V1}/collection/stats").json()
     assert st["most_valuable"][0]["name"] == "Sol Ring" and st["biggest_gains"][0]["name"] == "Sol Ring"
     months = signed_in.get(f"{V1}/collection/timeline").json()["months"]
@@ -216,3 +217,9 @@ def test_uploads_are_read_only_up_to_the_limit(signed_in, monkeypatch):
     monkeypatch.setattr(UploadFile, "read", read)
     assert upload(signed_in).status_code == 201
     assert asked == [MAX_UPLOAD_BYTES + 1]  # never the whole body, whatever its size
+
+
+def test_an_import_starts_the_value_history(signed_in):
+    signed_in.post("/api/v1/imports", files={"file": ("e.csv", CSV, "text/csv")})
+    days = signed_in.get("/api/v1/collection/history").json()["items"]
+    assert len(days) == 1 and days[0]["copies"] == 7 and days[0]["market"] > 0

@@ -3,6 +3,8 @@ in any format people can take elsewhere (``mtg_toolkits.formats``)."""
 
 from __future__ import annotations
 
+from datetime import date
+
 from mtg_toolkits import delta, formats
 from mtg_toolkits.dragonshield import SET_ALIASES
 from mtg_toolkits.models import CollectionEntry, Finish
@@ -10,6 +12,7 @@ from sqlalchemy import delete, select, tuple_
 from sqlalchemy.orm import Session
 
 from .models import Card, Entry, Import, User
+from .prices import compute_values
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 EXACT = ("set_number", "id")
@@ -87,6 +90,9 @@ def import_collection(db: Session, user: User, filename: str, content: bytes) ->
             price_finish=price_finish,
         ))
     db.commit()
+    # Today's value right away, so the value-over-time chart starts with the first import
+    # (the daily sync writes it again with that day's prices).
+    compute_values(db, date.today(), user.id)
     return imp
 
 

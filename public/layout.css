@@ -81,3 +81,14 @@ button.brand:focus-visible, .nav button:focus-visible { outline: 1px solid var(-
   .signin-lede { margin-bottom: 0; }
   .signin-form { padding: 24px 20px; }
 }
+
+/* ---- Valuation: market value, day by day ---- */
+.daily-empty { color: var(--text-2); font-size: 14px; line-height: 1.6; margin: 0; max-width: 640px; }
+.daily-empty b { color: var(--gold); }
+.daily-summary { display: flex; flex-wrap: wrap; gap: 12px 32px; margin-bottom: 14px; }
+.daily-summary > div { display: grid; gap: 4px; }
+.daily-summary b { font-family: var(--mono); font-size: 18px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.dv-axis { font-family: var(--mono); font-size: 10px; fill: var(--text-2); }
+.daily-note { color: var(--text-2); font-size: 12px; line-height: 1.6; margin: 12px 0 0; max-width: 760px; }
+/* Small labels on a panel's lighter background need the brighter text colour for contrast. */
+.panel .eyebrow, .panel .label-mono { color: var(--text-2); }

@@ -38,9 +38,10 @@ def unit_price(row: Entry, snap: PriceSnapshot | None) -> tuple[float, bool]:
     return float((row.source_prices or {}).get("market") or 0.0), False
 
 
-def compute_values(db: Session, day: date) -> int:
-    """Write every user's collection value for ``day``. Returns users processed."""
-    rows = list(db.scalars(select(Entry)))
+def compute_values(db: Session, day: date, user_id: int | None = None) -> int:
+    """Write every user's (or one user's) collection value for ``day``. Returns users processed."""
+    query = select(Entry) if user_id is None else select(Entry).where(Entry.user_id == user_id)
+    rows = list(db.scalars(query))
     prices = latest_prices(db, {r.scryfall_id for r in rows if r.scryfall_id})
     totals: dict[int, list[float]] = defaultdict(lambda: [0.0, 0.0, 0, 0])
     for r in rows:

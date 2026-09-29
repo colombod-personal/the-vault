@@ -147,6 +147,8 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
         </div>
       </div>
 
+      <DailyValue history={data.history} />
+
       <div className="panel" style={{ marginBottom: 24 }}>
         <div className="section-head" style={{ marginBottom: 18 }}>
           <div>
@@ -171,8 +173,8 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
         <p className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', lineHeight: 1.6, marginTop: 16, maxWidth: 760 }}>
           Each point is your holdings as of that month. The cost line is what you actually paid over
           time; the market line values those same holdings at the latest prices (calculated {fresh.abs}).
-          The gold band between them is unrealised gain — it is not a record of past market prices, which
-          aren't tracked here.
+          The gold band between them is unrealised gain. For what your collection was actually worth on
+          each day, see the price history above.
         </p>
       </div>
 
@@ -235,6 +237,183 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
       </div>
     </div>);
 
+}
+
+// ---- Real value over time: one point per day, recorded by the daily price sync (and on import) ----
+
+const DAY_RANGES = [['30', '30D'], ['90', '90D'], ['365', '1Y'], ['all', 'All']];
+const fmtDay = (iso, opts) => new Date(iso + 'T00:00:00').toLocaleDateString(undefined, opts || { day: 'numeric', month: 'short', year: 'numeric' });
+const fmtMoney = (v) => '$' + (Math.round(v * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function DailyValue({ history }) {
+  const days = useMemoVal(() => (history || []).filter((d) => d && d.day).slice().sort((a, b) => a.day.localeCompare(b.day)), [history]);
+  const [range, setRange] = useStateVal('90');
+  const shown = useMemoVal(() => {
+    if (range === 'all' || !days.length) return days;
+    const from = new Date(days[days.length - 1].day + 'T00:00:00');
+    from.setDate(from.getDate() - parseInt(range, 10));
+    const iso = from.toISOString().slice(0, 10);
+    return days.filter((d) => d.day >= iso);
+  }, [days, range]);
+
+  const last = days[days.length - 1];
+  const first = shown[0];
+  const change = last && first ? last.market - first.market : 0;
+  const changePct = first && first.market ? (change / first.market) * 100 : 0;
+  const up = change >= 0;
+
+  return (
+    <div className="panel daily-panel" style={{ marginBottom: 24 }}>
+      <div className="section-head" style={{ marginBottom: 14, flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <p className="eyebrow">Price history</p>
+          <h2 className="h2" style={{ marginTop: 4, fontSize: 22 }}>Market value, day by day</h2>
+        </div>
+        {days.length > 1 && (
+          <div style={{ display: 'flex', gap: 6 }} role="group" aria-label="Time range">
+            {DAY_RANGES.map(([k, lbl]) => (
+              <button key={k} className={`chip ${range === k ? 'active' : ''}`} aria-pressed={range === k} onClick={() => setRange(k)}>{lbl}</button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {!days.length && (
+        <p className="daily-empty">
+          No daily values yet. The Vault records your collection's market value every day after the price sync,
+          starting from your first import.
+        </p>
+      )}
+
+      {days.length === 1 && (
+        <p className="daily-empty">
+          Your history starts on {fmtDay(last.day)} at <b>{fmtMoney(last.market)}</b>. A new point is added every day
+          after the price sync, so the trend appears from tomorrow.
+        </p>
+      )}
+
+      {days.length > 1 && (
+        <>
+          <div className="daily-summary">
+            <div>
+              <span className="label-mono">Now</span>
+              <b>{fmtMoney(last.market)}</b>
+            </div>
+            <div>
+              <span className="label-mono">Change since {fmtDay(first.day, { day: 'numeric', month: 'short' })}</span>
+              <b style={{ color: up ? 'var(--good)' : 'var(--danger)' }}>
+                {up ? '▲ +' : '▼ −'}{fmtMoney(Math.abs(change))} ({up ? '+' : '−'}{Math.abs(changePct).toFixed(1)}%)
+              </b>
+            </div>
+            {last.cost != null && (
+              <div>
+                <span className="label-mono">Paid</span>
+                <b>{fmtMoney(last.cost)}</b>
+              </div>
+            )}
+          </div>
+          <DailyChart days={shown} />
+          <p className="daily-note">
+            Each point is what your collection was worth that day, at that day's Scryfall prices. Marked days are
+            imports that changed how many cards you hold, so a jump there is cards added or removed, not the market.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function DailyChart({ days }) {
+  const wrapRef = useRefVal(null);
+  const [w, setW] = useStateVal(900);
+  const [hover, setHover] = useStateVal(null);
+  useLayoutEffectVal(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => { for (const e of entries) setW(Math.max(280, e.contentRect.width)); });
+    ro.observe(el);
+    setW(Math.max(280, el.clientWidth));
+    return () => ro.disconnect();
+  }, []);
+
+  const H = 260, padL = 58, padR = 14, padT = 12, padB = 28;
+  const innerW = w - padL - padR, innerH = H - padT - padB;
+  const n = days.length;
+  const t0 = new Date(days[0].day + 'T00:00:00').getTime();
+  const t1 = new Date(days[n - 1].day + 'T00:00:00').getTime();
+  const x = (d) => padL + (t1 === t0 ? innerW / 2 : ((new Date(d.day + 'T00:00:00').getTime() - t0) / (t1 - t0)) * innerW);
+  const values = days.flatMap((d) => [d.market, d.cost == null ? d.market : d.cost]);
+  let lo = Math.min(...values), hi = Math.max(...values);
+  const pad = Math.max((hi - lo) * 0.1, hi * 0.02, 1);
+  lo = Math.max(0, lo - pad); hi = hi + pad;
+  const y = (v) => padT + innerH - ((v - lo) / (hi - lo)) * innerH;
+  const path = (key) => days.filter((d) => d[key] != null).map((d, i) => `${i ? 'L' : 'M'}${x(d).toFixed(1)},${y(d[key]).toFixed(1)}`).join(' ');
+  const area = `${path('market')} L${x(days[n - 1]).toFixed(1)},${padT + innerH} L${x(days[0]).toFixed(1)},${padT + innerH} Z`;
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => lo + f * (hi - lo));
+  const imports = days.filter((d, i) => i > 0 && d.copies !== days[i - 1].copies);
+  const labelEvery = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(innerW / 90))));
+
+  const onMove = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (w / rect.width);
+    let best = 0;
+    for (let i = 1; i < n; i++) if (Math.abs(x(days[i]) - mx) < Math.abs(x(days[best]) - mx)) best = i;
+    setHover(best);
+  };
+  const hv = hover != null ? days[hover] : null;
+  const prev = hover ? days[hover - 1] : null;
+  const tipLeft = hv ? Math.min(Math.max(x(hv), 80), w - 80) : 0;
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative', width: '100%' }}>
+      <svg width="100%" height={H} viewBox={`0 0 ${w} ${H}`} role="img" style={{ display: 'block', overflow: 'visible' }}
+        aria-label={`Market value from ${fmtDay(days[0].day)} (${fmtMoney(days[0].market)}) to ${fmtDay(days[n - 1].day)} (${fmtMoney(days[n - 1].market)})`}
+        onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+        <defs>
+          <linearGradient id="dv-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--gold)" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="var(--gold)" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {ticks.map((v, i) => (
+          <g key={i}>
+            <line x1={padL} x2={w - padR} y1={y(v)} y2={y(v)} stroke="var(--border)" strokeDasharray={i ? '2 4' : ''} />
+            <text x={padL - 8} y={y(v) + 4} textAnchor="end" className="dv-axis">{hi - lo < 20 ? '$' + v.toFixed(2) : fmtAxis(v)}</text>
+          </g>
+        ))}
+        {days.map((d, i) => (i % labelEvery === 0 || i === n - 1) && (i === n - 1 || x(days[n - 1]) - x(d) > 60) && (
+          <text key={d.day} x={x(d)} y={H - 8} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} className="dv-axis">
+            {fmtDay(d.day, { day: 'numeric', month: 'short' })}
+          </text>
+        ))}
+        <path d={area} fill="url(#dv-fill)" />
+        {days.some((d) => d.cost != null) && <path d={path('cost')} fill="none" stroke="var(--copper)" strokeWidth="1.5" strokeDasharray="5 4" />}
+        <path d={path('market')} fill="none" stroke="var(--gold)" strokeWidth="2.25" strokeLinejoin="round" />
+        {imports.map((d) => <circle key={d.day} cx={x(d)} cy={y(d.market)} r="4" fill="var(--bg)" stroke="var(--text-2)" strokeWidth="1.5" />)}
+        {hv && (
+          <g>
+            <line x1={x(hv)} x2={x(hv)} y1={padT} y2={padT + innerH} stroke="var(--border-2)" />
+            <circle cx={x(hv)} cy={y(hv.market)} r="4.5" fill="var(--gold)" />
+          </g>
+        )}
+      </svg>
+      {hv && (
+        <div className="vc-tip" style={{ left: tipLeft, top: 0, transform: 'translateX(-50%)' }}>
+          <div className="vc-tip-month">{fmtDay(hv.day)}</div>
+          <div className="vc-tip-row"><span className="sw gold"></span>Market<b>{fmtMoney(hv.market)}</b></div>
+          {hv.cost != null && <div className="vc-tip-row"><span className="sw copper"></span>Paid<b>{fmtMoney(hv.cost)}</b></div>}
+          {prev && prev.copies !== hv.copies && (
+            <div className="vc-tip-add">Import: {hv.copies > prev.copies ? '+' : '−'}{Math.abs(hv.copies - prev.copies).toLocaleString()} cards</div>
+          )}
+          {hv.priced < hv.copies && <div className="vc-tip-add">{(hv.copies - hv.priced).toLocaleString()} cards at your file's price</div>}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 20, marginTop: 10, flexWrap: 'wrap' }}>
+        <Legend swatch="gold" label="Market value that day" />
+        <Legend swatch="copper" label="What you paid" />
+      </div>
+    </div>
+  );
 }
 
 function Legend({ swatch, label }) {
