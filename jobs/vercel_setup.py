@@ -12,15 +12,22 @@ It sets what the app needs and nobody has to type:
 
 Then it reports what is still missing (the database, sign-in providers) and the redirect URIs to
 register, as JSON on stdout and as a checklist in the GitHub job summary.
+
+Store a sign-in provider's credentials in Production, typed at a hidden prompt so they never
+land in a file, the shell history or a chat:
+
+    VERCEL_TOKEN=... python -m jobs.vercel_setup --scope TEAM --provider google
 """
 
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 import secrets
 import sys
+from pathlib import Path
 
 import httpx
 
@@ -64,8 +71,9 @@ class Vercel:
         res = self.http.patch(f"/v9/projects/{self.project}/env/{env_id}", params=self.params, json={"target": targets})
         res.raise_for_status()
 
-    def add_env(self, key: str, value: str, targets: list[str]) -> None:
-        res = self.http.post(f"/v10/projects/{self.project}/env", params=self.params,
+    def add_env(self, key: str, value: str, targets: list[str], *, replace: bool = False) -> None:
+        params = {**self.params, "upsert": "true"} if replace else self.params
+        res = self.http.post(f"/v10/projects/{self.project}/env", params=params,
                              json={"key": key, "value": value, "type": "encrypted", "target": targets})
         res.raise_for_status()
 
@@ -117,6 +125,31 @@ def configure(v: Vercel) -> dict:
     }
 
 
+SECRET_NAMES = {"GOOGLE_CLIENT_SECRET", "MICROSOFT_CLIENT_SECRET", "FACEBOOK_CLIENT_SECRET"}
+
+
+def ask(name: str) -> str:
+    """One provider setting from the terminal. Secrets are hidden; Apple's key is read from its .p8 file."""
+    if name == "APPLE_PRIVATE_KEY":
+        return Path(input("Path to the Sign in with Apple key (.p8): ").strip()).expanduser().read_text()
+    value = (getpass.getpass if name in SECRET_NAMES else input)(f"{name}: ").strip()
+    if not value:
+        sys.exit(f"{name} is empty: nothing was changed")
+    return value
+
+
+def set_provider(v: Vercel, provider: str, prompt=ask) -> list[str]:
+    """Store one provider's settings in Production (replacing old values). Returns the names set."""
+    names = PROVIDERS[provider]
+    domain = v.production_domain()
+    if domain:
+        print(f"Register this redirect URI with {provider}: https://{domain}/api/auth/callback/{provider}", file=sys.stderr)
+    values = {name: prompt(name) for name in names}  # ask for everything first: all or nothing
+    for name, value in values.items():
+        v.add_env(name, value, ["production"], replace=True)
+    return list(names)
+
+
 def checklist(state: dict) -> str:
     lines = ["### Vercel setup", ""]
     tick = lambda ok: "✅" if ok else "⬜"  # noqa: E731
@@ -129,8 +162,8 @@ def checklist(state: dict) -> str:
                     "region Frankfurt, connect to Production and Preview, then re-run this workflow"))
     lines.append(f"- {tick(state['providers'])} Sign-in: "
                  + (", ".join(state["providers"]) if state["providers"]
-                    else "no provider yet. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Vercel → Settings → "
-                         "Environment Variables (README → Sign-in providers)"))
+                    else "passkeys only. For Google, run `python -m jobs.vercel_setup --provider google` "
+                         "(README → Sign-in providers)"))
     if state["redirect_uris"]:
         lines += ["", "Redirect URIs to register with each provider:", ""]
         lines += [f"- {p}: `{uri}`" for p, uri in state["redirect_uris"].items()]
@@ -139,15 +172,20 @@ def checklist(state: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = None) -> dict:
+def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = None, prompt=ask) -> dict:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--project", default="the-vault")
     parser.add_argument("--scope", default=os.environ.get("VERCEL_SCOPE") or None)
+    parser.add_argument("--provider", choices=sorted(PROVIDERS),
+                        help="store this sign-in provider's credentials in Production (asks for them)")
     args = parser.parse_args(argv)
     token = os.environ.get("VERCEL_TOKEN")
     if not token:
         sys.exit("VERCEL_TOKEN is not set")
-    state = configure(Vercel(token, args.project, args.scope, transport))
+    vercel = Vercel(token, args.project, args.scope, transport)
+    stored = set_provider(vercel, args.provider, prompt) if args.provider else []
+    state = configure(vercel)
+    state["changed"] += stored
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as fh:

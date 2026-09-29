@@ -20,7 +20,12 @@ class FakeVercel:
         if path == "/v10/projects/the-vault/env" and req.method == "GET":
             return httpx.Response(200, json={"envs": self.envs})
         if path == "/v10/projects/the-vault/env" and req.method == "POST":
-            self.envs.append({"id": f"env{len(self.envs)}", **json.loads(req.content)})
+            new = json.loads(req.content)
+            clash = [e for e in self.envs if e["key"] == new["key"] and set(e["target"]) & set(new["target"])]
+            if clash and req.url.params.get("upsert") != "true":
+                return httpx.Response(400, json={"error": {"code": "ENV_ALREADY_EXISTS"}})
+            self.envs = [e for e in self.envs if e not in clash]
+            self.envs.append({"id": f"env{len(self.envs)}", **new})
             return httpx.Response(201, json={"created": self.envs[-1]})
         if path.startswith("/v9/projects/the-vault/env/") and req.method == "PATCH":
             env = next(e for e in self.envs if e["id"] == path.rsplit("/", 1)[1])
@@ -58,7 +63,7 @@ def test_after_first_deploy_sets_base_url_once_and_keeps_secrets(token):
     again = vercel_setup.main([], fake.transport)
     assert again["changed"] == [] and fake.value("SESSION_SECRET") == secret  # never overwritten
     text = token.read_text(encoding="utf-8")
-    assert "Storage → Create Database → Neon" in text and "no provider yet" in text
+    assert "Storage → Create Database → Neon" in text and "passkeys only" in text
 
 
 def test_custom_domain_wins_and_ready_state():
@@ -89,3 +94,21 @@ def test_only_variables_production_can_read_count():
     envs = [{"key": k, "target": ["preview"]} for k in ("DATABASE_URL", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET")]
     state = vercel_setup.main([], FakeVercel(envs=envs).transport)
     assert state["database"] is False and state["providers"] == []
+
+
+def test_provider_credentials_are_asked_for_and_stored_in_production_only(capsys):
+    vercel = FakeVercel(domains=["the-vault.vercel.app"],
+                        envs=[{"key": "GOOGLE_CLIENT_ID", "value": "old", "target": ["production"], "type": "encrypted"}])
+    asked = []
+    answers = {"GOOGLE_CLIENT_ID": "new-id.apps.googleusercontent.com", "GOOGLE_CLIENT_SECRET": "s3cret"}
+    state = vercel_setup.main(["--provider", "google"], vercel.transport,
+                              prompt=lambda name: asked.append(name) or answers[name])
+    assert asked == ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]
+    assert "google" in state["providers"]
+    assert {"GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"} <= set(state["changed"])
+    stored = [e for e in vercel.envs if e["key"].startswith("GOOGLE_")]
+    assert all(e["target"] == ["production"] for e in stored)
+    assert vercel.value("GOOGLE_CLIENT_ID") == answers["GOOGLE_CLIENT_ID"] and len(stored) == 2  # replaced, not duplicated
+    out = capsys.readouterr()
+    assert "s3cret" not in out.out + out.err  # names only, never values
+    assert "https://the-vault.vercel.app/api/auth/callback/google" in out.err

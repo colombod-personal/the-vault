@@ -182,6 +182,15 @@ provider. The OAuth providers below are optional extras.
 Each redirect URI is `{BASE_URL}/api/auth/callback/{provider}`. A provider appears
 on the sign-in screen only when its client id is set.
 
+Store a provider's credentials in Vercel (Production) from your terminal. It asks for each value
+at a hidden prompt and prints only names, then redeploy (or merge) for them to apply:
+
+```bash
+read -rs VERCEL_TOKEN && export VERCEL_TOKEN
+python -m jobs.vercel_setup --scope wintermute2 --provider google   # or microsoft, facebook, apple
+unset VERCEL_TOKEN
+```
+
 | Provider | Where | Notes |
 |---|---|---|
 | Google | Google Cloud Console → APIs & Services → Credentials → OAuth client (Web) | Consent screen with `openid email profile`; no Google review needed for these scopes. |
