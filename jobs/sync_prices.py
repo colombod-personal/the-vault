@@ -31,7 +31,7 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
 
     settings = Settings()
     db = Database(settings.database_url)
-    db.create_all()
+    db.migrate()
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(args.file) if args.file else None
         if path is None:

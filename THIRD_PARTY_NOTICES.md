@@ -14,6 +14,7 @@ These are installed as dependencies; none of their code is copied into this repo
 | FastAPI, Starlette | MIT, BSD-3-Clause | the web server |
 | Pydantic (+ pydantic-core, annotated-types, typing-inspection) | MIT | request and response models |
 | SQLAlchemy | MIT | database layer |
+| Alembic (+ Mako, MarkupSafe) | MIT, MIT, BSD-3-Clause | database schema migrations |
 | **Psycopg 3** (+ psycopg-binary) | **LGPL-3.0-only** | Postgres driver (see below) |
 | Authlib, joserfc | BSD-3-Clause | OAuth / OpenID Connect sign-in, JWTs |
 | py_webauthn | BSD-3-Clause | passkeys (WebAuthn) |

@@ -18,6 +18,7 @@ dependencies = [
     "itsdangerous>=2.1",
     "python-multipart>=0.0.9",
     "webauthn>=3.0",
+    "alembic>=1.13",
     "mtg-toolkits @ git+https://github.com/colombod-personal/mtg-toolkits@a8cc7d0bb03a99d8258a802c9d50b5cbef1f7112",
 ]
 

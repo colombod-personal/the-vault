@@ -5,6 +5,18 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:  # production runs on Postgres (Neon): check the migrations there too
+        image: postgres:16
+        env:
+          POSTGRES_USER: vault
+          POSTGRES_PASSWORD: vault
+          POSTGRES_DB: vault_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U vault" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      VAULT_TEST_POSTGRES_URL: postgresql://vault:vault@localhost:5432/vault_test
     steps:
       - uses: actions/checkout@v4
         with:

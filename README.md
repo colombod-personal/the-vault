@@ -53,6 +53,7 @@ api/index.py          Vercel entry point (all /api/* routes)
 vault/app.py          FastAPI app factory, sessions, static files for local dev
 vault/auth.py         Google / Microsoft / Apple / Facebook sign-in, account linking
 vault/models.py       users, identities, imports, entries, cards, price_snapshots, collection_values
+vault/migrations/     schema migrations (Alembic), applied at startup; alembic.ini for writing new ones
 vault/importer.py     Dragon Shield CSV -> entries (records what changed since the last import)
 vault/collection_view.py  one user's collection as items, sets, timeline, stats (cached per version)
 vault/tokens.py       bearer access/refresh tokens and PKCE app codes for native apps
@@ -259,7 +260,6 @@ Rules to keep (from [Scryfall's API terms](https://scryfall.com/docs/api) and
 - Card images and card details from the server's `cards` table, so the browser never calls Scryfall.
 - Real value-over-time chart from `/api/v1/collection/history`.
 - Precompiled front end (Vite + React + TypeScript) instead of in-browser Babel.
-- Alembic migrations once the schema settles (tables are currently created with `create_all`).
 - Graph features: Postgres link tables and recursive queries first; Apache AGE (Azure Postgres)
   or pgvector for "similar cards" if needed.
 - Before opening to other people, work through the operational checklist in `docs/gdpr.md`

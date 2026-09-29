@@ -46,7 +46,7 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
     settings.check()
     transport = transport or outbound.transport(settings)
     db = Database(settings.database_url)
-    db.create_all()
+    db.migrate()
     auth = auth_module.Auth(settings, transport=transport)
     verifier = NativeVerifier(settings, transport=transport)
 

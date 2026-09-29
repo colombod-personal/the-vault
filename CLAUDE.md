@@ -37,3 +37,8 @@ React prototype as the front end (`public/`). Read `README.md` first.
   merges to `main` deploy; secrets live in the `vercel-production` environment and reach only
   jobs that run for `main`, never on push/PR; read-only `permissions`, `persist-credentials: false`,
   pinned tools, values through `env` (no `${{ }}` in scripts), integrity hashes on CDN scripts.
+- Schema changes need a migration (Alembic, `vault/migrations`): change the model, then
+  `DATABASE_URL=sqlite:///./vault.db alembic revision --autogenerate -m "what changed"`, review
+  the file (it must work on SQLite and Postgres), and commit it. The app applies migrations at
+  startup (`Database.migrate`); `tests/test_schema_migrations.py` fails if models and migrations
+  disagree. Never edit a migration that has shipped: add a new one.

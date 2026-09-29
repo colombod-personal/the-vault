@@ -47,7 +47,7 @@ def _request():
 
 def test_sign_in_links_providers_but_never_merges_by_email(tmp_path):
     db = Database(f"sqlite:///{tmp_path}/a.db")
-    db.create_all()
+    db.migrate()
     with db.sessions() as s:
         req = _request()
         alice = sign_in(s, req, Profile("google", "g-1", "alice@example.com", "Alice"))
