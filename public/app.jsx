@@ -90,7 +90,7 @@ function vaultHashFor(route) {
 }
 const vaultUrlFor = (route) => location.pathname + location.search + vaultHashFor(route);
 
-const { useTweaks, TweaksPanel, TweakSection, TweakSlider, TweakToggle, TweakRadio, TweakSelect, TweakColor, TweakButton } = window;
+// useTweaks, TweaksPanel, TweakSection, … are globals from tweaks-panel.jsx (same bundle).
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "accent": "#c79b3f",

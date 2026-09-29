@@ -15,6 +15,10 @@ React prototype as the front end (`public/`). Read `README.md` first.
   MCP tool in `vault/api/mcp.py` and a line in `public/llms.txt`. POSTs that create things take
   `Idempotency-Key` (`vault.api.idempotency`). Personal access tokens never get account-level
   powers (`account_user`).
+- After changing any `public/*.jsx`, rebuild the bundle: `npm --prefix web run build` (run
+  `npm --prefix web ci` once). Commit `public/app.bundle.js` with the change;
+  `tests/test_frontend_build.py` fails when it is stale. A new view file goes in `SOURCES` in
+  `web/build.mjs`.
 - Keep `public/styles.css` and its design tokens unchanged. Layout additions (navigation, small
   screens) go in `public/layout.css`, using those tokens. Views live in the URL hash
   (`#/browse`, `#/sets/MKM`): change views with `setRoute`, and open overlays (card drawer,

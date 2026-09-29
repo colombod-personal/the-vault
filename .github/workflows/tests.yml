@@ -26,3 +26,11 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
       - run: pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Front-end bundle matches a fresh build
+        run: |
+          npm --prefix web ci --no-audit --no-fund
+          npm --prefix web run build
+          git diff --exit-code -- public/app.bundle.js

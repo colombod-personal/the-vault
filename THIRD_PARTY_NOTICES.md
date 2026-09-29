@@ -54,7 +54,8 @@ change it.
 ## Software the web page loads
 
 Loaded by the browser from the unpkg CDN, not stored in this repository: React and ReactDOM
-(MIT), Babel standalone (MIT), Cytoscape.js (MIT). Fonts come from Google Fonts (Cormorant
+(MIT), Cytoscape.js (MIT). The views are compiled ahead of time by esbuild (MIT, a build tool in
+`web/`; none of its code ships). Fonts come from Google Fonts (Cormorant
 Garamond, Manrope and JetBrains Mono, all SIL Open Font License 1.1).
 
 ## Content that isn't ours

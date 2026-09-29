@@ -70,7 +70,8 @@ vault/privacy.py      GDPR data export (ZIP) and account erasure (purge_user)
 vault/outbound.py     sends outbound calls to the twin universe in local development (VAULT_TWINS_URL)
 jobs/sync_prices.py   CLI run by .github/workflows/sync-prices.yml
 twins/                digital twins of every outside service, for tests and offline development
-public/               front end (React prototype, no build step yet)
+public/               front end (React, JSX compiled into public/app.bundle.js by web/build.mjs)
+web/                  the front-end build (esbuild): npm --prefix web ci && npm --prefix web run build
 ```
 
 ## API
@@ -257,7 +258,7 @@ Rules to keep (from [Scryfall's API terms](https://scryfall.com/docs/api) and
 
 ## Next steps
 
-- Precompiled front end (Vite + React + TypeScript) instead of in-browser Babel.
+- TypeScript for the front end (the JSX is already compiled ahead of time by `web/build.mjs`).
 - Graph features: Postgres link tables and recursive queries first; Apache AGE (Azure Postgres)
   or pgvector for "similar cards" if needed.
 - Before opening to other people, work through the operational checklist in `docs/gdpr.md`
