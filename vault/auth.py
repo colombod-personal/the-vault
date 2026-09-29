@@ -166,6 +166,10 @@ class Auth:
         return Profile(provider, str(info["sub"]), email, name)
 
 
+# Providers' names for "the user pressed Cancel", as the one code the sign-in screen knows.
+CANCELLED = {"user_cancelled_authorize": "access_denied", "user_denied": "access_denied"}
+
+
 class IdentityInUse(Exception):
     """Linking a sign-in that already belongs to another Vault account."""
 
@@ -251,7 +255,8 @@ def build_router(auth: Auth, get_db) -> APIRouter:
             app_flow = request.session.pop("app_flow", None)
             target = app_flow["app_redirect_uri"] if app_flow else "/"
             key = "error" if app_flow else "signin_error"
-            return RedirectResponse(f"{target}?{urlencode({key: 'temporarily_unavailable'})}", status_code=303)
+            query = {key: "temporarily_unavailable", **({} if app_flow else {"provider": provider})}
+            return RedirectResponse(f"{target}?{urlencode(query)}", status_code=303)
         if auth.settings.twins_url:  # local development: the browser goes to the twin, not the real provider
             response.headers["location"] = outbound.browser_url(auth.settings, response.headers["location"])
         return response
@@ -263,11 +268,15 @@ def build_router(auth: Auth, get_db) -> APIRouter:
             profile = await auth.profile(provider, request)
         except SIGN_IN_ERRORS as exc:
             code = getattr(exc, "error", None) or "invalid_response"
+            if code == "missing_code":  # the provider answered with its own error instead of a code
+                answer = request.query_params if request.method == "GET" else await request.form()
+                code = str(answer.get("error") or code)
+            code = CANCELLED.get(code, code)
             log.warning("sign-in with %s failed: %s", provider, exc)
             if app_flow:
                 request.session.pop("app_flow", None)
                 return RedirectResponse(f"{app_flow['app_redirect_uri']}?{urlencode({'error': code})}", status_code=303)
-            return RedirectResponse(f"/?signin_error={code}", status_code=303)
+            return RedirectResponse(f"/?{urlencode({'signin_error': code, 'provider': provider})}", status_code=303)
         try:
             user = sign_in(db, request, profile)
         except IdentityInUse:

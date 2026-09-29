@@ -190,7 +190,7 @@ def test_same_email_on_another_provider_is_a_separate_account(client, universe):
 def test_user_cancels(client, universe, provider):
     twin = universe.twins[provider]
     location = deliver(client, twin.deny(start(client, provider)))
-    assert location.startswith("/?signin_error=")
+    assert location == f"/?signin_error=access_denied&provider={provider}"  # the sign-in screen names both
     assert client.get("/api/v1/me").status_code == 401
 
 
@@ -230,7 +230,7 @@ def test_wrong_base_url_is_caught_by_the_provider(tmp_path, universe):
 def test_provider_outage_and_errors_end_in_a_sign_in_error(client, universe):
     universe.google.outage = True
     res = client.get("/api/auth/login/google", follow_redirects=False)
-    assert res.status_code == 303 and res.headers["location"] == "/?signin_error=temporarily_unavailable"
+    assert res.status_code == 303 and res.headers["location"] == "/?signin_error=temporarily_unavailable&provider=google"
     universe.google.outage = False
     location = start(client, "google")
     universe.google.fail_next("/token", 503)

@@ -60,6 +60,8 @@ window.VaultApi = (() => {
         throw new ApiError(0, 'Network error: ' + e.message);
       }
       if (!resp.ok) {
+        // The session ended (expired, or signed out in another tab): the app shows the sign-in screen.
+        if (resp.status === 401 && !path.startsWith('/api/auth')) window.dispatchEvent(new Event('vault:unauthorized'));
         if (retryable && RETRYABLE.has(resp.status) && attempt < MAX_RETRIES) { await sleep(backoff(attempt, resp)); continue; }
         let msg = 'HTTP ' + resp.status;
         try { const p = await resp.json(); msg = p.detail || p.title || msg; } catch {}

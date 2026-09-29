@@ -1,77 +1,168 @@
 // Sign-in screen, CSV import panel and the account menu in the top bar.
 const { useState: useStateAcc, useEffect: useEffectAcc, useRef: useRefAcc } = React;
 
-const PROVIDER_LABELS = {
-  google: 'Continue with Google',
-  microsoft: 'Continue with Microsoft',
-  apple: 'Continue with Apple',
-  facebook: 'Continue with Facebook',
+const PROVIDERS = {
+  google: { name: 'Google', logo: (
+    <svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+  ) },
+  microsoft: { name: 'Microsoft', logo: (
+    <svg viewBox="0 0 21 21" aria-hidden="true"><path fill="#F25022" d="M1 1h9v9H1z"/><path fill="#7FBA00" d="M11 1h9v9h-9z"/><path fill="#00A4EF" d="M1 11h9v9H1z"/><path fill="#FFB900" d="M11 11h9v9h-9z"/></svg>
+  ) },
+  apple: { name: 'Apple', logo: (
+    <svg viewBox="0 0 814 1000" aria-hidden="true"><path fill="currentColor" d="M788 341c-6 4-108 62-108 190 0 148 130 200 134 202-1 3-21 72-69 142-43 62-88 124-156 124s-86-40-164-40c-77 0-104 41-167 41s-106-58-156-128C44 790 0 671 0 557 0 375 118 279 235 279c62 0 114 41 153 41 37 0 95-43 166-43 27 0 124 2 188 64zM554 171c29-35 50-83 50-131 0-7-1-13-2-19-47 2-104 32-138 72-27 30-52 79-52 128 0 7 1 15 2 17 3 1 8 1 13 1 43 0 97-29 127-68z"/></svg>
+  ) },
+  facebook: { name: 'Facebook', logo: (
+    <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="24" fill="#1877F2"/><path fill="#fff" d="M33.3 30.9 34.4 24h-6.6v-4.5c0-1.9.9-3.7 3.9-3.7h3v-5.9s-2.7-.5-5.4-.5c-5.4 0-8.9 3.3-8.9 9.2V24h-6v6.9h6V48c1.2.2 2.4.3 3.7.3s2.5-.1 3.7-.3V30.9h5.5z"/></svg>
+  ) },
 };
+const PROVIDER_LABELS = Object.fromEntries(Object.entries(PROVIDERS).map(([k, p]) => [k, `Continue with ${p.name}`]));
+const LAST_SIGNIN_KEY = 'vault_last_signin';
+const SESSION_ENDED_KEY = 'vault_session_ended';
+const SIGNED_OUT_KEY = 'vault_signed_out';
+
+// What went wrong, in words: the server sends /?signin_error=CODE&provider=NAME.
+function signInProblem(code, provider) {
+  const who = (PROVIDERS[provider] && PROVIDERS[provider].name) || 'the provider';
+  switch (code) {
+    case 'access_denied': return `You cancelled signing in with ${who}. Nothing was shared with the Vault.`;
+    case 'temporarily_unavailable': return `${who} isn't answering right now. Try again in a minute, or use another way to sign in.`;
+    case 'mismatching_state':
+      return 'That sign-in expired or was started in another tab. Please start again from here.';
+    case 'consent_required': case 'interaction_required': return `${who} needs you to confirm access. Please try again.`;
+    default: return `Signing in with ${who} didn't work (${code}). Please try again.`;
+  }
+}
+
+// Read the result of a sign-in attempt once, then clean the URL so a reload doesn't repeat it.
+function takeSignInResult() {
+  const params = new URLSearchParams(location.search);
+  const code = params.get('signin_error');
+  const provider = params.get('provider');
+  let ended = false, signedOut = false;
+  try {
+    ended = sessionStorage.getItem(SESSION_ENDED_KEY) === '1'; sessionStorage.removeItem(SESSION_ENDED_KEY);
+    signedOut = sessionStorage.getItem(SIGNED_OUT_KEY) === '1'; sessionStorage.removeItem(SIGNED_OUT_KEY);
+  } catch {}
+  if (code) {
+    params.delete('signin_error'); params.delete('provider');
+    history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params : '') + location.hash);
+  }
+  if (code) return { tone: 'danger', text: signInProblem(code, provider) };
+  if (ended) return { tone: 'info', text: 'Your session ended. Sign in again to carry on where you were.' };
+  if (signedOut) return { tone: 'info', text: "You're signed out. Your collection stays safe in the Vault." };
+  return null;
+}
+
+function signOut() {
+  try { sessionStorage.setItem(SIGNED_OUT_KEY, '1'); } catch {}
+  window.VaultApi.logout().finally(() => { location.hash = ''; location.reload(); });
+}
+
+function rememberSignIn(method) { try { localStorage.setItem(LAST_SIGNIN_KEY, method); } catch {} }
 
 function SignIn() {
   const [info, setInfo] = useStateAcc(null);
-  const [pkError, setPkError] = useStateAcc(null);
+  const [message, setMessage] = useStateAcc(takeSignInResult);
   const [creating, setCreating] = useStateAcc(false);
   const [newName, setNewName] = useStateAcc('');
-  const [busy, setBusy] = useStateAcc(false);
-  const error = new URLSearchParams(location.search).get('signin_error');
-  useEffectAcc(() => { window.VaultApi.providers().then(setInfo).catch(() => setInfo({ providers: [] })); }, []);
+  const [pending, setPending] = useStateAcc(null); // 'passkey' | 'signup' | provider name
+  const last = (() => { try { return localStorage.getItem(LAST_SIGNIN_KEY); } catch { return null; } })();
+  useEffectAcc(() => {
+    window.VaultApi.providers().then(setInfo).catch(() => setInfo({ providers: [], failed: true }));
+    // Coming Back from a provider's page restores this page from the cache: don't stay "busy".
+    const onShow = (e) => { if (e.persisted) setPending(null); };
+    window.addEventListener('pageshow', onShow);
+    return () => window.removeEventListener('pageshow', onShow);
+  }, []);
   const pk = window.VaultApi.passkeys;
-  const withPasskeys = info && info.passkeys && pk.supported();
-  const run = async (fn) => {
-    setPkError(null); setBusy(true);
-    try { await fn(); location.href = '/'; } catch (e) { setPkError(pk.explain(e)); } finally { setBusy(false); }
+  const withPasskeys = !!(info && info.passkeys && pk.supported());
+  const busy = pending !== null;
+  const run = async (kind, fn) => {
+    setMessage(null); setPending(kind);
+    try { await fn(); rememberSignIn('passkey'); location.href = '/'; }
+    catch (e) { setMessage({ tone: 'danger', text: pk.explain(e) }); setPending(null); }
   };
+  const go = (p) => { setMessage(null); setPending(p); rememberSignIn(p); location.href = `/api/auth/login/${p}`; };
+  const providers = info ? [...info.providers].sort((a, b) => (b === last) - (a === last)) : [];
+  const lastBadge = (m) => m === last && <span className="signin-last">Last used</span>;
 
   return (
-    <main style={{ display: 'grid', placeItems: 'center', minHeight: '100vh', padding: 16 }}>
-      <div className="panel" style={{ width: 'min(380px, 100%)', textAlign: 'center' }}>
-        <div style={{ fontFamily: 'var(--display)', fontSize: 36, color: 'var(--gold)' }}>◇</div>
-        <h1 className="h1" style={{ margin: '8px 0 4px' }}>The Vault</h1>
-        <p className="label-mono" style={{ marginBottom: 20, color: 'var(--text-2)' }}>Sign in to open your collection</p>
-        {error && <p style={{ color: 'var(--danger)', marginBottom: 12 }}>Sign-in failed ({error}). Please try again.</p>}
-        {!info && <div className="spinner" style={{ width: 18, height: 18, margin: '0 auto' }}></div>}
-        {info && (
-          <div style={{ display: 'grid', gap: 10 }}>
-            {withPasskeys && (
-              <>
-                <button className="btn primary" disabled={busy} onClick={() => run(pk.signIn)}>Sign in with a passkey</button>
-                {!creating ? (
-                  <button className="btn ghost" disabled={busy} onClick={() => setCreating(true)}>New here? Create an account with a passkey</button>
-                ) : (
-                  <div className="panel panel-tight" style={{ display: 'grid', gap: 8, textAlign: 'left' }}>
-                    <p className="label-mono">Your device creates a passkey (Face ID, Touch ID, Windows Hello or your phone). No password, no e-mail needed.</p>
-                    <input className="input" placeholder="Your name (optional)" value={newName} onChange={(e) => setNewName(e.target.value)} />
-                    <button className="btn primary" disabled={busy} onClick={() => run(() => pk.signUp(newName))}>Create my vault</button>
-                  </div>
-                )}
-                {pkError && <p style={{ color: 'var(--danger)' }}>{pkError}</p>}
-                {info.providers.length > 0 && <p className="label-mono">or</p>}
-              </>
-            )}
-            {info.providers.map((p) => (
-              <a key={p} className="btn" href={`/api/auth/login/${p}`}>{PROVIDER_LABELS[p] || p}</a>
-            ))}
-            {info.dev_login && (
-              <button className="btn ghost" onClick={() => window.VaultApi.devLogin().then(() => location.reload())}>
-                Local dev sign-in
-              </button>
-            )}
-            {!info.providers.length && !info.dev_login && !withPasskeys && (
-              <p className="label-mono">No sign-in providers are configured on this server.</p>
-            )}
-          </div>
-        )}
-        {localStorage.getItem('vault_pending_invite') && (
-          <p className="label-mono" style={{ marginTop: 16 }}>Sign in to accept the invite you opened.</p>
-        )}
-        <p className="label-mono" style={{ marginTop: 20, color: 'var(--text-2)' }}>
-          Your collection stays private unless you share it.{' '}
-          <a href="/privacy.html" style={{ color: 'var(--gold)', textDecoration: 'underline' }}>Privacy notice</a>
-          {' · '}<a href="/credits.html" style={{ color: 'var(--gold)', textDecoration: 'underline' }}>Credits &amp; thanks</a>
-        </p>
+    <main className="signin">
+      <div className="signin-card panel">
+        <section className="signin-pitch" aria-label="About the Vault">
+          <div className="signin-mark" aria-hidden="true">◇</div>
+          <h1 className="h1">The Vault</h1>
+          <p className="signin-lede">Your Magic: The Gathering collection, priced every day.</p>
+          <ul className="signin-points">
+            <li>Import from Dragon Shield or Moxfield, and see what changed since last time.</li>
+            <li>Market value by card and by set, with Scryfall prices updated daily.</li>
+            <li>Check any decklist against what you own, and share with friends.</li>
+          </ul>
+        </section>
+
+        <section className="signin-form" aria-labelledby="signin-title">
+          <h2 className="h2" id="signin-title">Sign in</h2>
+          <p className="signin-sub">New here? Any option below creates your vault the first time.</p>
+          {message && <p role={message.tone === 'danger' ? 'alert' : 'status'} className={`signin-msg ${message.tone}`}>{message.text}</p>}
+          {!info && <div className="signin-skeleton" aria-label="Loading sign-in options"><span /><span /><span /></div>}
+          {info && (
+            <div className="signin-options">
+              {providers.map((p) => (
+                <button key={p} type="button" className={`provider-btn provider-${p}`} disabled={busy} onClick={() => go(p)}>
+                  <span className="provider-logo">{PROVIDERS[p] ? PROVIDERS[p].logo : null}</span>
+                  <span className="provider-label">{pending === p ? `Opening ${PROVIDERS[p] ? PROVIDERS[p].name : p}…` : (PROVIDER_LABELS[p] || p)}</span>
+                  {pending === p ? <span className="spinner spinner-xs" /> : lastBadge(p)}
+                </button>
+              ))}
+              {withPasskeys && (
+                <>
+                  {providers.length > 0 && <div className="signin-or"><span>or use a passkey</span></div>}
+                  <button type="button" className="provider-btn provider-passkey" disabled={busy} onClick={() => run('passkey', pk.signIn)}>
+                    <span className="provider-logo" aria-hidden="true">⚿</span>
+                    <span className="provider-label">{pending === 'passkey' ? 'Waiting for your device…' : 'Sign in with a passkey'}</span>
+                    {pending === 'passkey' ? <span className="spinner spinner-xs" /> : lastBadge('passkey')}
+                  </button>
+                  {!creating ? (
+                    <button type="button" className="signin-link" disabled={busy} onClick={() => setCreating(true)}>
+                      No account yet? Create one with a passkey
+                    </button>
+                  ) : (
+                    <form className="signin-create" onSubmit={(e) => { e.preventDefault(); run('signup', () => pk.signUp(newName)); }}>
+                      <p>Your device makes a passkey: Face ID, Touch ID, Windows Hello or your phone. No password and no e-mail needed.</p>
+                      <label className="signin-field">
+                        <span>Your name (optional)</span>
+                        <input className="input" autoComplete="name" value={newName} onChange={(e) => setNewName(e.target.value)} />
+                      </label>
+                      <button className="btn primary" disabled={busy}>{pending === 'signup' ? 'Waiting for your device…' : 'Create my vault'}</button>
+                      <button type="button" className="signin-link" disabled={busy} onClick={() => setCreating(false)}>Cancel</button>
+                    </form>
+                  )}
+                </>
+              )}
+              {info.dev_login && (
+                <button type="button" className="signin-link" onClick={() => window.VaultApi.devLogin().then(() => location.reload())}>
+                  Local dev sign-in
+                </button>
+              )}
+              {!providers.length && !info.dev_login && !withPasskeys && (
+                <p className="signin-msg danger" role="alert">
+                  {info.failed ? "The Vault can't be reached right now. Check your connection and reload."
+                    : info.passkeys ? "This browser can't use passkeys, and no other sign-in is set up on this server. Try a recent Safari, Chrome, Edge or Firefox."
+                    : 'No sign-in is set up on this server yet.'}
+                </p>
+              )}
+            </div>
+          )}
+          {localStorage.getItem('vault_pending_invite') && (
+            <p className="signin-msg info" role="status">Sign in (or create your vault) to accept the invite you opened.</p>
+          )}
+          <p className="signin-fine">
+            We only receive your name and e-mail from the provider you choose. Your collection stays private unless you share it.{' '}
+            <a href="/privacy.html">Privacy notice</a> · <a href="/credits.html">Credits &amp; thanks</a>
+          </p>
+        </section>
       </div>
-      <div style={{ width: 'min(720px, 100%)' }}><VaultFooter /></div>
+      <div className="signin-footer"><VaultFooter /></div>
     </main>
   );
 }
@@ -141,12 +232,12 @@ function AccountMenu({ me, onImported, onAccount, readOnly }) {
       <button className="btn sm ghost" title={me && me.email ? me.email : ''} onClick={onAccount}>
         {me ? (me.name || me.email || 'Account') : 'Account'}
       </button>
-      <button className="btn sm ghost" onClick={() => window.VaultApi.logout().then(() => location.reload())}>Sign out</button>
+      <button className="btn sm ghost" onClick={signOut}>Sign out</button>
     </div>
   );
 }
 
-Object.assign(window, { SignIn, ImportButton, EmptyVault, AccountMenu, describeChanges });
+Object.assign(window, { SignIn, signOut, SESSION_ENDED_KEY, ImportButton, EmptyVault, AccountMenu, describeChanges });
 
 // ---- Account panel: profile, sharing, shared with me, saved decks, GDPR export/delete ----
 

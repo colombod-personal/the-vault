@@ -1,5 +1,5 @@
 // Main app — router + drawer + data loading
-const { useState: useStateApp, useEffect: useEffectApp } = React;
+const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
 // Shared freshness helper — describes how stale a calculated value is.
 window.vaultFreshness = function (iso) {
@@ -203,6 +203,18 @@ function App() {
     }
   };
   useEffectApp(() => { loadCollection(); }, []);
+  // A 401 while signed in means the session ended: back to the sign-in screen, which says why.
+  const authRef = useRefApp(auth); authRef.current = auth;
+  useEffectApp(() => {
+    const ended = () => {
+      if (authRef.current !== 'signed-in') return;
+      try { sessionStorage.setItem(window.SESSION_ENDED_KEY, '1'); } catch {}
+      window.VaultApi.logout().catch(() => {});
+      setAuth('signed-out');
+    };
+    window.addEventListener('vault:unauthorized', ended);
+    return () => window.removeEventListener('vault:unauthorized', ended);
+  }, []);
 
   async function acceptPendingInvite() {
     let token = null;
