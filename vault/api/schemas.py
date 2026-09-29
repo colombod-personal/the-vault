@@ -390,3 +390,50 @@ class PasskeyItem(Hal):
 
 class PasskeyPage(Page):
     items: list[PasskeyItem]
+
+
+# -- card catalog (Scryfall data served by the Vault) ---------------------------------------------
+
+class CardIdentifier(BaseModel):
+    """One of: ``id`` (Scryfall id), ``set`` + ``collector_number``, or ``name`` (optionally with ``set``)."""
+    id: str | None = Field(None, max_length=36)
+    set: str | None = Field(None, max_length=20)
+    collector_number: str | None = Field(None, max_length=30)
+    name: str | None = Field(None, max_length=300)
+
+
+class CardLookupIn(BaseModel):
+    identifiers: list[CardIdentifier] = Field(min_length=1, max_length=75)
+    refresh: bool = Field(False, description="Fetch fresh data and prices from Scryfall instead of the Vault's copy")
+
+
+class CatalogCard(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    object: str = "card"
+    id: str
+    name: str
+    set: str
+    collector_number: str
+    image_uris: dict[str, str] = Field(default_factory=dict)
+    prices: dict[str, str | None] = Field(default_factory=dict)
+    artist: str | None = None
+
+
+class CardLookup(Hal):
+    data: list[CatalogCard]
+    not_found: list[dict]
+    unavailable: bool = Field(description="Scryfall was needed for some cards but didn't answer; retry later")
+
+
+class CatalogSet(BaseModel):
+    code: str
+    name: str | None = None
+    icon_svg_uri: str | None = None
+    released_at: str | None = None
+    set_type: str | None = None
+    parent_set_code: str | None = None
+
+
+class SetCatalog(Hal):
+    items: list[CatalogSet]
+    count: int

@@ -1,0 +1,128 @@
+"""Card lookup and the sets catalog: the Vault answers, so the browser never calls Scryfall's API."""
+
+import pytest
+from fastapi.testclient import TestClient
+
+from twins import Universe
+from vault.app import create_app
+from vault.config import Settings
+
+V1 = "/api/v1"
+SOL_RING = "736f0d31-9052-5d04-b5d5-727ebc7f5cc9"
+
+
+@pytest.fixture
+def universe():
+    u = Universe()
+    yield u
+    assert not u.escapes, f"calls left the twin universe: {u.escapes}"
+
+
+@pytest.fixture
+def app(tmp_path, universe):
+    settings = Settings(database_url=f"sqlite:///{tmp_path}/test.db", session_secret="test", dev_login=True,
+                        base_url="http://testserver")
+    return create_app(settings, serve_static=False, transport=universe.transport)
+
+
+@pytest.fixture
+def client(app):
+    with TestClient(app) as c:
+        assert c.post("/api/auth/dev-login").status_code == 200
+        yield c
+
+
+def collection_calls(universe):
+    return [c for c in universe.scryfall.calls if c.path == "/cards/collection"]
+
+
+def lookup(client, *identifiers, **extra):
+    return client.post(f"{V1}/cards/lookup", json={"identifiers": list(identifiers), **extra}, headers=extra.pop("headers", {}))
+
+
+def test_a_miss_is_fetched_once_then_served_by_the_vault(client, universe):
+    first = lookup(client, {"id": SOL_RING}, {"set": "mkm", "collector_number": "167"})
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert {c["name"] for c in body["data"]} == {"Sol Ring", "A Killer Among Us"}
+    assert body["not_found"] == [] and body["unavailable"] is False
+    sol = next(c for c in body["data"] if c["id"] == SOL_RING)
+    assert sol["set"] == "c21" and sol["image_uris"]["normal"].startswith("https://cards.scryfall.io/")
+    assert isinstance(sol["prices"]["usd"], str) and sol["prices_as_of"]
+    assert len(collection_calls(universe)) == 1
+
+    again = lookup(client, {"name": "sol ring"}, {"set": "MKM", "collector_number": "167"}).json()
+    assert {c["name"] for c in again["data"]} == {"Sol Ring", "A Killer Among Us"}
+    assert len(collection_calls(universe)) == 1  # answered from the Vault's own table
+
+
+def test_refresh_fetches_new_prices(client, universe):
+    lookup(client, {"id": SOL_RING})
+    universe.scryfall.set_price(SOL_RING, usd=9.99)
+    assert lookup(client, {"id": SOL_RING}).json()["data"][0]["prices"]["usd"] != "9.99"
+    assert lookup(client, {"id": SOL_RING}, refresh=True).json()["data"][0]["prices"]["usd"] == "9.99"
+    assert len(collection_calls(universe)) == 2
+
+
+def test_unknown_cards_are_not_found(client):
+    body = lookup(client, {"name": "Definitely Not A Card"}, {"id": SOL_RING}).json()
+    assert body["not_found"] == [{"name": "Definitely Not A Card"}] and [c["name"] for c in body["data"]] == ["Sol Ring"]
+
+
+def test_scryfall_down_is_reported_not_an_error(client, universe):
+    universe.scryfall.fail_next("/cards/collection", 503, times=5)
+    body = lookup(client, {"id": SOL_RING})
+    assert body.status_code == 200
+    assert body.json() == {**body.json(), "data": [], "unavailable": True}
+
+
+def test_bad_requests(client):
+    assert lookup(client).status_code == 422
+    assert lookup(client, *[{"id": SOL_RING}] * 76).status_code == 422
+    assert lookup(client, {}).status_code in (400, 422)
+
+
+def test_lookup_needs_a_signed_in_user(app):
+    with TestClient(app) as anonymous:
+        assert lookup(anonymous, {"id": SOL_RING}).status_code == 401
+
+
+def test_read_only_token_and_mcp_can_look_up(client, app, universe):
+    token = client.post(f"{V1}/me/tokens", json={"name": "bot", "scopes": ["read"]}).json()["token"]
+    h = {"Authorization": f"Bearer {token}"}
+    with TestClient(app) as bot:
+        res = bot.post(f"{V1}/cards/lookup", json={"identifiers": [{"id": SOL_RING}]}, headers=h)
+        assert res.status_code == 200 and res.json()["data"][0]["name"] == "Sol Ring"
+        call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": {"name": "lookup_cards", "arguments": {"identifiers": [{"name": "Lightning Bolt"}]}}}
+        result = bot.post("/api/mcp", json=call, headers=h).json()["result"]
+        assert result["isError"] is False
+        assert result["structuredContent"]["data"][0]["name"] == "Lightning Bolt"
+
+
+def test_sets_catalog_is_public_and_cached(app, universe):
+    with TestClient(app) as anonymous:
+        res = anonymous.get(f"{V1}/catalog/sets")
+        assert res.status_code == 200, res.text
+        assert "max-age=86400" in res.headers["cache-control"]
+        body = res.json()
+        assert body["count"] == len(body["items"]) > 0
+        assert {"code", "name", "icon_svg_uri"} <= set(body["items"][0])
+        anonymous.get(f"{V1}/catalog/sets")
+    assert len([c for c in universe.scryfall.calls if c.path == "/sets"]) == 1
+
+
+def test_sets_catalog_when_scryfall_is_down(app, universe):
+    universe.scryfall.fail_next("/sets", 503, times=5)
+    with TestClient(app) as anonymous:
+        res = anonymous.get(f"{V1}/catalog/sets")
+    assert res.status_code == 503 and res.headers["retry-after"]
+
+
+def test_front_face_names_match_and_wildcards_do_not(client, universe):
+    universe.scryfall.add_card("Fire // Ice", "mh2", "290")
+    assert lookup(client, {"name": "Fire // Ice"}).json()["data"][0]["name"] == "Fire // Ice"
+    calls = len(collection_calls(universe))
+    assert lookup(client, {"name": "fire"}).json()["data"][0]["name"] == "Fire // Ice"  # front face, from the Vault
+    assert len(collection_calls(universe)) == calls
+    assert lookup(client, {"name": "%"}).json()["not_found"] == [{"name": "%"}]

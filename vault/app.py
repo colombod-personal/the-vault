@@ -30,7 +30,7 @@ UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 # Called cross-site by design: OAuth providers (Apple POSTs) and Meta's deletion callback.
 CROSS_SITE_ALLOWED = ("/api/auth/callback/", "/api/facebook/data-deletion")
 # POSTs a read-only token may call: they only compute an answer, or revoke the token itself.
-READ_ONLY_POSTS = {"/api/v1/decks/parse", "/api/v1/decks/coverage", "/api/v1/auth/revoke"}
+READ_ONLY_POSTS = {"/api/v1/decks/parse", "/api/v1/decks/coverage", "/api/v1/auth/revoke", "/api/v1/cards/lookup"}
 
 
 def _origin(url: str) -> str:

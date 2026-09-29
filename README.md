@@ -257,7 +257,6 @@ Rules to keep (from [Scryfall's API terms](https://scryfall.com/docs/api) and
 
 ## Next steps
 
-- Card images and card details from the server's `cards` table, so the browser never calls Scryfall.
 - Real value-over-time chart from `/api/v1/collection/history`.
 - Precompiled front end (Vite + React + TypeScript) instead of in-browser Babel.
 - Graph features: Postgres link tables and recursive queries first; Apache AGE (Azure Postgres)

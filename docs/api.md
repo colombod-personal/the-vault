@@ -155,6 +155,8 @@ https and localhost).
 | GET / POST | `/api/v1/decks` | saved decks / save one |
 | GET / PUT / DELETE | `/api/v1/decks/{id}` | a deck with coverage / update / delete |
 | GET | `/api/v1/archidekt/decks/{id}` | a public Archidekt deck, fetched server-side |
+| POST | `/api/v1/cards/lookup` | any card, owned or not: `{"identifiers": [{"id"} \| {"set", "collector_number"} \| {"name", "set"?}], "refresh"?}`, 1–75 of them. Answers in Scryfall's card shape (`data`, `not_found`) from the Vault's own card table, fetching misses from Scryfall once. `unavailable: true` means Scryfall was needed but didn't answer: retry later. Read scope |
+| GET | `/api/v1/catalog/sets` | every Magic set with its icon (public, cached for a day) |
 | POST / GET | `/api/v1/shares` | create a one-time invite link / list what you share |
 | DELETE | `/api/v1/shares/{id}` | revoke (owner) or leave (recipient) |
 | POST | `/api/v1/shares/accept` | `{"token"}` from an invite link |
@@ -172,6 +174,10 @@ and a `scryfall` link on each card. Native apps must show these the way the web 
 artist and copyright next to card images, and a Credits screen. See README → "Attribution".
 
 ## Server notes
+
+Clients never call Scryfall's API: card data and set lists come from the Vault (`/cards/lookup`,
+`/catalog/sets`), which uses one rate-limited Scryfall client per process and stores what it
+fetches. Images are hotlinked from Scryfall's image CDN, as Scryfall asks.
 
 Collection resources are built from one per-user view. It is cached in-process, keyed by a
 version: user, latest import, latest price day, latest card update, and whether costs are hidden.

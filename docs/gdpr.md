@@ -76,8 +76,8 @@ per-user table:
       don't log request bodies.
 - [ ] The daily price job runs on GitHub Actions and reads collection rows (not names
       or e-mails). Keep the `DATABASE_URL` secret restricted to that workflow.
-- [ ] The browser loads card images and, on "Update now", card lists straight from
-      Scryfall, so Scryfall sees the user's IP. This is disclosed in the notice.
-      Serving images and prices from the Vault's own `cards` table removes it.
+- [ ] The browser loads card images and set icons from Scryfall's CDN, so Scryfall sees the
+      user's IP. This is disclosed in the notice. Card data and prices come from the Vault
+      (it calls Scryfall's API itself, without user data).
 - [ ] Have a breach procedure: the supervisory authority must be notified within 72 hours.
 - [ ] Decide on inactive-account retention (for example, warn after 24 months, then delete).

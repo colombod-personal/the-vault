@@ -2,11 +2,12 @@
 
 - The migrations produce exactly the models' schema, so a model change without a migration fails
   here. Write one with: DATABASE_URL=sqlite:///./vault.db alembic revision --autogenerate -m "..."
-- A database made by the old create_all is adopted: missing tables added, stamped, upgraded.
+- A database made by the old create_all is adopted: the baseline adds only missing tables.
 - Set VAULT_TEST_POSTGRES_URL to run the same checks against Postgres.
 """
 
 import os
+from datetime import datetime, timezone
 
 import pytest
 from alembic.autogenerate import compare_metadata
@@ -14,7 +15,7 @@ from alembic.runtime.migration import MigrationContext
 from sqlalchemy import inspect, text
 
 from vault import models  # noqa: F401
-from vault.db import BASELINE, Base, Database
+from vault.db import Base, Database
 
 POSTGRES = os.environ.get("VAULT_TEST_POSTGRES_URL")
 URLS = ["sqlite"] + (["postgres"] if POSTGRES else [])
@@ -74,15 +75,17 @@ def test_a_create_all_database_is_adopted_with_its_data(database):
         assert "retired_refresh_tokens" in inspect(conn).get_table_names()
 
 
-def test_baseline_is_the_first_revision(database):
+def test_an_old_cards_table_gains_the_new_columns(database):
+    # cards as the first release made it (before power/toughness/loyalty/layout), holding a card
+    from sqlalchemy import MetaData, Table
+
+    old = Table("cards", MetaData(), *[c.copy() for c in Base.metadata.tables["cards"].columns
+                                      if c.name not in ("power", "toughness", "loyalty", "layout")])
+    with database.engine.begin() as conn:
+        old.create(conn)
+        conn.execute(old.insert().values(scryfall_id="sol", name="Sol Ring", set_code="c21", collector_number="263",
+                                         colors=[], color_identity=[], finishes=[], updated_at=datetime.now(timezone.utc)))
     database.migrate()
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
-    from pathlib import Path
-
-    import vault.db
-
-    config = Config()
-    config.set_main_option("script_location", str(Path(vault.db.__file__).parent / "migrations"))
-    assert BASELINE in {r.revision for r in ScriptDirectory.from_config(config).walk_revisions()}
-    assert ScriptDirectory.from_config(config).get_base() == BASELINE
+    with database.engine.connect() as conn:
+        assert conn.execute(text("SELECT name, power FROM cards")).one() == ("Sol Ring", None)
+    assert _diff(database) == []  # including the set/number index the old table lacked

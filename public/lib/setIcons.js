@@ -1,4 +1,4 @@
-// Scryfall set-icons. Fetches all sets once, caches in localStorage. Exposes
+// Set icons (Scryfall's), with the set list from the Vault (/api/v1/catalog/sets). Fetched once, cached in localStorage. Exposes
 // window.SetIcons.get(code) → URL | null  and a <SetIcon code="DSK" /> helper.
 (() => {
   const CACHE_KEY = 'scry_sets_v1';
@@ -16,11 +16,11 @@
     if (inflight) return inflight;
     inflight = (async () => {
       try {
-        const r = await fetch('https://api.scryfall.com/sets');
-        if (!r.ok) throw new Error('Scryfall /sets ' + r.status);
+        const r = await fetch('/api/v1/catalog/sets', { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('Set list ' + r.status);
         const j = await r.json();
         const out = {};
-        for (const s of j.data || []) {
+        for (const s of j.items || []) {
           out[s.code.toLowerCase()] = {
             name: s.name,
             icon: s.icon_svg_uri,

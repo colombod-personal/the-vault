@@ -301,7 +301,7 @@ function App() {
         // Incomplete — DON'T claim freshness. Leave values and timestamp untouched.
         setRefreshError(
           blocked
-            ? "Can't reach Scryfall on this network — nothing was updated, so values still show the last good prices. Try again off VPN / without an ad-blocker."
+            ? "The Vault couldn't reach Scryfall just now — nothing was updated, so values still show the last good prices. Try again in a few minutes."
             : `Update didn't finish — ${failedBatches} of ${results.batches} batches couldn't be reached. Nothing was changed; press Update now to retry.`
         );
       }

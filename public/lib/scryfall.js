@@ -1,9 +1,9 @@
-// Scryfall API client — public, no auth.
-// Scryfall's limits: /cards/collection, /cards/named and /cards/search 2 requests/second;
-// a 429 locks you out for 30 s. Bulk prices come from the Vault server's daily sync instead.
-// Caches results in localStorage by card identifier.
+// Card data (Scryfall's), fetched from the Vault: POST /api/v1/cards/lookup answers from the
+// server's copy and asks Scryfall itself for anything missing, so the browser never calls
+// Scryfall's API. Images still load from Scryfall's image CDN, as Scryfall asks.
+// Calls stay 500 ms apart (the server's Scryfall limit). Caches results in localStorage.
 window.Scryfall = (() => {
-  const SCRY_BASE = 'https://api.scryfall.com';
+  const LOOKUP = '/api/v1/cards/lookup';
   const CACHE_KEY = 'scry_cache_v3'; // v3: adds artist (credited wherever art is shown)
   const RATE_MS = 500;
   let lastCall = 0;
@@ -99,15 +99,16 @@ window.Scryfall = (() => {
         await rateLimit();
         if (attempt > 0) await new Promise(r => setTimeout(r, 400 * attempt));
         try {
-          const resp = await fetch(`${SCRY_BASE}/cards/collection`, {
-            method: 'POST',
+          const resp = await fetch(LOOKUP, {
+            method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify(body),
+            body: JSON.stringify({ ...body, refresh: force }),
           });
           if (resp.status === 429) { lastErr = 'HTTP 429'; await new Promise(r => setTimeout(r, 30000)); continue; }
           if (resp.status >= 500) { lastErr = 'HTTP ' + resp.status; continue; }
           if (!resp.ok) { lastErr = 'HTTP ' + resp.status; break; }
           json = await resp.json();
+          if (json.unavailable && !(json.data || []).length) { lastErr = 'Scryfall unavailable'; json = null; continue; }
         } catch (e) {
           lastErr = e.message; // network error / CORS / blocked — retry
         }
@@ -153,9 +154,14 @@ window.Scryfall = (() => {
     if (cache[k]) return cache[k];
     await rateLimit();
     try {
-      const r = await fetch(`${SCRY_BASE}/cards/named?exact=${encodeURIComponent(name)}`);
+      const r = await fetch(LOOKUP, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ identifiers: [{ name }] }),
+      });
       if (!r.ok) return null;
-      const j = await r.json();
+      const j = (await r.json()).data[0];
+      if (!j) return null;
       const s = slimCard(j);
       setCache(k, s);
       return s;

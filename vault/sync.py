@@ -58,6 +58,7 @@ def card_row(c: Card) -> dict:
         "set_name": c.set_name, "collector_number": c.collector_number, "rarity": c.rarity,
         "type_line": c.type_line, "mana_cost": c.mana_cost, "cmc": c.cmc, "colors": c.colors,
         "color_identity": c.color_identity, "oracle_text": c.oracle_text, "finishes": c.finishes,
+        "power": c.power, "toughness": c.toughness, "loyalty": c.loyalty, "layout": c.layout,
         "image_small": c.image_uris.get("small"), "image_normal": c.image_uris.get("normal"),
         "artist": c.raw.get("artist") or next((f.get("artist") for f in c.raw.get("card_faces") or [] if f.get("artist")), None),
         "scryfall_uri": c.scryfall_uri, "updated_at": datetime.now(timezone.utc),

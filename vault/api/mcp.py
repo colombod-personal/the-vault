@@ -109,6 +109,12 @@ TOOLS = [
     Tool("parse_decklist", "Parse a decklist into cards with quantity, set, collector number, finish and section.",
          {"text": {"type": "string"}}, ["text"], method="POST", path=lambda a: f"{V1}/decks/parse",
          body=lambda a: {"text": a["text"]}),
+    Tool("lookup_cards", "Card data (type, text, colours, artist, image links) and current prices for up to 75 "
+         "printings, by Scryfall id, set + collector number, or name. Works for any card, owned or not.",
+         {"identifiers": {"type": "array", "maxItems": 75, "items": {"type": "object", "properties": {
+             "id": {"type": "string"}, "set": {"type": "string"}, "collector_number": {"type": "string"},
+             "name": {"type": "string"}}, "additionalProperties": False}}}, ["identifiers"],
+         method="POST", path=lambda a: f"{V1}/cards/lookup", body=lambda a: {"identifiers": a["identifiers"]}),
     Tool("list_decks", "The person's saved decks.", dict(PAGING), path=lambda a: f"{V1}/decks", query=("limit", "cursor")),
     Tool("get_deck", "A saved deck with its text and coverage against the collection.",
          {"deck_id": {"type": "integer"}}, ["deck_id"], path=lambda a: f"{V1}/decks/{int(a['deck_id'])}"),

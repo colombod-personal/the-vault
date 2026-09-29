@@ -27,6 +27,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from .. import outbound, tokens
+from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
 from ..collection_view import SORTS, CollectionView, filtered, history_days
 from ..importer import MAX_UPLOAD_BYTES, ImportError_, export_collection, import_collection, user_entries
@@ -542,6 +543,27 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 return client.get_deck(deck_id).raw
         except ApiError as exc:
             raise HTTPException(exc.status_code if exc.status_code == 404 else 502, str(exc)) from exc
+
+    # -- card catalog (Scryfall data, served by the Vault) ---------------------------------------
+    catalog = Catalog(transport, rewrite_image=(lambda url: outbound.browser_url(settings, url)) if settings.twins_url else None)
+
+    @router.post("/cards/lookup", tags=["cards"], response_model=S.CardLookup, response_model_by_alias=True,
+                 summary="Card data, images and prices for up to 75 printings (Scryfall's collection lookup, via the Vault)")
+    def lookup_cards(body: S.CardLookupIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        idents = [i.model_dump(exclude_none=True) for i in body.identifiers]
+        if any(not i for i in idents):
+            raise HTTPException(400, "Each identifier needs an id, a set and collector_number, or a name")
+        return {**catalog.lookup(db, idents, refresh=body.refresh), "_links": {"self": link(f"{V1}/cards/lookup")}}
+
+    @router.get("/catalog/sets", tags=["cards"], response_model=S.SetCatalog, response_model_by_alias=True,
+                summary="Every Magic set: code, name, icon, release date (refreshed daily from Scryfall)")
+    def catalog_sets(response: Response) -> dict:
+        try:
+            items = catalog.sets()
+        except (ApiError, httpx.HTTPError) as exc:
+            raise HTTPException(503, "Scryfall's set list is unavailable right now", headers={"Retry-After": "60"}) from exc
+        response.headers["Cache-Control"] = "public, max-age=86400"
+        return {"items": items, "count": len(items), "_links": {"self": link(f"{V1}/catalog/sets")}}
 
     # -- sharing ------------------------------------------------------------------------------
     @router.post("/shares", tags=["sharing"], response_model=S.Invite, status_code=201,

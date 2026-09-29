@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
-from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -40,9 +40,6 @@ def make_engine(url: str) -> Engine:
                          connect_args={"prepare_threshold": None})
 
 
-BASELINE = "0001"  # the schema as create_all left it; earlier databases are stamped with it
-
-
 class Database:
     def __init__(self, url: str):
         self.engine = make_engine(url)
@@ -53,8 +50,8 @@ class Database:
 
         Cheap when nothing is pending (one query), so it runs at every startup. On Postgres a
         transaction-scoped advisory lock stops two cold starts from migrating at once. A database
-        made by the old ``create_all`` (no ``alembic_version`` table) gets its missing tables,
-        is stamped as the first revision, then upgraded like any other.
+        made by the old ``create_all`` (no ``alembic_version`` table) goes through the same chain:
+        the baseline revision only creates the tables it doesn't have yet.
         """
         from alembic import command
         from alembic.config import Config
@@ -75,10 +72,6 @@ class Database:
             if MigrationContext.configure(conn).get_current_revision() == head:
                 return  # another instance finished while we waited
             config.attributes["connection"] = conn
-            tables = set(inspect(conn).get_table_names())
-            if "alembic_version" not in tables and "users" in tables:
-                Base.metadata.create_all(conn)  # tables added after the last create_all
-                command.stamp(config, BASELINE)
             command.upgrade(config, "head")
 
     def session(self) -> Iterator[Session]:
