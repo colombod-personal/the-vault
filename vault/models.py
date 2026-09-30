@@ -202,6 +202,19 @@ class AuthCode(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class PasskeyChallenge(Base):
+    """A pending passkey ceremony's challenge (vault.passkeys). The session cookie holds only the
+    id; verifying claims the row with a conditional DELETE, so each challenge is used once, even
+    by requests racing with the same cookie. Rows live five minutes and name no one."""
+
+    __tablename__ = "passkey_challenges"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    challenge: Mapped[str] = mapped_column(String(128))  # base64url
+    expires: Mapped[float] = mapped_column(Float, index=True)  # unix time
+
+
 class Passkey(Base):
     """A WebAuthn credential (passkey: Face ID, Touch ID, Windows Hello, a phone or a security key).
 

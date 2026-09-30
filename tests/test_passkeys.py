@@ -148,3 +148,34 @@ def test_not_offered_without_https(tmp_path):
     with TestClient(create_app(settings, serve_static=False)) as c:
         assert c.get("/api/auth/providers").json()["passkeys"] is False
         assert c.post("/api/auth/passkey/login/options").status_code == 404
+
+
+def _replay(client, path, cookie, body):
+    """Send `body` again with the session cookie as it was before the first verify."""
+    client.cookies.clear()
+    client.cookies.set("vault_session", cookie)
+    return post(client, path, body)
+
+
+def test_a_sign_in_challenge_is_used_once_even_with_a_saved_cookie(client):
+    """The challenge lives on the server and is consumed atomically: replaying the pre-sign-in
+    cookie with the same answer (synced passkeys keep a zero counter) does not sign in again."""
+    phone = SoftAuthenticator(counter_step=0)  # counter stays 0, like iCloud and Google passkeys
+    signup(client, phone)
+    client.cookies.clear()
+    options = post(client, "/api/auth/passkey/login/options").json()
+    cookie = client.cookies.get("vault_session")
+    body = {"credential": phone.get(options, ORIGIN)}
+    assert post(client, "/api/auth/passkey/login/verify", body).status_code == 200
+    replay = _replay(client, "/api/auth/passkey/login/verify", cookie, body)
+    assert replay.status_code == 400 and client.get(f"{V1}/me").status_code == 401
+
+
+def test_a_sign_up_challenge_is_used_once_even_with_a_saved_cookie(client):
+    phone = SoftAuthenticator()
+    options = post(client, "/api/auth/passkey/signup/options", {"name": "Ann"}).json()
+    cookie = client.cookies.get("vault_session")
+    body = {"credential": phone.create(options, ORIGIN), "name": "Phone"}
+    assert post(client, "/api/auth/passkey/signup/verify", body).status_code == 200
+    replay = _replay(client, "/api/auth/passkey/signup/verify", cookie, body)
+    assert replay.status_code == 400

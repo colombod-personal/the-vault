@@ -3,9 +3,10 @@
 This needs no third-party console or account. Creating a passkey is also how someone makes a
 Vault account without Google, Microsoft, Apple or Facebook.
 
-Each flow is two steps: ``…/options`` returns the WebAuthn options (the challenge is kept in
-the signed session cookie, used once, valid for five minutes), and ``…/verify`` checks the
-browser's answer with py_webauthn.
+Each flow is two steps: ``…/options`` returns the WebAuthn options, and ``…/verify`` checks the
+browser's answer with py_webauthn. The challenge is kept on the server (``passkey_challenges``,
+valid for five minutes) and the session cookie only names it. Verifying claims it with a
+conditional DELETE, so it is used once, even by a replayed cookie or two racing requests.
 
 - ``signup``: new account, identified only by the passkey
 - ``register``: add a passkey to the signed-in account
@@ -25,7 +26,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from webauthn import (
     generate_authentication_options,
@@ -45,7 +46,7 @@ from webauthn.helpers.structs import (
 
 from .auth import Profile
 from .config import Settings
-from .models import Identity, Passkey, User
+from .models import Identity, Passkey, PasskeyChallenge, User
 
 RP_NAME = "The Vault"
 CHALLENGE_TTL = 300
@@ -75,17 +76,31 @@ class Verify(BaseModel):
     name: str | None = Field(None, max_length=80, description="A label for this passkey, e.g. 'MacBook'")
 
 
-def _stash(request: Request, kind: str, challenge: bytes, **extra) -> None:
-    request.session[SESSION_KEY] = {"kind": kind, "challenge": bytes_to_base64url(challenge),
-                                    "expires": time.time() + CHALLENGE_TTL, **extra}
+def _stash(request: Request, db: Session, kind: str, challenge: bytes, **extra) -> None:
+    now = time.time()
+    db.execute(delete(PasskeyChallenge).where(PasskeyChallenge.expires < now))  # tidy up old ones
+    ceremony = secrets.token_urlsafe(32)
+    db.add(PasskeyChallenge(id=ceremony, kind=kind, challenge=bytes_to_base64url(challenge), expires=now + CHALLENGE_TTL))
+    db.commit()
+    request.session[SESSION_KEY] = {"id": ceremony, "kind": kind, **extra}
 
 
-def _take(request: Request, kind: str) -> dict:
-    """The pending ceremony, used once."""
+def _take(request: Request, db: Session, kind: str) -> dict:
+    """The pending ceremony, claimed once: of two requests with the same cookie, one wins."""
+    expired = HTTPException(400, "No passkey request in progress, or it expired. Start again.")
     pending = request.session.pop(SESSION_KEY, None)
-    if not pending or pending.get("kind") != kind or pending.get("expires", 0) < time.time():
-        raise HTTPException(400, "No passkey request in progress, or it expired. Start again.")
-    return pending
+    if not pending or pending.get("kind") != kind or not pending.get("id"):
+        raise expired
+    row = db.get(PasskeyChallenge, pending["id"])
+    if row is None:
+        raise expired
+    challenge = row.challenge
+    claimed = db.execute(delete(PasskeyChallenge).where(
+        PasskeyChallenge.id == pending["id"], PasskeyChallenge.kind == kind, PasskeyChallenge.expires >= time.time()))
+    db.commit()
+    if claimed.rowcount != 1:
+        raise expired
+    return {**pending, "challenge": challenge}
 
 
 def _label(credential: dict, given: str | None) -> str:
@@ -102,7 +117,7 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         if not enabled(settings):
             raise HTTPException(404, "Passkeys need an https BASE_URL (or localhost)")
 
-    def registration_options(request: Request, kind: str, handle: bytes, user_name: str, display: str,
+    def registration_options(request: Request, db: Session, kind: str, handle: bytes, user_name: str, display: str,
                              exclude: list[Passkey], **extra) -> dict:
         options = generate_registration_options(
             rp_id=rp_id, rp_name=RP_NAME, user_id=handle, user_name=user_name, user_display_name=display,
@@ -110,7 +125,7 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
                 resident_key=ResidentKeyRequirement.REQUIRED, user_verification=UserVerificationRequirement.PREFERRED),
             exclude_credentials=[PublicKeyCredentialDescriptor(id=base64url_to_bytes(p.credential_id)) for p in exclude],
         )
-        _stash(request, kind, options.challenge, handle=bytes_to_base64url(handle), **extra)
+        _stash(request, db, kind, options.challenge, handle=bytes_to_base64url(handle), **extra)
         return json.loads(options_to_json(options))
 
     def save_credential(db: Session, user: User, pending: dict, body: Verify) -> Passkey:
@@ -136,17 +151,17 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
 
     # -- new account --------------------------------------------------------------------------
     @router.post("/signup/options", summary="Start creating an account with a passkey")
-    def signup_options(body: Signup, request: Request) -> dict:
+    def signup_options(body: Signup, request: Request, db: Session = Depends(get_db)) -> dict:
         require_enabled()
         name = (body.name or "").strip()[:200] or None
         handle = secrets.token_bytes(32)
-        return registration_options(request, "signup", handle, name or "Vault account", name or "Vault account", [],
+        return registration_options(request, db, "signup", handle, name or "Vault account", name or "Vault account", [],
                                     name=name)
 
     @router.post("/signup/verify", summary="Finish creating an account with a passkey (signs you in)")
     def signup_verify(body: Verify, request: Request, db: Session = Depends(get_db)) -> dict:
         require_enabled()
-        pending = _take(request, "signup")
+        pending = _take(request, db, "signup")
         user = User(name=pending.get("name"))
         db.add(user)
         db.flush()
@@ -162,13 +177,13 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         handle = base64url_to_bytes(identity.subject) if identity else secrets.token_bytes(32)
         existing = list(db.scalars(select(Passkey).where(Passkey.user_id == user.id)))
         label = user.email or user.name or "Vault account"
-        return registration_options(request, "register", handle, label, user.name or label, existing, uid=user.id)
+        return registration_options(request, db, "register", handle, label, user.name or label, existing, uid=user.id)
 
     @router.post("/register/verify", summary="Finish adding a passkey to your account")
     def register_verify(body: Verify, request: Request, user: User = Depends(account_user),
                         db: Session = Depends(get_db)) -> dict:
         require_enabled()
-        pending = _take(request, "register")
+        pending = _take(request, db, "register")
         if pending.get("uid") != user.id:
             raise HTTPException(400, "This passkey request belongs to another session")
         passkey = save_credential(db, user, pending, body)
@@ -176,16 +191,16 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
 
     # -- sign in ------------------------------------------------------------------------------
     @router.post("/login/options", summary="Start signing in with a passkey")
-    def login_options(request: Request) -> dict:
+    def login_options(request: Request, db: Session = Depends(get_db)) -> dict:
         require_enabled()
         options = generate_authentication_options(rp_id=rp_id, user_verification=UserVerificationRequirement.PREFERRED)
-        _stash(request, "login", options.challenge)
+        _stash(request, db, "login", options.challenge)
         return json.loads(options_to_json(options))
 
     @router.post("/login/verify", summary="Finish signing in with a passkey")
     def login_verify(body: Verify, request: Request, db: Session = Depends(get_db)) -> dict:
         require_enabled()
-        pending = _take(request, "login")
+        pending = _take(request, db, "login")
         credential_id = str(body.credential.get("id") or body.credential.get("rawId") or "")
         passkey = db.scalar(select(Passkey).where(Passkey.credential_id == credential_id))
         if passkey is None:
