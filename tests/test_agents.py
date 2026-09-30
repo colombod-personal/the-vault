@@ -256,3 +256,15 @@ def test_mcp_params_that_are_not_an_object_are_invalid(agent, bot, method, param
     body = {"jsonrpc": "2.0", "id": 7, "method": method, "params": params}
     res = bot.post("/api/mcp", json=body, headers=auth(read))
     assert res.status_code == 200 and res.json()["error"]["code"] == -32602
+
+
+@pytest.mark.parametrize("tool, arguments", [
+    ("get_collection_summary", {"share_id": "not-a-number"}),
+    ("get_collection_summary", {"share_id": True}),
+    ("search_cards", {"limit": "10"}),
+    ("check_decklist", {"text": 42}),
+])
+def test_mcp_arguments_of_the_wrong_type_are_invalid(agent, bot, tool, arguments):
+    read = make_token(agent)
+    res = rpc(bot, "tools/call", {"name": tool, "arguments": arguments}, read)
+    assert res.status_code == 200 and res.json()["error"]["code"] == -32602, res.text

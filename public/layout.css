@@ -92,3 +92,13 @@ button.brand:focus-visible, .nav button:focus-visible { outline: 1px solid var(-
 .daily-note { color: var(--text-2); font-size: 12px; line-height: 1.6; margin: 12px 0 0; max-width: 760px; }
 /* Small labels on a panel's lighter background need the brighter text colour for contrast. */
 .panel .eyebrow, .panel .label-mono { color: var(--text-2); }
+
+/* A table row's main cell as a real button, so rows open from the keyboard too (Browse). */
+.row-link { background: none; border: 0; padding: 0; margin: 0; color: inherit; font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+.row-link:hover { color: var(--gold); }
+.row-link:focus-visible { outline: 1px solid var(--gold); outline-offset: 3px; }
+/* Table headers on a panel need the brighter text colour for contrast. */
+.tbl th { color: var(--text-2); }
+/* --muted is below 4.5:1 on a panel's background: small grey text there uses --text-2. */
+.panel .muted, .tbl td.muted { color: var(--text-2); }
+.panel .chip:not(.active), .tbl .chip:not(.active) { color: var(--text-2); }

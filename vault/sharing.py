@@ -111,6 +111,7 @@ def incoming_share(db: Session, user: User, share_id: int, kind: str) -> Share:
 
 
 def display_name(user: User | None) -> str:
+    """What the people you share with see: your display name, never your e-mail address."""
     if user is None:
         return "Unknown"
-    return user.name or user.email or f"Vault user #{user.id}"
+    return user.name or f"Vault user #{user.id}"

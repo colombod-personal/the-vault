@@ -33,6 +33,7 @@ from ..collection_view import SORTS, CollectionView, filtered, history_days
 from ..importer import MAX_UPLOAD_BYTES, ImportError_, export_collection, import_collection, user_entries
 from ..models import AccessToken, ApiSession, Deck, Import, Passkey, Share, User
 from ..native import NativeTokenError, NativeVerifier, ProviderUnavailable
+from ..passkeys import remove_passkey
 from ..privacy import export_archive, purge_user
 from ..sharing import accept_invite, create_invite, display_name, incoming_share, owned_deck, reissue_invite
 from . import schemas as S
@@ -211,17 +212,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     @router.delete("/me/passkeys/{passkey_id}", tags=["account"], summary="Remove a passkey")
     def delete_passkey(passkey_id: int, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
-        passkey = db.get(Passkey, passkey_id)
-        if passkey is None or passkey.user_id != user.id:
-            raise HTTPException(404, "Passkey not found")
-        others = db.scalar(select(func.count(Passkey.id)).where(Passkey.user_id == user.id, Passkey.id != passkey.id))
-        other_providers = {i.provider for i in user.identities} - {"passkey"}
-        if not others and not other_providers:
-            raise HTTPException(409, "This is your only way to sign in. Add another passkey or sign-in method first.")
-        db.delete(passkey)
-        if not others:  # no passkeys left: the passkey identity goes too
-            for identity in [i for i in user.identities if i.provider == "passkey"]:
-                db.delete(identity)
+        remove_passkey(db, user.id, passkey_id)
         db.commit()
         return {"deleted": True}
 

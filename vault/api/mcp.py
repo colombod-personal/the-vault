@@ -65,6 +65,29 @@ class Tool:
         }
 
 
+JSON_TYPES = {"string": (str,), "integer": (int,), "number": (int, float), "boolean": (bool,),
+              "array": (list,), "object": (dict,)}
+
+
+def _fits(schema: dict, value: Any) -> bool:
+    """Whether an argument matches its input schema's type, enum and bounds. Tool schemas are
+    otherwise only descriptive, and paths are built from these values."""
+    kind = schema.get("type")
+    if kind in JSON_TYPES:
+        if isinstance(value, bool) and kind != "boolean":  # JSON true is not a number
+            return False
+        if not isinstance(value, JSON_TYPES[kind]):
+            return False
+    if "enum" in schema and value not in schema["enum"]:
+        return False
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if "minimum" in schema and value < schema["minimum"]:
+            return False
+        if "maximum" in schema and value > schema["maximum"]:
+            return False
+    return True
+
+
 def _base(args: dict) -> str:
     return f"{V1}/shared/{int(args['share_id'])}/collection" if args.get("share_id") else f"{V1}/collection"
 
@@ -246,6 +269,9 @@ def build_router(optional_user) -> APIRouter:
             unknown = [k for k in args if k not in tool.properties]
             if missing or unknown:
                 return _rpc_error(id_, -32602, f"Invalid arguments: missing {missing}, unknown {unknown}")
+            wrong = [k for k, v in args.items() if v is not None and not _fits(tool.properties[k], v)]
+            if wrong:
+                return _rpc_error(id_, -32602, f"Invalid arguments: wrong type or value for {wrong}")
             status, body = await call_api(request, tool, args, part)
             body = _with_cursor(body)
             text = json.dumps(body, separators=(",", ":"), default=str)

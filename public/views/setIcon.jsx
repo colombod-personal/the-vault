@@ -17,7 +17,7 @@ function SetIcon({ code, size = 18, variant = 'gold', title }) {
         display: 'inline-block',
         fontFamily: 'var(--mono)',
         fontSize: Math.max(8, size * 0.55),
-        color: 'var(--muted)',
+        color: 'var(--text-2)',
         letterSpacing: '0.04em',
       }}>{code}</span>
     );
@@ -32,7 +32,8 @@ function SetIcon({ code, size = 18, variant = 'gold', title }) {
   return (
     <img
       src={entry.icon}
-      alt={code}
+      alt=""  /* decorative: the set code or name is always written next to it */
+      aria-hidden="true"
       title={title || entry.name}
       style={{
         width: size, height: size,

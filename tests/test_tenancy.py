@@ -164,3 +164,25 @@ def test_racing_accepts_claim_an_invite_once(client, monkeypatch):
     monkeypatch.setattr(sharing, "_aware", carol_accepts_meanwhile)
     assert client.post("/api/v1/shares/accept", json={"token": token}).status_code == 404
     assert raced and client.get("/api/v1/shared").json()["items"] == []
+
+
+def test_sharing_never_reveals_an_email_address(client, settings):
+    """A sign-in provider may give an e-mail but no name: the people you share with still see
+    only a name, never the address."""
+    from sqlalchemy import create_engine, text
+
+    login(client, "alice@example.com")
+    engine = create_engine(settings.database_url)
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE users SET name = NULL WHERE email = 'alice@example.com'"))
+    token = client.post("/api/v1/shares", json={"kind": "collection"}).json()["url"].split("invite=")[1]
+    login(client, "bob@example.com")
+    accepted = client.post("/api/v1/shares/accept", json={"token": token}).json()
+    [incoming] = client.get("/api/v1/shared").json()["items"]
+    data = client.get(f"/api/v1/shared/{incoming['id']}/collection").json()
+    shown = [accepted["from"], incoming["from"], data["owner"]]
+    assert all("alice@example.com" not in (s or "") for s in shown), shown
+    login(client, "alice@example.com")
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE users SET name = NULL WHERE email = 'bob@example.com'"))
+    assert "bob@example.com" not in (client.get("/api/v1/shares").json()["items"][0]["with"] or "")

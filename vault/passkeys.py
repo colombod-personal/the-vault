@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 from webauthn import (
     generate_authentication_options,
@@ -223,6 +223,26 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         return {"signed_in": True}
 
     return router
+
+
+def remove_passkey(db: Session, user_id: int, passkey_id: int) -> None:
+    """Delete one of the account's passkeys, unless it is the last way to sign in (409).
+
+    The account row is locked first (``SELECT … FOR UPDATE``), so two removals running at the
+    same time take turns: the second sees what the first left and can't remove the last method.
+    The caller commits."""
+    db.execute(select(User.id).where(User.id == user_id).with_for_update())
+    passkey = db.get(Passkey, passkey_id, populate_existing=True)
+    if passkey is None or passkey.user_id != user_id:
+        raise HTTPException(404, "Passkey not found")
+    others = db.scalar(select(func.count(Passkey.id)).where(Passkey.user_id == user_id, Passkey.id != passkey_id))
+    providers = set(db.scalars(select(Identity.provider).where(Identity.user_id == user_id)))
+    if not others and not providers - {PROVIDER}:
+        raise HTTPException(409, "This is your only way to sign in. Add another passkey or sign-in method first.")
+    db.delete(passkey)
+    if not others:  # no passkeys left: the passkey identity goes too
+        db.execute(delete(Identity).where(Identity.user_id == user_id, Identity.provider == PROVIDER))
+    db.flush()
 
 
 def _profile(handle: str) -> Profile:

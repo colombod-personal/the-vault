@@ -46,15 +46,15 @@ function Browse({ data, openCard, initialQuery }) {
             value={q}
             onChange={e => { setQ(e.target.value); setLimit(60); }}
           />
-          <select className="select" value={setF} onChange={e => { setSetF(e.target.value); setLimit(60); }}>
+          <select className="select" aria-label="Filter by set" value={setF} onChange={e => { setSetF(e.target.value); setLimit(60); }}>
             <option value="">All sets ({data.sets.length})</option>
             {setOptions.map(s => <option key={s.code} value={s.code}>{s.code} — {s.name}</option>)}
           </select>
-          <select className="select" value={printingF} onChange={e => setPrintingF(e.target.value)}>
+          <select className="select" aria-label="Filter by printing" value={printingF} onChange={e => setPrintingF(e.target.value)}>
             <option value="">All printings</option>
             {Object.keys(data.meta.printings).filter(k => k).map(p => <option key={p} value={p}>{p}</option>)}
           </select>
-          <select className="select" value={sort} onChange={e => setSort(e.target.value)}>
+          <select className="select" aria-label="Sort by" value={sort} onChange={e => setSort(e.target.value)}>
             <option value="value">Sort: total value ↓</option>
             <option value="qty">Sort: quantity ↓</option>
             <option value="name">Sort: name A→Z</option>
@@ -62,7 +62,7 @@ function Browse({ data, openCard, initialQuery }) {
             <option value="oldest">Sort: oldest first</option>
           </select>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-2)' }}>
           <div>
             <span style={{ color: 'var(--gold)' }}>{filtered.length.toLocaleString()}</span> entries match · showing top <span style={{ color: 'var(--text)' }}>{Math.min(limit, filtered.length)}</span> · combined value of shown <span style={{ color: 'var(--gold)' }}>${totalShownValue.toFixed(2)}</span>
           </div>
@@ -95,7 +95,10 @@ function Browse({ data, openCard, initialQuery }) {
                 const pnl = total - c.pd;
                 return (
                   <tr key={i} onClick={() => openCard(c)} style={{ cursor: 'pointer' }}>
-                    <td style={{ fontWeight: 600 }}>{c.n}</td>
+                    <td style={{ fontWeight: 600 }}>
+                      {/* the row is clickable with a mouse; this button makes it reachable by keyboard */}
+                      <button type="button" className="row-link" onClick={(e) => { e.stopPropagation(); openCard(c); }}>{c.n}</button>
+                    </td>
                     <td>
                       <span className="chip" style={{ padding: '2px 8px', fontSize: 10, gap: 4 }}>
                         {window.SetIcon && <SetIcon code={c.s} size={12} />}

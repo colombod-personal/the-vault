@@ -1,12 +1,22 @@
 """Passkeys end to end with a software authenticator (twins.authenticator): sign-up, sign-in,
 adding and removing passkeys, and the attacks WebAuthn must stop."""
 
+import os
+import threading
+import time
+
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select, text
+from sqlalchemy.orm import Session
 
 from twins.authenticator import SoftAuthenticator
 from vault.app import create_app
 from vault.config import Settings
+from vault.db import Base, Database
+from vault.models import Identity, Passkey, User
+from vault.passkeys import remove_passkey
 
 ORIGIN = "https://vault.test"
 V1 = "/api/v1"
@@ -179,3 +189,49 @@ def test_a_sign_up_challenge_is_used_once_even_with_a_saved_cookie(client):
     assert post(client, "/api/auth/passkey/signup/verify", body).status_code == 200
     replay = _replay(client, "/api/auth/passkey/signup/verify", cookie, body)
     assert replay.status_code == 400
+
+
+@pytest.mark.skipif(not os.environ.get("VAULT_TEST_POSTGRES_URL"), reason="needs Postgres (row locks)")
+def test_two_removals_at_once_cannot_remove_the_last_passkey():
+    """Two passkeys, no other sign-in: removing both at the same time must leave one."""
+    db = Database(os.environ["VAULT_TEST_POSTGRES_URL"])
+    with db.engine.begin() as conn:
+        Base.metadata.drop_all(conn)
+        conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
+    db.migrate()
+    with Session(db.engine) as s:
+        user = User(name="Ann")
+        s.add(user)
+        s.flush()
+        s.add(Identity(user_id=user.id, provider="passkey", subject="h"))
+        keys = [Passkey(user_id=user.id, credential_id=f"c{i}", public_key=b"k", name=f"Key {i}") for i in (1, 2)]
+        s.add_all(keys)
+        s.commit()
+        uid, (first, second) = user.id, [k.id for k in keys]
+
+    outcome = {}
+
+    def remove_the_other_one():
+        with Session(db.engine) as s:
+            try:
+                remove_passkey(s, uid, first)
+                s.commit()
+                outcome["result"] = "deleted"
+            except HTTPException as exc:
+                outcome["result"] = exc.status_code
+
+    with Session(db.engine) as s:
+        remove_passkey(s, uid, second)  # holds the account lock until commit
+        racer = threading.Thread(target=remove_the_other_one)
+        racer.start()
+        time.sleep(0.5)
+        assert racer.is_alive()  # waiting for the lock, not deciding on stale data
+        s.commit()
+    racer.join(10)
+    assert outcome["result"] == 409
+    with Session(db.engine) as s:
+        assert s.scalar(select(func.count(Passkey.id)).where(Passkey.user_id == uid)) == 1
+    with db.engine.begin() as conn:
+        Base.metadata.drop_all(conn)
+        conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
+    db.engine.dispose()
