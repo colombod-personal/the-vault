@@ -6,6 +6,8 @@ import time
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi.testclient import TestClient
 from joserfc.jwk import RSAKey
 
@@ -15,6 +17,8 @@ from vault.config import Settings
 from vault.tokens import s256
 
 BUNDLE = "com.example.vault.ios"
+APPLE_KEY = ec.generate_private_key(ec.SECP256R1()).private_bytes(
+    serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()
 GOOGLE_IOS = "ios-client.apps.googleusercontent.com"
 V1 = "/api/v1"
 
@@ -300,3 +304,25 @@ def test_racing_code_redemptions_issue_one_session(app, client, idp):
         db.scalar = scalar
         with pytest.raises(tokens.TokenError, match="already used"):
             tokens.redeem_code(db, code, verifier, "vault://auth", None)
+
+
+@pytest.mark.parametrize("provider, aud, azp, ok", [
+    ("google", GOOGLE_IOS, GOOGLE_IOS, True),  # Google Sign-In for iOS
+    ("google", "google-web", GOOGLE_IOS, True),  # iOS SDK with the server client id: aud web, azp the iOS app
+    ("google", "google-web", "google-web", False),  # a token from the web sign-in
+    ("apple", "com.example.vault.web", None, False),  # the web Services ID
+])
+def test_native_endpoint_takes_only_tokens_made_for_the_app(tmp_path, provider, aud, azp, ok):
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path}/aud.db", session_secret="test", base_url="http://testserver",
+        google_client_id="google-web", google_client_secret="x", google_ios_client_id=GOOGLE_IOS,
+        apple_client_id="com.example.vault.web", apple_team_id="T", apple_key_id="K", apple_private_key=APPLE_KEY,
+        apple_app_bundle_id=BUNDLE)
+    universe = Universe()
+    universe.register_vault(settings)
+    with TestClient(create_app(settings, serve_static=False, transport=universe.transport)) as c:
+        twin = universe.twins[provider]
+        extra = {"azp": azp} if azp else {}
+        token = twin.native_id_token(aud, f"{provider[0]}-aud", **extra)
+        res = c.post(f"{V1}/auth/native/{provider}", json={"id_token": token})
+        assert (res.status_code == 200) is ok, res.text

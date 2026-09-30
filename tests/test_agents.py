@@ -247,3 +247,12 @@ def test_a_retried_token_creation_never_makes_a_second_token(signed_in):
     assert again.status_code == 409 and again.headers["location"].endswith(f"/me/tokens/{first.json()['id']}")
     assert "vault_pat_" not in again.text  # the secret is never stored or shown again
     assert signed_in.get(f"{V1}/me/tokens").json()["total"] == 1
+
+
+@pytest.mark.parametrize("params", [[1, 2], "x", 3, True])
+@pytest.mark.parametrize("method", ["initialize", "tools/call", "tools/list"])
+def test_mcp_params_that_are_not_an_object_are_invalid(agent, bot, method, params):
+    read = make_token(agent)
+    body = {"jsonrpc": "2.0", "id": 7, "method": method, "params": params}
+    res = bot.post("/api/mcp", json=body, headers=auth(read))
+    assert res.status_code == 200 and res.json()["error"]["code"] == -32602

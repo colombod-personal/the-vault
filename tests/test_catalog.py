@@ -1,11 +1,17 @@
 """Card lookup and the sets catalog: the Vault answers, so the browser never calls Scryfall's API."""
 
+import threading
+import time
+
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from twins import Universe
 from vault.app import create_app
+from vault.catalog import Catalog
 from vault.config import Settings
+from vault.db import Database
 
 V1 = "/api/v1"
 SOL_RING = "736f0d31-9052-5d04-b5d5-727ebc7f5cc9"
@@ -126,3 +132,59 @@ def test_front_face_names_match_and_wildcards_do_not(client, universe):
     assert lookup(client, {"name": "fire"}).json()["data"][0]["name"] == "Fire // Ice"  # front face, from the Vault
     assert len(collection_calls(universe)) == calls
     assert lookup(client, {"name": "%"}).json()["not_found"] == [{"name": "%"}]
+
+
+# -- concurrency: a request that waited for the Scryfall lock must not repeat another's work -----
+
+class HookLock:
+    """Stands in for Catalog._lock: runs ``before`` when acquired, as if another request had
+    held the lock and finished just before this one got it."""
+
+    def __init__(self, before):
+        self.before, self.inner = before, threading.Lock()
+
+    def __enter__(self):
+        self.inner.acquire()
+        self.before()
+
+    def __exit__(self, *exc):
+        self.inner.release()
+
+
+def test_a_lookup_that_waited_for_the_lock_uses_the_cards_stored_meanwhile(tmp_path, universe):
+    db = Database(f"sqlite:///{tmp_path}/race.db")
+    db.migrate()
+    catalog = Catalog(universe.transport)
+    other = Catalog(universe.transport)
+
+    def the_other_request_finishes():
+        with Session(db.engine) as s:
+            other.lookup(s, [{"id": SOL_RING}])
+
+    catalog._lock = HookLock(the_other_request_finishes)
+    with Session(db.engine) as s:
+        body = catalog.lookup(s, [{"id": SOL_RING}])
+    assert [c["name"] for c in body["data"]] == ["Sol Ring"]
+    assert len(collection_calls(universe)) == 1  # only the other request asked Scryfall
+
+
+def test_a_sets_refresh_that_waited_for_the_lock_uses_the_list_fetched_meanwhile(universe):
+    catalog = Catalog(universe.transport)
+    other = Catalog(universe.transport)
+    catalog._lock = HookLock(lambda: setattr(catalog, "_sets", (time.monotonic(), other.sets())))
+    assert catalog.sets()
+    assert len([c for c in universe.scryfall.calls if c.path == "/sets"]) == 1
+
+
+def test_sets_catalog_is_paged(app, universe):
+    with TestClient(app) as anonymous:
+        first = anonymous.get(f"{V1}/catalog/sets", params={"limit": 2}).json()
+        assert first["count"] == 2 and first["total"] > 2 and first["_links"]["next"]
+        codes, url = [], f"{V1}/catalog/sets?limit=2"
+        while url:
+            page = anonymous.get(url).json()
+            codes += [s["code"] for s in page["items"]]
+            url = page["_links"].get("next", {}).get("href")
+        assert len(codes) == first["total"] == len(set(codes))
+        assert anonymous.get(f"{V1}/catalog/sets", params={"limit": 501}).json()["count"] <= 500
+    assert len([c for c in universe.scryfall.calls if c.path == "/sets"]) == 1  # one fetch served every page

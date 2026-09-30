@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 from pathlib import Path
 
 from urllib.parse import urlsplit
@@ -27,6 +29,7 @@ from .native import NativeVerifier
 PUBLIC_DIR = Path(__file__).resolve().parent.parent / "public"
 
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+ACCOUNT_COOKIE = "vault_account"  # see account_marker
 # Called cross-site by design: OAuth providers (Apple POSTs) and Meta's deletion callback.
 CROSS_SITE_ALLOWED = ("/api/auth/callback/", "/api/facebook/data-deletion")
 # POSTs a read-only token may call: they only compute an answer, or revoke the token itself.
@@ -81,6 +84,24 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
         same_site="none" if settings.secure_cookies else "lax",
         https_only=settings.secure_cookies,
     )
+
+    account_marker_key = hashlib.sha256(b"vault-account-marker:" + settings.session_secret.encode()).digest()
+
+    @app.middleware("http")
+    async def account_marker(request: Request, call_next):
+        """A readable cookie naming the signed-in account by an opaque keyed hash (not the id).
+        The web app keys its offline copy by it, so after the account changes, by any route,
+        an offline browser never shows the previous account's collection."""
+        response = await call_next(request)
+        uid = (request.scope.get("session") or {}).get("uid")
+        marker = hmac.new(account_marker_key, str(uid).encode(), hashlib.sha256).hexdigest()[:32] if uid else None
+        current = request.cookies.get(ACCOUNT_COOKIE)
+        if marker and marker != current:
+            response.set_cookie(ACCOUNT_COOKIE, marker, max_age=30 * 24 * 3600, path="/", samesite="lax",
+                                secure=settings.secure_cookies, httponly=False)
+        elif not marker and current and "session" in request.scope:
+            response.delete_cookie(ACCOUNT_COOKIE, path="/", samesite="lax", secure=settings.secure_cookies)
+        return response
 
     allowed_origin = _origin(settings.base_url)
     # Local development with twins: the twin Apple page POSTs the sign-in back from the twin server.

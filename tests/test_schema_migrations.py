@@ -89,3 +89,10 @@ def test_an_old_cards_table_gains_the_new_columns(database):
     with database.engine.connect() as conn:
         assert conn.execute(text("SELECT name, power FROM cards")).one() == ("Sol Ring", None)
     assert _diff(database) == []  # including the set/number index the old table lacked
+
+
+def test_a_full_create_all_database_of_the_current_models_is_adopted(database):
+    # create_all of today's models: every table and column already there, no alembic_version
+    Base.metadata.create_all(database.engine)
+    database.migrate()
+    assert _revision(database) == "0002" and _diff(database) == []

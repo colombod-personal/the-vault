@@ -90,3 +90,20 @@ def test_apple_requests_openid_scope():
     s = Settings(apple_client_id="com.example.vault", apple_team_id="T", apple_key_id="K", apple_private_key="x")
     client = Auth(s).oauth.create_client("apple")
     assert "openid" in client.client_kwargs["scope"].split()  # needed for the id_token / user id
+
+
+def test_account_marker_cookie_follows_the_signed_in_account(client):
+    """The web app keys its offline copy by `vault_account`: it must change with the account,
+    disappear on sign-out, and not reveal the user id."""
+    assert "vault_account" not in client.cookies
+    client.post("/api/auth/dev-login", params={"email": "ann@example.com"})
+    ann = client.cookies.get("vault_account")
+    ann_id = client.get("/api/v1/me").json()["id"]
+    assert ann and len(ann) == 32 and ann != str(ann_id)
+    client.get("/api/v1/me")
+    assert client.cookies.get("vault_account") == ann  # stable while signed in
+    client.post("/api/auth/dev-login", params={"email": "bo@example.com"})
+    assert client.cookies.get("vault_account") not in (None, ann)
+    client.post("/api/auth/logout")
+    client.get("/api/auth/providers")
+    assert "vault_account" not in client.cookies

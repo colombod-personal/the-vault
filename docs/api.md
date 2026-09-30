@@ -83,8 +83,9 @@ The server stores only SHA-256 hashes of tokens.
    account. One already used by another account answers `409`. Personal access tokens can't
    link sign-ins.
 
-Audiences: `APPLE_APP_BUNDLE_ID` for Apple and `GOOGLE_IOS_CLIENT_ID` for Google. The web client
-ids are accepted too.
+Audiences: `APPLE_APP_BUNDLE_ID` for Apple and `GOOGLE_IOS_CLIENT_ID` for Google. Tokens from the
+web sign-in are refused. Google Sign-In for iOS configured with the server (web) client id is
+accepted: its tokens carry the web client id as `aud` and the iOS client as `azp`.
 
 ### Option B: browser sign-in handed to the app (any provider, including Microsoft and Facebook)
 
@@ -156,7 +157,7 @@ https and localhost).
 | GET / PUT / DELETE | `/api/v1/decks/{id}` | a deck with coverage / update / delete |
 | GET | `/api/v1/archidekt/decks/{id}` | a public Archidekt deck, fetched server-side |
 | POST | `/api/v1/cards/lookup` | any card, owned or not: `{"identifiers": [{"id"} \| {"set", "collector_number"} \| {"name", "set"?}], "refresh"?}`, 1–75 of them. Answers in Scryfall's card shape (`data`, `not_found`) from the Vault's own card table, fetching misses from Scryfall once. `unavailable: true` means Scryfall was needed but didn't answer: retry later. Read scope |
-| GET | `/api/v1/catalog/sets` | every Magic set with its icon (public, cached for a day) |
+| GET | `/api/v1/catalog/sets` | every Magic set with its icon, paged by set code (public, cached for a day) |
 | POST / GET | `/api/v1/shares` | create a one-time invite link / list what you share |
 | DELETE | `/api/v1/shares/{id}` | revoke (owner) or leave (recipient) |
 | POST | `/api/v1/shares/accept` | `{"token"}` from an invite link |

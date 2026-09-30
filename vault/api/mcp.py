@@ -215,9 +215,13 @@ def build_router(optional_user) -> APIRouter:
     async def handle(request: Request, msg: Any, part: int | None = None) -> dict | None:
         if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0" or "method" not in msg:
             return _rpc_error(msg.get("id") if isinstance(msg, dict) else None, -32600, "Invalid request")
-        id_, method, params = msg.get("id"), msg["method"], msg.get("params") or {}
+        id_, method, params = msg.get("id"), msg["method"], msg.get("params")
         if "id" not in msg:  # a notification (e.g. notifications/initialized): nothing to answer
             return None
+        if params is None:
+            params = {}
+        elif not isinstance(params, dict):
+            return _rpc_error(id_, -32602, "Invalid params: params must be an object")
         scopes = request.state.scopes
         if method == "initialize":
             asked = params.get("protocolVersion")

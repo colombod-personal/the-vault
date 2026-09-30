@@ -61,14 +61,20 @@ class Catalog:
         if missing:
             try:
                 with self._lock:
-                    cards, _ = self._scryfall().collection([identifiers[i] for i in missing])
+                    if not refresh:  # while this request waited, another may have stored these cards
+                        db.rollback()  # see what the other request committed
+                        for i in list(missing):
+                            if (card := _find(db, identifiers[i])) is not None:
+                                found[i] = card
+                        missing = [i for i in missing if i not in found]
+                    cards, _ = self._scryfall().collection([identifiers[i] for i in missing]) if missing else ([], [])
+                    if cards:  # stored before the lock is released, so the next request finds them
+                        today = date.today()
+                        upsert(db, Card, [card_row(c) for c in cards], ("scryfall_id",))
+                        upsert(db, PriceSnapshot, [price_row(c, today) for c in cards], ("scryfall_id", "day"))
+                        db.commit()
             except (ApiError, httpx.HTTPError):
-                cards, unavailable = [], True
-            if cards:
-                today = date.today()
-                upsert(db, Card, [card_row(c) for c in cards], ("scryfall_id",))
-                upsert(db, PriceSnapshot, [price_row(c, today) for c in cards], ("scryfall_id", "day"))
-                db.commit()
+                unavailable = True
             for i in missing:
                 if (card := _find(db, identifiers[i])) is not None:
                     found[i] = card
@@ -100,21 +106,29 @@ class Catalog:
     def sets(self) -> list[dict[str, Any]]:
         """Every Magic set (code, name, icon, release date, type), fetched from Scryfall at most
         once a day per process. Raises ApiError/HTTPError when Scryfall is down and nothing is cached."""
-        now = time.monotonic()
-        if self._sets and now - self._sets[0] < SETS_TTL:
-            return self._sets[1]
+        if (fresh := self._fresh_sets()) is not None:
+            return fresh
         with self._lock:
+            if (fresh := self._fresh_sets()) is not None:  # fetched while this request waited
+                return fresh
             try:
                 raw = self._scryfall().sets()
             except (ApiError, httpx.HTTPError):
                 if self._sets:
                     return self._sets[1]  # stale beats nothing
                 raise
-        items = [{"code": s["code"], "name": s.get("name"), "icon_svg_uri": self._rewrite(s["icon_svg_uri"]) if s.get("icon_svg_uri") else None,
+            items = self._set_items(raw)
+            self._sets = (time.monotonic(), items)
+            return items
+
+    def _fresh_sets(self) -> list[dict[str, Any]] | None:
+        cached = self._sets
+        return cached[1] if cached and time.monotonic() - cached[0] < SETS_TTL else None
+
+    def _set_items(self, raw: list[dict]) -> list[dict[str, Any]]:
+        return [{"code": s["code"], "name": s.get("name"), "icon_svg_uri": self._rewrite(s["icon_svg_uri"]) if s.get("icon_svg_uri") else None,
                   "released_at": s.get("released_at"), "set_type": s.get("set_type"),
                   "parent_set_code": s.get("parent_set_code")} for s in raw]
-        self._sets = (now, items)
-        return items
 
 
 def _find(db: Session, ident: dict[str, str]) -> Card | None:

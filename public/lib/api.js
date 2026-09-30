@@ -97,6 +97,7 @@ window.VaultApi = (() => {
     return {
       get: (k) => run('readonly', (st) => st.get(k)).catch(() => undefined),
       set: (k, v) => run('readwrite', (st) => st.put(v, k)).catch(() => undefined),
+      del: (k) => run('readwrite', (st) => st.delete(k)).catch(() => undefined),
       clear: () => run('readwrite', (st) => st.clear()).catch(() => undefined),
     };
   })();
@@ -120,22 +121,40 @@ window.VaultApi = (() => {
   const LANGUAGE = { en: 'English', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian', pt: 'Portuguese',
     ja: 'Japanese', ko: 'Korean', ru: 'Russian', zhs: 'Simplified Chinese', zht: 'Traditional Chinese' };
 
+  // The signed-in account, as the server names it in the readable `vault_account` cookie (an
+  // opaque hash, set on sign-in, cleared on sign-out). Local copies are stored under it, so a
+  // browser never shows one account's copy to another, even offline.
+  const account = () => {
+    const m = document.cookie.match(/(?:^|;\s*)vault_account=([0-9a-f]+)/);
+    return m ? m[1] : null;
+  };
+
   // Load a collection: from the local copy when its version is current, else page by page.
   async function loadCollection(base, onProgress) {
-    const key = 'collection:' + base;
     let summary;
     try {
       summary = await call(base);
     } catch (e) {
       if (e.status === 401) await localStore.clear();
-      const saved = e.status === 0 ? await localStore.get(key) : null; // offline: last copy
+      const who = account();
+      const saved = e.status === 0 && who ? await localStore.get(`collection:${who}:${base}`) : null; // offline: last copy
       if (saved) return assemble(saved, { offline: true, savedAt: saved.savedAt });
       throw e;
     }
+    localStore.del('collection:' + base);  // a copy saved by an older version, under no account
+    const who = account();
+    if (!who) return assemble(await fetchCollection(summary, onProgress), {});  // nowhere safe to keep a copy
+    const key = `collection:${who}:${base}`;
     const saved = await localStore.get(key);
     if (saved && saved.version && saved.version === summary.version) {
       return assemble({ ...saved, summary }, { fromCache: true, savedAt: saved.savedAt });
     }
+    const fresh = await fetchCollection(summary, onProgress);
+    localStore.set(key, fresh);
+    return assemble(fresh, {});
+  }
+
+  async function fetchCollection(summary, onProgress) {
     const L = summary._links;
     const [items, sets, timeline, history] = await Promise.all([
       all(withLimit(L.cards.href), onProgress),
@@ -143,9 +162,7 @@ window.VaultApi = (() => {
       call(L.timeline.href),
       all(withLimit(L.history.href)),
     ]);
-    const fresh = { version: summary.version, savedAt: new Date().toISOString(), summary, items, sets, timeline, history };
-    localStore.set(key, fresh);
-    return assemble(fresh, {});
+    return { version: summary.version, savedAt: new Date().toISOString(), summary, items, sets, timeline, history };
   }
 
   // Assemble the shape the views were designed around from the paginated resources.

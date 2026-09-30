@@ -556,14 +556,15 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return {**catalog.lookup(db, idents, refresh=body.refresh), "_links": {"self": link(f"{V1}/cards/lookup")}}
 
     @router.get("/catalog/sets", tags=["cards"], response_model=S.SetCatalog, response_model_by_alias=True,
-                summary="Every Magic set: code, name, icon, release date (refreshed daily from Scryfall)")
-    def catalog_sets(response: Response) -> dict:
+                summary="Every Magic set: code, name, icon, release date (refreshed daily from Scryfall), paged by code")
+    def catalog_sets(request: Request, response: Response, cursor: str | None = None, limit: int | None = None) -> dict:
         try:
             items = catalog.sets()
         except (ApiError, httpx.HTTPError) as exc:
             raise HTTPException(503, "Scryfall's set list is unavailable right now", headers={"Retry-After": "60"}) from exc
+        page, nxt = paginate(items, lambda s: (s["code"],), lambda s: s["code"], cursor=cursor, limit=limit)
         response.headers["Cache-Control"] = "public, max-age=86400"
-        return {"items": items, "count": len(items), "_links": {"self": link(f"{V1}/catalog/sets")}}
+        return page_body(request, page, nxt, len(items), limit=limit)
 
     # -- sharing ------------------------------------------------------------------------------
     @router.post("/shares", tags=["sharing"], response_model=S.Invite, status_code=201,

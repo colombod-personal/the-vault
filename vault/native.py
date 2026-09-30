@@ -39,10 +39,15 @@ class ProviderUnavailable(Exception):
 
 class NativeVerifier:
     def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
+        # Only tokens made for the app. Web sign-in tokens (Apple's Services ID, Google's web
+        # client) are never accepted here.
         self.audiences = {
-            "apple": {a for a in (settings.apple_app_bundle_id, settings.apple_client_id) if a},
-            "google": {a for a in (settings.google_ios_client_id, settings.google_client_id) if a},
+            "apple": {a for a in (settings.apple_app_bundle_id,) if a},
+            "google": {a for a in (settings.google_ios_client_id,) if a},
         }
+        # Google Sign-In for iOS configured with a server client id issues tokens with that id as
+        # `aud` and the iOS client as `azp`: accepted, but only with the iOS app as `azp`.
+        self.google_server_audience = settings.google_client_id if settings.google_ios_client_id else None
         self.transport = transport
         self._keys: dict[str, tuple[float, KeySet]] = {}
 
@@ -80,7 +85,9 @@ class NativeVerifier:
         auds = set(aud) if isinstance(aud, list) else {aud}
         if claims.get("iss") not in ISSUERS[provider]:
             raise NativeTokenError("Wrong issuer")
-        if not auds & self.audiences[provider]:
+        via_server_id = (provider == "google" and self.google_server_audience in auds
+                         and claims.get("azp") in self.audiences["google"])
+        if not (auds & self.audiences[provider] or via_server_id):
             raise NativeTokenError("Token was issued for another app")
         if not isinstance(claims.get("exp"), (int, float)) or claims["exp"] < now - 60:
             raise NativeTokenError("Token expired")

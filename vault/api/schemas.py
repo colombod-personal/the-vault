@@ -434,6 +434,5 @@ class CatalogSet(BaseModel):
     parent_set_code: str | None = None
 
 
-class SetCatalog(Hal):
+class SetCatalog(Page):
     items: list[CatalogSet]
-    count: int

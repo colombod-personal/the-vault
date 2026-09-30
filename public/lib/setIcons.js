@@ -16,11 +16,16 @@
     if (inflight) return inflight;
     inflight = (async () => {
       try {
-        const r = await fetch('/api/v1/catalog/sets', { credentials: 'same-origin' });
-        if (!r.ok) throw new Error('Set list ' + r.status);
-        const j = await r.json();
+        const sets = [];
+        for (let url = '/api/v1/catalog/sets?limit=500'; url; ) {  // pages of at most 500
+          const r = await fetch(url, { credentials: 'same-origin' });
+          if (!r.ok) throw new Error('Set list ' + r.status);
+          const j = await r.json();
+          sets.push(...(j.items || []));
+          url = j._links && j._links.next ? j._links.next.href : null;
+        }
         const out = {};
-        for (const s of j.items || []) {
+        for (const s of sets) {
           out[s.code.toLowerCase()] = {
             name: s.name,
             icon: s.icon_svg_uri,
