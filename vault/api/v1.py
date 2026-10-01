@@ -26,7 +26,7 @@ from mtg_toolkits.formats import FORMATS
 from mtg_toolkits.archidekt import ArchidektClient
 from mtg_toolkits.dragonshield import SET_ALIASES
 from mtg_toolkits.http import ApiError
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -535,8 +535,17 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         from datetime import datetime, timezone
 
         deck = owned_deck(db, user, deck_id)
-        deck.name, deck.text, deck.source_url = body.name.strip()[:200] or deck.name, body.text, body.source_url
-        deck.updated_at = datetime.now(timezone.utc)
+        if not _parse(body.text).lines:
+            raise HTTPException(400, "No cards found in the decklist")
+        values = {"name": body.name.strip()[:200] or deck.name, "text": body.text,
+                  "updated_at": datetime.now(timezone.utc)}
+        if "source_url" in body.model_fields_set:  # omitted: keep it (null clears it)
+            values["source_url"] = body.source_url
+        # One UPDATE of the row as it is now: a deck deleted meanwhile is simply not found.
+        done = db.execute(update(Deck).where(Deck.id == deck.id, Deck.user_id == user.id).values(**values))
+        if done.rowcount != 1:
+            db.rollback()
+            raise HTTPException(404, "Deck not found")
         db.commit()
         return _deck(deck)
 

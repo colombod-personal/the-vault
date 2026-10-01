@@ -4,6 +4,7 @@ generate the iOS client, e.g. with Apple's swift-openapi-generator)."""
 from __future__ import annotations
 
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -243,7 +244,19 @@ class ImportPage(Page):
 class DeckIn(BaseModel):
     name: str
     text: str = Field(max_length=50_000)
-    source_url: str | None = None
+    source_url: str | None = Field(None, max_length=500, description="Where the deck came from (an http or https "
+                                   "link). Left as it is when an update omits it; null clears it")
+
+    @field_validator("source_url")
+    @classmethod
+    def _http_link(cls, url: str | None) -> str | None:
+        url = (url or "").strip()
+        if not url:
+            return None
+        parts = urlsplit(url)
+        if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+            raise ValueError("source_url must be an http or https link")
+        return url
 
 
 class TextIn(BaseModel):

@@ -132,6 +132,7 @@ def _base(args: dict) -> str:
 
 ID = {"type": "integer", "minimum": 1, "maximum": MAX_ID}
 SHARE = {"share_id": {**ID, "description": "Read a collection someone shared with you (from list_shared_with_me) instead of your own"}}
+SOURCE_URL = {"type": "string", "maxLength": 500, "description": "Where the deck came from (an http or https link)"}
 PAGING = {
     "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25, "description": "Items per page"},
     "cursor": {"type": "string", "description": "next_cursor from the previous page"},
@@ -184,13 +185,14 @@ TOOLS = [
     Tool("get_deck", "A saved deck with its text and coverage against the collection.",
          {"deck_id": ID}, ["deck_id"], path=lambda a: f"{V1}/decks/{int(a['deck_id'])}"),
     Tool("save_deck", "Save a decklist to the person's decks.",
-         {"name": {"type": "string"}, "text": {"type": "string"}, "source_url": {"type": "string"}}, ["name", "text"],
+         {"name": {"type": "string"}, "text": {"type": "string"}, "source_url": SOURCE_URL}, ["name", "text"],
          method="POST", path=lambda a: f"{V1}/decks",
          body=lambda a: {"name": a["name"], "text": a["text"], "source_url": a.get("source_url")}, write=True),
-    Tool("update_deck", "Replace a saved deck's name and text.",
-         {"deck_id": ID, "name": {"type": "string"}, "text": {"type": "string"}},
+    Tool("update_deck", "Replace a saved deck's name and text (and its source link, if given).",
+         {"deck_id": ID, "name": {"type": "string"}, "text": {"type": "string"}, "source_url": SOURCE_URL},
          ["deck_id", "name", "text"], method="PUT", path=lambda a: f"{V1}/decks/{int(a['deck_id'])}",
-         body=lambda a: {"name": a["name"], "text": a["text"]}, write=True),
+         body=lambda a: {"name": a["name"], "text": a["text"],
+                         **({"source_url": a["source_url"]} if "source_url" in a else {})}, write=True),
     Tool("get_archidekt_deck", "A public deck from Archidekt by its id (the number in archidekt.com/decks/<id>).",
          {"deck_id": ID}, ["deck_id"], path=lambda a: f"{V1}/archidekt/decks/{int(a['deck_id'])}"),
     Tool("list_imports", "Past collection imports, newest first, with what changed each time.", dict(PAGING),

@@ -382,3 +382,17 @@ def test_an_api_failure_inside_a_tool_call_is_a_tool_error_not_a_failed_request(
     assert res.status_code == 200, res.text
     result = res.json()["result"]
     assert result["isError"] is True and "boom" not in result["content"][0]["text"]
+
+
+def test_mcp_deck_source_urls_are_checked_and_kept_by_updates(agent, bot):
+    write = make_token(agent, scopes=["read", "write"])
+    long = rpc(bot, "tools/call", {"name": "save_deck", "arguments": {
+        "name": "d", "text": "1 Sol Ring", "source_url": "https://a.test/" + "u" * 800}}, write).json()
+    assert long["error"]["code"] == -32602
+    url = "https://archidekt.com/decks/1"
+    deck = call_tool(bot, write, "save_deck", name="d", text="1 Sol Ring", source_url=url)["structuredContent"]
+    updated = call_tool(bot, write, "update_deck", deck_id=deck["id"], name="d2", text="2 Sol Ring")
+    assert updated["isError"] is False and updated["structuredContent"]["source_url"] == url
+    moved = call_tool(bot, write, "update_deck", deck_id=deck["id"], name="d2", text="2 Sol Ring",
+                      source_url="https://moxfield.com/decks/x")
+    assert moved["structuredContent"]["source_url"] == "https://moxfield.com/decks/x"

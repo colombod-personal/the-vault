@@ -279,7 +279,8 @@ def test_body_ids_too_big_for_the_database_are_invalid(signed_in, big):
     assert res.status_code == 422, res.text
 
 
-@pytest.mark.parametrize("path, extra", [("/decks/parse", {}), ("/decks/coverage", {}), ("/decks", {"name": "x"})])
+@pytest.mark.parametrize("path, extra", [("/decks/parse", {}), ("/decks/coverage", {}), ("/decks", {"name": "x"})],
+                         ids=["parse", "coverage", "save"])
 def test_a_decklist_quantity_too_long_to_read_is_a_bad_request(signed_in, path, extra):
     res = signed_in.post(V1 + path, json={"text": "9" * 5000 + " Sol Ring", **extra})
     assert res.status_code == 400, res.text
@@ -376,3 +377,54 @@ def test_postgres_never_sees_a_value_too_big_for_its_column():
         assert upload(client, (GENERIC_HEADER + "1,Sol Ring,c21,nonfoil,near_mint,english-long,,,\n").encode()).status_code == 400
         assert client.get(f"{V1}/decks/{2**31}").status_code == 422
         assert client.post(f"{V1}/shares", json={"kind": "deck", "deck_id": 2**31}).status_code == 422
+        deck = {"name": "x", "text": "1 Sol Ring", "source_url": "https://example.com/" + "a" * 600}
+        assert client.post(f"{V1}/decks", json=deck).status_code == 422
+
+
+@pytest.mark.parametrize("url", ["javascript:alert(1)", "data:text/html,x", "ftp://example.com/deck", "https://",
+                                 "https://archidekt.com/decks/" + "1" * 500, "//example.com/deck"],
+                         ids=["javascript", "data", "ftp", "no-host", "too-long", "no-scheme"])
+def test_a_deck_source_url_is_an_http_link_that_fits(signed_in, url):
+    res = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring", "source_url": url})
+    assert res.status_code == 422, res.text
+    deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring"}).json()
+    assert signed_in.put(f"{V1}/decks/{deck['id']}", json={"name": "x", "text": "1 Sol Ring",
+                                                           "source_url": url}).status_code == 422
+
+
+def test_updating_a_deck_keeps_its_source_url_unless_given(signed_in):
+    url = "https://archidekt.com/decks/123"
+    deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring", "source_url": url}).json()
+    assert deck["source_url"] == url
+    path = f"{V1}/decks/{deck['id']}"
+    assert signed_in.put(path, json={"name": "y", "text": "2 Sol Ring"}).json()["source_url"] == url
+    other = "http://moxfield.com/decks/abc"
+    assert signed_in.put(path, json={"name": "y", "text": "2 Sol Ring", "source_url": other}).json()["source_url"] == other
+    assert signed_in.put(path, json={"name": "y", "text": "2 Sol Ring", "source_url": None}).json()["source_url"] is None
+    assert signed_in.get(path).json()["source_url"] is None
+
+
+@pytest.mark.parametrize("text", ["", "no cards here", "9" * 5000 + " Sol Ring"], ids=["empty", "no-cards", "huge-quantity"])
+def test_updating_a_deck_needs_cards_like_creating_one(signed_in, text):
+    deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring"}).json()
+    assert signed_in.put(f"{V1}/decks/{deck['id']}", json={"name": "x", "text": text}).status_code == 400
+    assert signed_in.get(f"{V1}/decks/{deck['id']}").json()["text"] == "1 Sol Ring"
+
+
+def test_a_deck_deleted_while_it_is_being_updated_is_not_found(app, signed_in, monkeypatch):
+    from vault.api import v1
+    from vault.models import Deck
+
+    deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring"}).json()
+    real = v1.owned_deck
+
+    def deleted_meanwhile(db, user, deck_id):
+        found = real(db, user, deck_id)
+        with app.state.db.sessions() as other:  # another request deletes it now
+            other.delete(other.get(Deck, deck_id))
+            other.commit()
+        return found
+
+    monkeypatch.setattr(v1, "owned_deck", deleted_meanwhile)
+    res = signed_in.put(f"{V1}/decks/{deck['id']}", json={"name": "y", "text": "1 Sol Ring"})
+    assert res.status_code == 404, res.text
