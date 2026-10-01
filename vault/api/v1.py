@@ -39,6 +39,7 @@ from ..models import AccessToken, ApiSession, Deck, Import, NativeNonce, Passkey
 from ..native import LEEWAY as NATIVE_LEEWAY, NativeTokenError, NativeVerifier, ProviderUnavailable
 from ..passkeys import remove_passkey
 from ..privacy import export_archive, purge_user
+from ..ratelimit import limited
 from ..sharing import accept_invite, create_invite, display_name, incoming_share, invite_again, owned_deck
 from . import schemas as S
 from .hal import etag_response, link, page_body, paginate
@@ -101,7 +102,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         }
 
     @router.post("/auth/native/{provider}", tags=["auth"], response_model=S.TokenResponse,
-                 summary="Sign in with a native Apple or Google ID token")
+                 summary="Sign in with a native Apple or Google ID token", dependencies=limited("native", verify=True))
     async def native_sign_in(provider: str, body: S.NativeSignIn, request: Request, db: Session = Depends(get_db),
                              current: User | None = Depends(optional_user)) -> dict:
         try:
@@ -131,7 +132,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return tokens.issue(db, user, "app", body.device_name)
 
     @router.post("/auth/token", tags=["auth"], response_model=S.TokenResponse,
-                 summary="Redeem a browser sign-in code (PKCE) or rotate a refresh token")
+                 summary="Redeem a browser sign-in code (PKCE) or rotate a refresh token",
+                 dependencies=limited("token", verify=True))
     def token(body: S.TokenRequest, db: Session = Depends(get_db)) -> dict:
         try:
             if body.grant_type == "refresh_token":

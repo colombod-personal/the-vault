@@ -49,6 +49,7 @@ from webauthn.helpers.structs import (
 from .auth import Profile
 from .config import Settings
 from .models import Identity, Passkey, PasskeyChallenge, User
+from .ratelimit import limited
 
 RP_NAME = "The Vault"
 CHALLENGE_TTL = 300
@@ -159,7 +160,8 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         return passkey
 
     # -- new account --------------------------------------------------------------------------
-    @router.post("/signup/options", summary="Start creating an account with a passkey")
+    @router.post("/signup/options", dependencies=limited("passkey-signup"),
+                 summary="Start creating an account with a passkey")
     def signup_options(body: Signup, request: Request, db: Session = Depends(get_db)) -> dict:
         require_enabled()
         name = (body.name or "").strip()[:200] or None
@@ -167,7 +169,8 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         return registration_options(request, db, "signup", handle, name or "Vault account", name or "Vault account", [],
                                     name=name)
 
-    @router.post("/signup/verify", summary="Finish creating an account with a passkey (signs you in)")
+    @router.post("/signup/verify", dependencies=limited("passkey-signup-verify", verify=True),
+                 summary="Finish creating an account with a passkey (signs you in)")
     def signup_verify(body: Verify, request: Request, db: Session = Depends(get_db)) -> dict:
         require_enabled()
         pending = _take(request, db, "signup")
@@ -179,7 +182,8 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         return {"signed_in": True, "user_id": user.id, "passkey_id": passkey.id}
 
     # -- another passkey for the signed-in account --------------------------------------------
-    @router.post("/register/options", summary="Start adding a passkey to your account")
+    @router.post("/register/options", dependencies=limited("passkey-register"),
+                 summary="Start adding a passkey to your account")
     def register_options(request: Request, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
         require_enabled()
         identity = db.scalar(select(Identity).where(Identity.user_id == user.id, Identity.provider == PROVIDER))
@@ -188,7 +192,8 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         label = user.email or user.name or "Vault account"
         return registration_options(request, db, "register", handle, label, user.name or label, existing, uid=user.id)
 
-    @router.post("/register/verify", summary="Finish adding a passkey to your account")
+    @router.post("/register/verify", dependencies=limited("passkey-register-verify", verify=True),
+                 summary="Finish adding a passkey to your account")
     def register_verify(body: Verify, request: Request, user: User = Depends(account_user),
                         db: Session = Depends(get_db)) -> dict:
         require_enabled()
@@ -206,14 +211,16 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         return {"added": True, "passkey_id": passkey.id}
 
     # -- sign in ------------------------------------------------------------------------------
-    @router.post("/login/options", summary="Start signing in with a passkey")
+    @router.post("/login/options", dependencies=limited("passkey-login"),
+                 summary="Start signing in with a passkey")
     def login_options(request: Request, db: Session = Depends(get_db)) -> dict:
         require_enabled()
         options = generate_authentication_options(rp_id=rp_id, user_verification=UserVerificationRequirement.REQUIRED)
         _stash(request, db, "login", options.challenge)
         return json.loads(options_to_json(options))
 
-    @router.post("/login/verify", summary="Finish signing in with a passkey")
+    @router.post("/login/verify", dependencies=limited("passkey-login-verify", verify=True),
+                 summary="Finish signing in with a passkey")
     def login_verify(body: Verify, request: Request, db: Session = Depends(get_db)) -> dict:
         require_enabled()
         pending = _take(request, db, "login")

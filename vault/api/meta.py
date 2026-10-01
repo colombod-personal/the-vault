@@ -15,13 +15,14 @@ from sqlalchemy.orm import Session
 
 from ..models import Identity
 from ..privacy import purge_user
+from ..ratelimit import limited
 
 
 def build_router(get_db, settings) -> APIRouter:
     router = APIRouter(prefix="/api", tags=["meta"])
 
     # -- Facebook data deletion callback (required by Meta for Facebook Login) ----------
-    @router.post("/facebook/data-deletion")
+    @router.post("/facebook/data-deletion", dependencies=limited("facebook-deletion"))
     def facebook_data_deletion(signed_request: str = Form(...), db: Session = Depends(get_db)) -> dict:
         payload = parse_signed_request(signed_request, settings.facebook_client_secret)
         if payload is None:
@@ -34,7 +35,7 @@ def build_router(get_db, settings) -> APIRouter:
         code = _sign(settings.session_secret, secrets.token_urlsafe(12))
         return {"url": f"{settings.base_url}/api/facebook/deletion-status?code={code}", "confirmation_code": code}
 
-    @router.get("/facebook/deletion-status", response_class=PlainTextResponse)
+    @router.get("/facebook/deletion-status", response_class=PlainTextResponse, dependencies=limited("facebook-status"))
     def facebook_deletion_status(code: str) -> str:
         # Only codes this callback issued (signed with the server's secret) are confirmed;
         # the data was deleted before the code was handed out.
