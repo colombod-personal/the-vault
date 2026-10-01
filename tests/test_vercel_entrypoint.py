@@ -9,6 +9,7 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -74,3 +75,16 @@ def test_base_url_comes_from_vercel_when_not_set(monkeypatch):
     assert Settings().base_url == "https://the-vault-git-feature-wintermute2.vercel.app"
     monkeypatch.setenv("BASE_URL", "https://vault.example.com/")
     assert Settings().base_url == "https://vault.example.com"
+
+
+def test_a_vercel_deployment_refuses_a_plain_http_base_url(monkeypatch):
+    # Secure cookies and the session-secret check hang on https: on Vercel, http is a misconfiguration.
+    from vault.config import Settings
+
+    monkeypatch.setenv("VERCEL", "1")
+    plain = Settings(database_url="postgresql://db.example/vault", base_url="http://vault.example.com",
+                     session_secret="dev-insecure-secret")
+    with pytest.raises(RuntimeError, match="BASE_URL must be https"):
+        plain.check()
+    Settings(database_url="postgresql://db.example/vault", base_url="https://vault.example.com",
+             session_secret="s" * 32).check()  # the right setup still starts

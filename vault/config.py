@@ -62,6 +62,9 @@ class Settings:
                 "DATABASE_URL is not set. Connect a Neon Postgres database to the Vercel project "
                 "(Storage -> Neon) and redeploy."
             )
+        if os.environ.get("VERCEL") and not self.secure_cookies:
+            # Secure cookies, the session-secret check and OAuth redirects all follow BASE_URL.
+            raise RuntimeError("BASE_URL must be https on a Vercel deployment (or left unset)")
         if self.secure_cookies and self.session_secret == "dev-insecure-secret":
             raise RuntimeError("SESSION_SECRET must be set when BASE_URL is https")
         if self.twins_url and (self.secure_cookies or os.environ.get("VERCEL")):
