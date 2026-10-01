@@ -32,3 +32,13 @@ test('the full name still works, and so does the back face', async () => {
   const results = await scry.collection([{ name: 'Fire // Ice' }, { name: 'Ice' }]);
   assert.ok(results[0] && results[1]);
 });
+
+test('each finish is priced by its own Scryfall price, etched included', () => {
+  const scry = load({ data: [], not_found: [] });
+  const prices = { usd: '1.00', usd_foil: '3.00', usd_etched: '5.00' };
+  assert.equal(scry.priceFor(prices, { fin: 'nonfoil', p: '' }), 1);
+  assert.equal(scry.priceFor(prices, { fin: 'foil', p: 'Foil' }), 3);
+  assert.equal(scry.priceFor(prices, { fin: 'etched', p: 'Etched' }), 5);
+  assert.equal(scry.priceFor(prices, { p: 'Etched' }), 5, 'older saved copies have only the printing');
+  assert.equal(scry.priceFor({ usd: '1.00' }, { fin: 'etched' }), null, 'no etched price: keep the stored one');
+});

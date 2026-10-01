@@ -160,3 +160,16 @@ def test_two_first_sign_ins_at_once_end_in_one_account():
         Base.metadata.drop_all(conn)
         conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
     db.engine.dispose()
+
+
+def test_facebook_deletion_status_only_confirms_codes_the_vault_issued(client, app):
+    with app.state.db.sessions() as s:
+        sign_in(s, _request(), Profile("facebook", "321", None, "Cy"))
+    res = client.post("/api/facebook/data-deletion",
+                      data={"signed_request": _signed({"algorithm": "HMAC-SHA256", "user_id": "321"}, "fb-secret")})
+    issued = res.json()
+    status = client.get("/" + issued["url"].split("/", 3)[3])  # the URL Meta shows the user
+    assert status.status_code == 200 and "has been deleted" in status.text
+    for forged in ("made-up", issued["confirmation_code"][:-2] + "xx", ""):
+        res = client.get("/api/facebook/deletion-status", params={"code": forged})
+        assert res.status_code == 404 and "deleted" not in res.text, forged

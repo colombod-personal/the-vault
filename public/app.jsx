@@ -16,14 +16,10 @@ window.vaultFreshness = function (iso) {
   return { rel, abs, tone, days };
 };
 
-// Pick the live USD price for a card from the Scryfall cache (foil-aware).
+// Pick the live USD price for a card from the Scryfall cache, by its finish (as the server does).
 window.vaultPriceFor = function (card) {
   const s = window.Scryfall && window.Scryfall.cached(card.n, card.s, card.cn);
-  if (!s || !s.prices) return null;
-  const foil = /foil/i.test(card.p || '');
-  const raw = foil ? (s.prices.usd_foil || s.prices.usd) : (s.prices.usd || s.prices.usd_foil);
-  const v = parseFloat(raw);
-  return isFinite(v) ? v : null;
+  return s && s.prices ? window.Scryfall.priceFor(s.prices, card) : null;
 };
 
 // Recompute a data object's market values from freshly-cached Scryfall prices.

@@ -180,5 +180,15 @@ window.Scryfall = (() => {
   function cacheSize() { return Object.keys(cache).length; }
   function clearCache() { cache = {}; localStorage.removeItem(CACHE_KEY); }
 
-  return { collection, named, cached, cacheSize, clearCache };
+  // The live USD price for a collection card, by the finish it is priced as (`fin`: nonfoil, foil,
+  // etched; older saved copies only have the printing `p`). Null when Scryfall has none for it.
+  const FINISH_PRICE = { nonfoil: 'usd', foil: 'usd_foil', etched: 'usd_etched' };
+  function priceFor(prices, card) {
+    const fin = card.fin || (/etched/i.test(card.p || '') ? 'etched' : /foil/i.test(card.p || '') ? 'foil' : 'nonfoil');
+    const raw = prices && prices[FINISH_PRICE[fin] || 'usd'];
+    const v = parseFloat(raw);
+    return isFinite(v) ? v : null;
+  }
+
+  return { collection, named, cached, cacheSize, clearCache, priceFor };
 })();

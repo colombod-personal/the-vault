@@ -31,14 +31,24 @@ def build_router(get_db, settings) -> APIRouter:
         )
         if identity:
             purge_user(db, identity.user_id)
-        code = secrets.token_urlsafe(12)
+        code = _sign(settings.session_secret, secrets.token_urlsafe(12))
         return {"url": f"{settings.base_url}/api/facebook/deletion-status?code={code}", "confirmation_code": code}
 
     @router.get("/facebook/deletion-status", response_class=PlainTextResponse)
     def facebook_deletion_status(code: str) -> str:
+        # Only codes this callback issued (signed with the server's secret) are confirmed;
+        # the data was deleted before the code was handed out.
+        nonce, _, _sig = code.partition(".")
+        if not nonce or not hmac.compare_digest(code, _sign(settings.session_secret, nonce)):
+            raise HTTPException(404, "Unknown deletion request")
         return f"Deletion request {code}: all data for this Facebook account has been deleted."
 
     return router
+
+
+def _sign(secret: str, nonce: str) -> str:
+    mac = hmac.new(secret.encode(), b"facebook-deletion:" + nonce.encode(), hashlib.sha256).digest()[:16]
+    return f"{nonce}.{base64.urlsafe_b64encode(mac).rstrip(b'=').decode()}"
 
 
 def _b64decode(data: str) -> bytes:
