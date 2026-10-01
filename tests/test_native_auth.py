@@ -414,3 +414,47 @@ def test_a_native_sign_in_needs_a_nonce_and_each_token_works_once(client, idp):
     replay = client.post(f"{V1}/auth/native/google", json={"id_token": token, "nonce": raw})
     assert replay.status_code == 401 and "already used" in replay.json()["detail"]
     assert apple_sign_in(client, idp).status_code == 200  # Apple: SHA-256 of the raw nonce in the token
+
+
+def test_an_apple_token_cannot_be_replayed_with_the_hash_inside_it(client, idp, app):
+    """Apple's token carries SHA-256(nonce), which anyone holding the token can read. Sending
+    that hash as the nonce must not count as a new nonce: only the raw nonce is accepted, and
+    the used-nonce record is keyed on the value in the token (kept past expiry plus leeway)."""
+    from vault.models import NativeNonce
+    from vault.native import LEEWAY
+
+    raw = secrets.token_urlsafe(16)
+    idp.apple.add_account("a-hash", "h@privaterelay.appleid.com")
+    hashed = hashlib.sha256(raw.encode()).hexdigest()
+    token = idp.apple.native_id_token(BUNDLE, "a-hash", nonce=hashed)
+    assert client.post(f"{V1}/auth/native/apple", json={"id_token": token, "nonce": raw}).status_code == 200
+    replay = client.post(f"{V1}/auth/native/apple", json={"id_token": token, "nonce": hashed})
+    assert replay.status_code == 401, replay.text
+    with app.state.db.sessions() as db:
+        (row,) = db.query(NativeNonce).all()
+        exp = time.time()  # the twin's tokens expire within the hour
+        assert row.expires > exp + LEEWAY - 1
+
+
+def test_a_racing_first_sign_in_still_spends_the_nonce(client, idp, monkeypatch):
+    """Two first sign-ins for one new account race to create the identity; the loser rolls
+    back and retries. That rollback must not undo the record of its nonce, or its token could
+    be replayed."""
+    from sqlalchemy.exc import IntegrityError
+
+    from vault import auth
+
+    real, raced = auth._find_or_create, []
+
+    def once_collides(db, profile, current):
+        if not raced:
+            raced.append(True)
+            raise IntegrityError("insert", {}, Exception("identities (provider, subject) taken"))
+        return real(db, profile, current)
+
+    monkeypatch.setattr(auth, "_find_or_create", once_collides)
+    raw = secrets.token_urlsafe(24)
+    token = idp.google.native_id_token(GOOGLE_IOS, idp.google.add_account("g-race", "r@gmail.com", "R"), nonce=raw)
+    assert client.post(f"{V1}/auth/native/google", json={"id_token": token, "nonce": raw}).status_code == 200
+    replay = client.post(f"{V1}/auth/native/google", json={"id_token": token, "nonce": raw})
+    assert replay.status_code == 401, replay.text

@@ -35,7 +35,7 @@ from ..auth import IdentityInUse, Profile, find_or_create
 from ..collection_view import SORTS, CollectionView, filtered, history_days, import_days
 from ..importer import MAX_UPLOAD_BYTES, ImportError_, export_collection, import_collection, user_entries
 from ..models import AccessToken, ApiSession, Deck, Import, NativeNonce, Passkey, Share, User
-from ..native import NativeTokenError, NativeVerifier, ProviderUnavailable
+from ..native import LEEWAY as NATIVE_LEEWAY, NativeTokenError, NativeVerifier, ProviderUnavailable
 from ..passkeys import remove_passkey
 from ..privacy import export_archive, purge_user
 from ..sharing import accept_invite, create_invite, display_name, incoming_share, invite_again, owned_deck
@@ -108,12 +108,14 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             raise HTTPException(401, str(exc)) from exc
         except ProviderUnavailable as exc:
             raise HTTPException(503, f"{exc}. Try again shortly.", headers={"Retry-After": "30"}) from exc
-        # Each ID token signs in once: its nonce is recorded until the token expires.
+        # Each ID token signs in once: the nonce inside it is recorded, and committed on its own
+        # so nothing later in the sign-in can roll it back, until the token can no longer be
+        # used (its expiry plus the clock leeway ``verify`` allows).
         db.execute(delete(NativeNonce).where(NativeNonce.expires < time.time()))
-        db.add(NativeNonce(id=hashlib.sha256(f"{provider}:{body.nonce}".encode()).hexdigest(),
-                           expires=float(claims["exp"])))
+        db.add(NativeNonce(id=hashlib.sha256(f"{provider}:{claims['nonce']}".encode()).hexdigest(),
+                           expires=float(claims["exp"]) + NATIVE_LEEWAY))
         try:
-            db.flush()
+            db.commit()
         except IntegrityError:
             db.rollback()
             raise HTTPException(401, "This sign-in was already used; sign in again") from None

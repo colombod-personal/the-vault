@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import hmac
 import json
 import time
 
@@ -31,6 +32,7 @@ ISSUERS = {
 }
 CACHE_SECONDS = 3600
 REFRESH_COOLDOWN = 60  # seconds between early key refreshes (for a token with an unknown key id)
+LEEWAY = 60  # seconds of clock skew allowed past a token's expiry
 
 
 class NativeTokenError(Exception):
@@ -119,12 +121,14 @@ class NativeVerifier:
         # A token for several audiences must also have been issued to the app (Google's rule).
         if provider == "google" and len(auds) > 1 and claims.get("azp") not in self.audiences["google"]:
             raise NativeTokenError("Token was issued to another party")
-        if not isinstance(claims.get("exp"), (int, float)) or claims["exp"] < now - 60:
+        if not isinstance(claims.get("exp"), (int, float)) or claims["exp"] < now - LEEWAY:
             raise NativeTokenError("Token expired")
-        # Apple puts SHA-256(nonce) in the token; Google puts the nonce itself. The caller then
-        # records the nonce as used (NativeNonce), so the same token can't sign in twice.
-        expected = {nonce, hashlib.sha256(nonce.encode()).hexdigest()}
-        if claims.get("nonce") not in expected:
+        # Apple puts SHA-256(nonce) in the token; Google puts the nonce itself. Only that form is
+        # accepted: the hash is readable in an Apple token, so taking it as a nonce would let
+        # anyone holding the token sign in again. The caller then records the token's nonce as
+        # used (NativeNonce), so the same token can't sign in twice.
+        expected = hashlib.sha256(nonce.encode()).hexdigest() if provider == "apple" else nonce
+        if not hmac.compare_digest(str(claims.get("nonce") or ""), expected):
             raise NativeTokenError("Nonce mismatch")
         if not claims.get("sub"):
             raise NativeTokenError("Token has no subject")
