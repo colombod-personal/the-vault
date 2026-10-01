@@ -205,3 +205,35 @@ def test_two_imports_at_once_on_postgres_leave_one_file():
         assert s.scalar(select(func.count(Entry.id)).where(Entry.name == "Sol Ring")) == 1
     reset()
     db.engine.dispose()
+
+
+def test_the_sync_does_not_write_a_stale_match_into_a_row_that_reused_an_id(app, signed_in, monkeypatch):
+    """SQLite reuses a deleted row's id. If an import replaced the collection while the sync
+    ran, a new row can carry an old row's id: the old row's match must not land on it."""
+    from tests.test_api import BULK
+    from vault import sync as sync_module
+    from vault.models import Import
+
+    assert upload(signed_in).status_code == 201
+    real = sync_module.resolve_offline
+    with app.state.db.sessions() as db:
+        sol = db.scalar(select(Entry).where(Entry.name == "Sol Ring"))
+        sol_id, user_id = sol.id, sol.user_id
+
+    def reimport_meanwhile(entries, cards):
+        with app.state.db.sessions() as other:  # a new import whose row got Sol Ring's old id
+            imp = Import(user_id=user_id, filename="new.csv", source="generic", rows=1, copies=1, summary={})
+            other.add(imp)
+            other.flush()
+            other.execute(delete(Entry).where(Entry.user_id == user_id))
+            other.add(Entry(id=sol_id, user_id=user_id, import_id=imp.id, position=0, name="Island", quantity=1,
+                            finish="nonfoil"))
+            other.commit()
+        return real(entries, cards)
+
+    monkeypatch.setattr(sync_module, "resolve_offline", reimport_meanwhile)
+    with app.state.db.sessions() as db:
+        sync_module.sync(db, BULK, day=date(2026, 9, 27))
+    with app.state.db.sessions() as db:
+        island = db.get(Entry, sol_id)
+        assert (island.name, island.scryfall_id, island.match_method) == ("Island", None, None)

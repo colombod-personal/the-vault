@@ -79,11 +79,12 @@ def sync(db: Session, cards: Iterable[Card], day: date | None = None) -> dict:
 
     # The matches are written by id with plain UPDATEs, not through the loaded rows: an import
     # that replaced someone's collection while this ran deleted some of these rows, and an ORM
-    # flush would then fail the whole sync (everyone's prices with it). Gone rows are skipped.
+    # flush would then fail the whole sync (everyone's prices with it). Gone rows are skipped, and
+    # so is a new row that reuses a deleted one's id (SQLite does): it belongs to another import.
     updates = []
     for row, res in zip(todo, resolve_offline([fresh(r) for r in todo], cards)):
         if res.card is None:
-            updates.append({"b_id": row.id, "b_sid": None, "b_method": None, "b_finish": None})
+            updates.append({"b_id": row.id, "b_imp": row.import_id, "b_sid": None, "b_method": None, "b_finish": None})
             continue
         price_finish = None
         # Price an etched-only (or foil-only) printing by its real finish, but only when we
@@ -91,14 +92,14 @@ def sync(db: Session, cards: Iterable[Card], day: date | None = None) -> dict:
         only = res.card.finishes[0] if len(res.card.finishes) == 1 else None
         if res.method in EXACT and only in ("nonfoil", "foil", "etched") and only != row.finish:
             price_finish = only
-        updates.append({"b_id": row.id, "b_sid": res.card.id, "b_method": res.method, "b_finish": price_finish})
+        updates.append({"b_id": row.id, "b_imp": row.import_id, "b_sid": res.card.id, "b_method": res.method, "b_finish": price_finish})
         matched[res.card.id] = res.card
         methods[res.method] = methods.get(res.method, 0) + 1
     db.expunge_all()
     if updates:
         table = Entry.__table__
         db.connection().execute(
-            update(table).where(table.c.id == bindparam("b_id"))
+            update(table).where(table.c.id == bindparam("b_id"), table.c.import_id.is_not_distinct_from(bindparam("b_imp")))
             .values(scryfall_id=bindparam("b_sid"), match_method=bindparam("b_method"), price_finish=bindparam("b_finish")),
             updates)
 
