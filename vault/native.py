@@ -3,7 +3,7 @@
 Sign in with Apple (AuthenticationServices) and Google Sign-In for iOS give the app a
 signed OpenID Connect ID token. The app sends it to ``POST /api/v1/auth/native/{provider}``;
 we check the signature against the provider's published keys, the issuer, the audience
-(the iOS app's bundle id / iOS client id), expiry and, when given, the nonce.
+(the iOS app's bundle id / iOS client id), expiry and the nonce (required; each nonce signs in once).
 """
 
 from __future__ import annotations
