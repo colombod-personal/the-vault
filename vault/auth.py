@@ -23,6 +23,7 @@ Provider quirks handled here:
 from __future__ import annotations
 
 import hmac
+import html
 import json
 import logging
 import re
@@ -34,8 +35,8 @@ import httpx
 from authlib.common.errors import AuthlibBaseError
 from authlib.integrations.starlette_client import OAuth
 from joserfc.errors import JoseError
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from joserfc import jwt
 from joserfc.jwk import ECKey
 from sqlalchemy import select
@@ -257,6 +258,18 @@ def session_user(db: Session, request: Request) -> User | None:
 
 APP_FLOW_KEYS = ("app_redirect_uri", "code_challenge")
 
+HANDOFF_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in to the Vault app</title>
+<style>body{{font:16px/1.5 system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1b1b1b;background:#fff}}
+button{{font:inherit;padding:.6rem 1.2rem;margin:.25rem .5rem 0 0;border-radius:.5rem;border:1px solid #555;background:#fff;cursor:pointer}}
+button[value=continue]{{background:#1b1b1b;color:#fff}}
+@media (prefers-color-scheme:dark){{body{{background:#121212;color:#eee}}button{{background:#222;color:#eee}}button[value=continue]{{background:#eee;color:#121212}}}}</style>
+</head><body><h1>Sign in to the Vault app?</h1>
+<p>You are signed in as <strong>{who}</strong>. Continue only if you just asked the Vault app on this device to sign in.</p>
+<form method="post" action="/api/auth/app-handoff">
+<button type="submit" name="decision" value="continue" autofocus>Continue to the app</button>
+<button type="submit" name="decision" value="cancel">Cancel</button></form></body></html>"""
+
 
 def build_router(auth: Auth, get_db) -> APIRouter:
     router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -323,12 +336,35 @@ def build_router(auth: Auth, get_db) -> APIRouter:
                                         status_code=303)
             return RedirectResponse("/?link_error=identity_in_use", status_code=303)
         if app_flow:
-            from . import tokens
-
+            # The code goes to the app only after the person confirms here. Anyone can start this
+            # flow with their own PKCE challenge and send the link to someone; a silent sign-in
+            # must not then hand that person's code to whichever app claims the custom scheme.
             request.session.pop("app_flow", None)
-            code = tokens.create_code(db, user, app_flow["code_challenge"], app_flow["app_redirect_uri"])
-            return RedirectResponse(f"{app_flow['app_redirect_uri']}?{urlencode({'code': code})}", status_code=303)
+            request.session["app_handoff"] = {**app_flow, "uid": user.id}
+            return RedirectResponse("/api/auth/app-handoff", status_code=303)
         return RedirectResponse("/", status_code=303)
+
+    @router.get("/app-handoff", response_class=HTMLResponse)
+    def app_handoff_page(request: Request, db: Session = Depends(get_db)):
+        handoff, user = request.session.get("app_handoff"), session_user(db, request)
+        if not handoff or user is None or user.id != handoff.get("uid"):
+            raise HTTPException(404, "No app sign-in is waiting")
+        who = html.escape(user.name or user.email or "your Vault account")
+        return HTMLResponse(HANDOFF_PAGE.format(who=who), headers={"Cache-Control": "no-store"})
+
+    @router.post("/app-handoff")
+    def app_handoff(request: Request, decision: str = Form(...), db: Session = Depends(get_db)):
+        """The person's answer: hand a one-time code to the app, or tell it they declined."""
+        handoff, user = request.session.pop("app_handoff", None), session_user(db, request)
+        if not handoff or user is None or user.id != handoff.get("uid"):
+            raise HTTPException(404, "No app sign-in is waiting")
+        target = handoff["app_redirect_uri"]
+        if decision != "continue":
+            return RedirectResponse(f"{target}?{urlencode({'error': 'access_denied'})}", status_code=303)
+        from . import tokens
+
+        code = tokens.create_code(db, user, handoff["code_challenge"], target)
+        return RedirectResponse(f"{target}?{urlencode({'code': code})}", status_code=303)
 
     @router.post("/logout")
     def logout(request: Request, everywhere: bool = False, db: Session = Depends(get_db)) -> dict:

@@ -46,8 +46,13 @@ def app(settings, idp):
     return create_app(settings, serve_static=False, transport=idp.transport)
 
 
-def web_callback(client, cb):
-    return client.get(cb.url.replace("http://testserver", ""), follow_redirects=False)
+def web_callback(client, cb, decision="continue"):
+    """The provider's callback, then (for an app sign-in) the person confirming the hand-off."""
+    res = client.get(cb.url.replace("http://testserver", ""), follow_redirects=False)
+    if res.headers.get("location") == "/api/auth/app-handoff":
+        assert client.get("/api/auth/app-handoff").status_code == 200
+        res = client.post("/api/auth/app-handoff", data={"decision": decision}, follow_redirects=False)
+    return res
 
 
 @pytest.fixture
@@ -499,3 +504,34 @@ def test_a_code_for_an_account_deleted_meanwhile_is_refused_not_a_crash(app, cli
         db.get = deleted_meanwhile
         with pytest.raises(tokens.TokenError):
             tokens.redeem_code(db, code, verifier, "vault://auth", None)
+
+
+def test_an_app_gets_a_code_only_after_the_person_confirms(client, idp):
+    """Anyone can start an app sign-in with their own PKCE challenge and send the link. Signing
+    in alone hands no code to the custom scheme: the person confirms on a Vault page first,
+    and can decline."""
+    verifier = secrets.token_urlsafe(48)
+    start = lambda: client.get("/api/auth/login/google", params={  # noqa: E731
+        "app_redirect_uri": "vault://auth", "code_challenge": s256(verifier)}, follow_redirects=False)
+    res = start()
+    cb = idp.google.approve(res.headers["location"], "g-consent")
+    back = client.get(cb.url.replace("http://testserver", ""), follow_redirects=False)
+    assert back.headers["location"] == "/api/auth/app-handoff"  # not vault://auth?code=...
+    page = client.get("/api/auth/app-handoff")
+    assert page.status_code == 200 and "Continue to the app" in page.text and "no-store" in page.headers["cache-control"]
+    declined = client.post("/api/auth/app-handoff", data={"decision": "cancel"}, follow_redirects=False)
+    assert declined.headers["location"] == "vault://auth?error=access_denied"
+    assert client.post("/api/auth/app-handoff", data={"decision": "continue"}).status_code == 404  # used up
+    res = start()
+    back = web_callback(client, idp.google.approve(res.headers["location"], "g-consent"))
+    assert back.headers["location"].startswith("vault://auth?code=")
+
+
+def test_the_hand_off_page_escapes_the_account_name(client, idp):
+    verifier = secrets.token_urlsafe(48)
+    res = client.get("/api/auth/login/google", params={"app_redirect_uri": "vault://auth", "code_challenge": s256(verifier)},
+                     follow_redirects=False)
+    cb = idp.google.approve(res.headers["location"], "g-xss", name="<script>alert(1)</script>")
+    client.get(cb.url.replace("http://testserver", ""), follow_redirects=False)
+    page = client.get("/api/auth/app-handoff").text
+    assert "<script>alert" not in page and "&lt;script&gt;" in page

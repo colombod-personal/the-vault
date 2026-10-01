@@ -95,7 +95,10 @@ accepted: its tokens carry the web client id as `aud` and the iOS client as `azp
 
 1. The app makes a `code_verifier` (RFC 7636: 43-128 characters from `A-Z a-z 0-9 - . _ ~`) and opens this in `ASWebAuthenticationSession`:
    `/api/auth/login/{provider}?app_redirect_uri=vault://auth&code_challenge=<BASE64URL(SHA256(verifier))>&code_challenge_method=S256`
-2. After sign-in the browser is sent to `vault://auth?code=...`, or to `?error=...` if it failed
+2. After sign-in the Vault asks the person to confirm ("Sign in to the Vault app?" at
+   `/api/auth/app-handoff`), so a sign-in link someone else started can't hand their code to
+   another app. Then the browser is sent to `vault://auth?code=...`, or to `?error=...` if it failed
+   or they declined (`access_denied`)
    (`identity_in_use` when a signed-in person tries to link a sign-in owned by another account).
    `app_redirect_uri` must be listed in `APP_REDIRECT_URIS`.
 3. `POST /api/v1/auth/token`:
