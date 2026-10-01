@@ -54,7 +54,7 @@ vault/app.py          FastAPI app factory, sessions, static files for local dev
 vault/auth.py         Google / Microsoft / Apple / Facebook sign-in, account linking
 vault/models.py       users, identities, imports, entries, cards, price_snapshots, collection_values
 vault/migrations/     schema migrations (Alembic), applied at startup; alembic.ini for writing new ones
-vault/importer.py     Dragon Shield CSV -> entries (records what changed since the last import)
+vault/importer.py     collection files (Dragon Shield, Moxfield, generic CSV) -> entries, and exports in every format
 vault/collection_view.py  one user's collection as items, sets, timeline, stats (cached per version)
 vault/tokens.py       bearer access/refresh tokens and PKCE app codes for native apps
 vault/native.py       verifies Apple / Google ID tokens from the iOS SDKs

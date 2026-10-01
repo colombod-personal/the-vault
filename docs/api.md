@@ -15,7 +15,7 @@ One API for the web app and native apps (the planned iOS app), under `/api/v1`.
   shares, access tokens) accept `Idempotency-Key: <uuid>`: a retry with the same key replays the first answer
   (`Idempotent-Replayed: true`) instead of doing the work twice. A retry that arrives while the
   first attempt is still running gets `409` with `Retry-After`. A replayed invite shows the
-  same link (derived again from the server's secret; the stored answer never keeps it), and
+  same link until the invite is accepted (then 409; the link is derived again from the server's secret, and the stored answer never keeps it), and
   accepting an invite (`/shares/accept`) takes a key too.
   An access token's secret is shown once and never stored, so a retried token creation answers
   `409` with the token's id (in `Location`) instead of making a second one: revoke it and create
@@ -164,7 +164,7 @@ https and localhost).
 | DELETE | `/api/v1/shares/{id}` | revoke (owner) or leave (recipient) |
 | POST | `/api/v1/shares/accept` | `{"token"}` from an invite link |
 | GET | `/api/v1/shared` | what others share with you |
-| GET | `/api/v1/shared/{id}/collection[/…]` | a shared collection, read-only. Same sub-resources as `/collection` except `export.csv`. Prices paid are hidden unless the owner allowed them |
+| GET | `/api/v1/shared/{id}/collection[/…]` | a shared collection, read-only. Same sub-resources as `/collection` except the exports (`exports`, `export/{format}`, `export.csv`). Prices paid are hidden unless the owner allowed them |
 | GET | `/api/v1/shared/{id}/deck` | a shared deck, checked against your collection |
 
 Outside v1: `POST /api/mcp` (the MCP server for agents, [`agents.md`](agents.md)), plus the web and provider callbacks: `/api/auth/*` (browser sign-in),

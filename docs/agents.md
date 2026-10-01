@@ -17,8 +17,8 @@ Created in Account → Agents & API, or with `POST /api/v1/me/tokens`
 (`{"name", "scopes": ["read"] | ["read", "write"], "expires_in_days": 1–365}`).
 
 - The token (`vault_pat_…`) is shown once. Only its SHA-256 is stored.
-- **read** covers everything under `GET`, plus the two POSTs that only compute:
-  `decks/parse` and `decks/coverage`. **write** adds imports, saving decks and sharing.
+- **read** covers everything under `GET`, plus the POSTs that only compute or revoke the token
+  itself: `decks/parse`, `decks/coverage`, `cards/lookup` and `auth/revoke`. **write** adds imports, saving decks and sharing.
   Without write, a change answers `403` with `WWW-Authenticate: Bearer error="insufficient_scope"`.
 - Tokens can never manage the account: they can't create tokens, delete the account, export
   it, or manage app sessions. Those need the person, on the web or in the iOS app. A leaked
@@ -71,7 +71,7 @@ tell the agent how to start, and remind it to credit artists and Scryfall.
   or a new deck never happens twice. Reusing a key for a different request answers 422; a
   retry that arrives while the first attempt is still running answers 409 with `Retry-After`.
   On `/api/mcp` the header covers the tool call (in a JSON-RPC batch, each call separately).
-  A retried invite shows the same link (derived again from the server's secret; stored answers never keep it).
+  A retried invite shows the same link until the invite is accepted (then 409); it is derived again from the server's secret, and stored answers never keep it.
 - **Errors say what to do.** Every error is problem+json with a `detail`. A 503 carries
   `Retry-After`.
 
