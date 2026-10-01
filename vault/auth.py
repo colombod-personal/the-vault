@@ -46,6 +46,7 @@ from sqlalchemy.orm import Session
 from . import outbound
 from .config import Settings
 from .models import Identity, User, new_session_key
+from .ratelimit import limited
 
 log = logging.getLogger(__name__)
 
@@ -281,7 +282,7 @@ def build_router(auth: Auth, get_db) -> APIRouter:
         return {"providers": auth.enabled, "dev_login": auth.settings.dev_login,
                 "passkeys": passkeys_enabled(auth.settings)}
 
-    @router.get("/login/{provider}")
+    @router.get("/login/{provider}", dependencies=limited("oauth-login"))
     async def login(provider: str, request: Request, app_redirect_uri: str | None = None,
                     code_challenge: str | None = None, code_challenge_method: str | None = None):
         """Browser sign-in. Native apps open this in ASWebAuthenticationSession with
@@ -311,7 +312,7 @@ def build_router(auth: Auth, get_db) -> APIRouter:
             response.headers["location"] = outbound.browser_url(auth.settings, response.headers["location"])
         return response
 
-    @router.api_route("/callback/{provider}", methods=["GET", "POST"])
+    @router.api_route("/callback/{provider}", methods=["GET", "POST"], dependencies=limited("oauth-callback"))
     async def callback(provider: str, request: Request, db: Session = Depends(get_db)):
         app_flow = request.session.get("app_flow")
         try:

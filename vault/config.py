@@ -49,6 +49,14 @@ class Settings:
     app_redirect_uris: tuple[str, ...] = field(default_factory=lambda: tuple(
         u.strip() for u in _env("APP_REDIRECT_URIS", "vault://auth").split(",") if u.strip()))
 
+    # Requests per minute per client IP to each sign-in endpoint (vault.ratelimit): starting a
+    # sign-in, and the steps that check a credential or redeem a token.
+    auth_rate_limit: int = field(default_factory=lambda: int(_env("AUTH_RATE_LIMIT", "30")))
+    auth_verify_rate_limit: int = field(default_factory=lambda: int(_env("AUTH_VERIFY_RATE_LIMIT", "10")))
+    passkey_challenge_cap: int = field(default_factory=lambda: int(_env("PASSKEY_CHALLENGE_CAP", "10000")))
+    # Behind Vercel's edge, which sets the client's address in x-forwarded-for / x-real-ip.
+    on_vercel: bool = field(default_factory=lambda: bool(os.environ.get("VERCEL")))
+
     # Local development only: send every outbound call to the digital twin universe (python -m twins).
     twins_url: str = field(default_factory=lambda: _env("VAULT_TWINS_URL"))
 

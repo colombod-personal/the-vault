@@ -7,6 +7,8 @@ Each flow is two steps: ``…/options`` returns the WebAuthn options, and ``…/
 browser's answer with py_webauthn. The challenge is kept on the server (``passkey_challenges``,
 valid for five minutes) and the session cookie only names it. Verifying claims it with a
 conditional DELETE, so it is used once, even by a replayed cookie or two racing requests.
+User verification (a PIN or biometric) is required: a passkey can be an account's only factor.
+At most PASSKEY_CHALLENGE_CAP ceremonies may be pending; past that, new ones get 429.
 
 - ``signup``: new account, identified only by the passkey
 - ``register``: add a passkey to the signed-in account
@@ -48,6 +50,7 @@ from webauthn.helpers.structs import (
 from .auth import Profile
 from .config import Settings
 from .models import Identity, Passkey, PasskeyChallenge, User
+from .ratelimit import limited
 
 RP_NAME = "The Vault"
 CHALLENGE_TTL = 300
@@ -77,9 +80,13 @@ class Verify(BaseModel):
     name: str | None = Field(None, max_length=80, description="A label for this passkey, e.g. 'MacBook'")
 
 
-def _stash(request: Request, db: Session, kind: str, challenge: bytes, **extra) -> None:
+def _stash(request: Request, db: Session, cap: int, kind: str, challenge: bytes, **extra) -> None:
     now = time.time()
     db.execute(delete(PasskeyChallenge).where(PasskeyChallenge.expires < now))  # tidy up old ones
+    if db.scalar(select(func.count()).select_from(PasskeyChallenge)) >= cap:  # a flood from many IPs
+        db.commit()
+        raise HTTPException(429, "Too many passkey requests in progress. Try again in a minute.",
+                            headers={"Retry-After": "60"})
     ceremony = secrets.token_urlsafe(32)
     db.add(PasskeyChallenge(id=ceremony, kind=kind, challenge=bytes_to_base64url(challenge), expires=now + CHALLENGE_TTL))
     db.commit()
@@ -123,17 +130,17 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         options = generate_registration_options(
             rp_id=rp_id, rp_name=RP_NAME, user_id=handle, user_name=user_name, user_display_name=display,
             authenticator_selection=AuthenticatorSelectionCriteria(
-                resident_key=ResidentKeyRequirement.REQUIRED, user_verification=UserVerificationRequirement.PREFERRED),
+                resident_key=ResidentKeyRequirement.REQUIRED, user_verification=UserVerificationRequirement.REQUIRED),
             exclude_credentials=[PublicKeyCredentialDescriptor(id=base64url_to_bytes(p.credential_id)) for p in exclude],
         )
-        _stash(request, db, kind, options.challenge, handle=bytes_to_base64url(handle), **extra)
+        _stash(request, db, settings.passkey_challenge_cap, kind, options.challenge, handle=bytes_to_base64url(handle), **extra)
         return json.loads(options_to_json(options))
 
     def save_credential(db: Session, user: User, pending: dict, body: Verify) -> Passkey:
         try:
             verified = verify_registration_response(
                 credential=body.credential, expected_challenge=base64url_to_bytes(pending["challenge"]),
-                expected_rp_id=rp_id, expected_origin=origin)
+                expected_rp_id=rp_id, expected_origin=origin, require_user_verification=True)
         except WEBAUTHN_ERRORS as exc:
             raise HTTPException(400, f"The passkey could not be verified: {exc}") from exc
         credential_id = bytes_to_base64url(verified.credential_id)
@@ -158,7 +165,8 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         return passkey
 
     # -- new account --------------------------------------------------------------------------
-    @router.post("/signup/options", summary="Start creating an account with a passkey")
+    @router.post("/signup/options", dependencies=limited("passkey-signup"),
+                 summary="Start creating an account with a passkey")
     def signup_options(body: Signup, request: Request, db: Session = Depends(get_db)) -> dict:
         require_enabled()
         name = (body.name or "").strip()[:200] or None
@@ -166,7 +174,8 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         return registration_options(request, db, "signup", handle, name or "Vault account", name or "Vault account", [],
                                     name=name)
 
-    @router.post("/signup/verify", summary="Finish creating an account with a passkey (signs you in)")
+    @router.post("/signup/verify", dependencies=limited("passkey-signup-verify", verify=True),
+                 summary="Finish creating an account with a passkey (signs you in)")
     def signup_verify(body: Verify, request: Request, db: Session = Depends(get_db)) -> dict:
         require_enabled()
         pending = _take(request, db, "signup")
@@ -178,7 +187,8 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         return {"signed_in": True, "user_id": user.id, "passkey_id": passkey.id}
 
     # -- another passkey for the signed-in account --------------------------------------------
-    @router.post("/register/options", summary="Start adding a passkey to your account")
+    @router.post("/register/options", dependencies=limited("passkey-register"),
+                 summary="Start adding a passkey to your account")
     def register_options(request: Request, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
         require_enabled()
         identity = db.scalar(select(Identity).where(Identity.user_id == user.id, Identity.provider == PROVIDER))
@@ -187,7 +197,8 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         label = user.email or user.name or "Vault account"
         return registration_options(request, db, "register", handle, label, user.name or label, existing, uid=user.id)
 
-    @router.post("/register/verify", summary="Finish adding a passkey to your account")
+    @router.post("/register/verify", dependencies=limited("passkey-register-verify", verify=True),
+                 summary="Finish adding a passkey to your account")
     def register_verify(body: Verify, request: Request, user: User = Depends(account_user),
                         db: Session = Depends(get_db)) -> dict:
         require_enabled()
@@ -205,14 +216,16 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         return {"added": True, "passkey_id": passkey.id}
 
     # -- sign in ------------------------------------------------------------------------------
-    @router.post("/login/options", summary="Start signing in with a passkey")
+    @router.post("/login/options", dependencies=limited("passkey-login"),
+                 summary="Start signing in with a passkey")
     def login_options(request: Request, db: Session = Depends(get_db)) -> dict:
         require_enabled()
-        options = generate_authentication_options(rp_id=rp_id, user_verification=UserVerificationRequirement.PREFERRED)
-        _stash(request, db, "login", options.challenge)
+        options = generate_authentication_options(rp_id=rp_id, user_verification=UserVerificationRequirement.REQUIRED)
+        _stash(request, db, settings.passkey_challenge_cap, "login", options.challenge)
         return json.loads(options_to_json(options))
 
-    @router.post("/login/verify", summary="Finish signing in with a passkey")
+    @router.post("/login/verify", dependencies=limited("passkey-login-verify", verify=True),
+                 summary="Finish signing in with a passkey")
     def login_verify(body: Verify, request: Request, db: Session = Depends(get_db)) -> dict:
         require_enabled()
         pending = _take(request, db, "login")
@@ -226,7 +239,7 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
             verified = verify_authentication_response(
                 credential=body.credential, expected_challenge=base64url_to_bytes(pending["challenge"]),
                 expected_rp_id=rp_id, expected_origin=origin, credential_public_key=passkey.public_key,
-                credential_current_sign_count=passkey.sign_count)
+                credential_current_sign_count=passkey.sign_count, require_user_verification=True)
         except WEBAUTHN_ERRORS as exc:
             raise HTTPException(401, f"The passkey could not be verified: {exc}") from exc
         identity = db.scalar(select(Identity).where(Identity.user_id == passkey.user_id, Identity.provider == PROVIDER))

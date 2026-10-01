@@ -29,6 +29,7 @@ def settings(tmp_path):
         database_url=f"sqlite:///{tmp_path}/native.db", session_secret="test", base_url="http://testserver",
         google_client_id="google-web", google_client_secret="x", apple_app_bundle_id=BUNDLE,
         google_ios_client_id=GOOGLE_IOS, app_redirect_uris=("vault://auth",),
+        auth_verify_rate_limit=100,  # some tests sign in more than the limit allows (test_rate_limits.py)
     )
 
 

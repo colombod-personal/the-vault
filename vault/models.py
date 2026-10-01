@@ -231,6 +231,18 @@ class NativeNonce(Base):
     expires: Mapped[float] = mapped_column(Float, index=True)  # unix time (the token's exp)
 
 
+class RateHit(Base):
+    """Requests to a sign-in endpoint in one minute (vault.ratelimit). ``key`` is a keyed hash of
+    the endpoint's bucket and the client's IP, so no IP address is stored; rows go after a few
+    minutes."""
+
+    __tablename__ = "rate_hits"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    minute: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)  # unix time // 60
+    hits: Mapped[int] = mapped_column(Integer)
+
+
 class PasskeyChallenge(Base):
     """A pending passkey ceremony's challenge (vault.passkeys). The session cookie holds only the
     id; verifying claims the row with a conditional DELETE, so each challenge is used once, even

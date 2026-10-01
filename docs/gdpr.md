@@ -35,6 +35,7 @@ This is an engineering document, not legal advice: have the privacy notice
 | `collection_values` | yes | daily market value and cost | `value_history.json` | `purge_user` |
 | `native_nonces` | no | hashes of used native sign-in nonces, until the ID token expires | – | deleted when expired |
 | `passkey_challenges` | no | a pending passkey challenge (random, five minutes), naming no one | – | deleted when used or expired |
+| `rate_hits` | no | per-minute request counts to the sign-in endpoints, keyed by a keyed hash of endpoint and IP (no IP address stored) | – | deleted after a few minutes |
 | `cards`, `price_snapshots` | no | public Scryfall card data and prices | – | kept (not about people) |
 
 `tests/test_privacy.py::test_every_table_referencing_users_is_purged` fails if a table

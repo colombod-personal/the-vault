@@ -134,6 +134,26 @@ def test_webauthn_rejects(client, attack):
     assert client.get(f"{V1}/me").status_code == 401
 
 
+def test_user_verification_is_required(client):
+    """A passkey can be an account's only factor, so it must come with a PIN or biometric."""
+    options = post(client, "/api/auth/passkey/signup/options", {"name": "Ann"}).json()
+    assert options["authenticatorSelection"]["userVerification"] == "required"
+    res = post(client, "/api/auth/passkey/signup/verify",
+               {"credential": SoftAuthenticator(user_verified=False).create(options, ORIGIN)})
+    assert res.status_code == 400 and "verif" in res.json()["detail"].lower()
+    assert client.get(f"{V1}/me").status_code == 401
+
+    phone = SoftAuthenticator()
+    signup(client, phone)
+    client.cookies.clear()
+    phone.user_verified = False  # e.g. a security key touched without its PIN
+    options = post(client, "/api/auth/passkey/login/options").json()
+    assert options["userVerification"] == "required"
+    res = post(client, "/api/auth/passkey/login/verify", {"credential": phone.get(options, ORIGIN)})
+    assert res.status_code == 401 and "verif" in res.json()["detail"].lower()
+    assert client.get(f"{V1}/me").status_code == 401
+
+
 def test_personal_access_tokens_cannot_add_passkeys(client):
     signup(client, SoftAuthenticator())
     token = post(client, f"{V1}/me/tokens", {"name": "bot", "scopes": ["read", "write"]}).json()["token"]

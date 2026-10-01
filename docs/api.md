@@ -112,6 +112,9 @@ accepted: its tokens carry the web client id as `aud` and the iOS client as `azp
 Passkeys need no third party: Face ID, Touch ID, Windows Hello, a phone or a security key.
 Each ceremony is two POSTs. The challenge is kept on the server (`passkey_challenges`); the
 signed session cookie holds only the ceremony's id. A challenge can be claimed once, within 5 minutes.
+User verification is required (`userVerification: "required"`): a passkey can be an account's
+only way in, so the authenticator must check a PIN or biometric. A credential or assertion without
+the UV flag is refused (`400` when creating a passkey, `401` when signing in).
 
 | Step | Endpoint |
 |---|---|
@@ -124,6 +127,22 @@ signed session cookie holds only the ceremony's id. A challenge can be claimed o
 Vercel, a deployment without `BASE_URL` uses its own address. Personal access tokens can't add
 passkeys. `GET /api/auth/providers` says whether passkeys are available (`"passkeys": true` on
 https and localhost).
+
+### Rate limits
+
+The sign-in endpoints are limited per client IP, per endpoint, in fixed one-minute windows
+counted in the database (so they hold across serverless instances; only a keyed hash of the IP
+is stored). Over the limit they answer `429` (problem+json) with `Retry-After` in seconds.
+
+| Endpoints | Requests per minute | Setting |
+|---|---|---|
+| `POST /api/auth/passkey/{signup,register,login}/options`, `GET /api/auth/login/{provider}`, `GET\|POST /api/auth/callback/{provider}`, `POST /api/facebook/data-deletion`, `GET /api/facebook/deletion-status` | 30 | `AUTH_RATE_LIMIT` |
+| `POST /api/auth/passkey/{signup,register,login}/verify`, `POST /api/v1/auth/native/{provider}`, `POST /api/v1/auth/token` | 10 | `AUTH_VERIFY_RATE_LIMIT` |
+
+At most 10,000 passkey ceremonies may be pending at once (`PASSKEY_CHALLENGE_CAP`); beyond that
+`…/options` answers `429` until some expire. On Vercel the client IP is the first
+`x-forwarded-for` entry (or `x-real-ip`), which Vercel's edge sets; elsewhere those headers are
+ignored and the connection's address is used.
 
 ### Keeping and ending sessions
 
