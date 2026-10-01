@@ -358,3 +358,27 @@ def test_a_failure_while_storing_the_answer_leaves_nothing_behind(app, signed_in
     retry = signed_in.post(f"{V1}{path}", headers=headers, **kwargs)
     assert retry.status_code == 201, retry.text
     assert count() == before + 1
+
+
+@pytest.mark.parametrize("tool, arguments", [
+    ("get_deck", {"deck_id": 2**31}), ("get_deck", {"deck_id": 10**30}),
+    ("get_shared_deck", {"share_id": 10**30}), ("get_collection_summary", {"share_id": 2**31}),
+])
+def test_mcp_ids_too_big_for_the_database_are_invalid(agent, bot, tool, arguments):
+    read = make_token(agent)
+    res = rpc(bot, "tools/call", {"name": tool, "arguments": arguments}, read)
+    assert res.status_code == 200 and res.json()["error"]["code"] == -32602, res.text
+
+
+def test_an_api_failure_inside_a_tool_call_is_a_tool_error_not_a_failed_request(agent, bot, monkeypatch):
+    from vault.api import v1
+
+    def broken(text):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(v1.decklist, "parse_text", broken)
+    read = make_token(agent)
+    res = rpc(bot, "tools/call", {"name": "check_decklist", "arguments": {"text": "1 Sol Ring"}}, read)
+    assert res.status_code == 200, res.text
+    result = res.json()["result"]
+    assert result["isError"] is True and "boom" not in result["content"][0]["text"]

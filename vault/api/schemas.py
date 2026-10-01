@@ -8,6 +8,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
+MAX_ID = 2**31 - 1  # ids are INTEGER columns: 32 bits on Postgres
+
+
 class Link(BaseModel):
     href: str
     title: str | None = None
@@ -293,7 +296,7 @@ class DeckPage(Page):
 
 class ShareIn(BaseModel):
     kind: Literal["collection", "deck"]
-    deck_id: int | None = None
+    deck_id: int | None = Field(None, ge=1, le=MAX_ID)
     show_costs: bool = False
 
 

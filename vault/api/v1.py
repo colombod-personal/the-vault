@@ -15,10 +15,11 @@ import hashlib
 import time
 from dataclasses import dataclass
 from datetime import date
+from typing import Annotated
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, UploadFile
 from fastapi.responses import Response
 from mtg_toolkits import decklist, delta
 from mtg_toolkits.formats import FORMATS
@@ -44,6 +45,7 @@ from .hal import etag_response, link, page_body, paginate
 from .idempotency import idempotent
 
 V1 = "/api/v1"
+Id = Annotated[int, Path(ge=1, le=S.MAX_ID)]  # a row id: anything larger can't exist (and would overflow the column)
 DELETE_CONFIRMATION = "DELETE"
 
 
@@ -201,7 +203,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return page_body(request, items, nxt, len(rows), limit=limit)
 
     @router.delete("/me/sessions/{session_id}", tags=["account"], summary="Sign an app out remotely")
-    def end_session(session_id: int, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+    def end_session(session_id: Id, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
         s = db.get(ApiSession, session_id)
         if s is None or s.user_id != user.id:
             raise HTTPException(404, "Session not found")
@@ -223,7 +225,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return page_body(request, [_passkey(p) for p in page], nxt, len(rows), limit=limit)
 
     @router.delete("/me/passkeys/{passkey_id}", tags=["account"], summary="Remove a passkey")
-    def delete_passkey(passkey_id: int, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+    def delete_passkey(passkey_id: Id, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
         remove_passkey(db, user.id, passkey_id)
         db.commit()
         return {"deleted": True}
@@ -260,7 +262,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return page_body(request, [_token(t) for t in page], nxt, len(rows), limit=limit)
 
     @router.delete("/me/tokens/{token_id}", tags=["account"], summary="Revoke a personal access token")
-    def delete_token(token_id: int, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+    def delete_token(token_id: Id, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
         row = db.get(AccessToken, token_id)
         if row is None or row.user_id != user.id:
             raise HTTPException(404, "Token not found")
@@ -284,7 +286,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     def own_ctx(db: Session = Depends(get_db), user: User = Depends(current_user)) -> Ctx:
         return Ctx(db, user, False, f"{V1}/collection", True)
 
-    def shared_ctx(share_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)) -> Ctx:
+    def shared_ctx(share_id: Id, db: Session = Depends(get_db), user: User = Depends(current_user)) -> Ctx:
         share = incoming_share(db, user, share_id, "collection")
         owner = db.get(User, share.owner_id)
         return Ctx(db, owner, not share.show_costs, f"{V1}/shared/{share_id}/collection", False, display_name(owner))
@@ -460,7 +462,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return page_body(request, [_import(i) for i in page], nxt, len(rows), limit=limit)
 
     @router.get("/imports/{import_id}", tags=["imports"], response_model=S.ImportItem)
-    def get_import(import_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    def get_import(import_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         imp = db.get(Import, import_id)
         if imp is None or imp.user_id != user.id:
             raise HTTPException(404, "Import not found")
@@ -518,12 +520,12 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return idempotent(request, db, user, 201, run)
 
     @router.get("/decks/{deck_id}", tags=["decks"], response_model=S.Deck, summary="A saved deck, with coverage")
-    def get_deck(deck_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    def get_deck(deck_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         deck = owned_deck(db, user, deck_id)
         return _deck(deck, _coverage(deck.text, user_entries(db, user)))
 
     @router.put("/decks/{deck_id}", tags=["decks"], response_model=S.Deck)
-    def update_deck(deck_id: int, body: S.DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    def update_deck(deck_id: Id, body: S.DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
         from datetime import datetime, timezone
 
         deck = owned_deck(db, user, deck_id)
@@ -533,7 +535,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return _deck(deck)
 
     @router.delete("/decks/{deck_id}", tags=["decks"])
-    def delete_deck(deck_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    def delete_deck(deck_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         deck = owned_deck(db, user, deck_id)
         db.execute(delete(Share).where(Share.deck_id == deck.id))
         db.delete(deck)
@@ -604,7 +606,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return page_body(request, items, nxt, len(rows), limit=limit)
 
     @router.delete("/shares/{share_id}", tags=["sharing"], summary="Revoke (owner) or leave (recipient)")
-    def remove_share(share_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    def remove_share(share_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         share = db.get(Share, share_id)
         if share is None or user.id not in (share.owner_id, share.grantee_id):
             raise HTTPException(404, "Not found")
@@ -641,7 +643,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     @router.get("/shared/{share_id}/deck", tags=["sharing"], response_model=S.Deck,
                 summary="A deck someone shared, with coverage against your collection")
-    def shared_deck(share_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    def shared_deck(share_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         share = incoming_share(db, user, share_id, "deck")
         deck = db.get(Deck, share.deck_id)
         out = _deck(deck, _coverage(deck.text, user_entries(db, user)))

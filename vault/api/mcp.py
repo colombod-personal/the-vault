@@ -14,6 +14,7 @@ fails with the API's 403.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Callable
@@ -24,6 +25,9 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 
 from ..models import User
+from .schemas import MAX_ID
+
+log = logging.getLogger(__name__)
 
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 V1 = "/api/v1"
@@ -126,7 +130,7 @@ def _base(args: dict) -> str:
     return f"{V1}/shared/{int(shared)}/collection" if shared is not None else f"{V1}/collection"
 
 
-ID = {"type": "integer", "minimum": 1}
+ID = {"type": "integer", "minimum": 1, "maximum": MAX_ID}
 SHARE = {"share_id": {**ID, "description": "Read a collection someone shared with you (from list_shared_with_me) instead of your own"}}
 PAGING = {
     "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25, "description": "Items per page"},
@@ -242,8 +246,13 @@ def build_router(optional_user) -> APIRouter:
         elif tool.body is not None:
             kwargs["json"] = tool.body(args)
         transport = httpx.ASGITransport(app=request.app)
-        async with httpx.AsyncClient(transport=transport, base_url=str(request.base_url).rstrip("/")) as client:
-            res = await client.request(tool.method, tool.path(args), **kwargs)
+        try:
+            async with httpx.AsyncClient(transport=transport, base_url=str(request.base_url).rstrip("/")) as client:
+                res = await client.request(tool.method, tool.path(args), **kwargs)
+        except Exception:  # the API failed: this tool call failed, not the whole MCP request (or its batch)
+            log.exception("MCP tool %s failed", tool.name)
+            return 500, {"type": "about:blank", "title": "Internal server error", "status": 500,
+                         "detail": "The Vault could not complete this request. Try again later."}
         try:
             body = res.json()
         except ValueError:

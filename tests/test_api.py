@@ -3,6 +3,7 @@ import json
 from datetime import date
 from pathlib import Path
 
+import pytest
 from mtg_toolkits.scryfall import Card
 
 from sqlalchemy import select
@@ -254,3 +255,24 @@ def test_the_bulk_prefilter_keeps_printings_matched_by_set_and_number(app, signe
         assert kept == ["bel2"]
         stats = sync(db, wanted_cards(db, bulk), day=date(2026, 9, 27))
     assert stats["methods"].get("set_number") == 1
+
+
+ID_TOO_BIG = [2**31, 10**30]  # ids are 32-bit INTEGER columns on Postgres
+
+
+@pytest.mark.parametrize("big", ID_TOO_BIG)
+@pytest.mark.parametrize("method, path", [
+    ("GET", "/decks/{}"), ("GET", "/imports/{}"), ("GET", "/shared/{}/deck"), ("GET", "/shared/{}/collection"),
+    ("GET", "/shared/{}/collection/cards"), ("DELETE", "/me/sessions/{}"), ("DELETE", "/me/tokens/{}"),
+    ("DELETE", "/me/passkeys/{}"), ("DELETE", "/shares/{}"), ("DELETE", "/decks/{}"),
+])
+def test_ids_too_big_for_the_database_are_invalid_not_server_errors(signed_in, method, path, big):
+    res = signed_in.request(method, V1 + path.format(big))
+    assert res.status_code == 422, res.text
+
+
+@pytest.mark.parametrize("big", ID_TOO_BIG + [1e30])
+def test_body_ids_too_big_for_the_database_are_invalid(signed_in, big):
+    assert signed_in.put(f"{V1}/decks/{2**31}", json={"name": "a", "text": "1 Sol Ring"}).status_code == 422
+    res = signed_in.post(f"{V1}/shares", json={"kind": "deck", "deck_id": big})
+    assert res.status_code == 422, res.text
