@@ -18,6 +18,7 @@ from datetime import date
 from typing import Any, Callable
 
 import httpx
+from mtg_toolkits.dragonshield import scryfall_set_code
 from mtg_toolkits.http import ApiError
 from mtg_toolkits.scryfall import ScryfallClient
 from sqlalchemy import func, or_, select
@@ -50,7 +51,10 @@ class Catalog:
     # -- cards ------------------------------------------------------------------------------
     def lookup(self, db: Session, identifiers: list[dict[str, str]], *, refresh: bool = False) -> dict[str, Any]:
         """Scryfall's /cards/collection, answered by the Vault: ``{"data": [...], "not_found": [...],
-        "unavailable": bool}``. ``unavailable`` is true when Scryfall was needed but didn't answer."""
+        "unavailable": bool}``. ``unavailable`` is true when Scryfall was needed but didn't answer.
+        Dragon Shield set codes (kept as-is in collections) are translated to Scryfall's; ``not_found``
+        lists identifiers as asked."""
+        asked, identifiers = identifiers, [_scryfall_ident(i) for i in identifiers]
         found: dict[int, Card] = {}
         if not refresh:
             for i, ident in enumerate(identifiers):
@@ -85,7 +89,7 @@ class Catalog:
             if card.scryfall_id not in seen:
                 seen.add(card.scryfall_id)
                 data.append(self._card_json(card, prices.get(card.scryfall_id)))
-        return {"data": data, "not_found": [identifiers[i] for i in range(len(identifiers)) if i not in found],
+        return {"data": data, "not_found": [asked[i] for i in range(len(identifiers)) if i not in found],
                 "unavailable": unavailable}
 
     def _card_json(self, c: Card, p: PriceSnapshot | None) -> dict[str, Any]:
@@ -129,6 +133,12 @@ class Catalog:
         return [{"code": s["code"], "name": s.get("name"), "icon_svg_uri": self._rewrite(s["icon_svg_uri"]) if s.get("icon_svg_uri") else None,
                   "released_at": s.get("released_at"), "set_type": s.get("set_type"),
                   "parent_set_code": s.get("parent_set_code")} for s in raw]
+
+
+def _scryfall_ident(ident: dict[str, str]) -> dict[str, str]:
+    if not ident.get("set"):
+        return ident
+    return {**ident, "set": scryfall_set_code(ident["set"])}
 
 
 def _find(db: Session, ident: dict[str, str]) -> Card | None:

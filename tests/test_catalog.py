@@ -189,3 +189,15 @@ def test_sets_catalog_is_paged(app, universe):
         assert len(codes) == first["total"] == len(set(codes))
         assert anonymous.get(f"{V1}/catalog/sets", params={"limit": 501}).json()["count"] <= 500
     assert len([c for c in universe.scryfall.calls if c.path == "/sets"]) == 1  # one fetch served every page
+
+
+def test_a_dragon_shield_set_code_finds_the_card(client, universe):
+    # The collection keeps Dragon Shield's own code (GK2_ORZHOV); lookups translate it, upstream and in the Vault.
+    ident = {"set": "GK2_ORZHOV", "collector_number": "29"}
+    body = lookup(client, ident).json()
+    assert [c["name"] for c in body["data"]] == ["Belfry Spirit"] and body["not_found"] == []
+    again = lookup(client, ident).json()
+    assert [c["name"] for c in again["data"]] == ["Belfry Spirit"]
+    assert len(collection_calls(universe)) == 1  # the second time, from the Vault's own table
+    missing = {"set": "GK2_ORZHOV", "collector_number": "9999"}
+    assert lookup(client, missing).json()["not_found"] == [missing]  # reported as asked
