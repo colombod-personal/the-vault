@@ -7,6 +7,7 @@ Each flow is two steps: ``…/options`` returns the WebAuthn options, and ``…/
 browser's answer with py_webauthn. The challenge is kept on the server (``passkey_challenges``,
 valid for five minutes) and the session cookie only names it. Verifying claims it with a
 conditional DELETE, so it is used once, even by a replayed cookie or two racing requests.
+User verification (a PIN or biometric) is required: a passkey can be an account's only factor.
 
 - ``signup``: new account, identified only by the passkey
 - ``register``: add a passkey to the signed-in account
@@ -123,7 +124,7 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         options = generate_registration_options(
             rp_id=rp_id, rp_name=RP_NAME, user_id=handle, user_name=user_name, user_display_name=display,
             authenticator_selection=AuthenticatorSelectionCriteria(
-                resident_key=ResidentKeyRequirement.REQUIRED, user_verification=UserVerificationRequirement.PREFERRED),
+                resident_key=ResidentKeyRequirement.REQUIRED, user_verification=UserVerificationRequirement.REQUIRED),
             exclude_credentials=[PublicKeyCredentialDescriptor(id=base64url_to_bytes(p.credential_id)) for p in exclude],
         )
         _stash(request, db, kind, options.challenge, handle=bytes_to_base64url(handle), **extra)
@@ -133,7 +134,7 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         try:
             verified = verify_registration_response(
                 credential=body.credential, expected_challenge=base64url_to_bytes(pending["challenge"]),
-                expected_rp_id=rp_id, expected_origin=origin)
+                expected_rp_id=rp_id, expected_origin=origin, require_user_verification=True)
         except WEBAUTHN_ERRORS as exc:
             raise HTTPException(400, f"The passkey could not be verified: {exc}") from exc
         credential_id = bytes_to_base64url(verified.credential_id)
@@ -208,7 +209,7 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
     @router.post("/login/options", summary="Start signing in with a passkey")
     def login_options(request: Request, db: Session = Depends(get_db)) -> dict:
         require_enabled()
-        options = generate_authentication_options(rp_id=rp_id, user_verification=UserVerificationRequirement.PREFERRED)
+        options = generate_authentication_options(rp_id=rp_id, user_verification=UserVerificationRequirement.REQUIRED)
         _stash(request, db, "login", options.challenge)
         return json.loads(options_to_json(options))
 
@@ -226,7 +227,7 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
             verified = verify_authentication_response(
                 credential=body.credential, expected_challenge=base64url_to_bytes(pending["challenge"]),
                 expected_rp_id=rp_id, expected_origin=origin, credential_public_key=passkey.public_key,
-                credential_current_sign_count=passkey.sign_count)
+                credential_current_sign_count=passkey.sign_count, require_user_verification=True)
         except WEBAUTHN_ERRORS as exc:
             raise HTTPException(401, f"The passkey could not be verified: {exc}") from exc
         identity = db.scalar(select(Identity).where(Identity.user_id == passkey.user_id, Identity.provider == PROVIDER))

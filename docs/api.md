@@ -109,6 +109,9 @@ accepted: its tokens carry the web client id as `aud` and the iOS client as `azp
 Passkeys need no third party: Face ID, Touch ID, Windows Hello, a phone or a security key.
 Each ceremony is two POSTs. The challenge is kept on the server (`passkey_challenges`); the
 signed session cookie holds only the ceremony's id. A challenge can be claimed once, within 5 minutes.
+User verification is required (`userVerification: "required"`): a passkey can be an account's
+only way in, so the authenticator must check a PIN or biometric. A credential or assertion without
+the UV flag is refused (`400` when creating a passkey, `401` when signing in).
 
 | Step | Endpoint |
 |---|---|
