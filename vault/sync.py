@@ -11,6 +11,7 @@ from collections.abc import Iterable, Iterator
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+from mtg_toolkits.dragonshield import scryfall_set_code
 from mtg_toolkits.scryfall import Card, iter_bulk_file, resolve_offline
 from sqlalchemy import select
 from sqlalchemy.dialects import postgresql, sqlite
@@ -33,11 +34,15 @@ def wanted_cards(db: Session, bulk: Iterable[dict]) -> Iterator[Card]:
     rows = db.execute(select(Entry.set_code, Entry.collector_number, Entry.name, Entry.scryfall_id)).all()
     ids = {r.scryfall_id for r in rows if r.scryfall_id}
     names = {_front(r.name) for r in rows}
+    printings = {(scryfall_set_code(r.set_code).lower(), r.collector_number.lower())
+                 for r in rows if r.set_code and r.collector_number}
     for obj in bulk:
         if obj.get("object") != "card":
             continue
         faces = [f.get("name", "") for f in obj.get("card_faces") or []]
-        if obj.get("id") in ids or _front(obj.get("name", "")) in names or any(_front(f) in names for f in faces):
+        printing = (str(obj.get("set", "")).lower(), str(obj.get("collector_number", "")).lower())
+        if (obj.get("id") in ids or printing in printings or _front(obj.get("name", "")) in names
+                or any(_front(f) in names for f in faces)):
             yield Card.from_json(obj)
 
 

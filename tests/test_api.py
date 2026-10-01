@@ -5,7 +5,7 @@ from pathlib import Path
 
 from mtg_toolkits.scryfall import Card
 
-from vault.sync import sync
+from vault.sync import sync, wanted_cards
 
 CSV = (Path(__file__).parent / "fixtures" / "collection.csv").read_bytes()
 V1 = "/api/v1"
@@ -223,3 +223,14 @@ def test_an_import_starts_the_value_history(signed_in):
     signed_in.post("/api/v1/imports", files={"file": ("e.csv", CSV, "text/csv")})
     days = signed_in.get("/api/v1/collection/history").json()["items"]
     assert len(days) == 1 and days[0]["copies"] == 7 and days[0]["market"] > 0
+
+
+def test_the_bulk_prefilter_keeps_printings_matched_by_set_and_number(app, signed_in):
+    upload(signed_in)  # Belfry Spirit is GK2_ORZHOV 29 in the file
+    bulk = [{"object": "card", "id": "bel2", "name": "Belfry Spirit (Errata)", "set": "gk2", "collector_number": "29"},
+            {"object": "card", "id": "x", "name": "Unrelated", "set": "gk2", "collector_number": "30"}]
+    with app.state.db.sessions() as db:
+        kept = [c.id for c in wanted_cards(db, bulk)]
+        assert kept == ["bel2"]
+        stats = sync(db, wanted_cards(db, bulk), day=date(2026, 9, 27))
+    assert stats["methods"].get("set_number") == 1
