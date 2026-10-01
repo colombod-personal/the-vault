@@ -469,8 +469,14 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return _import(imp)
 
     # -- decks ----------------------------------------------------------------------------------
+    def _parse(text: str) -> decklist.Decklist:
+        try:
+            return decklist.parse_text(text)
+        except (ValueError, OverflowError) as exc:  # e.g. a quantity with thousands of digits
+            raise HTTPException(400, f"The decklist could not be read: {exc}") from exc
+
     def _coverage(text: str, owned_rows) -> dict:
-        deck = decklist.parse_text(text)
+        deck = _parse(text)
         lines = delta.coverage(deck.to_entries(), [r.to_collection_entry() for r in owned_rows])
         return {"cards": [{"name": c.entry.name, "set": c.entry.set_code, "number": c.entry.collector_number,
                            "need": c.need, "have": c.have, "missing": c.missing, "status": c.status} for c in lines],
@@ -487,7 +493,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     @router.post("/decks/parse", tags=["decks"], response_model=S.ParsedDeck,
                  summary="Parse a pasted decklist (Archidekt, Moxfield, Arena, MTGO formats)")
     def parse_deck(body: S.TextIn, user: User = Depends(current_user)) -> dict:
-        deck = decklist.parse_text(body.text)
+        deck = _parse(body.text)
         return {"cards": [{"name": l.name, "set": l.set_code or "", "collector_number": l.collector_number or "",
                            "qty": l.quantity, "finish": l.finish.value, "section": l.section,
                            "categories": l.categories} for l in deck.lines],
@@ -507,7 +513,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     @router.post("/decks", tags=["decks"], response_model=S.Deck, status_code=201)
     def create_deck(request: Request, body: S.DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
-        if not decklist.parse_text(body.text).lines:
+        if not _parse(body.text).lines:
             raise HTTPException(400, "No cards found in the decklist")
 
         def run():

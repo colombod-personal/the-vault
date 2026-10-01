@@ -276,3 +276,9 @@ def test_body_ids_too_big_for_the_database_are_invalid(signed_in, big):
     assert signed_in.put(f"{V1}/decks/{2**31}", json={"name": "a", "text": "1 Sol Ring"}).status_code == 422
     res = signed_in.post(f"{V1}/shares", json={"kind": "deck", "deck_id": big})
     assert res.status_code == 422, res.text
+
+
+@pytest.mark.parametrize("path, extra", [("/decks/parse", {}), ("/decks/coverage", {}), ("/decks", {"name": "x"})])
+def test_a_decklist_quantity_too_long_to_read_is_a_bad_request(signed_in, path, extra):
+    res = signed_in.post(V1 + path, json={"text": "9" * 5000 + " Sol Ring", **extra})
+    assert res.status_code == 400, res.text
