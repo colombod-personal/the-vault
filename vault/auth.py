@@ -22,6 +22,7 @@ Provider quirks handled here:
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import re
@@ -43,7 +44,7 @@ from sqlalchemy.orm import Session
 
 from . import outbound
 from .config import Settings
-from .models import Identity, User
+from .models import Identity, User, new_session_key
 
 log = logging.getLogger(__name__)
 
@@ -224,14 +225,27 @@ def sign_in(db: Session, request: Request, profile: Profile, link: bool = True) 
 
     With ``link`` (provider sign-ins), a new identity joins the account already signed in here.
     Without it (passkey sign-in and sign-up, dev login) the browser simply switches accounts."""
-    uid = request.session.get("uid") if link else None
-    current = db.get(User, uid) if uid else None
+    current = session_user(db, request) if link else None
     user = find_or_create(db, profile, current)
+    if not user.session_key:
+        user.session_key = new_session_key()
+        db.commit()
     app_flow = request.session.get("app_flow")
     request.session.clear()
     request.session["uid"] = user.id
+    request.session["sk"] = user.session_key
     if app_flow:
         request.session["app_flow"] = app_flow
+    return user
+
+
+def session_user(db: Session, request: Request) -> User | None:
+    """The user this browser's session cookie signs in, if it is still valid: the cookie's key
+    must match the account's (see ``User.session_key``)."""
+    uid, key = request.session.get("uid"), request.session.get("sk")
+    user = db.get(User, uid) if isinstance(uid, int) and isinstance(key, str) else None
+    if user is None or not user.session_key or not hmac.compare_digest(user.session_key, key):
+        return None
     return user
 
 
@@ -311,7 +325,13 @@ def build_router(auth: Auth, get_db) -> APIRouter:
         return RedirectResponse("/", status_code=303)
 
     @router.post("/logout")
-    def logout(request: Request) -> dict:
+    def logout(request: Request, everywhere: bool = False, db: Session = Depends(get_db)) -> dict:
+        """Sign this browser out; with ``?everywhere=true``, every browser signed in to the account
+        (a copied session cookie stops working too). Apps are signed out under /me/sessions."""
+        user = session_user(db, request) if everywhere else None
+        if user is not None:
+            user.session_key = new_session_key()
+            db.commit()
         request.session.clear()
         return {"ok": True}
 

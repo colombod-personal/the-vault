@@ -26,7 +26,8 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, exists, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from webauthn import (
     generate_authentication_options,
@@ -146,7 +147,13 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
                           name=_label(body.credential, body.name), aaguid=verified.aaguid,
                           backed_up=verified.credential_backed_up)
         db.add(passkey)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:  # raced: the same credential, or another device's first passkey (another handle)
+            db.rollback()
+            if db.scalar(select(Passkey.id).where(Passkey.credential_id == credential_id)):
+                raise HTTPException(409, "This passkey is already registered") from None
+            raise HTTPException(409, "A passkey was just added to this account from another device. Please try again.") from None
         return passkey
 
     # -- new account --------------------------------------------------------------------------
@@ -261,9 +268,11 @@ def remove_passkey(db: Session, user_id: int, passkey_id: int) -> None:
         .execution_options(synchronize_session=False)).rowcount
     if not removed:
         raise HTTPException(409, "This is your only way to sign in. Add another passkey or sign-in method first.")
-    if not db.scalar(select(func.count(Passkey.id)).where(Passkey.user_id == user_id)):
-        # no passkeys left: the passkey identity goes too
-        db.execute(delete(Identity).where(Identity.user_id == user_id, Identity.provider == PROVIDER))
+    # No passkeys left: the passkey identity goes too. Checked in the DELETE itself, so a passkey
+    # registered at the same moment keeps the identity it needs to sign in.
+    db.execute(delete(Identity).where(Identity.user_id == user_id, Identity.provider == PROVIDER,
+                                      ~exists().where(Passkey.user_id == user_id))
+               .execution_options(synchronize_session=False))
     db.flush()
 
 

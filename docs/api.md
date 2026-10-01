@@ -50,7 +50,9 @@ There is no `next` on the last page. `limit` above 500 is capped, not refused.
 
 ## Authentication
 
-The web app uses a session cookie (set by `/api/auth/login/{provider}`). Native apps use
+The web app uses a session cookie (set by `/api/auth/login/{provider}`). `POST /api/auth/logout`
+signs the browser out; `?everywhere=true` signs out every browser on the account (copied cookies
+stop working too). Native apps use
 **bearer tokens**: `Authorization: Bearer <access_token>`. Bearer requests never use cookies,
 so they need no CSRF protection.
 
@@ -151,7 +153,7 @@ https and localhost).
 | GET | `/api/v1/collection/exports` | export formats (Dragon Shield, Moxfield, Archidekt, generic CSV, text list), each with a download link |
 | GET | `/api/v1/collection/export/{format}` | the collection in that format. Other apps get Scryfall set codes and numbers for matched printings |
 | GET | `/api/v1/collection/export.csv` | Dragon Shield CSV, byte-identical to a Dragon Shield import |
-| POST / GET | `/api/v1/imports` | upload a Dragon Shield, Moxfield or generic CSV, detected from the header (multipart `file`, 201; the import's `source` says which) / list imports with changes |
+| POST / GET | `/api/v1/imports` | upload a Dragon Shield, Moxfield or generic CSV, detected from the header (multipart `file`, 201; the import's `source` says which; 409 if another import of the collection finished while this one ran) / list imports with changes |
 | GET | `/api/v1/imports/{id}` | one import |
 | POST | `/api/v1/decks/parse` | parse a pasted decklist |
 | POST | `/api/v1/decks/coverage` | owned / partial / missing per card |
@@ -160,7 +162,7 @@ https and localhost).
 | GET | `/api/v1/archidekt/decks/{id}` | a public Archidekt deck, fetched server-side |
 | POST | `/api/v1/cards/lookup` | any card, owned or not: `{"identifiers": [{"id"} \| {"set", "collector_number"} \| {"name", "set"?}], "refresh"?}`, 1–75 of them. Answers in Scryfall's card shape (`data`, `not_found`) from the Vault's own card table, fetching misses from Scryfall once. `unavailable: true` means Scryfall was needed but didn't answer: retry later. Read scope |
 | GET | `/api/v1/catalog/sets` | every Magic set with its icon, paged by set code, plus `aliases` mapping Dragon Shield set codes (e.g. `gk2_orzhov`) to Scryfall ones (public, cached for a day) |
-| POST / GET | `/api/v1/shares` | create a one-time invite link / list what you share |
+| POST / GET | `/api/v1/shares` | create a one-time invite link (web or app sign-in only, not personal access tokens) / list what you share |
 | DELETE | `/api/v1/shares/{id}` | revoke (owner) or leave (recipient) |
 | POST | `/api/v1/shares/accept` | `{"token"}` from an invite link |
 | GET | `/api/v1/shared` | what others share with you |

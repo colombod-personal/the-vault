@@ -21,12 +21,18 @@ def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def invite_token(secret: str, share_id: int) -> str:
-    """The invite's link token, derived from the server's secret and the invite's id: the same
-    every time, so a retried create can show the link again without storing it, and concurrent
-    retries all show the same, valid link. Only its SHA-256 is stored."""
-    mac = hmac.new(secret.encode(), f"vault-invite:{share_id}".encode(), hashlib.sha256).digest()
+def invite_token(secret: str, share: Share) -> str:
+    """The invite's link token, derived from the server's secret, the invite's id and its expiry
+    time: the same every time, so a retried create can show the link again without storing it,
+    and concurrent retries all show the same, valid link. The expiry makes it unique even if a
+    database reuses a deleted invite's id (SQLite does), so a revoked link never comes back.
+    Only its SHA-256 is stored."""
+    micros = (_aware(share.expires_at) - EPOCH) // timedelta(microseconds=1)
+    mac = hmac.new(secret.encode(), f"vault-invite:{share.id}:{micros}".encode(), hashlib.sha256).digest()
     return base64.urlsafe_b64encode(mac).rstrip(b"=").decode()
+
+
+EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
 def _aware(dt: datetime | None) -> datetime | None:
@@ -56,7 +62,7 @@ def create_invite(db: Session, owner: User, kind: str, deck_id: int | None, show
                   expires_at=datetime.now(timezone.utc) + INVITE_TTL)
     db.add(share)
     db.flush()  # the id the token is derived from
-    token = invite_token(secret, share.id)
+    token = invite_token(secret, share)
     share.token_hash = _hash(token)
     db.flush()  # the caller commits (with the Idempotency-Key answer)
     return share, token
@@ -115,7 +121,7 @@ def invite_again(db: Session, owner: User, share_id: int, secret: str) -> tuple[
     share = db.get(Share, share_id)
     if share is None or share.owner_id != owner.id:
         raise HTTPException(404, "This invite no longer exists")
-    token = invite_token(secret, share.id)
+    token = invite_token(secret, share)
     if share.grantee_id is not None or share.token_hash != _hash(token):
         raise HTTPException(409, "This invite was already accepted, so its link can't be shown again")
     return share, token

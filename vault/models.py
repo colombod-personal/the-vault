@@ -13,6 +13,7 @@ Shared: ``cards`` (Scryfall data for printings someone owns), ``price_snapshots`
 
 from __future__ import annotations
 
+import secrets
 from datetime import date, datetime, timezone
 
 from mtg_toolkits.models import CollectionEntry, Condition, Finish
@@ -26,6 +27,10 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def new_session_key() -> str:
+    return secrets.token_hex(16)
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -33,6 +38,12 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(String(320))
     name: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # Web session cookies carry this key and are valid only while it matches: "sign out
+    # everywhere" replaces it, and an account made later with a reused id never has an old one.
+    session_key: Mapped[str | None] = mapped_column(String(32), default=new_session_key)
+    # Bumped by every collection import; an import that read an older version is refused, so two
+    # imports at once can't both replace the collection and leave both files' cards in it.
+    collection_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     identities: Mapped[list[Identity]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
@@ -41,7 +52,11 @@ class Identity(Base):
     """A sign-in method linked to a user. Accounts are never merged by e-mail."""
 
     __tablename__ = "identities"
-    __table_args__ = (UniqueConstraint("provider", "subject"),)
+    # An account has one WebAuthn user handle (its passkey identity); the index makes the database
+    # refuse a second one even where row locks don't exist (SQLite).
+    __table_args__ = (UniqueConstraint("provider", "subject"),
+                      Index("uq_identities_one_passkey", "user_id", unique=True,
+                            sqlite_where=text("provider = 'passkey'"), postgresql_where=text("provider = 'passkey'")))
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)

@@ -13,13 +13,12 @@ from pathlib import Path
 
 from mtg_toolkits.dragonshield import scryfall_set_code
 from mtg_toolkits.scryfall import Card, iter_bulk_file, resolve_offline
-from sqlalchemy import select
-from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy import bindparam, select, update
 from sqlalchemy.orm import Session
 
 from . import models
 from .models import Entry, PriceSnapshot
-from .prices import compute_values
+from .prices import compute_values, upsert  # noqa: F401  (upsert: re-exported)
 
 
 EXACT = ("set_number", "id")
@@ -44,17 +43,6 @@ def wanted_cards(db: Session, bulk: Iterable[dict]) -> Iterator[Card]:
         if (obj.get("id") in ids or printing in printings or _front(obj.get("name", "")) in names
                 or any(_front(f) in names for f in faces)):
             yield Card.from_json(obj)
-
-
-def upsert(db: Session, model, rows: list[dict], keys: tuple[str, ...]) -> None:
-    if not rows:
-        return
-    insert = postgresql.insert if db.bind.dialect.name == "postgresql" else sqlite.insert
-    table = model.__table__
-    for i in range(0, len(rows), 1000):
-        stmt = insert(table).values(rows[i:i + 1000])
-        update = {c.name: stmt.excluded[c.name] for c in table.columns if c.name not in keys}
-        db.execute(stmt.on_conflict_do_update(index_elements=list(keys), set_=update))
 
 
 def card_row(c: Card) -> dict:
@@ -102,19 +90,30 @@ def sync(db: Session, cards: Iterable[Card], day: date | None = None) -> dict:
         e.scryfall_id = None
         return e
 
+    # The matches are written by id with plain UPDATEs, not through the loaded rows: an import
+    # that replaced someone's collection while this ran deleted some of these rows, and an ORM
+    # flush would then fail the whole sync (everyone's prices with it). Gone rows are skipped.
+    updates = []
     for row, res in zip(todo, resolve_offline([fresh(r) for r in todo], cards)):
         if res.card is None:
-            row.scryfall_id = row.match_method = row.price_finish = None
+            updates.append({"b_id": row.id, "b_sid": None, "b_method": None, "b_finish": None})
             continue
-        row.scryfall_id, row.match_method = res.card.id, res.method
-        row.price_finish = None
+        price_finish = None
         # Price an etched-only (or foil-only) printing by its real finish, but only when we
         # know the exact printing; a name-only match picks an arbitrary one.
         only = res.card.finishes[0] if len(res.card.finishes) == 1 else None
         if res.method in EXACT and only in ("nonfoil", "foil", "etched") and only != row.finish:
-            row.price_finish = only
+            price_finish = only
+        updates.append({"b_id": row.id, "b_sid": res.card.id, "b_method": res.method, "b_finish": price_finish})
         matched[res.card.id] = res.card
         methods[res.method] = methods.get(res.method, 0) + 1
+    db.expunge_all()
+    if updates:
+        table = Entry.__table__
+        db.connection().execute(
+            update(table).where(table.c.id == bindparam("b_id"))
+            .values(scryfall_id=bindparam("b_sid"), match_method=bindparam("b_method"), price_finish=bindparam("b_finish")),
+            updates)
 
     upsert(db, models.Card, [card_row(c) for c in matched.values()], ("scryfall_id",))
     upsert(db, PriceSnapshot, [price_row(c, day) for c in matched.values()], ("scryfall_id", "day"))
@@ -122,7 +121,7 @@ def sync(db: Session, cards: Iterable[Card], day: date | None = None) -> dict:
     users = compute_values(db, day)
     return {
         "day": day.isoformat(), "rows": len(rows), "resolved_now": sum(methods.values()),
-        "methods": methods, "unmatched": sum(1 for r in rows if not r.scryfall_id),
+        "methods": methods, "unmatched": sum(1 for u in updates if u["b_sid"] is None),
         "printings_priced": len(matched), "users": users,
     }
 

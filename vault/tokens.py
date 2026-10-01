@@ -72,9 +72,19 @@ def authenticate(db: Session, bearer: str) -> User | None:
         return None
     now = _now()
     if session.last_used_at is None or now - _aware(session.last_used_at) > timedelta(minutes=5):
-        session.last_used_at = now
-        db.commit()
+        if not _touch(db, ApiSession, session.id, now):
+            return None  # signed out meanwhile
     return db.get(User, session.user_id)
+
+
+def _touch(db: Session, model, row_id: int, now: datetime) -> bool:
+    """Record a token's use with a plain UPDATE: a row deleted meanwhile (a sign-out) just means
+    the token is no longer valid, rather than an ORM flush error."""
+    db.expunge_all()
+    touched = db.execute(update(model).where(model.id == row_id).values(last_used_at=now)
+                         .execution_options(synchronize_session=False)).rowcount
+    db.commit()
+    return bool(touched)
 
 
 def refresh(db: Session, refresh_token: str) -> dict:
@@ -180,6 +190,6 @@ def authenticate_pat(db: Session, bearer: str) -> tuple[User, set[str]] | None:
         return None
     now = _now()
     if row.last_used_at is None or now - _aware(row.last_used_at) > timedelta(minutes=5):
-        row.last_used_at = now
-        db.commit()
+        if not _touch(db, AccessToken, row.id, now):
+            return None  # revoked meanwhile
     return db.get(User, row.user_id), set(row.scopes.split())

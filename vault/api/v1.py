@@ -33,7 +33,7 @@ from .. import outbound, tokens
 from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
 from ..collection_view import SORTS, CollectionView, filtered, history_days, import_days
-from ..importer import MAX_UPLOAD_BYTES, ImportError_, export_collection, import_collection, user_entries
+from ..importer import MAX_UPLOAD_BYTES, ImportConflict, ImportError_, export_collection, import_collection, user_entries
 from ..models import AccessToken, ApiSession, Deck, Import, NativeNonce, Passkey, Share, User
 from ..native import LEEWAY as NATIVE_LEEWAY, NativeTokenError, NativeVerifier, ProviderUnavailable
 from ..passkeys import remove_passkey
@@ -449,6 +449,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         def run():
             try:
                 return _import(import_collection(db, user, file.filename or "upload.csv", content))
+            except ImportConflict as exc:
+                raise HTTPException(409, str(exc)) from exc
             except ImportError_ as exc:
                 raise HTTPException(400, str(exc)) from exc
 
@@ -574,7 +576,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     # -- sharing ------------------------------------------------------------------------------
     @router.post("/shares", tags=["sharing"], response_model=S.Invite, status_code=201,
                  summary="Create a one-time invite link for your collection or a deck")
-    def create_share(request: Request, body: S.ShareIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    def create_share(request: Request, body: S.ShareIn, user: User = Depends(account_user), db: Session = Depends(get_db)):
         def invite(share: Share, token: str) -> dict:
             return {"id": share.id, "url": f"{settings.base_url}/?invite={token}", "expires_at": _iso(share.expires_at),
                     "_links": {"self": link(f"{V1}/shares/{share.id}")}}

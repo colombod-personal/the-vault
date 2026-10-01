@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import date
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.orm import Session
 
 from .models import CollectionValue, Entry, PriceSnapshot, User
@@ -38,6 +39,18 @@ def unit_price(row: Entry, snap: PriceSnapshot | None) -> tuple[float, bool]:
     return float((row.source_prices or {}).get("market") or 0.0), False
 
 
+def upsert(db: Session, model, rows: list[dict], keys: tuple[str, ...]) -> None:
+    """INSERT … ON CONFLICT DO UPDATE: one statement, so concurrent writers of a row never collide."""
+    if not rows:
+        return
+    insert = postgresql.insert if db.bind.dialect.name == "postgresql" else sqlite.insert
+    table = model.__table__
+    for i in range(0, len(rows), 1000):
+        stmt = insert(table).values(rows[i:i + 1000])
+        update = {c.name: stmt.excluded[c.name] for c in table.columns if c.name not in keys}
+        db.execute(stmt.on_conflict_do_update(index_elements=list(keys), set_=update))
+
+
 def compute_values(db: Session, day: date, user_id: int | None = None, *, commit: bool = True) -> int:
     """Write every user's (or one user's) collection value for ``day``. Returns users processed.
     ``commit=False`` leaves it in the caller's transaction."""
@@ -52,11 +65,12 @@ def compute_values(db: Session, day: date, user_id: int | None = None, *, commit
         t[1] += (r.purchase_price or 0.0) * r.quantity
         t[2] += r.quantity
         t[3] += r.quantity if priced else 0
-    for user_id, (market, cost, copies, priced) in totals.items():
-        db.merge(CollectionValue(
-            user_id=user_id, day=day, market_usd=round(market, 2), cost_usd=round(cost, 2),
-            copies=int(copies), priced_copies=int(priced),
-        ))
+    # An upsert, not select-then-insert: the daily sync and a user's first import of the day can
+    # write the same (user, day) row at once.
+    upsert(db, CollectionValue, [
+        {"user_id": user_id, "day": day, "market_usd": round(market, 2), "cost_usd": round(cost, 2),
+         "copies": int(copies), "priced_copies": int(priced)}
+        for user_id, (market, cost, copies, priced) in totals.items()], ("user_id", "day"))
     if commit:
         db.commit()
     return len(totals)

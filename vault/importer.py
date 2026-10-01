@@ -8,7 +8,7 @@ from datetime import date
 from mtg_toolkits import delta, formats
 from mtg_toolkits.dragonshield import SET_ALIASES
 from mtg_toolkits.models import CollectionEntry, Finish
-from sqlalchemy import delete, select, tuple_
+from sqlalchemy import delete, select, tuple_, update
 from sqlalchemy.orm import Session
 
 from .models import Card, Entry, Import, User
@@ -20,6 +20,10 @@ EXACT = ("set_number", "id")
 
 class ImportError_(ValueError):
     pass
+
+
+class ImportConflict(ImportError_):
+    """Another import replaced the collection while this one ran."""
 
 
 def user_entries(db: Session, user: User) -> list[Entry]:
@@ -56,6 +60,7 @@ def import_collection(db: Session, user: User, filename: str, content: bytes) ->
     if not entries:
         raise ImportError_("No cards found in the file.")
 
+    version = db.scalar(select(User.collection_version).where(User.id == user.id))
     old_rows = user_entries(db, user)
     changes = delta.diff([r.to_collection_entry() for r in old_rows], entries)
 
@@ -75,6 +80,13 @@ def import_collection(db: Session, user: User, filename: str, content: bytes) ->
         user_id=user.id, filename=filename[:255], source=source, rows=len(entries),
         copies=sum(e.quantity for e in entries), summary=changes.summary(),
     )
+    # Claim the collection: only one import replaces the version it read. Another import that
+    # got there first (committed, or still running and holding the row) makes this one fail
+    # instead of adding its cards to the other file's.
+    claimed = db.execute(update(User).where(User.id == user.id, User.collection_version == version)
+                         .values(collection_version=version + 1).execution_options(synchronize_session=False)).rowcount
+    if not claimed:
+        raise ImportConflict("Another import of this collection just finished. Reload and try again.")
     db.add(imp)
     db.flush()
     db.execute(delete(Entry).where(Entry.user_id == user.id))

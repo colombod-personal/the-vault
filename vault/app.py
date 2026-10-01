@@ -141,8 +141,7 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
             if user is not None:
                 request.state.bearer = bearer
             return user
-        uid = request.session.get("uid")
-        return session.get(User, uid) if uid else None
+        return auth_module.session_user(session, request)
 
     def current_user(request: Request, user: User | None = Depends(optional_user)) -> User:
         if user is None:
