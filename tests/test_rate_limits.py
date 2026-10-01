@@ -4,15 +4,17 @@ across serverless instances, keyed by a hash of the client's IP."""
 import dataclasses
 import os
 import threading
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select, text
 
+from twins.authenticator import SoftAuthenticator
 from vault import ratelimit
 from vault.app import create_app
 from vault.db import Base, Database
-from vault.models import RateHit
+from vault.models import PasskeyChallenge, RateHit
 
 POSTGRES = os.environ.get("VAULT_TEST_POSTGRES_URL")
 DATABASES = ["sqlite"] + (["postgres"] if POSTGRES else [])
@@ -107,3 +109,18 @@ def test_hits_are_counted_exactly_under_concurrency(backend, tmp_path):
     assert sorted(counts) == list(range(1, 41))
     db.engine.dispose()
 
+
+def test_pending_passkey_challenges_are_capped(settings):
+    with limited_client(settings, auth_rate_limit=100, passkey_challenge_cap=2) as c:
+        assert [c.post("/api/auth/passkey/login/options").status_code for _ in range(3)] == [200, 200, 429]
+        res = c.post("/api/auth/passkey/signup/options", json={})
+        assert res.status_code == 429 and res.headers["retry-after"]
+        with c.app.state.db.sessions() as s:  # expired challenges make room again
+            s.execute(PasskeyChallenge.__table__.update().values(expires=time.time() - 1))
+            s.commit()
+        options = c.post("/api/auth/passkey/signup/options", json={}).json()
+        res = c.post("/api/auth/passkey/signup/verify",
+                     json={"credential": SoftAuthenticator().create(options, "http://localhost")})
+        assert res.status_code == 200
+        with c.app.state.db.sessions() as s:
+            assert s.scalar(select(PasskeyChallenge.id)) is None  # the expired ones were deleted

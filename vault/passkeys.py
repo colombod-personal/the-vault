@@ -8,6 +8,7 @@ browser's answer with py_webauthn. The challenge is kept on the server (``passke
 valid for five minutes) and the session cookie only names it. Verifying claims it with a
 conditional DELETE, so it is used once, even by a replayed cookie or two racing requests.
 User verification (a PIN or biometric) is required: a passkey can be an account's only factor.
+At most PASSKEY_CHALLENGE_CAP ceremonies may be pending; past that, new ones get 429.
 
 - ``signup``: new account, identified only by the passkey
 - ``register``: add a passkey to the signed-in account
@@ -79,9 +80,13 @@ class Verify(BaseModel):
     name: str | None = Field(None, max_length=80, description="A label for this passkey, e.g. 'MacBook'")
 
 
-def _stash(request: Request, db: Session, kind: str, challenge: bytes, **extra) -> None:
+def _stash(request: Request, db: Session, cap: int, kind: str, challenge: bytes, **extra) -> None:
     now = time.time()
     db.execute(delete(PasskeyChallenge).where(PasskeyChallenge.expires < now))  # tidy up old ones
+    if db.scalar(select(func.count()).select_from(PasskeyChallenge)) >= cap:  # a flood from many IPs
+        db.commit()
+        raise HTTPException(429, "Too many passkey requests in progress. Try again in a minute.",
+                            headers={"Retry-After": "60"})
     ceremony = secrets.token_urlsafe(32)
     db.add(PasskeyChallenge(id=ceremony, kind=kind, challenge=bytes_to_base64url(challenge), expires=now + CHALLENGE_TTL))
     db.commit()
@@ -128,7 +133,7 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
                 resident_key=ResidentKeyRequirement.REQUIRED, user_verification=UserVerificationRequirement.REQUIRED),
             exclude_credentials=[PublicKeyCredentialDescriptor(id=base64url_to_bytes(p.credential_id)) for p in exclude],
         )
-        _stash(request, db, kind, options.challenge, handle=bytes_to_base64url(handle), **extra)
+        _stash(request, db, settings.passkey_challenge_cap, kind, options.challenge, handle=bytes_to_base64url(handle), **extra)
         return json.loads(options_to_json(options))
 
     def save_credential(db: Session, user: User, pending: dict, body: Verify) -> Passkey:
@@ -216,7 +221,7 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
     def login_options(request: Request, db: Session = Depends(get_db)) -> dict:
         require_enabled()
         options = generate_authentication_options(rp_id=rp_id, user_verification=UserVerificationRequirement.REQUIRED)
-        _stash(request, db, "login", options.challenge)
+        _stash(request, db, settings.passkey_challenge_cap, "login", options.challenge)
         return json.loads(options_to_json(options))
 
     @router.post("/login/verify", dependencies=limited("passkey-login-verify", verify=True),
