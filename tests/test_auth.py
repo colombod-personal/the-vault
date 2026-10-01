@@ -85,7 +85,7 @@ def test_facebook_data_deletion_endpoint(client, app):
     with app.state.db.sessions() as s:
         sign_in(s, _request(), Profile("facebook", "123", None, "Bob"))
     res = client.post("/api/facebook/data-deletion",
-                      data={"signed_request": _signed({"algorithm": "HMAC-SHA256", "user_id": "123"}, "fb-secret")})
+                      data={"signed_request": _signed({"algorithm": "HMAC-SHA256", "user_id": "123", "issued_at": int(time.time())}, "fb-secret")})
     assert res.status_code == 200 and set(res.json()) == {"url", "confirmation_code"}
     with app.state.db.sessions() as s:
         assert s.query(User).count() == 0
@@ -166,10 +166,44 @@ def test_facebook_deletion_status_only_confirms_codes_the_vault_issued(client, a
     with app.state.db.sessions() as s:
         sign_in(s, _request(), Profile("facebook", "321", None, "Cy"))
     res = client.post("/api/facebook/data-deletion",
-                      data={"signed_request": _signed({"algorithm": "HMAC-SHA256", "user_id": "321"}, "fb-secret")})
+                      data={"signed_request": _signed({"algorithm": "HMAC-SHA256", "user_id": "321", "issued_at": int(time.time())}, "fb-secret")})
     issued = res.json()
     status = client.get("/" + issued["url"].split("/", 3)[3])  # the URL Meta shows the user
     assert status.status_code == 200 and "has been deleted" in status.text
     for forged in ("made-up", issued["confirmation_code"][:-2] + "xx", ""):
         res = client.get("/api/facebook/deletion-status", params={"code": forged})
         assert res.status_code == 404 and "deleted" not in res.text, forged
+
+
+def test_an_old_facebook_deletion_request_cannot_be_replayed(client, app):
+    """A captured request replayed later (after the person signed up again) must not delete
+    their new account: only fresh requests are honoured."""
+    with app.state.db.sessions() as s:
+        sign_in(s, _request(), Profile("facebook", "555", None, "Di"))
+    for issued in (int(time.time()) - 2 * 3600, None):
+        payload = {"algorithm": "HMAC-SHA256", "user_id": "555"} | ({"issued_at": issued} if issued else {})
+        res = client.post("/api/facebook/data-deletion", data={"signed_request": _signed(payload, "fb-secret")})
+        assert res.status_code == 400, res.text
+    with app.state.db.sessions() as s:
+        assert s.query(User).count() == 1
+
+
+def test_facebook_deletion_keeps_an_account_with_other_sign_ins(client, app):
+    """Removing the Vault from Facebook deletes what came from Facebook. An account that also
+    signs in another way stays, without its Facebook link or the e-mail it brought."""
+    with app.state.db.sessions() as s:
+        user = sign_in(s, _request(), Profile("facebook", "777", "ed@facebook.example", "Ed"))
+        s.add(Identity(user_id=user.id, provider="passkey", subject="handle-ed"))
+        s.commit()
+    payload = {"algorithm": "HMAC-SHA256", "user_id": "777", "issued_at": int(time.time())}
+    assert client.post("/api/facebook/data-deletion", data={"signed_request": _signed(payload, "fb-secret")}).status_code == 200
+    with app.state.db.sessions() as s:
+        (user,) = s.query(User).all()
+        assert [i.provider for i in user.identities] == ["passkey"] and user.email is None
+
+
+def test_an_address_too_long_to_be_real_is_not_stored(client, app):
+    with app.state.db.sessions() as s:
+        user = sign_in(s, _request(), Profile("google", "g-long", "a" * 400 + "@example.com", "Lo"))
+        assert user.email is None and user.identities[0].email is None
+    assert client.post("/api/auth/dev-login", params={"email": "x" * 300}).status_code == 422

@@ -7,14 +7,19 @@ import hashlib
 import hmac
 import json
 import secrets
+import time
 
 from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi.responses import PlainTextResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import Identity
+from ..models import Identity, User
 from ..privacy import purge_user
+
+
+MAX_AGE = 3600  # seconds a data-deletion request stays valid
+MAX_SKEW = 300  # seconds a request may seem to come from the future (clock differences)
 
 
 def build_router(get_db, settings) -> APIRouter:
@@ -26,11 +31,27 @@ def build_router(get_db, settings) -> APIRouter:
         payload = parse_signed_request(signed_request, settings.facebook_client_secret)
         if payload is None:
             raise HTTPException(400, "Invalid signed_request")
+        # Meta sends the request as the person removes the app. An old one (copied from a log, say)
+        # is refused: replayed after they signed up again, it would delete their new account.
+        issued = payload.get("issued_at")
+        if not isinstance(issued, (int, float)) or not -MAX_SKEW <= time.time() - issued <= MAX_AGE:
+            raise HTTPException(400, "This signed_request has expired")
         identity = db.scalar(
             select(Identity).where(Identity.provider == "facebook", Identity.subject == str(payload["user_id"]))
         )
         if identity:
-            purge_user(db, identity.user_id)
+            others = db.scalar(select(func.count(Identity.id)).where(
+                Identity.user_id == identity.user_id, Identity.id != identity.id))
+            if others:  # the account doesn't depend on Facebook: remove what came from Facebook only
+                user = db.get(User, identity.user_id)
+                if user.email and identity.email and user.email == identity.email and not db.scalar(
+                        select(Identity.id).where(Identity.user_id == user.id, Identity.id != identity.id,
+                                                  Identity.email == user.email).limit(1)):
+                    user.email = None
+                db.delete(identity)
+                db.commit()
+            else:
+                purge_user(db, identity.user_id)
         code = _sign(settings.session_secret, secrets.token_urlsafe(12))
         return {"url": f"{settings.base_url}/api/facebook/deletion-status?code={code}", "confirmation_code": code}
 
@@ -41,7 +62,7 @@ def build_router(get_db, settings) -> APIRouter:
         nonce, _, _sig = code.partition(".")
         if not nonce or not hmac.compare_digest(code, _sign(settings.session_secret, nonce)):
             raise HTTPException(404, "Unknown deletion request")
-        return f"Deletion request {code}: all data for this Facebook account has been deleted."
+        return f"Deletion request {code}: all data the Vault received from this Facebook account has been deleted."
 
     return router
 

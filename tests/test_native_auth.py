@@ -476,3 +476,26 @@ def test_a_short_pkce_verifier_is_refused(client, idp):
 def test_a_native_name_longer_than_an_account_name_is_invalid(client, idp):
     assert apple_sign_in(client, idp, name="N" * 201).status_code == 422
     assert apple_sign_in(client, idp, name="N" * 200).status_code == 200
+
+
+def test_a_code_for_an_account_deleted_meanwhile_is_refused_not_a_crash(app, client, idp):
+    from vault import tokens
+    from vault.models import User
+
+    verifier = secrets.token_urlsafe(48)
+    res = client.get("/api/auth/login/google", params={"app_redirect_uri": "vault://auth", "code_challenge": s256(verifier)},
+                     follow_redirects=False)
+    back = web_callback(client, idp.google.approve(res.headers["location"], "g-gone"))
+    code = parse_qs(urlsplit(back.headers["location"]).query)["code"][0]
+    with app.state.db.sessions() as db:
+        real_get, deleted = db.get, []
+
+        def deleted_meanwhile(model, ident, **kw):  # the account is deleted right after the code is claimed
+            if model is User and not deleted:
+                deleted.append(True)
+                return None
+            return real_get(model, ident, **kw)
+
+        db.get = deleted_meanwhile
+        with pytest.raises(tokens.TokenError):
+            tokens.redeem_code(db, code, verifier, "vault://auth", None)

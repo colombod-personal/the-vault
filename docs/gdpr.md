@@ -65,7 +65,7 @@ per-user table:
 | Information (13) | `public/privacy.html`, linked from the sign-in screen, the footer and the account panel; `public/credits.html` lists every service and what it receives |
 | Access and portability (15, 20) | Account → Download my data → `GET /api/v1/me/export` (ZIP of CSV and JSON). Account → Move your collection exports to Dragon Shield, Moxfield, Archidekt, generic CSV or text, so people can switch apps |
 | Rectification (16) | edit display name (`PATCH /api/v1/me`); re-import the collection |
-| Erasure (17) | Account → Delete my account (download offered first) → `DELETE /api/v1/me` with `{"confirm": "DELETE"}`; also Meta's data-deletion callback for Facebook sign-ins |
+| Erasure (17) | Account → Delete my account (download offered first) → `DELETE /api/v1/me` with `{"confirm": "DELETE"}`; also Meta's data-deletion callback for Facebook sign-ins (deletes the account when Facebook is its only sign-in, otherwise only the Facebook link and the e-mail it brought; requests older than an hour are refused) |
 | Restriction / objection (18, 21) | by e-mail to the controller (the only processing is providing the service) |
 
 ## Operational checklist before going public

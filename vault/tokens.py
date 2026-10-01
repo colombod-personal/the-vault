@@ -166,7 +166,10 @@ def redeem_code(db: Session, code: str, code_verifier: str, redirect_uri: str, d
         raise TokenError("invalid_grant", "redirect_uri does not match")
     if not PKCE_VERIFIER.fullmatch(code_verifier or "") or not secrets.compare_digest(s256(code_verifier), row.code_challenge):
         raise TokenError("invalid_grant", "PKCE verification failed")
-    return issue(db, db.get(User, row.user_id), "app", device_name)
+    user = db.get(User, row.user_id)
+    if user is None:  # the account was deleted after the code was made
+        raise TokenError("invalid_grant", "Unknown or already used code")
+    return issue(db, user, "app", device_name)
 
 
 # -- personal access tokens (agents, scripts, MCP clients) ---------------------------------

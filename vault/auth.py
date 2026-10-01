@@ -34,7 +34,7 @@ import httpx
 from authlib.common.errors import AuthlibBaseError
 from authlib.integrations.starlette_client import OAuth
 from joserfc.errors import JoseError
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from joserfc import jwt
 from joserfc.jwk import ECKey
@@ -194,6 +194,8 @@ def find_or_create(db: Session, profile: Profile, current: User | None = None) -
 
     Two first sign-ins with one identity at the same time both try to create it; the unique
     (provider, subject) index lets one win, and the other then signs in to the winner's account."""
+    if profile.email and len(profile.email) > 320:  # no real address is this long (users.email is String(320))
+        profile = Profile(profile.provider, profile.subject, None, profile.name)
     try:
         return _find_or_create(db, profile, current)
     except IntegrityError:
@@ -340,7 +342,8 @@ def build_router(auth: Auth, get_db) -> APIRouter:
         return {"ok": True}
 
     @router.post("/dev-login")
-    def dev_login(request: Request, db: Session = Depends(get_db), email: str = "dev@localhost") -> dict:
+    def dev_login(request: Request, db: Session = Depends(get_db),
+                  email: str = Query("dev@localhost", min_length=1, max_length=255)) -> dict:
         if not auth.settings.dev_login:
             raise HTTPException(404)
         user = sign_in(db, request, Profile("dev", email, email, "Local developer"), link=False)
