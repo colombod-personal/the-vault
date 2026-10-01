@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 from datetime import date
 from pathlib import Path
 
@@ -282,3 +283,96 @@ def test_body_ids_too_big_for_the_database_are_invalid(signed_in, big):
 def test_a_decklist_quantity_too_long_to_read_is_a_bad_request(signed_in, path, extra):
     res = signed_in.post(V1 + path, json={"text": "9" * 5000 + " Sol Ring", **extra})
     assert res.status_code == 400, res.text
+
+
+DS_HEADER = ("Folder Name,Quantity,Trade Quantity,Card Name,Set Code,Set Name,Card Number,Condition,Printing,"
+             "Language,Price Bought,Date Bought,LOW,MID,MARKET\n")
+GENERIC_HEADER = "quantity,name,set_code,finish,condition,language,scryfall_id,source_prices,extra\n"
+
+
+def ds_row(folder="f", qty="1", trade="0", name="Sol Ring", set_code="C21", set_name="Commander 2021", number="263",
+           price="1", market="1"):
+    return f"{folder},{qty},{trade},{name},{set_code},{set_name},{number},NearMint,Foil,English,{price},2023-01-10,1,1,{market}\n"
+
+
+@pytest.mark.parametrize("content", [
+    DS_HEADER + ds_row(qty="inf"),
+    DS_HEADER + ds_row(qty="1e30"),
+    DS_HEADER + ds_row(qty="-5"),
+    DS_HEADER + ds_row(qty="1000001"),
+    DS_HEADER + ds_row(trade="inf"),
+    DS_HEADER + ds_row(trade="-1"),
+    DS_HEADER + ds_row(name="N" * 200_000),  # larger than the csv module's field limit
+    DS_HEADER + ds_row(set_code="S" * 21),  # identity: never clipped into another printing's code
+    DS_HEADER + ds_row(number="9" * 31),
+    GENERIC_HEADER + '1,Sol Ring,c21,nonfoil,near_mint,en,,"[1]",\n',
+    GENERIC_HEADER + '1,Sol Ring,c21,nonfoil,near_mint,en,,,"[1]"\n',
+    GENERIC_HEADER + '1,Sol Ring,c21,nonfoil,near_mint,en,,"{""a"": null}",\n',
+    GENERIC_HEADER + "99999999999999999999999,Sol Ring,c21,nonfoil,near_mint,en,,,\n",
+    GENERIC_HEADER + "1,Sol Ring,c21,nonfoil,near_mint,english-long,,,\n",
+    GENERIC_HEADER + "1,Sol Ring,c21,nonfoil,near_mint,en," + "z" * 37 + ",,\n",
+], ids=["qty-inf", "qty-1e30", "qty-negative", "qty-over-a-million", "trade-inf", "trade-negative", "huge-field",
+        "long-set-code", "long-number", "prices-list", "extra-list", "price-null", "qty-huge", "long-language",
+        "long-scryfall-id"])
+def test_a_collection_file_with_values_the_vault_cannot_store_is_a_bad_request(signed_in, content):
+    assert upload(signed_in).status_code == 201
+    res = upload(signed_in, content.encode())
+    assert res.status_code == 400, res.text
+    assert signed_in.get(f"{V1}/collection").json()["copies"] == 7  # the collection is left as it was
+
+
+@pytest.mark.parametrize("price, market", [("1e309", "1"), ("1", "1e309"), ("nan", "1"), ("1", "nan"),
+                                           ("inf", "-inf"), ("1e300", "1e300")])
+def test_prices_that_are_not_finite_numbers_are_dropped_on_import(signed_in, price, market):
+    res = upload(signed_in, (DS_HEADER + ds_row(price=price, market=market) + ds_row(number="264")).encode())
+    assert res.status_code == 201, res.text
+    for path in ("", "/cards", "/stats", "/history", "/sets", "/timeline"):
+        assert signed_in.get(f"{V1}/collection{path}").status_code == 200, path
+    summary = signed_in.get(f"{V1}/collection").json()
+    assert summary["copies"] == 2 and summary["market_value"] < 1e6 and (summary["paid"] or 0) < 1e6
+
+
+def test_long_free_text_is_clipped_to_fit_on_import(app, signed_in):
+    from vault.models import Entry
+    content = DS_HEADER + ds_row(folder="D" * 300, name="N" * 400, set_name="X" * 300)
+    assert upload(signed_in, content.encode()).status_code == 201
+    with app.state.db.sessions() as db:
+        e = db.scalar(select(Entry))
+        assert (len(e.name), len(e.set_name), len(e.folder)) == (300, 200, 200)
+
+
+def test_prices_already_stored_out_of_range_do_not_break_reading(app, signed_in):
+    from vault.models import CollectionValue, Entry
+    upload(signed_in)
+    with app.state.db.sessions() as db:
+        for e in db.scalars(select(Entry)):
+            e.purchase_price, e.source_prices = float("inf"), {"low": float("inf"), "mid": 1.0, "market": float("inf")}
+        for v in db.scalars(select(CollectionValue)):
+            v.market_usd, v.cost_usd = float("inf"), float("-inf")
+        db.commit()
+    for path in ("", "/cards", "/stats", "/history", "/sets", "/timeline"):
+        res = signed_in.get(f"{V1}/collection{path}")
+        assert res.status_code == 200 and "Infinity" not in res.text, path
+
+
+@pytest.mark.skipif(not os.environ.get("VAULT_TEST_POSTGRES_URL"), reason="needs Postgres (it enforces column sizes)")
+def test_postgres_never_sees_a_value_too_big_for_its_column():
+    from fastapi.testclient import TestClient
+    from sqlalchemy import text
+    from vault.app import create_app
+    from vault.config import Settings
+    from vault.db import Base, Database
+
+    url = os.environ["VAULT_TEST_POSTGRES_URL"]
+    with Database(url).engine.begin() as conn:
+        Base.metadata.drop_all(conn)
+        conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
+    settings = Settings(database_url=url, session_secret="s" * 32, dev_login=True, base_url="http://testserver")
+    with TestClient(create_app(settings, serve_static=False)) as client:
+        assert client.post("/api/auth/dev-login").status_code == 200
+        long_text = DS_HEADER + ds_row(folder="D" * 300, name="N" * 400, set_name="X" * 300)
+        assert upload(client, long_text.encode(), name="F" * 400).status_code == 201
+        assert upload(client, (DS_HEADER + ds_row(set_code="S" * 40)).encode()).status_code == 400
+        assert upload(client, (GENERIC_HEADER + "1,Sol Ring,c21,nonfoil,near_mint,english-long,,,\n").encode()).status_code == 400
+        assert client.get(f"{V1}/decks/{2**31}").status_code == 422
+        assert client.post(f"{V1}/shares", json={"kind": "deck", "deck_id": 2**31}).status_code == 422

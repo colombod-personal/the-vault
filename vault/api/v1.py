@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 from .. import outbound, tokens
 from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
-from ..collection_view import SORTS, CollectionView, filtered, history_days, import_days
+from ..collection_view import SORTS, CollectionView, filtered, finite, history_days, import_days
 from ..importer import MAX_UPLOAD_BYTES, ImportError_, export_collection, import_collection, user_entries
 from ..models import AccessToken, ApiSession, Deck, Import, NativeNonce, Passkey, Share, User
 from ..native import NativeTokenError, NativeVerifier, ProviderUnavailable
@@ -382,8 +382,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 rows = history_days(ctx.db, ctx.owner, since)
                 imported = import_days(ctx.db, ctx.owner)
                 page, nxt = paginate(rows, lambda v: (v.day.isoformat(),), lambda v: v.user_id, cursor=cursor, limit=limit)
-                items = [{"day": v.day.isoformat(), "market": v.market_usd,
-                          "cost": None if ctx.hide_costs else v.cost_usd, "copies": v.copies,
+                items = [{"day": v.day.isoformat(), "market": finite(v.market_usd) or 0.0,
+                          "cost": None if ctx.hide_costs else finite(v.cost_usd), "copies": v.copies,
                           "priced": v.priced_copies, "imported": v.day in imported} for v in page]
                 return page_body(request, items, nxt, len(rows), since=since and since.isoformat(), limit=limit)
 
