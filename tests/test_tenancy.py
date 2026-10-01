@@ -239,6 +239,7 @@ def test_two_invites_from_one_owner_accepted_at_once_give_one_grant():
         s.add_all([owner, guest])
         s.commit()
         (_, first), (_, second) = create_invite(s, owner, "collection", None, False), create_invite(s, owner, "collection", None, False)
+        s.commit()
         guest_id = guest.id
 
     done = {}

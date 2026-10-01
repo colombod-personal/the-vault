@@ -48,7 +48,7 @@ def create_invite(db: Session, owner: User, kind: str, deck_id: int | None, show
         token_hash=_hash(token), expires_at=datetime.now(timezone.utc) + INVITE_TTL,
     )
     db.add(share)
-    db.commit()
+    db.flush()  # the caller commits (with the Idempotency-Key answer)
     return share, token
 
 

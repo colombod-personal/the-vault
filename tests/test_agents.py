@@ -175,6 +175,7 @@ def test_tokens_always_read_and_cannot_edit_the_profile(app, agent, bot):
 
     with app.state.db.sessions() as db:  # a write-only token made some other way still can't read
         _, secret = tokens.create_pat(db, db.query(User).one(), "w", ["write"], 30)
+        db.commit()
     assert bot.get(f"{V1}/collection", headers={"Authorization": f"Bearer {secret}"}).status_code == 403
     h = auth(make_token(agent, scopes=["read", "write"]))
     assert bot.patch(f"{V1}/me", json={"name": "Mallory"}, headers=h).status_code == 403
@@ -320,3 +321,40 @@ def test_mcp_arguments_given_as_a_non_object_are_invalid_even_when_empty(agent, 
     read = make_token(agent)
     res = rpc(bot, "tools/call", {"name": "get_collection_summary", "arguments": arguments}, read)
     assert res.status_code == 200 and res.json()["error"]["code"] == -32602, res.text
+
+
+@pytest.mark.parametrize("path, kwargs, model", [
+    ("/imports", {"files": {"file": ("e.csv", CSV, "text/csv")}}, "Import"),
+    ("/shares", {"json": {"kind": "collection"}}, "Share"),
+    ("/me/tokens", {"json": {"name": "Agent", "scopes": ["read"], "expires_in_days": 30}}, "AccessToken"),
+])
+def test_a_failure_while_storing_the_answer_leaves_nothing_behind(app, signed_in, path, kwargs, model):
+    """The work and the stored answer are one transaction: if saving the answer fails, the work
+    is undone too and the key is released, so a retry with the same key does it exactly once."""
+    from sqlalchemy import event, func, select
+    from sqlalchemy.orm import Session
+
+    from vault import models
+
+    failed = []
+
+    def fail_storing_the_answer(session):
+        if not failed and any(isinstance(o, models.IdempotentRequest) and o.status for o in session.dirty):
+            failed.append(True)
+            raise RuntimeError("the database went away")
+
+    def count():
+        with app.state.db.sessions() as db:
+            return db.scalar(select(func.count()).select_from(getattr(models, model)))
+
+    before, headers = count(), {"Idempotency-Key": f"late-{model}"}
+    event.listen(Session, "before_commit", fail_storing_the_answer)
+    try:
+        with pytest.raises(RuntimeError):
+            signed_in.post(f"{V1}{path}", headers=headers, **kwargs)
+    finally:
+        event.remove(Session, "before_commit", fail_storing_the_answer)
+    assert failed and count() == before  # nothing half-done
+    retry = signed_in.post(f"{V1}{path}", headers=headers, **kwargs)
+    assert retry.status_code == 201, retry.text
+    assert count() == before + 1

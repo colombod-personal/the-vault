@@ -170,7 +170,7 @@ def create_pat(db: Session, user: User, name: str, scopes: list[str], days: int)
     row = AccessToken(user_id=user.id, name=name[:80], prefix=token[:len(PAT_PREFIX) + 4], token_hash=_hash(token),
                       scopes=" ".join(s for s in SCOPES if s in scopes), expires_at=_now() + timedelta(days=days))
     db.add(row)
-    db.commit()
+    db.flush()  # the caller commits (with the Idempotency-Key answer)
     return row, token
 
 

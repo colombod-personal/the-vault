@@ -8,7 +8,9 @@ different endpoint is refused with 422.
 
 The key is reserved (committed) before the work starts, so of two requests arriving at once
 only one does the work; the other gets 409 with ``Retry-After`` until the first has answered.
-A request that fails releases its key, so it can be retried. Stored answers never hold secrets:
+The work and the stored answer are committed together (the endpoints leave their work
+uncommitted for this); a request that fails, even while saving its answer, undoes its work and
+releases its key, so it can be retried. Stored answers never hold secrets:
 an endpoint that returns one passes ``redact`` (what to store) and ``replay`` (how to rebuild
 the answer, e.g. by minting a fresh invite link).
 """
@@ -58,15 +60,15 @@ def idempotent(request: Request, db: Session, user: User, status: int, compute: 
         return _replay(stored, endpoint, replay)
     reservation_id = reservation.id
     try:
-        body = jsonable_encoder(compute())
+        body = jsonable_encoder(compute())  # the work, left uncommitted
+        row = db.get(IdempotentRequest, reservation_id)
+        row.status, row.body = status, jsonable_encoder(redact(body)) if redact else body
+        db.commit()  # the work and its stored answer together: both or neither
     except BaseException:
-        db.rollback()  # undo uncommitted work, then release the key so a retry runs again
+        db.rollback()  # undo the work, then release the key so a retry runs again
         db.execute(delete(IdempotentRequest).where(IdempotentRequest.id == reservation_id))
         db.commit()
         raise
-    row = db.get(IdempotentRequest, reservation_id)
-    row.status, row.body = status, jsonable_encoder(redact(body)) if redact else body
-    db.commit()  # with the work itself when compute() left it uncommitted
     return JSONResponse(body, status_code=status)
 
 
