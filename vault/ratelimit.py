@@ -45,6 +45,9 @@ def hit(db: Session, key: str, minute: int) -> int:
     return db.execute(stmt.returning(RateHit.hits)).scalar_one()
 
 
+PROVIDERS = frozenset({"google", "microsoft", "apple", "facebook"})
+
+
 def limited(bucket: str, *, verify: bool = False) -> list:
     """Route ``dependencies`` limiting ``bucket``: AUTH_VERIFY_RATE_LIMIT for steps that check
     a credential or redeem a token (``verify``), else AUTH_RATE_LIMIT."""
@@ -54,7 +57,11 @@ def limited(bucket: str, *, verify: bool = False) -> list:
         allowed = settings.auth_verify_rate_limit if verify else settings.auth_rate_limit
         now = time.time()
         minute = int(now // WINDOW)
-        key = hmac.new(settings.session_secret.encode(), f"{bucket}:{client_ip(request, settings)}".encode(),
+        # One counter per provider, so heavy use of one sign-in doesn't block the others. Only known
+        # names count separately: a made-up provider in the URL can't open a fresh counter.
+        provider = request.path_params.get("provider")
+        scope = provider if provider in PROVIDERS else "-"
+        key = hmac.new(settings.session_secret.encode(), f"{bucket}:{scope}:{client_ip(request, settings)}".encode(),
                        hashlib.sha256).hexdigest()
         with request.app.state.db.sessions() as db:
             count = hit(db, key, minute)

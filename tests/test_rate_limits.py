@@ -124,3 +124,14 @@ def test_pending_passkey_challenges_are_capped(settings):
         assert res.status_code == 200
         with c.app.state.db.sessions() as s:
             assert s.scalar(select(PasskeyChallenge.id)) is None  # the expired ones were deleted
+
+
+def test_each_provider_has_its_own_counter_but_made_up_ones_share_one(settings):
+    """Using up Google sign-in doesn't block Apple. A made-up provider in the URL can't open a
+    fresh counter to get past the limit."""
+    with limited_client(settings, auth_rate_limit=1) as c:
+        assert c.get("/api/auth/login/google", follow_redirects=False).status_code != 429
+        assert c.get("/api/auth/login/google", follow_redirects=False).status_code == 429
+        assert c.get("/api/auth/login/apple", follow_redirects=False).status_code != 429
+        assert c.get("/api/auth/login/made-up-1", follow_redirects=False).status_code != 429
+        assert c.get("/api/auth/login/made-up-2", follow_redirects=False).status_code == 429
