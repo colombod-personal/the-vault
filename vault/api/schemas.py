@@ -4,8 +4,12 @@ generate the iOS client, e.g. with Apple's swift-openapi-generator)."""
 from __future__ import annotations
 
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+MAX_ID = 2**31 - 1  # ids are INTEGER columns: 32 bits on Postgres
 
 
 class Link(BaseModel):
@@ -207,7 +211,8 @@ class NativeSignIn(BaseModel):
     id_token: str
     nonce: str = Field(min_length=16, max_length=200,
                        description="The raw nonce the app generated for this sign-in (required; each works once)")
-    name: str | None = Field(None, description="Apple sends the user's name to the app only once; pass it here")
+    name: str | None = Field(None, max_length=200,
+                             description="Apple sends the user's name to the app only once; pass it here")
     device_name: str | None = None
 
 
@@ -239,7 +244,19 @@ class ImportPage(Page):
 class DeckIn(BaseModel):
     name: str
     text: str = Field(max_length=50_000)
-    source_url: str | None = None
+    source_url: str | None = Field(None, max_length=500, description="Where the deck came from (an http or https "
+                                   "link). Left as it is when an update omits it; null clears it")
+
+    @field_validator("source_url")
+    @classmethod
+    def _http_link(cls, url: str | None) -> str | None:
+        url = (url or "").strip()
+        if not url:
+            return None
+        parts = urlsplit(url)
+        if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+            raise ValueError("source_url must be an http or https link")
+        return url
 
 
 class TextIn(BaseModel):
@@ -293,7 +310,7 @@ class DeckPage(Page):
 
 class ShareIn(BaseModel):
     kind: Literal["collection", "deck"]
-    deck_id: int | None = None
+    deck_id: int | None = Field(None, ge=1, le=MAX_ID)
     show_costs: bool = False
 
 

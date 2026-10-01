@@ -31,7 +31,8 @@ Created in Account → Agents & API, or with `POST /api/v1/me/tokens`
 
 Stateless Streamable HTTP. Each JSON-RPC request gets one `application/json` answer, with no
 session id and no SSE, which fits serverless hosting. Protocol versions 2025-06-18, 2025-03-26
-and 2024-11-05 are supported. It was tested with the official MCP Python SDK client.
+and 2024-11-05 are supported. It was tested with the official MCP Python SDK client. A JSON-RPC
+batch (older protocol versions) holds 1 to 20 calls; an empty or larger one is refused (`-32600`).
 
 ```bash
 claude mcp add --transport http vault https://<host>/api/mcp --header "Authorization: Bearer vault_pat_..."
@@ -56,7 +57,10 @@ Tools (the `share_id` argument reads a collection someone shared with you):
 \* write tools, listed only for tokens with the write scope.
 
 Each tool calls the API in-process with the caller's credentials, so the API enforces every
-rule: tenancy, sharing, scopes, validation and paging. Pages include a `next_cursor`, and
+rule: tenancy, sharing, scopes, validation and paging. Tool arguments are checked against the
+tool's schema first, with the API's limits (decklists up to 50,000 characters, ids, lookup
+identifiers); a failed check is a JSON-RPC error (`-32602`), and an API error is the tool
+result with `isError`. Pages include a `next_cursor`, and
 answers come as `structuredContent` plus the same JSON as text. The server's `instructions`
 tell the agent how to start, and remind it to credit artists and Scryfall.
 

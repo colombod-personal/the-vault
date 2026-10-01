@@ -14,19 +14,25 @@ fails with the API's 403.
 from __future__ import annotations
 
 import json
+import logging
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Callable
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 
 from ..models import User
+from .schemas import MAX_ID
+
+log = logging.getLogger(__name__)
 
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 V1 = "/api/v1"
+MAX_BATCH = 20  # calls in one JSON-RPC batch
 
 INSTRUCTIONS = """\
 The Vault holds one person's Magic: The Gathering collection (imported from Dragon Shield),
@@ -73,7 +79,7 @@ JSON_TYPES = {"string": (str,), "integer": (int,), "number": (int, float), "bool
 def _invalid(schema: dict, value: Any, where: str) -> str | None:
     """Why ``value`` doesn't match ``schema``, or None. Tool schemas are otherwise only
     descriptive, and paths and API bodies are built from these values. Covers the keywords the
-    tools use: type, enum, bounds, lengths, format (date), items, properties, required,
+    tools use: type, enum, bounds, lengths, pattern, format (date), items, properties, required,
     additionalProperties, anyOf."""
     kind = schema.get("type")
     if kind in JSON_TYPES:
@@ -89,6 +95,8 @@ def _invalid(schema: dict, value: Any, where: str) -> str | None:
     if isinstance(value, str):
         if len(value) < schema.get("minLength", 0) or len(value) > schema.get("maxLength", len(value)):
             return f"{where} has the wrong length"
+        if "pattern" in schema and not re.search(schema["pattern"], value):
+            return f"{where} is not in the right form"
         if schema.get("format") == "date" and not _is_date(value):
             return f"{where} must be a date (YYYY-MM-DD)"
     if isinstance(value, list):
@@ -126,8 +134,10 @@ def _base(args: dict) -> str:
     return f"{V1}/shared/{int(shared)}/collection" if shared is not None else f"{V1}/collection"
 
 
-ID = {"type": "integer", "minimum": 1}
+ID = {"type": "integer", "minimum": 1, "maximum": MAX_ID}
 SHARE = {"share_id": {**ID, "description": "Read a collection someone shared with you (from list_shared_with_me) instead of your own"}}
+DECKLIST = {"type": "string", "maxLength": 50_000}  # as the API's TextIn and DeckIn
+SOURCE_URL = {"type": "string", "maxLength": 500, "description": "Where the deck came from (an http or https link)"}
 PAGING = {
     "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25, "description": "Items per page"},
     "cursor": {"type": "string", "description": "next_cursor from the previous page"},
@@ -149,8 +159,8 @@ TOOLS = [
          path=lambda a: _base(a) + "/cards", query=("q", "set", "name", "finish", "condition", "sort", "limit", "cursor")),
     Tool("get_card", "One printing in detail: every copy (condition, language, folder, price paid, date), "
          "Scryfall card data (type, text, image with artist credit) and 90 days of prices.",
-         {"card_id": {"type": "string", "description": "The id from search_cards"}, **SHARE}, ["card_id"],
-         path=lambda a: _base(a) + f"/cards/{a['card_id']}"),
+         {"card_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$", "description": "The id from search_cards"},
+          **SHARE}, ["card_id"], path=lambda a: _base(a) + f"/cards/{quote(a['card_id'], safe='')}"),
     Tool("list_sets", "Market value, copies and printings per set. Paged.", {**PAGING, **SHARE},
          path=lambda a: _base(a) + "/sets", query=("limit", "cursor")),
     Tool("get_collection_stats", "Highlights: most valuable printings, biggest price gains and losses, duplicates.",
@@ -162,16 +172,18 @@ TOOLS = [
          path=lambda a: _base(a) + "/timeline"),
     Tool("check_decklist", "Which cards of a decklist the person owns, partly owns or is missing. Accepts "
          "Archidekt, Moxfield, Arena and MTGO text formats.",
-         {"text": {"type": "string", "description": "The decklist, one card per line, e.g. '1 Sol Ring'"}}, ["text"],
+         {"text": {**DECKLIST, "description": "The decklist, one card per line, e.g. '1 Sol Ring'"}}, ["text"],
          method="POST", path=lambda a: f"{V1}/decks/coverage", body=lambda a: {"text": a["text"]}),
     Tool("parse_decklist", "Parse a decklist into cards with quantity, set, collector number, finish and section.",
-         {"text": {"type": "string"}}, ["text"], method="POST", path=lambda a: f"{V1}/decks/parse",
+         {"text": DECKLIST}, ["text"], method="POST", path=lambda a: f"{V1}/decks/parse",
          body=lambda a: {"text": a["text"]}),
     Tool("lookup_cards", "Card data (type, text, colours, artist, image links) and current prices for up to 75 "
          "printings, by Scryfall id, set + collector number, or name. Works for any card, owned or not.",
          {"identifiers": {"type": "array", "minItems": 1, "maxItems": 75, "items": {"type": "object", "properties": {
-             "id": {"type": "string"}, "set": {"type": "string"}, "collector_number": {"type": "string"},
-             "name": {"type": "string"}}, "additionalProperties": False,
+             # the API's CardIdentifier limits
+             "id": {"type": "string", "maxLength": 36}, "set": {"type": "string", "maxLength": 20},
+             "collector_number": {"type": "string", "maxLength": 30}, "name": {"type": "string", "maxLength": 300}},
+             "additionalProperties": False,
              # one of: a Scryfall id, a name (optionally with a set), or a set and collector number
              "anyOf": [{"required": ["id"]}, {"required": ["name"]}, {"required": ["set", "collector_number"]}]}}},
          ["identifiers"],
@@ -180,13 +192,14 @@ TOOLS = [
     Tool("get_deck", "A saved deck with its text and coverage against the collection.",
          {"deck_id": ID}, ["deck_id"], path=lambda a: f"{V1}/decks/{int(a['deck_id'])}"),
     Tool("save_deck", "Save a decklist to the person's decks.",
-         {"name": {"type": "string"}, "text": {"type": "string"}, "source_url": {"type": "string"}}, ["name", "text"],
+         {"name": {"type": "string"}, "text": DECKLIST, "source_url": SOURCE_URL}, ["name", "text"],
          method="POST", path=lambda a: f"{V1}/decks",
          body=lambda a: {"name": a["name"], "text": a["text"], "source_url": a.get("source_url")}, write=True),
-    Tool("update_deck", "Replace a saved deck's name and text.",
-         {"deck_id": ID, "name": {"type": "string"}, "text": {"type": "string"}},
+    Tool("update_deck", "Replace a saved deck's name and text (and its source link, if given).",
+         {"deck_id": ID, "name": {"type": "string"}, "text": DECKLIST, "source_url": SOURCE_URL},
          ["deck_id", "name", "text"], method="PUT", path=lambda a: f"{V1}/decks/{int(a['deck_id'])}",
-         body=lambda a: {"name": a["name"], "text": a["text"]}, write=True),
+         body=lambda a: {"name": a["name"], "text": a["text"],
+                         **({"source_url": a["source_url"]} if "source_url" in a else {})}, write=True),
     Tool("get_archidekt_deck", "A public deck from Archidekt by its id (the number in archidekt.com/decks/<id>).",
          {"deck_id": ID}, ["deck_id"], path=lambda a: f"{V1}/archidekt/decks/{int(a['deck_id'])}"),
     Tool("list_imports", "Past collection imports, newest first, with what changed each time.", dict(PAGING),
@@ -242,8 +255,13 @@ def build_router(optional_user) -> APIRouter:
         elif tool.body is not None:
             kwargs["json"] = tool.body(args)
         transport = httpx.ASGITransport(app=request.app)
-        async with httpx.AsyncClient(transport=transport, base_url=str(request.base_url).rstrip("/")) as client:
-            res = await client.request(tool.method, tool.path(args), **kwargs)
+        try:
+            async with httpx.AsyncClient(transport=transport, base_url=str(request.base_url).rstrip("/")) as client:
+                res = await client.request(tool.method, tool.path(args), **kwargs)
+        except Exception:  # the API failed: this tool call failed, not the whole MCP request (or its batch)
+            log.exception("MCP tool %s failed", tool.name)
+            return 500, {"type": "about:blank", "title": "Internal server error", "status": 500,
+                         "detail": "The Vault could not complete this request. Try again later."}
         try:
             body = res.json()
         except ValueError:
@@ -263,6 +281,9 @@ def build_router(optional_user) -> APIRouter:
         except ValueError:
             return JSONResponse(_rpc_error(None, -32700, "Parse error"), status_code=400)
         if isinstance(message, list):  # JSON-RPC batch (older protocol versions)
+            if not message or len(message) > MAX_BATCH:
+                why = "an empty batch" if not message else f"a batch holds at most {MAX_BATCH} calls"
+                return JSONResponse(_rpc_error(None, -32600, f"Invalid request: {why}"), status_code=400)
             answers = [a for a in [await handle(request, m, i) for i, m in enumerate(message)] if a is not None]
             return JSONResponse(answers) if answers else Response(status_code=202)
         answer = await handle(request, message)
@@ -297,7 +318,10 @@ def build_router(optional_user) -> APIRouter:
         if method == "tools/list":
             return _result(id_, {"tools": [t.schema() for t in TOOLS if not t.write or "write" in scopes]})
         if method == "tools/call":
-            tool = BY_NAME.get(params.get("name", ""))
+            name = params.get("name")
+            if not isinstance(name, str):
+                return _rpc_error(id_, -32602, "Invalid params: name must be the tool's name")
+            tool = BY_NAME.get(name)
             args = params.get("arguments")
             if args is None:  # omitted: no arguments
                 args = {}

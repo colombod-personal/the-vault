@@ -8,6 +8,7 @@ to it. Prices come from the latest Scryfall snapshot, falling back to the file's
 from __future__ import annotations
 
 import hashlib
+import math
 import threading
 from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
@@ -19,6 +20,12 @@ from sqlalchemy.orm import Session
 from .importer import user_entries
 from .models import Card, Entry, Import, PriceSnapshot, User
 from .prices import latest_prices, unit_price
+
+
+def finite(value: float | None) -> float | None:
+    """``value``, or None when it is not a finite number. Imports drop such prices; this keeps one
+    stored before that (or by hand) from making every page unanswerable (JSON has no infinity)."""
+    return value if isinstance(value, (int, float)) and math.isfinite(value) else None
 
 
 def _printing(row: Entry) -> str:
@@ -107,6 +114,7 @@ class CollectionView:
             set_code = (r.extra or {}).get("Set Code") or (r.set_code or "").upper()
             gid = group_id(r.name, set_code, r.collector_number or "", printing, r.condition, r.language)
             price, from_scryfall = unit_price(r, prices.get(r.scryfall_id) if r.scryfall_id else None)
+            price, paid = finite(price) or 0.0, finite(r.purchase_price)
             day = r.purchase_date.isoformat() if r.purchase_date else None
             g = groups.get(gid)
             if g is None:
@@ -116,20 +124,20 @@ class CollectionView:
                     condition=r.condition, language=r.language, price=price,
                     price_source="scryfall" if from_scryfall else "file",
                 )
-            g.copies.append({"quantity": r.quantity, "folder": r.folder, "purchase_price": r.purchase_price,
+            g.copies.append({"quantity": r.quantity, "folder": r.folder, "purchase_price": paid,
                              "purchase_date": day})
             g.quantity += r.quantity
-            g.paid += (r.purchase_price or 0.0) * r.quantity
+            g.paid += (paid or 0.0) * r.quantity
             g.scryfall_id = g.scryfall_id or r.scryfall_id
             sp = r.source_prices or {}
             if day and (g.first_acquired is None or day < g.first_acquired):
                 g.first_acquired = day
             if day is None or g.last_acquired is None or day >= g.last_acquired:
                 g.last_acquired = day or g.last_acquired
-                g.low, g.mid = sp.get("low", g.low), sp.get("mid", g.mid)
+                g.low, g.mid = finite(sp.get("low", g.low)), finite(sp.get("mid", g.mid))
             if day:
                 months[day[:7]] += r.quantity
-                spend[day[:7]] += (r.purchase_price or 0.0) * r.quantity
+                spend[day[:7]] += (paid or 0.0) * r.quantity
         ordered = sorted(groups.values(), key=lambda g: (g.name.lower(), g.set_code, g.number, g.id))
         timeline = [(m, months[m], round(spend[m], 2)) for m in sorted(months)]
         latest = db.execute(select(Import.created_at, Import.source).where(Import.user_id == user.id)

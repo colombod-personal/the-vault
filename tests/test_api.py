@@ -1,8 +1,11 @@
 import base64
+import csv
 import json
+import os
 from datetime import date
 from pathlib import Path
 
+import pytest
 from mtg_toolkits.scryfall import Card
 
 from sqlalchemy import select
@@ -254,3 +257,245 @@ def test_the_bulk_prefilter_keeps_printings_matched_by_set_and_number(app, signe
         assert kept == ["bel2"]
         stats = sync(db, wanted_cards(db, bulk), day=date(2026, 9, 27))
     assert stats["methods"].get("set_number") == 1
+
+
+ID_TOO_BIG = [2**31, 10**30]  # ids are 32-bit INTEGER columns on Postgres
+
+
+@pytest.mark.parametrize("big", ID_TOO_BIG)
+@pytest.mark.parametrize("method, path", [
+    ("GET", "/decks/{}"), ("GET", "/imports/{}"), ("GET", "/shared/{}/deck"), ("GET", "/shared/{}/collection"),
+    ("GET", "/shared/{}/collection/cards"), ("DELETE", "/me/sessions/{}"), ("DELETE", "/me/tokens/{}"),
+    ("DELETE", "/me/passkeys/{}"), ("DELETE", "/shares/{}"), ("DELETE", "/decks/{}"),
+])
+def test_ids_too_big_for_the_database_are_invalid_not_server_errors(signed_in, method, path, big):
+    res = signed_in.request(method, V1 + path.format(big))
+    assert res.status_code == 422, res.text
+
+
+@pytest.mark.parametrize("big", ID_TOO_BIG + [1e30])
+def test_body_ids_too_big_for_the_database_are_invalid(signed_in, big):
+    assert signed_in.put(f"{V1}/decks/{2**31}", json={"name": "a", "text": "1 Sol Ring"}).status_code == 422
+    res = signed_in.post(f"{V1}/shares", json={"kind": "deck", "deck_id": big})
+    assert res.status_code == 422, res.text
+
+
+@pytest.mark.parametrize("path, extra", [("/decks/parse", {}), ("/decks/coverage", {}), ("/decks", {"name": "x"})],
+                         ids=["parse", "coverage", "save"])
+def test_a_decklist_the_parser_cannot_read_is_a_bad_request(signed_in, monkeypatch, path, extra):
+    res = signed_in.post(V1 + path, json={"text": "9" * 5000 + " Sol Ring", **extra})
+    assert res.status_code in (200, 400), res.text  # mtg-toolkits >= 0.2.0: an unparsed line; before: ValueError
+
+    from vault.api import v1
+
+    def unreadable(text):  # whatever the library version raises it for
+        raise ValueError("Exceeds the limit (4300 digits) for integer string conversion")
+
+    monkeypatch.setattr(v1.decklist, "parse_text", unreadable)
+    res = signed_in.post(V1 + path, json={"text": "1 Sol Ring", **extra})
+    assert res.status_code == 400, res.text
+
+
+DS_HEADER = ("Folder Name,Quantity,Trade Quantity,Card Name,Set Code,Set Name,Card Number,Condition,Printing,"
+             "Language,Price Bought,Date Bought,LOW,MID,MARKET\n")
+GENERIC_HEADER = "quantity,name,set_code,finish,condition,language,scryfall_id,source_prices,extra\n"
+
+
+def ds_row(folder="f", qty="1", trade="0", name="Sol Ring", set_code="C21", set_name="Commander 2021", number="263",
+           price="1", market="1"):
+    return f"{folder},{qty},{trade},{name},{set_code},{set_name},{number},NearMint,Foil,English,{price},2023-01-10,1,1,{market}\n"
+
+
+@pytest.mark.parametrize("content", [
+    DS_HEADER + ds_row(qty="inf"),
+    DS_HEADER + ds_row(qty="1e30"),
+    DS_HEADER + ds_row(qty="-5"),
+    DS_HEADER + ds_row(qty="1000001"),
+    DS_HEADER + ds_row(trade="inf"),
+    DS_HEADER + ds_row(trade="-1"),
+    DS_HEADER + ds_row(name="N" * 200_000),  # larger than the csv module's field limit
+    DS_HEADER + ds_row(set_code="S" * 21),  # identity: never clipped into another printing's code
+    DS_HEADER + ds_row(number="9" * 31),
+    GENERIC_HEADER + '1,Sol Ring,c21,nonfoil,near_mint,en,,"[1]",\n',
+    GENERIC_HEADER + '1,Sol Ring,c21,nonfoil,near_mint,en,,,"[1]"\n',
+    GENERIC_HEADER + '1,Sol Ring,c21,nonfoil,near_mint,en,,"{""a"": null}",\n',
+    GENERIC_HEADER + "99999999999999999999999,Sol Ring,c21,nonfoil,near_mint,en,,,\n",
+    GENERIC_HEADER + "1,Sol Ring,c21,nonfoil,near_mint,english-long,,,\n",
+    GENERIC_HEADER + "1,Sol Ring,c21,nonfoil,near_mint,en," + "z" * 37 + ",,\n",
+], ids=["qty-inf", "qty-1e30", "qty-negative", "qty-over-a-million", "trade-inf", "trade-negative", "huge-field",
+        "long-set-code", "long-number", "prices-list", "extra-list", "price-null", "qty-huge", "long-language",
+        "long-scryfall-id"])
+def test_a_collection_file_with_values_the_vault_cannot_store_is_a_bad_request(signed_in, content):
+    assert upload(signed_in).status_code == 201
+    res = upload(signed_in, content.encode())
+    assert res.status_code == 400, res.text
+    assert signed_in.get(f"{V1}/collection").json()["copies"] == 7  # the collection is left as it was
+
+
+@pytest.mark.parametrize("price, market", [("1e309", "1"), ("1", "1e309"), ("nan", "1"), ("1", "nan"),
+                                           ("inf", "-inf"), ("1e300", "1e300")])
+def test_prices_that_are_not_finite_numbers_are_dropped_on_import(signed_in, price, market):
+    res = upload(signed_in, (DS_HEADER + ds_row(price=price, market=market) + ds_row(number="264")).encode())
+    assert res.status_code == 201, res.text
+    for path in ("", "/cards", "/stats", "/history", "/sets", "/timeline"):
+        assert signed_in.get(f"{V1}/collection{path}").status_code == 200, path
+    summary = signed_in.get(f"{V1}/collection").json()
+    assert summary["copies"] == 2 and summary["market_value"] < 1e6 and (summary["paid"] or 0) < 1e6
+
+
+def test_long_free_text_is_clipped_to_fit_on_import(app, signed_in):
+    from vault.models import Entry
+    content = DS_HEADER + ds_row(folder="D" * 300, name="N" * 400, set_name="X" * 300)
+    assert upload(signed_in, content.encode()).status_code == 201
+    with app.state.db.sessions() as db:
+        e = db.scalar(select(Entry))
+        assert (len(e.name), len(e.set_name), len(e.folder)) == (300, 200, 200)
+
+
+def test_prices_already_stored_out_of_range_do_not_break_reading(app, signed_in):
+    from vault.models import CollectionValue, Entry
+    upload(signed_in)
+    with app.state.db.sessions() as db:
+        for e in db.scalars(select(Entry)):
+            e.purchase_price, e.source_prices = float("inf"), {"low": float("inf"), "mid": 1.0, "market": float("inf")}
+        for v in db.scalars(select(CollectionValue)):
+            v.market_usd, v.cost_usd = float("inf"), float("-inf")
+        db.commit()
+    for path in ("", "/cards", "/stats", "/history", "/sets", "/timeline"):
+        res = signed_in.get(f"{V1}/collection{path}")
+        assert res.status_code == 200 and "Infinity" not in res.text, path
+
+
+@pytest.mark.skipif(not os.environ.get("VAULT_TEST_POSTGRES_URL"), reason="needs Postgres (it enforces column sizes)")
+def test_postgres_never_sees_a_value_too_big_for_its_column():
+    from fastapi.testclient import TestClient
+    from sqlalchemy import text
+    from vault.app import create_app
+    from vault.config import Settings
+    from vault.db import Base, Database
+
+    url = os.environ["VAULT_TEST_POSTGRES_URL"]
+    with Database(url).engine.begin() as conn:
+        Base.metadata.drop_all(conn)
+        conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
+    settings = Settings(database_url=url, session_secret="s" * 32, dev_login=True, base_url="http://testserver")
+    with TestClient(create_app(settings, serve_static=False)) as client:
+        assert client.post("/api/auth/dev-login").status_code == 200
+        long_text = DS_HEADER + ds_row(folder="D" * 300, name="N" * 400, set_name="X" * 300)
+        assert upload(client, long_text.encode(), name="F" * 400).status_code == 201
+        assert upload(client, (DS_HEADER + ds_row(set_code="S" * 40)).encode()).status_code == 400
+        assert upload(client, (GENERIC_HEADER + "1,Sol Ring,c21,nonfoil,near_mint,english-long,,,\n").encode()).status_code == 400
+        assert client.get(f"{V1}/decks/{2**31}").status_code == 422
+        assert client.post(f"{V1}/shares", json={"kind": "deck", "deck_id": 2**31}).status_code == 422
+        deck = {"name": "x", "text": "1 Sol Ring", "source_url": "https://example.com/" + "a" * 600}
+        assert client.post(f"{V1}/decks", json=deck).status_code == 422
+
+
+@pytest.mark.parametrize("url", ["javascript:alert(1)", "data:text/html,x", "ftp://example.com/deck", "https://",
+                                 "https://archidekt.com/decks/" + "1" * 500, "//example.com/deck"],
+                         ids=["javascript", "data", "ftp", "no-host", "too-long", "no-scheme"])
+def test_a_deck_source_url_is_an_http_link_that_fits(signed_in, url):
+    res = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring", "source_url": url})
+    assert res.status_code == 422, res.text
+    deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring"}).json()
+    assert signed_in.put(f"{V1}/decks/{deck['id']}", json={"name": "x", "text": "1 Sol Ring",
+                                                           "source_url": url}).status_code == 422
+
+
+def test_updating_a_deck_keeps_its_source_url_unless_given(signed_in):
+    url = "https://archidekt.com/decks/123"
+    deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring", "source_url": url}).json()
+    assert deck["source_url"] == url
+    path = f"{V1}/decks/{deck['id']}"
+    assert signed_in.put(path, json={"name": "y", "text": "2 Sol Ring"}).json()["source_url"] == url
+    other = "http://moxfield.com/decks/abc"
+    assert signed_in.put(path, json={"name": "y", "text": "2 Sol Ring", "source_url": other}).json()["source_url"] == other
+    assert signed_in.put(path, json={"name": "y", "text": "2 Sol Ring", "source_url": None}).json()["source_url"] is None
+    assert signed_in.get(path).json()["source_url"] is None
+
+
+@pytest.mark.parametrize("text", ["", "no cards here", "9" * 5000 + " Sol Ring"], ids=["empty", "no-cards", "huge-quantity"])
+def test_updating_a_deck_needs_cards_like_creating_one(signed_in, text):
+    deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring"}).json()
+    assert signed_in.put(f"{V1}/decks/{deck['id']}", json={"name": "x", "text": text}).status_code == 400
+    assert signed_in.get(f"{V1}/decks/{deck['id']}").json()["text"] == "1 Sol Ring"
+
+
+def test_a_deck_deleted_while_it_is_being_updated_is_not_found(app, signed_in, monkeypatch):
+    from vault.api import v1
+    from vault.models import Deck
+
+    deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring"}).json()
+    real = v1.owned_deck
+
+    def deleted_meanwhile(db, user, deck_id):
+        found = real(db, user, deck_id)
+        with app.state.db.sessions() as other:  # another request deletes it now
+            other.delete(other.get(Deck, deck_id))
+            other.commit()
+        return found
+
+    monkeypatch.setattr(v1, "owned_deck", deleted_meanwhile)
+    res = signed_in.put(f"{V1}/decks/{deck['id']}", json={"name": "y", "text": "1 Sol Ring"})
+    assert res.status_code == 404, res.text
+
+
+@pytest.mark.parametrize("error", [ValueError("bad"), TypeError("bad"), AttributeError("bad"), OverflowError("bad"),
+                                   csv.Error("field larger than field limit")])
+def test_any_error_the_collection_parser_raises_is_a_bad_request(signed_in, monkeypatch, error):
+    from vault import importer
+
+    def broken(text):
+        raise error
+
+    monkeypatch.setattr(importer.formats, "parse", broken)
+    res = upload(signed_in)
+    assert res.status_code == 400 and res.json()["detail"].startswith("No cards found"), res.text
+
+
+def entry(**overrides):
+    from mtg_toolkits.models import CollectionEntry
+    return CollectionEntry(**{"name": "Sol Ring", "quantity": 1, "set_code": "c21", "collector_number": "263",
+                              **overrides})
+
+
+@pytest.mark.parametrize("overrides", [
+    {"quantity": 10**30}, {"quantity": -1}, {"quantity": 1_000_001}, {"quantity": float("inf")}, {"quantity": 2.5},
+    {"quantity": "1"}, {"trade_quantity": float("nan")}, {"trade_quantity": -1}, {"name": ""}, {"name": None},
+    {"set_code": "s" * 21}, {"collector_number": "1" * 31}, {"scryfall_id": "z" * 37}, {"language": "english"},
+    {"set_name": 5},
+], ids=lambda o: "-".join(f"{k}={str(v)[:12]}" for k, v in o.items()))
+def test_the_importer_refuses_entries_it_cannot_store_whatever_the_parser_returns(overrides):
+    """The app's own checks, independent of the mtg-toolkits version that parsed the file."""
+    from vault.importer import ImportError_, _clean
+    with pytest.raises(ImportError_):
+        _clean(entry(**overrides), 1)
+
+
+def test_the_importer_drops_bad_prices_and_clips_free_text_whatever_the_parser_returns():
+    from vault.importer import _clean
+    e = entry(quantity=3.0, purchase_price=float("inf"), name="N" * 400, set_name="X" * 300, folder="F" * 300,
+              source_prices={"low": float("nan"), "mid": 1e300, "market": 2.5, "high": None, 5: 1.0},
+              extra={"Printing": "Foil", "n": 1, "l": [1]})
+    _clean(e, 1)
+    assert (e.quantity, e.purchase_price, e.source_prices, e.extra) == (3, None, {"market": 2.5}, {"Printing": "Foil"})
+    assert (len(e.name), len(e.set_name), len(e.folder)) == (300, 200, 200)
+    bad = entry(source_prices=[1], extra=None)
+    _clean(bad, 1)
+    assert (bad.source_prices, bad.extra) == ({}, {})
+
+
+def test_an_import_matches_known_printings_the_way_the_library_does(app, client):
+    """Set aliases, letter case and zero-padding in a file's set and number still find a
+    printing the server already knows, right at import (not only after the next sync)."""
+    client.post("/api/auth/dev-login", params={"email": "first@example.com"})
+    upload(client)
+    with app.state.db.sessions() as db:
+        sync(db, BULK, day=date(2026, 9, 27))
+    client.cookies.clear()
+    client.post("/api/auth/dev-login", params={"email": "second@example.com"})
+    padded = CSV.replace(b"Sol Ring,C21,Commander 2021,263,", b"Sol Ring,c21,Commander 2021,0263,") \
+                .replace(b",GK2,", b",GK2_ORZHOV,")
+    assert upload(client, padded).status_code == 201
+    cards = {c["name"]: c for c in all_cards(client)}
+    assert cards["Sol Ring"]["price"]["source"] == "scryfall"

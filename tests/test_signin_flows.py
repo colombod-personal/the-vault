@@ -236,3 +236,15 @@ def test_provider_outage_and_errors_end_in_a_sign_in_error(client, universe):
     universe.google.fail_next("/token", 503)
     assert deliver(client, universe.google.approve(location, "g-4")).startswith("/?signin_error=")
     assert client.get("/api/v1/me").status_code == 401
+
+
+@pytest.mark.parametrize("user, name", [
+    ("[1]", None), ('{"name": "Cy"}', None), ('{"name": {"firstName": 5}}', None), ("5", None), ("null", None),
+    ('{"name": {"firstName": "Cy", "lastName": ["Doe"]}}', "Cy"),
+    (json.dumps({"name": {"firstName": "F" * 150, "lastName": "L" * 150}}), "F" * 150 + " " + "L" * 49),
+], ids=["list", "name-text", "first-name-number", "number", "null", "last-name-list", "too-long"])
+def test_apple_user_field_of_any_shape_signs_in(client, universe, user, name):
+    """Apple's one-time `user` form field is whatever the POST says: never trusted to be the right shape."""
+    cb = universe.apple.approve(start(client, "apple"), universe.apple.add_account("a-9", "cy@icloud.com", "Cy Doe"))
+    assert deliver(client, Callback(cb.url, cb.method, {**cb.data, "user": user})) == "/"
+    assert me(client)["name"] == name

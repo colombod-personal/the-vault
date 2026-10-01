@@ -471,3 +471,8 @@ def test_a_short_pkce_verifier_is_refused(client, idp):
     res = client.post(f"{V1}/auth/token", json={"grant_type": "authorization_code", "code": code,
                                                 "code_verifier": verifier, "redirect_uri": "vault://auth"})
     assert res.status_code == 400, res.text
+
+
+def test_a_native_name_longer_than_an_account_name_is_invalid(client, idp):
+    assert apple_sign_in(client, idp, name="N" * 201).status_code == 422
+    assert apple_sign_in(client, idp, name="N" * 200).status_code == 200

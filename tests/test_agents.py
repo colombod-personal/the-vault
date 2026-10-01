@@ -358,3 +358,91 @@ def test_a_failure_while_storing_the_answer_leaves_nothing_behind(app, signed_in
     retry = signed_in.post(f"{V1}{path}", headers=headers, **kwargs)
     assert retry.status_code == 201, retry.text
     assert count() == before + 1
+
+
+@pytest.mark.parametrize("tool, arguments", [
+    ("get_deck", {"deck_id": 2**31}), ("get_deck", {"deck_id": 10**30}),
+    ("get_shared_deck", {"share_id": 10**30}), ("get_collection_summary", {"share_id": 2**31}),
+])
+def test_mcp_ids_too_big_for_the_database_are_invalid(agent, bot, tool, arguments):
+    read = make_token(agent)
+    res = rpc(bot, "tools/call", {"name": tool, "arguments": arguments}, read)
+    assert res.status_code == 200 and res.json()["error"]["code"] == -32602, res.text
+
+
+def test_an_api_failure_inside_a_tool_call_is_a_tool_error_not_a_failed_request(agent, bot, monkeypatch):
+    from vault.api import v1
+
+    def broken(text):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(v1.decklist, "parse_text", broken)
+    read = make_token(agent)
+    res = rpc(bot, "tools/call", {"name": "check_decklist", "arguments": {"text": "1 Sol Ring"}}, read)
+    assert res.status_code == 200, res.text
+    result = res.json()["result"]
+    assert result["isError"] is True and "boom" not in result["content"][0]["text"]
+
+
+def test_mcp_deck_source_urls_are_checked_and_kept_by_updates(agent, bot):
+    write = make_token(agent, scopes=["read", "write"])
+    long = rpc(bot, "tools/call", {"name": "save_deck", "arguments": {
+        "name": "d", "text": "1 Sol Ring", "source_url": "https://a.test/" + "u" * 800}}, write).json()
+    assert long["error"]["code"] == -32602
+    url = "https://archidekt.com/decks/1"
+    deck = call_tool(bot, write, "save_deck", name="d", text="1 Sol Ring", source_url=url)["structuredContent"]
+    updated = call_tool(bot, write, "update_deck", deck_id=deck["id"], name="d2", text="2 Sol Ring")
+    assert updated["isError"] is False and updated["structuredContent"]["source_url"] == url
+    moved = call_tool(bot, write, "update_deck", deck_id=deck["id"], name="d2", text="2 Sol Ring",
+                      source_url="https://moxfield.com/decks/x")
+    assert moved["structuredContent"]["source_url"] == "https://moxfield.com/decks/x"
+
+
+@pytest.mark.parametrize("name", [["x"], {"a": 1}, 5, None, True])
+def test_mcp_a_tool_name_that_is_not_text_is_invalid(agent, bot, name):
+    read = make_token(agent)
+    res = rpc(bot, "tools/call", {"name": name}, read)
+    assert res.status_code == 200 and res.json()["error"]["code"] == -32602, res.text
+
+
+@pytest.mark.parametrize("card_id", ["../../decks", "../cards", "x?limit=1", "x#y", "a/b", "..", "."])
+def test_mcp_card_ids_stay_inside_the_card_path(agent, bot, card_id):
+    read = make_token(agent)
+    res = rpc(bot, "tools/call", {"name": "get_card", "arguments": {"card_id": card_id}}, read).json()
+    assert res["error"]["code"] == -32602, res  # never another endpoint's answer
+
+
+def test_mcp_batches_are_capped_and_never_empty(agent, bot):
+    read = make_token(agent)
+    ping = lambda i: {"jsonrpc": "2.0", "id": i, "method": "ping"}  # noqa: E731
+    empty = bot.post("/api/mcp", json=[], headers=auth(read))
+    assert empty.status_code == 400 and empty.json()["error"]["code"] == -32600
+    big = bot.post("/api/mcp", json=[ping(i) for i in range(21)], headers=auth(read))
+    assert big.status_code == 400 and big.json()["error"]["code"] == -32600
+    full = bot.post("/api/mcp", json=[ping(i) for i in range(20)], headers=auth(read))
+    assert full.status_code == 200 and len(full.json()) == 20
+
+
+@pytest.mark.parametrize("tool, arguments", [
+    ("check_decklist", {"text": "1 Sol Ring\n" * 5000}),
+    ("parse_decklist", {"text": "x" * 50_001}),
+    ("lookup_cards", {"identifiers": [{"id": "x" * 37}]}),
+    ("lookup_cards", {"identifiers": [{"set": "s" * 21, "collector_number": "1"}]}),
+    ("lookup_cards", {"identifiers": [{"set": "c21", "collector_number": "1" * 31}]}),
+    ("lookup_cards", {"identifiers": [{"name": "n" * 301}]}),
+    ("get_card", {"card_id": "x" * 65}),
+])
+def test_mcp_text_limits_match_the_api(agent, bot, tool, arguments):
+    read = make_token(agent)
+    res = rpc(bot, "tools/call", {"name": tool, "arguments": arguments}, read)
+    assert res.status_code == 200 and res.json()["error"]["code"] == -32602, res.text[:300]
+
+
+def test_mcp_write_tools_have_the_same_text_limits(agent, bot):
+    write = make_token(agent, scopes=["read", "write"])
+    for tool in ("save_deck", "update_deck"):
+        args = {"deck_id": 1, "name": "d", "text": "x" * 50_001}
+        if tool == "save_deck":
+            del args["deck_id"]
+        res = rpc(bot, "tools/call", {"name": tool, "arguments": args}, write)
+        assert res.json()["error"]["code"] == -32602, res.text[:300]

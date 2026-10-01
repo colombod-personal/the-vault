@@ -158,7 +158,7 @@ https and localhost).
 | POST | `/api/v1/decks/parse` | parse a pasted decklist |
 | POST | `/api/v1/decks/coverage` | owned / partial / missing per card |
 | GET / POST | `/api/v1/decks` | saved decks / save one |
-| GET / PUT / DELETE | `/api/v1/decks/{id}` | a deck with coverage / update / delete |
+| GET / PUT / DELETE | `/api/v1/decks/{id}` | a deck with coverage / update (an omitted `source_url` is kept) / delete |
 | GET | `/api/v1/archidekt/decks/{id}` | a public Archidekt deck, fetched server-side |
 | POST | `/api/v1/cards/lookup` | any card, owned or not: `{"identifiers": [{"id"} \| {"set", "collector_number"} \| {"name", "set"?}], "refresh"?}`, 1–75 of them. Answers in Scryfall's card shape (`data`, `not_found`) from the Vault's own card table, fetching misses from Scryfall once. `unavailable: true` means Scryfall was needed but didn't answer: retry later. Read scope |
 | GET | `/api/v1/catalog/sets` | every Magic set with its icon, paged by set code, plus `aliases` mapping Dragon Shield set codes (e.g. `gk2_orzhov`) to Scryfall ones (public, cached for a day) |
