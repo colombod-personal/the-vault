@@ -79,8 +79,8 @@ not deployed (`.vercelignore`).
 How the pieces connect:
 - The Vault's outbound calls go to `http://localhost:9000/h/<real host>/<path>` (`vault/outbound.py`).
 - Sign-in redirects to browsers are rewritten the same way.
-- The API root links to the twins, so the web app sends its own Scryfall calls there too
-  (`public/lib/api.js`). Card images and set icons in those answers point at the twins.
+- Card data comes from the Vault, which calls the Scryfall twin; image and icon URLs in its
+  answers point at the twins.
 
 ### Control API (for agents, scripts, the iOS simulator)
 

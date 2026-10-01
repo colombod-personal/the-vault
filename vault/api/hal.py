@@ -4,7 +4,7 @@ Response conventions for ``/api/v1``:
 
 * Every resource has ``_links`` with at least ``self``; related resources are linked,
   so a client can navigate from ``GET /api/v1`` without hard-coding URLs.
-* Lists are ``{"items": [...], "count": n, "total": N, "_links": {"self", "next"?}}``.
+* Lists are ``{"items": [...], "count": n, "total": N, "_links": {"self", "first", "next"?}}``.
   Follow ``next`` until it's absent. Cursors are opaque; don't build them yourself.
 * Responses carry an ``ETag``; send it back as ``If-None-Match`` to get ``304``.
 * Errors are ``application/problem+json`` (RFC 9457): ``type``, ``title``, ``status``, ``detail``.

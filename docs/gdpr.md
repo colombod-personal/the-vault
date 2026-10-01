@@ -33,6 +33,7 @@ This is an engineering document, not legal advice: have the privacy notice
 | `idempotent_requests` | yes | stored answers to retried POSTs (24 hours) | – (short-lived copies of answers already in the export) | `purge_user` |
 | `auth_codes` | yes | one-time sign-in codes for apps (2 minutes) | – (expire in minutes) | `purge_user` |
 | `collection_values` | yes | daily market value and cost | `value_history.json` | `purge_user` |
+| `native_nonces` | no | hashes of used native sign-in nonces, until the ID token expires | – | deleted when expired |
 | `passkey_challenges` | no | a pending passkey challenge (random, five minutes), naming no one | – | deleted when used or expired |
 | `cards`, `price_snapshots` | no | public Scryfall card data and prices | – | kept (not about people) |
 

@@ -92,8 +92,9 @@ function Browse({ data, openCard, initialQuery }) {
             <tbody>
               {filtered.slice(0, limit).map((c, i) => {
                 const total = c.mk * c.q;
-                const pnl = total - c.pd;
-                const hidden = data.meta.costsHidden;  // shared without prices paid: no fake $0 / full-value P&L
+                // shared without prices paid, or no price paid recorded: no fake $0 / full-value P&L
+                const hidden = data.meta.costsHidden;
+                const cardPnl = window.vaultCardPnL(c, hidden);
                 return (
                   <tr key={i} onClick={() => openCard(c)} style={{ cursor: 'pointer' }}>
                     <td style={{ fontWeight: 600 }}>
@@ -102,7 +103,7 @@ function Browse({ data, openCard, initialQuery }) {
                     </td>
                     <td>
                       <span className="chip" style={{ padding: '2px 8px', fontSize: 10, gap: 4 }}>
-                        {window.SetIcon && <SetIcon code={c.s} size={12} />}
+                        {window.SetIcon && <SetIcon code={c.s} size={12} fallback={false} />}
                         <span>{c.s}</span>
                       </span>
                     </td>
@@ -111,9 +112,9 @@ function Browse({ data, openCard, initialQuery }) {
                     <td className="num">{c.q}</td>
                     <td className="num">${c.mk.toFixed(2)}</td>
                     <td className="num" style={{ color: 'var(--gold)' }}>${total.toFixed(2)}</td>
-                    <td className="num muted">{hidden ? '—' : `$${c.pd.toFixed(2)}`}</td>
-                    {hidden ? <td className="num muted">—</td> : (
-                      <td className="num" style={{ color: pnl >= 0 ? 'var(--good)' : 'var(--danger)' }}>{pnl >= 0 ? '+' : '−'}${Math.abs(pnl).toFixed(2)}</td>
+                    <td className="num muted">{window.vaultSpentText(c, hidden)}</td>
+                    {cardPnl.state !== 'known' ? <td className="num muted">{window.vaultPnLText(c, hidden)}</td> : (
+                      <td className="num" style={{ color: cardPnl.pnl >= 0 ? 'var(--good)' : 'var(--danger)' }}>{window.vaultPnLText(c, hidden)}</td>
                     )}
                   </tr>
                 );

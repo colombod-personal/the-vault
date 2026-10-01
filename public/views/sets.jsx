@@ -57,7 +57,7 @@ function Sets({ data, onSetClick }) {
           <div key={s.code} className="set-tile" style={{ '--pct': `${(s.value / maxVal) * 100}%` }} {...window.vaultPressable(() => onSetClick(s.code), `${s.name} (${s.code})`)}>
             <div className="code-row">
               <span className="code" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                {window.SetIcon && <SetIcon code={s.code} size={18} />}
+                {window.SetIcon && <SetIcon code={s.code} size={18} fallback={false} />}
                 <span>{s.code}</span>
               </span>
               <span className="qty">{s.qty} cards</span>
@@ -82,7 +82,7 @@ function SetDetail({ data, code, onBack, openCard }) {
     <div data-screen-label="03 Set Detail">
       <button className="btn ghost" onClick={onBack} style={{ marginBottom: 16 }}>← Back to all sets</button>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 8 }}>
-        {window.SetIcon && <SetIcon code={set.code} size={32} />}
+        {window.SetIcon && <SetIcon code={set.code} size={32} fallback={false} />}
         <span style={{ fontFamily: 'var(--mono)', fontSize: 24, color: 'var(--gold)', letterSpacing: '0.06em' }}>{set.code}</span>
         <h1 className="h1" style={{ fontSize: 34 }}>{set.name}</h1>
       </div>

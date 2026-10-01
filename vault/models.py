@@ -1,14 +1,13 @@
 """Tables.
 
 Per user (tenant data, private unless shared): ``users``, ``identities`` (one per
-linked OAuth account), ``imports`` (each uploaded CSV with its change summary),
+linked sign-in method (OAuth provider or passkey)), ``imports`` (each uploaded CSV with its change summary),
 ``entries`` (the collection, one row per source-file row so exports round-trip),
 ``decks`` and ``collection_values``. ``shares`` records access a user has granted
 to someone else. :func:`vault.privacy.purge_user` removes all of it.
 
-Shared: ``cards`` (Scryfall data for printings someone owns), ``price_snapshots``
-(one row per printing per day, written by the daily sync) and
-``collection_values`` (each user's daily total, which powers the value chart).
+Shared: ``cards`` (Scryfall data for printings someone owns) and ``price_snapshots``
+(one row per printing per day, written by the daily sync).
 """
 
 from __future__ import annotations

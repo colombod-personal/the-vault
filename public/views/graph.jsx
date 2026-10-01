@@ -509,7 +509,7 @@ function GraphView({ data, openCard }) {
           <p className="label-mono">Enriched & in graph</p>
           <p style={{ fontFamily: 'var(--mono)', fontSize: 13, marginTop: 4 }}>
             <span style={{ color: 'var(--gold)' }}>{enrichedCount.toLocaleString()}</span>
-            <span className="muted"> / 7,133 unique names</span>
+            <span className="muted"> / {Object.keys(data.byName).length.toLocaleString()} unique names</span>
           </p>
         </div>
       </div>
@@ -803,7 +803,7 @@ function SetConstellation({ data, nodes, filteredNodes, openCard }) {
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 12 }}>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                {window.SetIcon && <SetIcon code={selectedSet.code} size={36} />}
+                {window.SetIcon && <SetIcon code={selectedSet.code} size={36} fallback={false} />}
                 <div style={{ fontFamily: 'var(--mono)', fontSize: 28, color: 'var(--gold)', letterSpacing: '0.06em' }}>{selectedSet.code}</div>
               </div>
               <div style={{ fontFamily: 'var(--display)', fontSize: 24, fontWeight: 600, marginTop: 6 }}>{selectedSet.name}</div>
@@ -897,7 +897,7 @@ function SetConstellation({ data, nodes, filteredNodes, openCard }) {
               }}>
 
               <div style={{ fontFamily: 'var(--mono)', fontSize: r > 60 ? 12 : r > 44 ? 10 : 8, fontWeight: 700, letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 4 }}>
-                {window.SetIcon && r >= 40 && <SetIcon code={s.code} size={r > 60 ? 16 : 12} variant="white" />}
+                {window.SetIcon && r >= 40 && <SetIcon code={s.code} size={r > 60 ? 16 : 12} variant="white" fallback={false} />}
                 <span>{s.code}</span>
               </div>
               {r > 44 &&

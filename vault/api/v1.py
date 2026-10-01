@@ -3,7 +3,7 @@
 Start at ``GET /api/v1`` and follow ``_links``. Authentication: the web app's session
 cookie, or ``Authorization: Bearer <access_token>`` for native apps (see ``/auth``).
 Every list is cursor-paginated; no response grows with the size of a collection
-beyond one page (max 500 items).
+beyond one page (max 500 items), except the export downloads.
 
 Tenant isolation: queries are scoped to the signed-in user; other users' data is
 reachable only through shares they granted, and ids that aren't yours answer 404.

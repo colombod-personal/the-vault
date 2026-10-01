@@ -44,7 +44,11 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
   }, [full, range]);
 
   const last = full[full.length - 1] || { marketCum: 0, costCum: 0, gainCum: 0 };
-  const pnlPct = last.costCum ? last.gainCum / last.costCum * 100 : 0;
+  // The headline counts every card, dated or not; gain counts only cards with a known cost.
+  const pnlAll = useMemoVal(() => window.vaultPnL(data.cards, m.costsHidden), [data]);
+  const gain = pnlAll.pnl || 0;
+  const pnlPct = pnlAll.pct || 0;
+  const undated = useMemoVal(() => data.cards.reduce((n, c) => n + ((c.fd || '').slice(0, 7) ? 0 : (c.q || 0)), 0), [data]);
 
   // Biggest single month by market value added.
   const peak = useMemoVal(() => full.reduce((a, b) => b.marketAdd > a.marketAdd ? b : a, full[0] || {}), [full]);
@@ -125,7 +129,7 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
       <div className="stat-grid" style={{ marginBottom: 16 }}>
         <div className="stat">
           <div className="label">Market value</div>
-          <div className="value"><span className="currency">$</span>{Math.round(last.marketCum).toLocaleString()}</div>
+          <div className="value"><span className="currency">$</span>{Math.round(m.totalMarket).toLocaleString()}</div>
           <div className="delta">at prices as of {fresh.abs}</div>
         </div>
         {m.costsHidden ? (
@@ -137,23 +141,37 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
         ) : (<>
         <div className="stat accent">
           <div className="label">Cost basis</div>
-          <div className="value"><span className="currency">$</span>{Math.round(last.costCum).toLocaleString()}</div>
+          <div className="value"><span className="currency">$</span>{Math.round(m.totalPaid).toLocaleString()}</div>
           <div className="delta">cumulative spend</div>
         </div>
-        <div className={`stat ${last.gainCum >= 0 ? 'good' : 'bad'}`}>
-          <div className="label">Unrealised gain</div>
-          <div className="value" style={{ color: last.gainCum >= 0 ? 'var(--good)' : 'var(--danger)' }}>
-            <span className="currency">$</span>{last.gainCum >= 0 ? '+' : '−'}{Math.abs(Math.round(last.gainCum)).toLocaleString()}
+        {pnlAll.known ? (
+          <div className={`stat ${gain >= 0 ? 'good' : 'bad'}`}>
+            <div className="label">Unrealised gain</div>
+            <div className="value" style={{ color: gain >= 0 ? 'var(--good)' : 'var(--danger)' }}>
+              <span className="currency">$</span>{gain >= 0 ? '+' : '−'}{Math.abs(Math.round(gain)).toLocaleString()}
+            </div>
+            <div className={`delta ${gain >= 0 ? 'up' : 'down'}`}>{gain >= 0 ? '▲' : '▼'} {Math.abs(pnlPct).toFixed(1)}% over cost</div>
+            {pnlAll.unknown > 0 && <div className="delta" style={{ fontSize: 10 }}>on the {pnlAll.known.toLocaleString()} printings with a price paid</div>}
           </div>
-          <div className={`delta ${last.gainCum >= 0 ? 'up' : 'down'}`}>{last.gainCum >= 0 ? '▲' : '▼'} {Math.abs(pnlPct).toFixed(1)}% over cost</div>
-        </div>
+        ) : (
+          <div className="stat">
+            <div className="label">Unrealised gain</div>
+            <div className="value muted">—</div>
+            <div className="delta">no prices paid recorded</div>
+          </div>
+        )}
         </>)}
         <div className="stat">
           <div className="label">Last 12 months</div>
           <div className="value" style={{ color: 'var(--gold)' }}><span className="currency">$</span>+{Math.round(yoy).toLocaleString()}</div>
-          <div className="delta">value added since {full.length > 12 ? full[full.length - 13].label : full[0]?.label}</div>
+          <div className="delta">{full.length ? `value added since ${full.length > 12 ? full[full.length - 13].label : full[0].label}` : 'no acquisition dates recorded'}</div>
         </div>
       </div>
+      {undated > 0 && (
+        <p className="label-mono" style={{ marginBottom: 16 }}>
+          {undated.toLocaleString()} {undated === 1 ? 'card has' : 'cards have'} no acquisition date: counted in the market value above, left out of the month-by-month curve and ledger.
+        </p>
+      )}
 
       <DailyValue history={data.history} />
 
@@ -205,7 +223,7 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
               <option value="recent">Newest first</option>
               <option value="oldest">Oldest first</option>
               <option value="market">Most value added</option>
-              <option value="spend">Most spent</option>
+              {!m.costsHidden && <option value="spend">Most spent</option>}
               <option value="cards">Most cards</option>
             </select>
           </div>
@@ -217,7 +235,7 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
                 <tr>
                   <th>Month</th>
                   <th className="num">Cards added</th>
-                  <th className="num">Spend</th>
+                  {!m.costsHidden && <th className="num">Spend</th>}
                   <th className="num">Market value added</th>
                   <th className="num">Cumulative value</th>
                 </tr>
@@ -227,13 +245,13 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
                 <tr key={r.ym}>
                     <td>{r.label}</td>
                     <td className="num muted">{r.cardsAdd.toLocaleString()}</td>
-                    <td className="num muted">${Math.round(r.costAdd).toLocaleString()}</td>
+                    {!m.costsHidden && <td className="num muted">${Math.round(r.costAdd).toLocaleString()}</td>}
                     <td className="num" style={{ color: 'var(--gold)' }}>${Math.round(r.marketAdd).toLocaleString()}</td>
                     <td className="num">${Math.round(r.marketCum).toLocaleString()}</td>
                   </tr>
                 )}
                 {ledgerRows.length === 0 &&
-                <tr><td colSpan={5} className="muted" style={{ textAlign: 'center', padding: 24 }}>No months match “{ledgerQuery}”.</td></tr>
+                <tr><td colSpan={m.costsHidden ? 4 : 5} className="muted" style={{ textAlign: 'center', padding: 24 }}>No months match “{ledgerQuery}”.</td></tr>
                 }
               </tbody>
             </table>
@@ -424,7 +442,7 @@ function DailyChart({ days }) {
       )}
       <div style={{ display: 'flex', gap: 20, marginTop: 10, flexWrap: 'wrap' }}>
         <Legend swatch="gold" label="Market value that day" />
-        <Legend swatch="copper" label="What you paid" />
+        {days.some((d) => d.cost != null) && <Legend swatch="copper" label="What you paid" />}
       </div>
     </div>
   );

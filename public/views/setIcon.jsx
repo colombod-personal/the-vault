@@ -1,8 +1,9 @@
 // <SetIcon code="DSK" size={20} tinted /> renders a set's SVG icon from Scryfall.
-// Falls back to set code text while loading or if the icon can't be fetched.
+// Falls back to set code text while loading or if the icon can't be fetched; pass fallback={false}
+// where the code is already written next to the icon, so it doesn't show twice ("MKM MKM").
 const { useState: useStateSI, useEffect: useEffectSI } = React;
 
-function SetIcon({ code, size = 18, variant = 'gold', title }) {
+function SetIcon({ code, size = 18, variant = 'gold', title, fallback = true }) {
   const [tick, setTick] = useStateSI(0);
   useEffectSI(() => {
     if (!window.SetIcons) return;
@@ -12,6 +13,7 @@ function SetIcon({ code, size = 18, variant = 'gold', title }) {
   }, []);
   const entry = window.SetIcons?.get(code);
   if (!entry?.icon) {
+    if (!fallback) return null;
     return (
       <span style={{
         display: 'inline-block',

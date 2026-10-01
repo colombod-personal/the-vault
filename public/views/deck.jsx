@@ -76,7 +76,8 @@ function DeckView({ data, openCard, initialText }) {
         ownEntries = own.entries;
       }
       const s = scry[i];
-      const price = s?.prices ? (parseFloat(s.prices.usd) || parseFloat(s.prices.usd_foil) || 0) : 0;
+      // No Scryfall price (or no match): unknown, not $0.
+      const price = s?.prices ? (parseFloat(s.prices.usd) || parseFloat(s.prices.usd_foil) || null) : null;
       const need = Math.max(0, c.qty - owned);
       return {
         ...c,
@@ -85,7 +86,8 @@ function DeckView({ data, openCard, initialText }) {
         ownEntries,
         need,
         unitPrice: price,
-        rowCost: need * price,
+        priced: price != null,
+        rowCost: need * (price || 0),
       };
     });
     setEnriched(rows);
@@ -94,7 +96,7 @@ function DeckView({ data, openCard, initialText }) {
 
   const summary = useMemoD(() => {
     if (!enriched) return null;
-    let total = 0, ownedQty = 0, missingQty = 0, missingCost = 0;
+    let total = 0, ownedQty = 0, missingQty = 0, missingCost = 0, unpricedQty = 0;
     let ownedFully = 0, ownedPartial = 0, missingAll = 0;
     for (const r of enriched) {
       total += r.qty;
@@ -102,11 +104,12 @@ function DeckView({ data, openCard, initialText }) {
       ownedQty += have;
       missingQty += r.need;
       missingCost += r.rowCost;
+      if (r.need > 0 && !r.priced) unpricedQty += r.need;
       if (r.owned >= r.qty) ownedFully++;
       else if (r.owned > 0) ownedPartial++;
       else missingAll++;
     }
-    return { total, ownedQty, missingQty, missingCost, ownedFully, ownedPartial, missingAll };
+    return { total, ownedQty, missingQty, missingCost, unpricedQty, ownedFully, ownedPartial, missingAll };
   }, [enriched]);
 
   const rowsFiltered = useMemoD(() => {
@@ -223,12 +226,17 @@ function DeckView({ data, openCard, initialText }) {
               <div style={{ marginTop: 20, padding: 14, background: 'var(--bg-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
                 <p className="label-mono">Cost to complete</p>
                 <p style={{ fontFamily: 'var(--display)', fontSize: 42, fontWeight: 600, lineHeight: 1, marginTop: 4, color: 'var(--gold)' }}>
-                  <span style={{ fontSize: 20, color: 'var(--text-2)', position: 'relative', top: -8 }}>$</span>
+                  <span style={{ fontSize: 20, color: 'var(--text-2)', position: 'relative', top: -8 }}>{summary.unpricedQty ? '≥ $' : '$'}</span>
                   {summary.missingCost.toFixed(2)}
                 </p>
                 <p className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', marginTop: 6 }}>
                   at current Scryfall USD prices
                 </p>
+                {summary.unpricedQty > 0 && (
+                  <p className="muted deck-unpriced-note" style={{ fontSize: 11, fontFamily: 'var(--mono)', marginTop: 4 }}>
+                    incomplete: {summary.unpricedQty} missing {summary.unpricedQty === 1 ? 'card has' : 'cards have'} no price (?) and {summary.unpricedQty === 1 ? 'is' : 'are'} not counted
+                  </p>
+                )}
               </div>
 
               <div className="divider"></div>
@@ -272,7 +280,7 @@ function DeckView({ data, openCard, initialText }) {
               {rowsFiltered.map((r, i) => {
                 const status = r.owned >= r.qty ? 'owned' : (r.owned > 0 ? 'partial' : 'missing');
                 return (
-                  <div className={`deck-row ${status}`} key={i} {...(r.scry ? window.vaultPressable(() => openCard({ n: r.name, s: r.scry.set, cn: r.scry.collector_number, p: 'Normal', c: 'Mint', l: 'English', q: r.owned, mk: r.unitPrice, lo: 0, mi: 0, pd: 0, fd: '', ld: '', _scry: r.scry, _ownEntries: r.ownEntries, _deckRow: r }), r.name) : {})} style={{ cursor: r.scry ? 'pointer' : 'default' }}>
+                  <div className={`deck-row ${status}`} key={i} {...(r.scry ? window.vaultPressable(() => openCard({ n: r.name, s: r.scry.set, cn: r.scry.collector_number, p: 'Normal', c: 'Mint', l: 'English', q: r.owned, mk: r.unitPrice || 0, lo: 0, mi: 0, pd: 0, fd: '', ld: '', _scry: r.scry, _ownEntries: r.ownEntries, _deckRow: r }), r.name) : {})} style={{ cursor: r.scry ? 'pointer' : 'default' }}>
                     <div className="qty">{r.qty}×</div>
                     <div>
                       <div style={{ fontWeight: 600 }}>{r.name}</div>
@@ -287,9 +295,9 @@ function DeckView({ data, openCard, initialText }) {
                     <div className={`have ${status === 'owned' ? 'full' : status === 'partial' ? 'part' : 'none'}`}>
                       {r.owned > 0 ? `${Math.min(r.owned, r.qty)}/${r.qty}` : '0'}
                     </div>
-                    <div className="cost muted">{r.need > 0 ? `${r.need} × $${r.unitPrice.toFixed(2)}` : '—'}</div>
-                    <div className="cost" style={{ color: r.rowCost > 0 ? 'var(--gold)' : 'var(--muted)' }}>
-                      {r.rowCost > 0 ? `$${r.rowCost.toFixed(2)}` : '✓'}
+                    <div className="cost muted">{r.need > 0 ? `${r.need} × ${r.priced ? '$' + r.unitPrice.toFixed(2) : '?'}` : '—'}</div>
+                    <div className="cost" style={{ color: r.rowCost > 0 ? 'var(--gold)' : 'var(--muted)' }} title={r.need > 0 && !r.priced ? 'No price available' : undefined}>
+                      {r.need > 0 ? (r.priced ? `$${r.rowCost.toFixed(2)}` : '?') : '✓'}
                     </div>
                   </div>
                 );
