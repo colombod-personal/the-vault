@@ -261,6 +261,9 @@ def test_mcp_params_that_are_not_an_object_are_invalid(agent, bot, method, param
 @pytest.mark.parametrize("tool, arguments", [
     ("get_collection_summary", {"share_id": "not-a-number"}),
     ("get_collection_summary", {"share_id": True}),
+    ("get_collection_summary", {"share_id": 0}),  # never "no share": that would read your own collection
+    ("get_value_history", {"since": "yesterday"}),
+    ("get_value_history", {"since": "2026-13-45"}),
     ("search_cards", {"limit": "10"}),
     ("check_decklist", {"text": 42}),
 ])

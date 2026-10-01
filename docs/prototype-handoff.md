@@ -1,4 +1,11 @@
-# The Vault — Handoff & Deployment Guide
+# The Vault — Handoff & Deployment Guide (historical: the prototype)
+
+> **Historical document.** This describes the original client-only prototype as it was handed
+> off. It is no longer the current architecture: the Vault now has a FastAPI server
+> (`vault/`), a Postgres database with migrations, a precompiled front end
+> (`public/app.bundle.js`, built by esbuild), and the browser no longer calls Scryfall's API
+> (the server does). "Path B" below is what was then built. For the current system see
+> `README.md`, `docs/api.md` and `CLAUDE.md`.
 
 An MTG (Magic: The Gathering) collection manager + valuation app. This is a **working client-side
 application**, not just a visual mockup: it loads a real collection, computes portfolio value, pulls
@@ -10,7 +17,7 @@ This document covers two paths:
 
 ---
 
-## 1. What this actually is (current architecture)
+## 1. What the prototype was (architecture at handoff)
 
 It's a **static, client-side site**. No server, no build step, no database.
 

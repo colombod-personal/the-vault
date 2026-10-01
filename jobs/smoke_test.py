@@ -18,7 +18,6 @@ import httpx
 def run(base: str, transport: httpx.BaseTransport | None = None) -> tuple[list[tuple[str, bool, str]], bool]:
     base = base.rstrip("/")
     results: list[tuple[str, bool, str]] = []
-    configured = True
     headers = {"User-Agent": "the-vault-smoke-test"}
     bypass = os.environ.get("VERCEL_AUTOMATION_BYPASS_SECRET")
     if bypass:  # Vercel Deployment Protection (previews): the project's automation bypass
@@ -44,30 +43,31 @@ def run(base: str, transport: httpx.BaseTransport | None = None) -> tuple[list[t
 
         health = check("GET /api/health", "GET", "/api/health", 200)
         if health is not None and health.status_code == 503:
-            configured = False
+            # Not configured yet (no database): every path answers 503, so the other checks would
+            # only repeat it. Report that one finding; main() doesn't count it as broken.
             results[-1] = ("GET /api/health", False, "503 not configured yet: " + health.text[:200])
+            return results, False
         home = check("GET / (web app)", "GET", "/", 200, lambda r: "The Vault" in r.text)
         for page in ("/credits.html", "/privacy.html", "/llms.txt"):
             check(f"GET {page}", "GET", page, 200)
-        if configured:
-            check("GET /api/v1 (hypermedia root)", "GET", "/api/v1", 200, lambda r: r.json().get("version") == "1")
-            prov = check("GET /api/auth/providers", "GET", "/api/auth/providers", 200)
-            if prov is not None and prov.status_code == 200:
-                results[-1] = (results[-1][0], results[-1][1], results[-1][2] + " providers=" + json.dumps(prov.json().get("providers")))
-            check("GET /api/v1/collection needs sign-in", "GET", "/api/v1/collection", 401,
-                  lambda r: r.headers.get("content-type", "").startswith("application/problem+json"))
-            check("POST /api/mcp needs a token", "POST", "/api/mcp", 401,
-                  json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
-            check("GET /api/openapi.json", "GET", "/api/openapi.json", 200, lambda r: "/api/v1/collection/cards" in r.text)
-            check("Cross-site POST refused", "POST", "/api/v1/decks/parse", 403,
-                  json={"text": "1 Sol Ring"}, headers={"Origin": "https://evil.example"})
+        check("GET /api/v1 (hypermedia root)", "GET", "/api/v1", 200, lambda r: r.json().get("version") == "1")
+        prov = check("GET /api/auth/providers", "GET", "/api/auth/providers", 200)
+        if prov is not None and prov.status_code == 200:
+            results[-1] = (results[-1][0], results[-1][1], results[-1][2] + " providers=" + json.dumps(prov.json().get("providers")))
+        check("GET /api/v1/collection needs sign-in", "GET", "/api/v1/collection", 401,
+              lambda r: r.headers.get("content-type", "").startswith("application/problem+json"))
+        check("POST /api/mcp needs a token", "POST", "/api/mcp", 401,
+              json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+        check("GET /api/openapi.json", "GET", "/api/openapi.json", 200, lambda r: "/api/v1/collection/cards" in r.text)
+        check("Cross-site POST refused", "POST", "/api/v1/decks/parse", 403,
+              json={"text": "1 Sol Ring"}, headers={"Origin": "https://evil.example"})
         if home is not None:
             hsts = "strict-transport-security" in home.headers
             results.append(("Security headers on /", hsts and home.headers.get("x-content-type-options") == "nosniff",
                             "HSTS " + ("yes" if hsts else "missing")))
         region = health.headers.get("x-vercel-id", "") if health is not None else ""
         results.append(("Function region (x-vercel-id)", "fra1" in region.split("::")[-2:-1] or "fra1" in region, region or "no header"))
-    return results, configured
+    return results, True
 
 
 def main(argv: list[str] | None = None) -> int:

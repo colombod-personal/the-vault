@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlsplit
 
@@ -72,7 +73,8 @@ JSON_TYPES = {"string": (str,), "integer": (int,), "number": (int, float), "bool
 def _invalid(schema: dict, value: Any, where: str) -> str | None:
     """Why ``value`` doesn't match ``schema``, or None. Tool schemas are otherwise only
     descriptive, and paths and API bodies are built from these values. Covers the keywords the
-    tools use: type, enum, bounds, lengths, items, properties, required, additionalProperties, anyOf."""
+    tools use: type, enum, bounds, lengths, format (date), items, properties, required,
+    additionalProperties, anyOf."""
     kind = schema.get("type")
     if kind in JSON_TYPES:
         if (isinstance(value, bool) and kind != "boolean") or not isinstance(value, JSON_TYPES[kind]):
@@ -87,6 +89,8 @@ def _invalid(schema: dict, value: Any, where: str) -> str | None:
     if isinstance(value, str):
         if len(value) < schema.get("minLength", 0) or len(value) > schema.get("maxLength", len(value)):
             return f"{where} has the wrong length"
+        if schema.get("format") == "date" and not _is_date(value):
+            return f"{where} must be a date (YYYY-MM-DD)"
     if isinstance(value, list):
         if len(value) < schema.get("minItems", 0) or len(value) > schema.get("maxItems", len(value)):
             return f"{where} has the wrong number of items"
@@ -109,11 +113,21 @@ def _invalid(schema: dict, value: Any, where: str) -> str | None:
     return None
 
 
+def _is_date(value: str) -> bool:
+    try:
+        return len(value) == 10 and date.fromisoformat(value).isoformat() == value
+    except ValueError:
+        return False
+
+
 def _base(args: dict) -> str:
-    return f"{V1}/shared/{int(args['share_id'])}/collection" if args.get("share_id") else f"{V1}/collection"
+    # An explicit share_id always means the shared collection (never "your own" by accident).
+    shared = args.get("share_id")
+    return f"{V1}/shared/{int(shared)}/collection" if shared is not None else f"{V1}/collection"
 
 
-SHARE = {"share_id": {"type": "integer", "description": "Read a collection someone shared with you (from list_shared_with_me) instead of your own"}}
+ID = {"type": "integer", "minimum": 1}
+SHARE = {"share_id": {**ID, "description": "Read a collection someone shared with you (from list_shared_with_me) instead of your own"}}
 PAGING = {
     "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25, "description": "Items per page"},
     "cursor": {"type": "string", "description": "next_cursor from the previous page"},
@@ -164,17 +178,17 @@ TOOLS = [
          method="POST", path=lambda a: f"{V1}/cards/lookup", body=lambda a: {"identifiers": a["identifiers"]}),
     Tool("list_decks", "The person's saved decks.", dict(PAGING), path=lambda a: f"{V1}/decks", query=("limit", "cursor")),
     Tool("get_deck", "A saved deck with its text and coverage against the collection.",
-         {"deck_id": {"type": "integer"}}, ["deck_id"], path=lambda a: f"{V1}/decks/{int(a['deck_id'])}"),
+         {"deck_id": ID}, ["deck_id"], path=lambda a: f"{V1}/decks/{int(a['deck_id'])}"),
     Tool("save_deck", "Save a decklist to the person's decks.",
          {"name": {"type": "string"}, "text": {"type": "string"}, "source_url": {"type": "string"}}, ["name", "text"],
          method="POST", path=lambda a: f"{V1}/decks",
          body=lambda a: {"name": a["name"], "text": a["text"], "source_url": a.get("source_url")}, write=True),
     Tool("update_deck", "Replace a saved deck's name and text.",
-         {"deck_id": {"type": "integer"}, "name": {"type": "string"}, "text": {"type": "string"}},
+         {"deck_id": ID, "name": {"type": "string"}, "text": {"type": "string"}},
          ["deck_id", "name", "text"], method="PUT", path=lambda a: f"{V1}/decks/{int(a['deck_id'])}",
          body=lambda a: {"name": a["name"], "text": a["text"]}, write=True),
     Tool("get_archidekt_deck", "A public deck from Archidekt by its id (the number in archidekt.com/decks/<id>).",
-         {"deck_id": {"type": "integer"}}, ["deck_id"], path=lambda a: f"{V1}/archidekt/decks/{int(a['deck_id'])}"),
+         {"deck_id": ID}, ["deck_id"], path=lambda a: f"{V1}/archidekt/decks/{int(a['deck_id'])}"),
     Tool("list_imports", "Past collection imports, newest first, with what changed each time.", dict(PAGING),
          path=lambda a: f"{V1}/imports", query=("limit", "cursor")),
     Tool("import_collection_csv", "Replace the collection with a collection file and record what changed. Dragon "
@@ -189,7 +203,7 @@ TOOLS = [
     Tool("list_shared_with_me", "Collections and decks other people have shared with this person.",
          path=lambda a: f"{V1}/shared"),
     Tool("get_shared_deck", "A deck someone shared, checked against this person's collection.",
-         {"share_id": {"type": "integer"}}, ["share_id"], path=lambda a: f"{V1}/shared/{int(a['share_id'])}/deck"),
+         {"share_id": ID}, ["share_id"], path=lambda a: f"{V1}/shared/{int(a['share_id'])}/deck"),
 ]
 BY_NAME = {t.name: t for t in TOOLS}
 

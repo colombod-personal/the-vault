@@ -52,3 +52,13 @@ def test_vercel_login_redirect_is_reported_as_protection():
         302, headers={"location": "https://vercel.com/sso-api?url=https%3A%2F%2Fthe-vault-x.vercel.app%2F&nonce=1"}))
     results, configured = smoke_test.run("https://the-vault-x.vercel.app", sso)
     assert not configured and [(n, ok) for n, ok, _ in results] == [("Deployment protection", True)]
+
+
+def test_a_deployment_without_a_database_is_reported_not_broken(monkeypatch):
+    # Vercel's fallback app answers 503 "not configured yet" for every path, pages included.
+    down = httpx.MockTransport(lambda r: httpx.Response(503, json={"detail": "The Vault is not configured yet: x"}))
+    results, configured = smoke_test.run("https://x.test", down)
+    assert not configured
+    assert [n for n, ok, _ in results if not ok] == ["GET /api/health"]  # the one, expected, finding
+    monkeypatch.setattr(smoke_test, "run", lambda base: (results, configured))
+    assert smoke_test.main(["https://x.test"]) == 0

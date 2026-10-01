@@ -46,10 +46,11 @@ per-user table:
 
 ## Tenant isolation
 
-- Every endpoint gets the signed-in user from the session and scopes its queries by
-  `user_id` (`vault/routes/api.py`).
-- Another user's data is reachable only through `/api/shared/{share_id}/…`, which
-  checks that the share was granted to the caller (`sharing.incoming_share`).
+- Every endpoint gets the signed-in user (session or token) and scopes its queries by
+  `user_id` (`vault/api/v1.py`).
+- Another user's data is reachable only through `/api/v1/shared/{share_id}/…`
+  (`/collection/…` or `/deck`), which checks that the share was granted to the caller
+  (`sharing.incoming_share`).
 - Ids that aren't yours answer **404, not 403**, so other tenants' ids can't be probed.
 - A deck share gives access to that deck only, never to the owner's collection.
   Coverage for a shared deck is computed against the *viewer's* own collection.
