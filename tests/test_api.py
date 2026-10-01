@@ -1,4 +1,5 @@
 import base64
+import csv
 import json
 import os
 from datetime import date
@@ -281,8 +282,17 @@ def test_body_ids_too_big_for_the_database_are_invalid(signed_in, big):
 
 @pytest.mark.parametrize("path, extra", [("/decks/parse", {}), ("/decks/coverage", {}), ("/decks", {"name": "x"})],
                          ids=["parse", "coverage", "save"])
-def test_a_decklist_quantity_too_long_to_read_is_a_bad_request(signed_in, path, extra):
+def test_a_decklist_the_parser_cannot_read_is_a_bad_request(signed_in, monkeypatch, path, extra):
     res = signed_in.post(V1 + path, json={"text": "9" * 5000 + " Sol Ring", **extra})
+    assert res.status_code in (200, 400), res.text  # mtg-toolkits >= 0.2.0: an unparsed line; before: ValueError
+
+    from vault.api import v1
+
+    def unreadable(text):  # whatever the library version raises it for
+        raise ValueError("Exceeds the limit (4300 digits) for integer string conversion")
+
+    monkeypatch.setattr(v1.decklist, "parse_text", unreadable)
+    res = signed_in.post(V1 + path, json={"text": "1 Sol Ring", **extra})
     assert res.status_code == 400, res.text
 
 
@@ -428,3 +438,48 @@ def test_a_deck_deleted_while_it_is_being_updated_is_not_found(app, signed_in, m
     monkeypatch.setattr(v1, "owned_deck", deleted_meanwhile)
     res = signed_in.put(f"{V1}/decks/{deck['id']}", json={"name": "y", "text": "1 Sol Ring"})
     assert res.status_code == 404, res.text
+
+
+@pytest.mark.parametrize("error", [ValueError("bad"), TypeError("bad"), AttributeError("bad"), OverflowError("bad"),
+                                   csv.Error("field larger than field limit")])
+def test_any_error_the_collection_parser_raises_is_a_bad_request(signed_in, monkeypatch, error):
+    from vault import importer
+
+    def broken(text):
+        raise error
+
+    monkeypatch.setattr(importer.formats, "parse", broken)
+    res = upload(signed_in)
+    assert res.status_code == 400 and res.json()["detail"].startswith("No cards found"), res.text
+
+
+def entry(**overrides):
+    from mtg_toolkits.models import CollectionEntry
+    return CollectionEntry(**{"name": "Sol Ring", "quantity": 1, "set_code": "c21", "collector_number": "263",
+                              **overrides})
+
+
+@pytest.mark.parametrize("overrides", [
+    {"quantity": 10**30}, {"quantity": -1}, {"quantity": 1_000_001}, {"quantity": float("inf")}, {"quantity": 2.5},
+    {"quantity": "1"}, {"trade_quantity": float("nan")}, {"trade_quantity": -1}, {"name": ""}, {"name": None},
+    {"set_code": "s" * 21}, {"collector_number": "1" * 31}, {"scryfall_id": "z" * 37}, {"language": "english"},
+    {"set_name": 5},
+], ids=lambda o: "-".join(f"{k}={str(v)[:12]}" for k, v in o.items()))
+def test_the_importer_refuses_entries_it_cannot_store_whatever_the_parser_returns(overrides):
+    """The app's own checks, independent of the mtg-toolkits version that parsed the file."""
+    from vault.importer import ImportError_, _clean
+    with pytest.raises(ImportError_):
+        _clean(entry(**overrides), 1)
+
+
+def test_the_importer_drops_bad_prices_and_clips_free_text_whatever_the_parser_returns():
+    from vault.importer import _clean
+    e = entry(quantity=3.0, purchase_price=float("inf"), name="N" * 400, set_name="X" * 300, folder="F" * 300,
+              source_prices={"low": float("nan"), "mid": 1e300, "market": 2.5, "high": None, 5: 1.0},
+              extra={"Printing": "Foil", "n": 1, "l": [1]})
+    _clean(e, 1)
+    assert (e.quantity, e.purchase_price, e.source_prices, e.extra) == (3, None, {"market": 2.5}, {"Printing": "Foil"})
+    assert (len(e.name), len(e.set_name), len(e.folder)) == (300, 200, 200)
+    bad = entry(source_prices=[1], extra=None)
+    _clean(bad, 1)
+    assert (bad.source_prices, bad.extra) == ({}, {})
