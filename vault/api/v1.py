@@ -543,9 +543,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     @router.post("/cards/lookup", tags=["cards"], response_model=S.CardLookup, response_model_by_alias=True,
                  summary="Card data, images and prices for up to 75 printings (Scryfall's collection lookup, via the Vault)")
     def lookup_cards(body: S.CardLookupIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-        idents = [i.model_dump(exclude_none=True) for i in body.identifiers]
-        if any(not i for i in idents):
-            raise HTTPException(400, "Each identifier needs an id, a set and collector_number, or a name")
+        idents = [i.model_dump(exclude_none=True) for i in body.identifiers]  # each complete (CardIdentifier)
         return {**catalog.lookup(db, idents, refresh=body.refresh), "_links": {"self": link(f"{V1}/cards/lookup")}}
 
     @router.get("/catalog/sets", tags=["cards"], response_model=S.SetCatalog, response_model_by_alias=True,

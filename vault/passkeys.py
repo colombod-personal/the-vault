@@ -209,7 +209,9 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         require_enabled()
         pending = _take(request, db, "login")
         credential_id = str(body.credential.get("id") or body.credential.get("rawId") or "")
-        passkey = db.scalar(select(Passkey).where(Passkey.credential_id == credential_id))
+        # Locked until commit: two sign-ins with one key take turns, so each is checked against
+        # the count the other saved and the stored count never goes backwards.
+        passkey = db.scalar(select(Passkey).where(Passkey.credential_id == credential_id).with_for_update())
         if passkey is None:
             raise HTTPException(401, "This passkey isn't registered with the Vault (it may have been removed)")
         try:

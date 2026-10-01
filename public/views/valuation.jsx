@@ -351,7 +351,7 @@ function DailyChart({ days }) {
   const area = `${path('market')} L${x(days[n - 1]).toFixed(1)},${padT + innerH} L${x(days[0]).toFixed(1)},${padT + innerH} Z`;
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => lo + f * (hi - lo));
   // The server marks import days; older answers without the mark fall back to a change in card count.
-  const isImport = (d, i) => i > 0 && (d.imported ?? d.copies !== days[i - 1].copies);
+  const isImport = (d, i) => d.imported ?? (i > 0 && d.copies !== days[i - 1].copies);
   const imports = days.filter(isImport);
   const labelEvery = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(innerW / 90))));
 
@@ -404,9 +404,10 @@ function DailyChart({ days }) {
           <div className="vc-tip-month">{fmtDay(hv.day)}</div>
           <div className="vc-tip-row"><span className="sw gold"></span>Market<b>{fmtMoney(hv.market)}</b></div>
           {hv.cost != null && <div className="vc-tip-row"><span className="sw copper"></span>Paid<b>{fmtMoney(hv.cost)}</b></div>}
-          {prev && isImport(hv, hover) && (
+          {isImport(hv, hover) && (
             <div className="vc-tip-add">
-              {prev.copies === hv.copies ? 'Import (same card count)'
+              {!prev ? `Import: ${hv.copies.toLocaleString()} cards`
+                : prev.copies === hv.copies ? 'Import (same card count)'
                 : `Import: ${hv.copies > prev.copies ? '+' : '−'}${Math.abs(hv.copies - prev.copies).toLocaleString()} cards`}
             </div>
           )}

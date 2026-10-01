@@ -4,6 +4,9 @@ import pytest
 import hashlib
 import hmac
 import json
+import os
+import threading
+import time
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -114,3 +117,46 @@ def test_account_marker_cookie_follows_the_signed_in_account(client):
 @pytest.mark.parametrize("payload", [[1, 2], "user", 42])
 def test_facebook_signed_request_that_is_not_an_object_is_refused(payload):
     assert parse_signed_request(_signed(payload, "fb-secret"), "fb-secret") is None
+
+
+@pytest.mark.skipif(not os.environ.get("VAULT_TEST_POSTGRES_URL"), reason="needs Postgres (unique index waits)")
+def test_two_first_sign_ins_at_once_end_in_one_account():
+    """Two callbacks for the same new identity: the one that loses the insert race signs in
+    to the account the winner created, instead of failing."""
+    from sqlalchemy import func, select, text
+    from sqlalchemy.orm import Session
+    from vault.auth import find_or_create
+    from vault.db import Base
+    db = Database(os.environ["VAULT_TEST_POSTGRES_URL"])
+    with db.engine.begin() as conn:
+        Base.metadata.drop_all(conn)
+        conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
+    db.migrate()
+    profile = Profile("google", "g-1", "ann@example.com", "Ann")
+    outcome = {}
+
+    def the_other_callback():
+        with Session(db.engine) as s:
+            try:
+                outcome["user"] = find_or_create(s, profile).id
+            except Exception as exc:  # noqa: BLE001
+                outcome["error"] = repr(exc)
+
+    with Session(db.engine) as s:
+        winner = User(email="ann@example.com", name="Ann")
+        winner.identities.append(Identity(provider="google", subject="g-1"))
+        s.add(winner)
+        s.flush()  # inserted, not yet committed
+        racer = threading.Thread(target=the_other_callback)
+        racer.start()
+        time.sleep(0.5)
+        s.commit()
+        winner_id = winner.id
+    racer.join(10)
+    assert outcome == {"user": winner_id}
+    with Session(db.engine) as s:
+        assert s.scalar(select(func.count(User.id))) == 1
+    with db.engine.begin() as conn:
+        Base.metadata.drop_all(conn)
+        conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
+    db.engine.dispose()

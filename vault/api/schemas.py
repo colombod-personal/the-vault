@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Link(BaseModel):
@@ -401,6 +401,12 @@ class CardIdentifier(BaseModel):
     set: str | None = Field(None, max_length=20)
     collector_number: str | None = Field(None, max_length=30)
     name: str | None = Field(None, max_length=300)
+
+    @model_validator(mode="after")
+    def _one_complete_form(self) -> "CardIdentifier":
+        if not (self.id or self.name or (self.set and self.collector_number)):
+            raise ValueError("needs an id, a name, or both set and collector_number")
+        return self
 
 
 class CardLookupIn(BaseModel):

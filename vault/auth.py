@@ -37,6 +37,7 @@ from fastapi.responses import RedirectResponse
 from joserfc import jwt
 from joserfc.jwk import ECKey
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from . import outbound
@@ -182,7 +183,18 @@ def find_or_create(db: Session, profile: Profile, current: User | None = None) -
     someone is already signed in; otherwise it gets a new account. Never merged by e-mail.
 
     Raises IdentityInUse when ``current`` is set and the identity belongs to someone else:
-    linking never switches accounts."""
+    linking never switches accounts.
+
+    Two first sign-ins with one identity at the same time both try to create it; the unique
+    (provider, subject) index lets one win, and the other then signs in to the winner's account."""
+    try:
+        return _find_or_create(db, profile, current)
+    except IntegrityError:
+        db.rollback()
+        return _find_or_create(db, profile, current)
+
+
+def _find_or_create(db: Session, profile: Profile, current: User | None) -> User:
     identity = db.scalar(
         select(Identity).where(Identity.provider == profile.provider, Identity.subject == profile.subject)
     )

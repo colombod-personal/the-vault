@@ -85,7 +85,7 @@ def test_scryfall_down_is_reported_not_an_error(client, universe):
 def test_bad_requests(client):
     assert lookup(client).status_code == 422
     assert lookup(client, *[{"id": SOL_RING}] * 76).status_code == 422
-    assert lookup(client, {}).status_code in (400, 422)
+    assert lookup(client, {}).status_code == 422
 
 
 def test_lookup_needs_a_signed_in_user(app):
@@ -201,3 +201,10 @@ def test_a_dragon_shield_set_code_finds_the_card(client, universe):
     assert len(collection_calls(universe)) == 1  # the second time, from the Vault's own table
     missing = {"set": "GK2_ORZHOV", "collector_number": "9999"}
     assert lookup(client, missing).json()["not_found"] == [missing]  # reported as asked
+
+
+@pytest.mark.parametrize("ident", [{"set": "mkm"}, {"collector_number": "167"}, {}, {"set": "mkm", "name": None}])
+def test_an_incomplete_identifier_is_refused_before_any_lookup(client, universe, ident):
+    res = lookup(client, ident)
+    assert res.status_code == 422, res.text
+    assert collection_calls(universe) == []

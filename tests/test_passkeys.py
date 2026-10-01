@@ -260,3 +260,43 @@ def test_passkeys_added_from_two_devices_at_once_both_sign_in(tmp_path):
             assert res.status_code == 200, res.text
         else:
             assert second.status_code == 409
+
+
+@pytest.mark.skipif(not os.environ.get("VAULT_TEST_POSTGRES_URL"), reason="needs Postgres (row locks)")
+def test_two_sign_ins_at_once_cannot_roll_the_counter_back():
+    """A hardware key counts its uses. Two sign-ins verified against the same stored count
+    must not let the lower one be written last."""
+    db = Database(os.environ["VAULT_TEST_POSTGRES_URL"])
+    with db.engine.begin() as conn:
+        Base.metadata.drop_all(conn)
+        conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
+    settings = Settings(database_url=os.environ["VAULT_TEST_POSTGRES_URL"], session_secret="s" * 32, base_url=ORIGIN)
+    app = create_app(settings, serve_static=False)
+    key = SoftAuthenticator()
+    outcome = {}
+    with TestClient(app, base_url=ORIGIN) as first, TestClient(app, base_url=ORIGIN) as second:
+        assert signup(first, key).status_code == 200
+        first.cookies.clear()
+        earlier = key.get(post(first, "/api/auth/passkey/login/options").json(), ORIGIN)   # count 1
+        later_options = post(second, "/api/auth/passkey/login/options").json()
+        key.get(later_options, ORIGIN)  # count 2, verified and saved by the other request (below)
+
+        def verify_the_earlier_one():
+            outcome["status"] = post(first, "/api/auth/passkey/login/verify", {"credential": earlier}).status_code
+
+        with Session(db.engine) as s:  # the other request is mid-verify and holds the passkey row
+            s.execute(select(Passkey).with_for_update()).all()
+            racer = threading.Thread(target=verify_the_earlier_one)
+            racer.start()
+            time.sleep(0.5)
+            assert racer.is_alive()  # waits for the row instead of checking against a stale count
+            s.execute(text("UPDATE passkeys SET sign_count = 2"))
+            s.commit()
+        racer.join(10)
+    assert outcome["status"] == 401  # count 1 after 2: refused, as a cloned key would be
+    with Session(db.engine) as s:
+        assert s.scalar(select(Passkey.sign_count)) == 2
+    with db.engine.begin() as conn:
+        Base.metadata.drop_all(conn)
+        conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
+    db.engine.dispose()
