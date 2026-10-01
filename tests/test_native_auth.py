@@ -131,6 +131,22 @@ def test_refresh_rotation_and_reuse_detection(client, idp):
     assert res.status_code == 400
 
 
+def test_an_expired_old_refresh_token_does_not_end_the_session(client, idp):
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import update
+    from vault.models import RetiredRefreshToken
+    first = apple_sign_in(client, idp).json()
+    second = client.post(f"{V1}/auth/token", json={"grant_type": "refresh_token", "refresh_token": first["refresh_token"]}).json()
+    with client.app.state.db.sessions() as db:  # the old token's own lifetime has run out
+        db.execute(update(RetiredRefreshToken).values(expires_at=datetime.now(timezone.utc) - timedelta(minutes=1)))
+        db.commit()
+    stale = client.post(f"{V1}/auth/token", json={"grant_type": "refresh_token", "refresh_token": first["refresh_token"]})
+    assert stale.status_code == 400 and "reuse" not in stale.json()["detail"]
+    assert client.get(f"{V1}/me", headers=bearer(second)).status_code == 200  # the session lives on
+    with client.app.state.db.sessions() as db:
+        assert db.query(RetiredRefreshToken).count() == 0  # and the expired row is gone
+
+
 def test_sessions_list_remote_sign_out_and_revoke(client, idp):
     phone = apple_sign_in(client, idp, device_name="iPhone").json()
     ipad = apple_sign_in(client, idp, device_name="iPad").json()

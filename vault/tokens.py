@@ -82,6 +82,11 @@ def refresh(db: Session, refresh_token: str) -> dict:
     session = db.scalar(select(ApiSession).where(ApiSession.refresh_hash == h))
     if session is None:
         retired = db.scalar(select(RetiredRefreshToken).where(RetiredRefreshToken.token_hash == h))
+        if retired is not None and _aware(retired.expires_at) < _now():
+            # Past its own lifetime it is merely expired, not evidence of copying: forget it.
+            db.delete(retired)
+            db.commit()
+            retired = None
         if retired is None:
             raise TokenError("invalid_grant", "Unknown or revoked refresh token")
         # Any already-rotated token coming back means it was copied: revoke the whole session.

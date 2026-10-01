@@ -1,9 +1,12 @@
 // Sets view — all sets owned + drill-in
-const { useMemo: useMemoS, useState: useStateS } = React;
+const { useEffect: useEffectS, useMemo: useMemoS, useState: useStateS } = React;
 
 function Sets({ data, onSetClick }) {
   const [q, setQ] = useStateS('');
   const [sort, setSort] = useStateS('value');
+  // Release dates come from the set list, which may arrive after this view: re-sort when it does.
+  const [setsLoaded, setSetsLoaded] = useStateS(0);
+  useEffectS(() => window.SetIcons?.onLoad(() => setSetsLoaded((n) => n + 1)), []);
 
   const sets = useMemoS(() => {
     let out = data.sets;
@@ -22,7 +25,7 @@ function Sets({ data, onSetClick }) {
       case 'oldest': out = out.slice().sort((a, b) => (released(a.code) || '9').localeCompare(released(b.code) || '9')); break;
     }
     return out;
-  }, [data, q, sort]);
+  }, [data, q, sort, setsLoaded]);
 
   const maxVal = Math.max(...data.sets.map(s => s.value));
 

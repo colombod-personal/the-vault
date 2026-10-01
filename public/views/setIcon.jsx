@@ -7,7 +7,7 @@ function SetIcon({ code, size = 18, variant = 'gold', title }) {
   useEffectSI(() => {
     if (!window.SetIcons) return;
     const unsub = window.SetIcons.onLoad(() => setTick((t) => t + 1));
-    window.SetIcons.loadAll();
+    window.SetIcons.loadAll().catch(() => {});  // offline: no icon, and the next view retries
     return unsub;
   }, []);
   const entry = window.SetIcons?.get(code);
