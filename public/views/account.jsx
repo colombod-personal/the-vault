@@ -53,9 +53,9 @@ function takeSignInResult() {
   return null;
 }
 
-function signOut() {
+function signOut({ everywhere = false } = {}) {
   try { sessionStorage.setItem(SIGNED_OUT_KEY, '1'); } catch {}
-  window.VaultApi.logout().finally(() => { location.hash = ''; location.reload(); });
+  window.VaultApi.logout(everywhere).finally(() => { location.hash = ''; location.reload(); });
 }
 
 function rememberSignIn(method) { try { localStorage.setItem(LAST_SIGNIN_KEY, method); } catch {} }
@@ -232,7 +232,7 @@ function AccountMenu({ me, onImported, onAccount, readOnly }) {
       <button className="btn sm ghost" title={me && me.email ? me.email : ''} onClick={onAccount}>
         {me ? (me.name || me.email || 'Account') : 'Account'}
       </button>
-      <button className="btn sm ghost" onClick={signOut}>Sign out</button>
+      <button className="btn sm ghost" onClick={() => signOut()}>Sign out</button>
     </div>
   );
 }
@@ -597,6 +597,8 @@ function SignInMethods({ me, onChanged }) {
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
         {info && info.passkeys && api.passkeys.supported() && <button className="btn sm" onClick={add}>Add a passkey</button>}
         {linkable.map((p) => <a key={p} className="btn sm ghost" href={`/api/auth/login/${p}`}>Link {p[0].toUpperCase() + p.slice(1)}</a>)}
+        <button className="btn sm ghost" title="Signs out every browser signed in to this account, including this one"
+                onClick={() => signOut({ everywhere: true })}>Sign out everywhere</button>
       </div>
     </Section>
   );

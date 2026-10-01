@@ -277,7 +277,8 @@ window.VaultApi = (() => {
       return create(V1 + '/imports', { body });
     },
     archidektDeck: (id) => call(V1 + '/archidekt/decks/' + encodeURIComponent(id)),
-    logout: () => call('/api/auth/logout', { method: 'POST' }).finally(() => localStore.clear()),
+    logout: (everywhere = false) => call('/api/auth/logout' + (everywhere ? '?everywhere=true' : ''), { method: 'POST' })
+      .finally(() => localStore.clear()),
     clearLocalData: () => localStore.clear(),
     devLogin: () => call('/api/auth/dev-login', { method: 'POST' }),
 
