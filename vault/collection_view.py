@@ -11,7 +11,7 @@ import hashlib
 import threading
 from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -254,6 +254,12 @@ SORTS = {
     "set": lambda g: (g.set_code, g.number, g.name.lower()),
     "-acquired": lambda g: (-date.fromisoformat(g.last_acquired).toordinal() if g.last_acquired else 0, g.name.lower()),
 }
+
+
+def import_days(db: Session, user: User) -> set[date]:
+    """The days the user imported a file, in the server's local calendar (as the value history is)."""
+    stamps = db.scalars(select(Import.created_at).where(Import.user_id == user.id))
+    return {(s if s.tzinfo else s.replace(tzinfo=timezone.utc)).astimezone().date() for s in stamps}
 
 
 def history_days(db: Session, user: User, since: date | None = None) -> list:

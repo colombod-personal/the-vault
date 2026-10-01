@@ -103,8 +103,8 @@ accepted: its tokens carry the web client id as `aud` and the iOS client as `azp
 ### Passkeys (WebAuthn, web)
 
 Passkeys need no third party: Face ID, Touch ID, Windows Hello, a phone or a security key.
-Each ceremony is two POSTs. The challenge lives in the signed session cookie and can be used
-once, within 5 minutes.
+Each ceremony is two POSTs. The challenge is kept on the server (`passkey_challenges`); the
+signed session cookie holds only the ceremony's id. A challenge can be claimed once, within 5 minutes.
 
 | Step | Endpoint |
 |---|---|
@@ -144,7 +144,7 @@ https and localhost).
 | GET | `/api/v1/collection/cards/{id}` | one printing: copies, card data, image with artist credit, 90-day price history |
 | GET | `/api/v1/collection/sets` | value by set, paged |
 | GET | `/api/v1/collection/timeline` | copies acquired per month |
-| GET | `/api/v1/collection/history` | daily market value and cost, paged (`since`) |
+| GET | `/api/v1/collection/history` | daily market value and cost, paged (`since`); `imported` marks the days a file was imported |
 | GET | `/api/v1/collection/stats` | most valuable, biggest gains and losses, duplicates |
 | GET | `/api/v1/collection/exports` | export formats (Dragon Shield, Moxfield, Archidekt, generic CSV, text list), each with a download link |
 | GET | `/api/v1/collection/export/{format}` | the collection in that format. Other apps get Scryfall set codes and numbers for matched printings |

@@ -315,7 +315,7 @@ function DailyValue({ history }) {
           <DailyChart days={shown} />
           <p className="daily-note">
             Each point is what your collection was worth that day, at that day's Scryfall prices. Marked days are
-            imports that changed how many cards you hold, so a jump there is cards added or removed, not the market.
+            imports, so a jump there can be cards added, removed or swapped, not the market.
           </p>
         </>
       )}
@@ -350,7 +350,9 @@ function DailyChart({ days }) {
   const path = (key) => days.filter((d) => d[key] != null).map((d, i) => `${i ? 'L' : 'M'}${x(d).toFixed(1)},${y(d[key]).toFixed(1)}`).join(' ');
   const area = `${path('market')} L${x(days[n - 1]).toFixed(1)},${padT + innerH} L${x(days[0]).toFixed(1)},${padT + innerH} Z`;
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => lo + f * (hi - lo));
-  const imports = days.filter((d, i) => i > 0 && d.copies !== days[i - 1].copies);
+  // The server marks import days; older answers without the mark fall back to a change in card count.
+  const isImport = (d, i) => i > 0 && (d.imported ?? d.copies !== days[i - 1].copies);
+  const imports = days.filter(isImport);
   const labelEvery = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(innerW / 90))));
 
   const onMove = (e) => {
@@ -402,8 +404,11 @@ function DailyChart({ days }) {
           <div className="vc-tip-month">{fmtDay(hv.day)}</div>
           <div className="vc-tip-row"><span className="sw gold"></span>Market<b>{fmtMoney(hv.market)}</b></div>
           {hv.cost != null && <div className="vc-tip-row"><span className="sw copper"></span>Paid<b>{fmtMoney(hv.cost)}</b></div>}
-          {prev && prev.copies !== hv.copies && (
-            <div className="vc-tip-add">Import: {hv.copies > prev.copies ? '+' : '−'}{Math.abs(hv.copies - prev.copies).toLocaleString()} cards</div>
+          {prev && isImport(hv, hover) && (
+            <div className="vc-tip-add">
+              {prev.copies === hv.copies ? 'Import (same card count)'
+                : `Import: ${hv.copies > prev.copies ? '+' : '−'}${Math.abs(hv.copies - prev.copies).toLocaleString()} cards`}
+            </div>
           )}
           {hv.priced < hv.copies && <div className="vc-tip-add">{(hv.copies - hv.priced).toLocaleString()} cards at your file's price</div>}
         </div>

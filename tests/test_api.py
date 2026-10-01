@@ -5,6 +5,7 @@ from pathlib import Path
 
 from mtg_toolkits.scryfall import Card
 
+from sqlalchemy import select
 from vault.sync import sync, wanted_cards
 
 CSV = (Path(__file__).parent / "fixtures" / "collection.csv").read_bytes()
@@ -157,7 +158,7 @@ def test_daily_sync_card_data_history_and_stats(app, signed_in):
     summary = signed_in.get(f"{V1}/collection").json()
     assert summary["market_value"] == round(4 * 0.12 + 3.0 + 0.8 + 0.25, 2) and summary["prices_as_of"] == "2026-09-27"
     history = signed_in.get(f"{V1}/collection/history").json()
-    synced = {"day": "2026-09-27", "market": 4.53, "cost": 2.83, "copies": 7, "priced": 7}
+    synced = {"day": "2026-09-27", "market": 4.53, "cost": 2.83, "copies": 7, "priced": 7, "imported": False}
     assert history["items"][0] == synced  # the import's own day (today, at the file's prices) follows it
     st = signed_in.get(f"{V1}/collection/stats").json()
     assert st["most_valuable"][0]["name"] == "Sol Ring" and st["biggest_gains"][0]["name"] == "Sol Ring"
@@ -223,6 +224,25 @@ def test_an_import_starts_the_value_history(signed_in):
     signed_in.post("/api/v1/imports", files={"file": ("e.csv", CSV, "text/csv")})
     days = signed_in.get("/api/v1/collection/history").json()["items"]
     assert len(days) == 1 and days[0]["copies"] == 7 and days[0]["market"] > 0
+    assert days[0]["imported"] is True
+
+
+def test_an_import_that_keeps_the_card_count_is_still_marked(app, signed_in):
+    from datetime import timedelta
+    from sqlalchemy import update
+    from vault.models import CollectionValue, Import
+    upload(signed_in)
+    yesterday = date.today() - timedelta(days=1)
+    with app.state.db.sessions() as db:  # yesterday's import, and a quiet day before it
+        for imp in db.scalars(select(Import)):
+            imp.created_at -= timedelta(days=1)
+        db.execute(update(CollectionValue).values(day=yesterday))
+        db.add(CollectionValue(user_id=db.scalar(select(CollectionValue.user_id)), day=yesterday - timedelta(days=1),
+                               market_usd=1.0, cost_usd=1.0, copies=7, priced_copies=7))
+        db.commit()
+    upload(signed_in, CSV.replace(b"Sol Ring,C21,Commander 2021,263", b"Sol Ring,C21,Commander 2021,263 "))  # same count
+    days = signed_in.get(f"{V1}/collection/history").json()["items"]
+    assert [(d["copies"], d["imported"]) for d in days] == [(7, False), (7, True), (7, True)]
 
 
 def test_the_bulk_prefilter_keeps_printings_matched_by_set_and_number(app, signed_in):

@@ -158,6 +158,7 @@ class DayValue(BaseModel):
     cost: float | None = None
     copies: int
     priced: int
+    imported: bool = Field(False, description="A file was imported that day (a change there may be cards, not prices)")
 
 
 class HistoryPage(Page):
