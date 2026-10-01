@@ -396,3 +396,53 @@ def test_mcp_deck_source_urls_are_checked_and_kept_by_updates(agent, bot):
     moved = call_tool(bot, write, "update_deck", deck_id=deck["id"], name="d2", text="2 Sol Ring",
                       source_url="https://moxfield.com/decks/x")
     assert moved["structuredContent"]["source_url"] == "https://moxfield.com/decks/x"
+
+
+@pytest.mark.parametrize("name", [["x"], {"a": 1}, 5, None, True])
+def test_mcp_a_tool_name_that_is_not_text_is_invalid(agent, bot, name):
+    read = make_token(agent)
+    res = rpc(bot, "tools/call", {"name": name}, read)
+    assert res.status_code == 200 and res.json()["error"]["code"] == -32602, res.text
+
+
+@pytest.mark.parametrize("card_id", ["../../decks", "../cards", "x?limit=1", "x#y", "a/b", "..", "."])
+def test_mcp_card_ids_stay_inside_the_card_path(agent, bot, card_id):
+    read = make_token(agent)
+    res = rpc(bot, "tools/call", {"name": "get_card", "arguments": {"card_id": card_id}}, read).json()
+    assert res["error"]["code"] == -32602, res  # never another endpoint's answer
+
+
+def test_mcp_batches_are_capped_and_never_empty(agent, bot):
+    read = make_token(agent)
+    ping = lambda i: {"jsonrpc": "2.0", "id": i, "method": "ping"}  # noqa: E731
+    empty = bot.post("/api/mcp", json=[], headers=auth(read))
+    assert empty.status_code == 400 and empty.json()["error"]["code"] == -32600
+    big = bot.post("/api/mcp", json=[ping(i) for i in range(21)], headers=auth(read))
+    assert big.status_code == 400 and big.json()["error"]["code"] == -32600
+    full = bot.post("/api/mcp", json=[ping(i) for i in range(20)], headers=auth(read))
+    assert full.status_code == 200 and len(full.json()) == 20
+
+
+@pytest.mark.parametrize("tool, arguments", [
+    ("check_decklist", {"text": "1 Sol Ring\n" * 5000}),
+    ("parse_decklist", {"text": "x" * 50_001}),
+    ("lookup_cards", {"identifiers": [{"id": "x" * 37}]}),
+    ("lookup_cards", {"identifiers": [{"set": "s" * 21, "collector_number": "1"}]}),
+    ("lookup_cards", {"identifiers": [{"set": "c21", "collector_number": "1" * 31}]}),
+    ("lookup_cards", {"identifiers": [{"name": "n" * 301}]}),
+    ("get_card", {"card_id": "x" * 65}),
+])
+def test_mcp_text_limits_match_the_api(agent, bot, tool, arguments):
+    read = make_token(agent)
+    res = rpc(bot, "tools/call", {"name": tool, "arguments": arguments}, read)
+    assert res.status_code == 200 and res.json()["error"]["code"] == -32602, res.text[:300]
+
+
+def test_mcp_write_tools_have_the_same_text_limits(agent, bot):
+    write = make_token(agent, scopes=["read", "write"])
+    for tool in ("save_deck", "update_deck"):
+        args = {"deck_id": 1, "name": "d", "text": "x" * 50_001}
+        if tool == "save_deck":
+            del args["deck_id"]
+        res = rpc(bot, "tools/call", {"name": tool, "arguments": args}, write)
+        assert res.json()["error"]["code"] == -32602, res.text[:300]
