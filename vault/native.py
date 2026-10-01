@@ -83,7 +83,9 @@ class NativeVerifier:
         self._keys[provider] = (time.time(), keys)
         return keys
 
-    async def verify(self, provider: str, id_token: str, nonce: str | None = None) -> dict:
+    async def verify(self, provider: str, id_token: str, nonce: str) -> dict:
+        if not nonce:
+            raise NativeTokenError("A nonce is required")
         if provider not in self.audiences or not self.audiences[provider]:
             raise NativeTokenError(f"Native sign-in with {provider} is not configured")
         try:
@@ -119,11 +121,11 @@ class NativeVerifier:
             raise NativeTokenError("Token was issued to another party")
         if not isinstance(claims.get("exp"), (int, float)) or claims["exp"] < now - 60:
             raise NativeTokenError("Token expired")
-        if nonce is not None:
-            # Apple puts SHA-256(nonce) in the token; Google puts the nonce itself.
-            expected = {nonce, hashlib.sha256(nonce.encode()).hexdigest()}
-            if claims.get("nonce") not in expected:
-                raise NativeTokenError("Nonce mismatch")
+        # Apple puts SHA-256(nonce) in the token; Google puts the nonce itself. The caller then
+        # records the nonce as used (NativeNonce), so the same token can't sign in twice.
+        expected = {nonce, hashlib.sha256(nonce.encode()).hexdigest()}
+        if claims.get("nonce") not in expected:
+            raise NativeTokenError("Nonce mismatch")
         if not claims.get("sub"):
             raise NativeTokenError("Token has no subject")
         return claims

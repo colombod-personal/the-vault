@@ -65,7 +65,8 @@ The server stores only SHA-256 hashes of tokens.
 ### Option A: native SDK sign-in (Apple, Google)
 
 1. The app signs in with *Sign in with Apple* (`ASAuthorizationAppleIDProvider`) or Google
-   Sign-In for iOS. It passes a random nonce (Apple: `SHA-256(nonce)` as the request nonce).
+   Sign-In for iOS. It passes a fresh random nonce (Apple: `SHA-256(nonce)` as the request nonce).
+   The nonce is required (16-200 characters) and each one signs in once: a replayed ID token is refused.
 2. `POST /api/v1/auth/native/{apple|google}`:
 
    ```json

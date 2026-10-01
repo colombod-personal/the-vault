@@ -12,6 +12,7 @@ reachable only through shares they granted, and ids that aren't yours answer 404
 from __future__ import annotations
 
 import hashlib
+import time
 from dataclasses import dataclass
 from datetime import date
 from urllib.parse import urlencode
@@ -25,6 +26,7 @@ from mtg_toolkits.archidekt import ArchidektClient
 from mtg_toolkits.dragonshield import SET_ALIASES
 from mtg_toolkits.http import ApiError
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .. import outbound, tokens
@@ -32,7 +34,7 @@ from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
 from ..collection_view import SORTS, CollectionView, filtered, history_days, import_days
 from ..importer import MAX_UPLOAD_BYTES, ImportError_, export_collection, import_collection, user_entries
-from ..models import AccessToken, ApiSession, Deck, Import, Passkey, Share, User
+from ..models import AccessToken, ApiSession, Deck, Import, NativeNonce, Passkey, Share, User
 from ..native import NativeTokenError, NativeVerifier, ProviderUnavailable
 from ..passkeys import remove_passkey
 from ..privacy import export_archive, purge_user
@@ -106,6 +108,15 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             raise HTTPException(401, str(exc)) from exc
         except ProviderUnavailable as exc:
             raise HTTPException(503, f"{exc}. Try again shortly.", headers={"Retry-After": "30"}) from exc
+        # Each ID token signs in once: its nonce is recorded until the token expires.
+        db.execute(delete(NativeNonce).where(NativeNonce.expires < time.time()))
+        db.add(NativeNonce(id=hashlib.sha256(f"{provider}:{body.nonce}".encode()).hexdigest(),
+                           expires=float(claims["exp"])))
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(401, "This sign-in was already used; sign in again") from None
         name = body.name if provider == "apple" else claims.get("name")
         if "account" not in request.state.scopes:  # a personal access token can't add sign-in methods
             current = None

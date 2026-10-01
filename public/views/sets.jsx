@@ -27,7 +27,8 @@ function Sets({ data, onSetClick }) {
     return out;
   }, [data, q, sort, setsLoaded]);
 
-  const maxVal = Math.max(...data.sets.map(s => s.value));
+  // At least $1, so sets all worth $0 (e.g. before the first price sync) give empty bars, not NaN%.
+  const maxVal = Math.max(1, ...data.sets.map(s => s.value));
 
   return (
     <div data-screen-label="03 Sets">

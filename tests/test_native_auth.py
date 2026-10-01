@@ -91,14 +91,15 @@ def test_native_apple_sign_in_and_bearer_access(client, idp):
 
 
 def test_native_google(client, idp):
-    token = idp.google.native_id_token(GOOGLE_IOS, idp.google.add_account("g-1", "ann@gmail.com", "Ann"))
-    tokens = client.post(f"{V1}/auth/native/google", json={"id_token": token}).json()
+    raw = secrets.token_urlsafe(24)
+    token = idp.google.native_id_token(GOOGLE_IOS, idp.google.add_account("g-1", "ann@gmail.com", "Ann"), nonce=raw)
+    tokens = client.post(f"{V1}/auth/native/google", json={"id_token": token, "nonce": raw}).json()
     assert client.get(f"{V1}/me", headers=bearer(tokens)).json()["email"] == "ann@gmail.com"
 
 
 @pytest.mark.parametrize("case", ["wrong_audience", "expired", "wrong_nonce", "forged", "wrong_issuer", "not_configured"])
 def test_native_tokens_are_verified(client, idp, case):
-    raw = "n0nce-value"
+    raw = "n0nce-value-for-this-test"
     kwargs = {"nonce": hashlib.sha256(raw.encode()).hexdigest()}
     provider, aud = "apple", BUNDLE
     if case == "wrong_audience":
@@ -342,8 +343,10 @@ def test_native_endpoint_takes_only_tokens_made_for_the_app(tmp_path, provider, 
     with TestClient(create_app(settings, serve_static=False, transport=universe.transport)) as c:
         twin = universe.twins[provider]
         extra = {"azp": azp} if azp else {}
-        token = twin.native_id_token(aud, f"{provider[0]}-aud", **extra)
-        res = c.post(f"{V1}/auth/native/{provider}", json={"id_token": token})
+        raw = secrets.token_urlsafe(24)
+        in_token = hashlib.sha256(raw.encode()).hexdigest() if provider == "apple" else raw
+        token = twin.native_id_token(aud, f"{provider[0]}-aud", nonce=in_token, **extra)
+        res = c.post(f"{V1}/auth/native/{provider}", json={"id_token": token, "nonce": raw})
         assert (res.status_code == 200) is ok, res.text
 
 
@@ -356,12 +359,12 @@ def test_bad_tokens_do_not_make_the_vault_refetch_provider_keys(client, idp):
     forger = RSAKey.generate_key(2048, parameters={"kid": idp.apple.keys[0].kid})
     for _ in range(5):  # known key id, wrong signature
         token = idp.apple.native_id_token(BUNDLE, "a-x", key=forger)
-        assert client.post(f"{V1}/auth/native/apple", json={"id_token": token}).status_code == 401
+        assert client.post(f"{V1}/auth/native/apple", json={"id_token": token, "nonce": "n" * 24}).status_code == 401
     assert keys() == before
     for i in range(5):  # unknown key ids
         stranger = RSAKey.generate_key(2048, parameters={"kid": f"unknown-{i}"})
         token = idp.apple.native_id_token(BUNDLE, "a-x", key=stranger)
-        assert client.post(f"{V1}/auth/native/apple", json={"id_token": token}).status_code == 401
+        assert client.post(f"{V1}/auth/native/apple", json={"id_token": token, "nonce": "n" * 24}).status_code == 401
     assert keys() == before + 1  # one refresh, then the cooldown
 
 
@@ -371,9 +374,10 @@ def test_bad_tokens_do_not_make_the_vault_refetch_provider_keys(client, idp):
     ([GOOGLE_IOS, "someone-else"], None, False),  # several audiences and no authorized party
 ])
 def test_google_tokens_with_several_audiences_must_be_issued_to_the_app(client, idp, aud, azp, ok):
-    claims = {**_claims(idp.google.native_id_token(GOOGLE_IOS, f"g-multi-{ok}")), "aud": aud, "azp": azp}
+    raw = secrets.token_urlsafe(24)
+    claims = {**_claims(idp.google.native_id_token(GOOGLE_IOS, f"g-multi-{ok}", nonce=raw)), "aud": aud, "azp": azp}
     token = idp.google.sign({k: v for k, v in claims.items() if v is not None})
-    res = client.post(f"{V1}/auth/native/google", json={"id_token": token})
+    res = client.post(f"{V1}/auth/native/google", json={"id_token": token, "nonce": raw})
     assert (res.status_code == 200) is ok, res.text
 
 
@@ -394,5 +398,19 @@ def test_a_google_token_without_an_audience_is_refused_when_no_server_client_is_
         claims = _claims(universe.google.native_id_token(GOOGLE_IOS, "g-noaud"))
         claims.pop("aud")
         claims["azp"] = GOOGLE_IOS
-        res = c.post(f"{V1}/auth/native/google", json={"id_token": universe.google.sign(claims)})
+        res = c.post(f"{V1}/auth/native/google", json={"id_token": universe.google.sign(claims), "nonce": claims.get("nonce") or "n" * 24})
         assert res.status_code == 401, res.text
+
+
+def test_a_native_sign_in_needs_a_nonce_and_each_token_works_once(client, idp):
+    """Without a nonce a copied ID token could be replayed until it expires: the nonce is
+    required, and a token whose nonce was already used is refused."""
+    token = idp.google.native_id_token(GOOGLE_IOS, idp.google.add_account("g-once", "o@gmail.com", "O"))
+    assert client.post(f"{V1}/auth/native/google", json={"id_token": token}).status_code in (401, 422)
+    raw = secrets.token_urlsafe(24)
+    token = idp.google.native_id_token(GOOGLE_IOS, "g-once", nonce=raw)
+    first = client.post(f"{V1}/auth/native/google", json={"id_token": token, "nonce": raw})
+    assert first.status_code == 200, first.text
+    replay = client.post(f"{V1}/auth/native/google", json={"id_token": token, "nonce": raw})
+    assert replay.status_code == 401 and "already used" in replay.json()["detail"]
+    assert apple_sign_in(client, idp).status_code == 200  # Apple: SHA-256 of the raw nonce in the token

@@ -71,7 +71,7 @@ tell the agent how to start, and remind it to credit artists and Scryfall.
   or a new deck never happens twice. Reusing a key for a different request answers 422; a
   retry that arrives while the first attempt is still running answers 409 with `Retry-After`.
   On `/api/mcp` the header covers the tool call (in a JSON-RPC batch, each call separately).
-  A retried invite gets a fresh link: stored answers never keep one.
+  A retried invite shows the same link (derived again from the server's secret; stored answers never keep it).
 - **Errors say what to do.** Every error is problem+json with a `detail`. A 503 carries
   `Retry-After`.
 

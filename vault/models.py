@@ -206,6 +206,17 @@ class AuthCode(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class NativeNonce(Base):
+    """A nonce a native sign-in (Apple / Google ID token) already used, kept until its token
+    expires: the same ID token can't sign in twice. Rows name no one (a hash of provider and
+    nonce)."""
+
+    __tablename__ = "native_nonces"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # sha256(provider:nonce)
+    expires: Mapped[float] = mapped_column(Float, index=True)  # unix time (the token's exp)
+
+
 class PasskeyChallenge(Base):
     """A pending passkey ceremony's challenge (vault.passkeys). The session cookie holds only the
     id; verifying claims the row with a conditional DELETE, so each challenge is used once, even
