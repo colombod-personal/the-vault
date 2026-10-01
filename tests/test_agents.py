@@ -181,23 +181,23 @@ def test_tokens_always_read_and_cannot_edit_the_profile(app, agent, bot):
     assert bot.patch(f"{V1}/me", json={"name": "Mallory"}, headers=h).status_code == 403
 
 
-def test_a_retried_invite_gets_a_fresh_link_and_none_is_stored(app, signed_in):
+def test_a_retried_invite_gets_the_same_link_and_none_is_stored(app, signed_in):
+    """Replays (even several at once) rebuild the same link from the server's secret, so no
+    retry can invalidate a link another one returned, and no link is ever stored."""
     from vault.models import IdempotentRequest
 
     key = {"Idempotency-Key": "invite-1"}
     first = signed_in.post(f"{V1}/shares", json={"kind": "collection"}, headers=key).json()
-    again = signed_in.post(f"{V1}/shares", json={"kind": "collection"}, headers=key)
-    assert again.status_code == 201 and again.headers["idempotent-replayed"] == "true"
-    assert again.json()["id"] == first["id"] and again.json()["url"] != first["url"]
+    replays = [signed_in.post(f"{V1}/shares", json={"kind": "collection"}, headers=key) for _ in range(2)]
+    assert all(r.status_code == 201 and r.headers["idempotent-replayed"] == "true" for r in replays)
+    assert {r.json()["url"] for r in replays} == {first["url"]} and replays[0].json()["id"] == first["id"]
     assert signed_in.get(f"{V1}/shares").json()["total"] == 1
     with app.state.db.sessions() as db:
         assert "invite=" not in str(db.query(IdempotentRequest).one().body)
     with TestClient(signed_in.app) as bob:
         bob.post("/api/auth/dev-login", params={"email": "bob@example.com"})
-        old = first["url"].split("invite=")[1]
-        assert bob.post(f"{V1}/shares/accept", json={"token": old}).status_code == 404  # replaced
-        new = again.json()["url"].split("invite=")[1]
-        assert bob.post(f"{V1}/shares/accept", json={"token": new}).status_code == 200
+        token = first["url"].split("invite=")[1]
+        assert bob.post(f"{V1}/shares/accept", json={"token": token}).status_code == 200  # still valid
     assert signed_in.post(f"{V1}/shares", json={"kind": "collection"}, headers=key).status_code == 409  # accepted
 
 

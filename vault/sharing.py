@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
-import secrets
+import hmac
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
@@ -20,6 +21,14 @@ def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def invite_token(secret: str, share_id: int) -> str:
+    """The invite's link token, derived from the server's secret and the invite's id: the same
+    every time, so a retried create can show the link again without storing it, and concurrent
+    retries all show the same, valid link. Only its SHA-256 is stored."""
+    mac = hmac.new(secret.encode(), f"vault-invite:{share_id}".encode(), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(mac).rstrip(b"=").decode()
+
+
 def _aware(dt: datetime | None) -> datetime | None:
     # SQLite returns naive datetimes; treat them as UTC.
     return dt.replace(tzinfo=timezone.utc) if dt is not None and dt.tzinfo is None else dt
@@ -33,7 +42,8 @@ def owned_deck(db: Session, user: User, deck_id: int) -> Deck:
     return deck
 
 
-def create_invite(db: Session, owner: User, kind: str, deck_id: int | None, show_costs: bool) -> tuple[Share, str]:
+def create_invite(db: Session, owner: User, kind: str, deck_id: int | None, show_costs: bool,
+                  secret: str) -> tuple[Share, str]:
     if kind not in ("collection", "deck"):
         raise HTTPException(400, "kind must be 'collection' or 'deck'")
     if kind == "deck":
@@ -42,12 +52,12 @@ def create_invite(db: Session, owner: User, kind: str, deck_id: int | None, show
         owned_deck(db, owner, deck_id)
     else:
         deck_id = None
-    token = secrets.token_urlsafe(24)
-    share = Share(
-        owner_id=owner.id, kind=kind, deck_id=deck_id, show_costs=show_costs,
-        token_hash=_hash(token), expires_at=datetime.now(timezone.utc) + INVITE_TTL,
-    )
+    share = Share(owner_id=owner.id, kind=kind, deck_id=deck_id, show_costs=show_costs,
+                  expires_at=datetime.now(timezone.utc) + INVITE_TTL)
     db.add(share)
+    db.flush()  # the id the token is derived from
+    token = invite_token(secret, share.id)
+    share.token_hash = _hash(token)
     db.flush()  # the caller commits (with the Idempotency-Key answer)
     return share, token
 
@@ -98,21 +108,16 @@ def accept_invite(db: Session, user: User, token: str, *, retry: bool = True) ->
     return share
 
 
-def reissue_invite(db: Session, owner: User, share_id: int) -> tuple[Share, str]:
-    """A fresh link for an invite that hasn't been accepted yet; the previous link stops working.
-
-    Used when a create-invite request is retried with the same Idempotency-Key: the stored
-    answer never holds the link itself, so a new one is minted for the same invite."""
+def invite_again(db: Session, owner: User, share_id: int, secret: str) -> tuple[Share, str]:
+    """The link of an invite that hasn't been accepted yet, for a retried create (same
+    Idempotency-Key). The token is derived again, so it is the one already handed out; nothing
+    changes, and any number of retries, even at once, agree."""
     share = db.get(Share, share_id)
     if share is None or share.owner_id != owner.id:
         raise HTTPException(404, "This invite no longer exists")
-    token = secrets.token_urlsafe(24)
-    if not db.execute(update(Share).where(Share.id == share.id, Share.grantee_id.is_(None))
-                      .values(token_hash=_hash(token))).rowcount:
-        db.rollback()
+    token = invite_token(secret, share.id)
+    if share.grantee_id is not None or share.token_hash != _hash(token):
         raise HTTPException(409, "This invite was already accepted, so its link can't be shown again")
-    db.commit()
-    db.refresh(share)
     return share, token
 
 

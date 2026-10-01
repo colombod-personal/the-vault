@@ -36,7 +36,7 @@ from ..models import AccessToken, ApiSession, Deck, Import, Passkey, Share, User
 from ..native import NativeTokenError, NativeVerifier, ProviderUnavailable
 from ..passkeys import remove_passkey
 from ..privacy import export_archive, purge_user
-from ..sharing import accept_invite, create_invite, display_name, incoming_share, owned_deck, reissue_invite
+from ..sharing import accept_invite, create_invite, display_name, incoming_share, invite_again, owned_deck
 from . import schemas as S
 from .hal import etag_response, link, page_body, paginate
 from .idempotency import idempotent
@@ -566,11 +566,12 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             return {"id": share.id, "url": f"{settings.base_url}/?invite={token}", "expires_at": _iso(share.expires_at),
                     "_links": {"self": link(f"{V1}/shares/{share.id}")}}
 
-        # The stored answer keeps only the invite id, never the link: a retry gets a fresh link.
+        # The stored answer keeps only the invite id, never the link: a retry derives the same link again.
+        secret = settings.session_secret
         return idempotent(request, db, user, 201, lambda: invite(*create_invite(db, user, body.kind, body.deck_id,
-                                                                                body.show_costs)),
+                                                                                body.show_costs, secret)),
                           redact=lambda answer: {"id": answer["id"]},
-                          replay=lambda stored: invite(*reissue_invite(db, user, stored["id"])))
+                          replay=lambda stored: invite(*invite_again(db, user, stored["id"], secret)))
 
     @router.get("/shares", tags=["sharing"], response_model=S.SharePage, response_model_by_alias=True,
                 summary="What you have shared, and with whom")

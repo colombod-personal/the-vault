@@ -12,7 +12,7 @@ The work and the stored answer are committed together (the endpoints leave their
 uncommitted for this); a request that fails, even while saving its answer, undoes its work and
 releases its key, so it can be retried. Stored answers never hold secrets:
 an endpoint that returns one passes ``redact`` (what to store) and ``replay`` (how to rebuild
-the answer, e.g. by minting a fresh invite link).
+the answer, e.g. by deriving the same invite link again).
 """
 
 from __future__ import annotations
