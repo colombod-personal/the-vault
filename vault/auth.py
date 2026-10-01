@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from urllib.parse import urlencode
@@ -167,6 +168,8 @@ class Auth:
         return Profile(provider, str(info["sub"]), email, name)
 
 
+PKCE_CHALLENGE = re.compile(r"[A-Za-z0-9_-]{43,128}")
+
 # Providers' names for "the user pressed Cancel", as the one code the sign-in screen knows.
 CANCELLED = {"user_cancelled_authorize": "access_denied", "user_denied": "access_denied"}
 
@@ -255,8 +258,10 @@ def build_router(auth: Auth, get_db) -> APIRouter:
         if app_redirect_uri is not None:
             if app_redirect_uri not in auth.settings.app_redirect_uris:
                 raise HTTPException(400, "app_redirect_uri is not allowed")
-            if not code_challenge or (code_challenge_method or "S256") != "S256" or len(code_challenge) < 43:
-                raise HTTPException(400, "A PKCE code_challenge (S256) is required")
+            # RFC 7636: an S256 challenge is 43-128 base64url characters (also the column's limit).
+            if (not code_challenge or (code_challenge_method or "S256") != "S256"
+                    or not PKCE_CHALLENGE.fullmatch(code_challenge)):
+                raise HTTPException(400, "A PKCE code_challenge (S256, 43-128 base64url characters) is required")
             request.session["app_flow"] = {"app_redirect_uri": app_redirect_uri, "code_challenge": code_challenge}
         redirect_uri = f"{auth.settings.base_url}/api/auth/callback/{provider}"
         client = auth.client(provider)

@@ -192,6 +192,9 @@ def test_app_handoff_rejects_unknown_redirects_and_missing_pkce(client):
     assert client.get("/api/auth/login/google", params={"app_redirect_uri": "vault://auth"}).status_code == 400
     assert client.get("/api/auth/login/google", params={"app_redirect_uri": "vault://auth", "code_challenge": ok,
                                                         "code_challenge_method": "plain"}).status_code == 400
+    for bad in ("a" * 129, "a" * 42, "not/base64url+chars" + "a" * 30):  # RFC 7636: 43-128 base64url characters
+        assert client.get("/api/auth/login/google", params={"app_redirect_uri": "vault://auth",
+                                                            "code_challenge": bad}).status_code == 400, bad
 
 
 def test_cancelled_app_sign_in_returns_error_to_the_app(client, idp):
