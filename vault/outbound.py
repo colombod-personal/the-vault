@@ -22,6 +22,7 @@ class TwinRouting(httpx.BaseTransport, httpx.AsyncBaseTransport):
 
     def _rewrite(self, request: httpx.Request) -> httpx.Request:
         url = request.url
+        # raw_path is the path *and* the query (b"/auth?client_id=..."), so nothing is dropped.
         target = self.base.copy_with(raw_path=self.base.raw_path.rstrip(b"/") + b"/h/" + url.host.encode() + url.raw_path)
         headers = httpx.Headers(request.headers)
         headers["host"] = target.netloc.decode()
@@ -45,4 +46,6 @@ def browser_url(settings, url: str) -> str:
     if not settings.twins_url:
         return url
     u = httpx.URL(url)
+    # raw_path is the path *and* the query, so the provider's OAuth parameters are kept
+    # (tests/test_twins.py: test_vault_routes_outbound_calls_to_the_twin_server).
     return f"{settings.twins_url.rstrip('/')}/h/{u.host}{u.raw_path.decode()}"
