@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -145,6 +146,10 @@ def s256(verifier: str) -> str:
     return base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
 
 
+# RFC 7636: 43-128 unreserved characters. A shorter verifier could be guessed from the challenge.
+PKCE_VERIFIER = re.compile(r"[A-Za-z0-9._~-]{43,128}")
+
+
 def redeem_code(db: Session, code: str, code_verifier: str, redirect_uri: str, device_name: str | None) -> dict:
     row = db.scalar(select(AuthCode).where(AuthCode.code_hash == _hash(code)))
     if row is None:
@@ -159,7 +164,7 @@ def redeem_code(db: Session, code: str, code_verifier: str, redirect_uri: str, d
         raise TokenError("invalid_grant", "Code expired")
     if row.redirect_uri != redirect_uri:
         raise TokenError("invalid_grant", "redirect_uri does not match")
-    if not secrets.compare_digest(s256(code_verifier), row.code_challenge):
+    if not PKCE_VERIFIER.fullmatch(code_verifier or "") or not secrets.compare_digest(s256(code_verifier), row.code_challenge):
         raise TokenError("invalid_grant", "PKCE verification failed")
     return issue(db, db.get(User, row.user_id), "app", device_name)
 

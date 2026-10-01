@@ -458,3 +458,16 @@ def test_a_racing_first_sign_in_still_spends_the_nonce(client, idp, monkeypatch)
     assert client.post(f"{V1}/auth/native/google", json={"id_token": token, "nonce": raw}).status_code == 200
     replay = client.post(f"{V1}/auth/native/google", json={"id_token": token, "nonce": raw})
     assert replay.status_code == 401, replay.text
+
+
+def test_a_short_pkce_verifier_is_refused(client, idp):
+    """RFC 7636 verifiers are 43-128 unreserved characters; a short one could be brute-forced
+    from an intercepted code's challenge, so it never redeems a code."""
+    verifier = "short"
+    res = client.get("/api/auth/login/google", params={"app_redirect_uri": "vault://auth", "code_challenge": s256(verifier)},
+                     follow_redirects=False)
+    back = web_callback(client, idp.google.approve(res.headers["location"], "g-short"))
+    code = parse_qs(urlsplit(back.headers["location"]).query)["code"][0]
+    res = client.post(f"{V1}/auth/token", json={"grant_type": "authorization_code", "code": code,
+                                                "code_verifier": verifier, "redirect_uri": "vault://auth"})
+    assert res.status_code == 400, res.text

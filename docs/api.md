@@ -93,7 +93,7 @@ accepted: its tokens carry the web client id as `aud` and the iOS client as `azp
 
 ### Option B: browser sign-in handed to the app (any provider, including Microsoft and Facebook)
 
-1. The app makes a `code_verifier` and opens this in `ASWebAuthenticationSession`:
+1. The app makes a `code_verifier` (RFC 7636: 43-128 characters from `A-Z a-z 0-9 - . _ ~`) and opens this in `ASWebAuthenticationSession`:
    `/api/auth/login/{provider}?app_redirect_uri=vault://auth&code_challenge=<BASE64URL(SHA256(verifier))>&code_challenge_method=S256`
 2. After sign-in the browser is sent to `vault://auth?code=...`, or to `?error=...` if it failed
    (`identity_in_use` when a signed-in person tries to link a sign-in owned by another account).
