@@ -446,3 +446,5 @@ class SetCatalog(Page):
     items: list[CatalogSet]
     aliases: dict[str, str] = Field(default_factory=dict,
                                     description="Dragon Shield set codes and the Scryfall set code each stands for")
+    alias_prefixes: list[str] = Field(default_factory=list,
+                                      description="Any other code starting with one of these stands for its first three characters")

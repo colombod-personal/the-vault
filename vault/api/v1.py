@@ -23,7 +23,7 @@ from fastapi.responses import Response
 from mtg_toolkits import decklist, delta
 from mtg_toolkits.formats import FORMATS
 from mtg_toolkits.archidekt import ArchidektClient
-from mtg_toolkits.dragonshield import SET_ALIASES
+from mtg_toolkits.normalize import SET_ALIAS_PREFIXES, set_alias_map
 from mtg_toolkits.http import ApiError
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
@@ -571,7 +571,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         page, nxt = paginate(items, lambda s: (s["code"],), lambda s: s["code"], cursor=cursor, limit=limit)
         response.headers["Cache-Control"] = "public, max-age=86400"
         # Dragon Shield's own set codes (e.g. gk2_orzhov) and the Scryfall set each stands for.
-        return {**page_body(request, page, nxt, len(items), limit=limit), "aliases": SET_ALIASES}
+        return {**page_body(request, page, nxt, len(items), limit=limit), "aliases": set_alias_map(), "alias_prefixes": list(SET_ALIAS_PREFIXES)}
 
     # -- sharing ------------------------------------------------------------------------------
     @router.post("/shares", tags=["sharing"], response_model=S.Invite, status_code=201,

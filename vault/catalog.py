@@ -18,7 +18,7 @@ from datetime import date
 from typing import Any, Callable
 
 import httpx
-from mtg_toolkits.dragonshield import scryfall_set_code
+from mtg_toolkits import normalize_collector_number, normalize_set_code
 from mtg_toolkits.http import ApiError
 from mtg_toolkits.scryfall import ScryfallClient
 from sqlalchemy import func, or_, select
@@ -136,17 +136,17 @@ class Catalog:
 
 
 def _scryfall_ident(ident: dict[str, str]) -> dict[str, str]:
-    if not ident.get("set"):
-        return ident
-    return {**ident, "set": scryfall_set_code(ident["set"])}
+    return {**ident, "set": normalize_set_code(ident["set"])} if ident.get("set") else ident
 
 
 def _find(db: Session, ident: dict[str, str]) -> Card | None:
     if ident.get("id"):
         return db.get(Card, ident["id"])
     if ident.get("set") and ident.get("collector_number"):
+        raw = str(ident["collector_number"]).strip()  # as written, lower-cased, or as the library matches it
+        numbers = {raw, raw.lower(), normalize_collector_number(raw) or raw}
         return db.scalar(select(Card).where(Card.set_code == ident["set"].lower(),
-                                            Card.collector_number == str(ident["collector_number"])).limit(1))
+                                            Card.collector_number.in_(numbers)).limit(1))
     if ident.get("name"):
         name = ident["name"].strip().lower()
         front = name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + " // %"  # "Fire" → "Fire // Ice"

@@ -39,3 +39,10 @@ test('the saved set list is refreshed after a day', async () => {
   assert.equal(nextDay.calls.length, 1, 'stale copy: fetched again');
   assert.ok(nextDay.icons.get('new'), 'a set released since is found');
 });
+
+test('a guild-kit code missing from the alias table follows the prefix rule', async () => {
+  const page = { ...PAGE([{ code: 'gk1', name: 'GRN Guild Kit', icon_svg_uri: 'https://svgs/gk1.svg' }]), alias_prefixes: ['gk1_', 'gk2_'] };
+  const { icons } = load({ pages: [page] });
+  await icons.loadAll();
+  assert.equal(icons.get('GK1_NEWGUILD')?.icon, 'https://svgs/gk1.svg');
+});

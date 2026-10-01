@@ -11,8 +11,7 @@ from collections.abc import Iterable, Iterator
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from mtg_toolkits.dragonshield import scryfall_set_code
-from mtg_toolkits.scryfall import Card, iter_bulk_file, resolve_offline
+from mtg_toolkits.scryfall import Card, card_matches_keys, index_keys, iter_bulk_file, resolve_offline
 from sqlalchemy import bindparam, select, update
 from sqlalchemy.orm import Session
 
@@ -24,24 +23,12 @@ from .prices import compute_values, upsert  # noqa: F401  (upsert: re-exported)
 EXACT = ("set_number", "id")
 
 
-def _front(name: str) -> str:
-    return name.split(" // ")[0].strip().lower()
-
-
 def wanted_cards(db: Session, bulk: Iterable[dict]) -> Iterator[Card]:
-    """Only keep bulk objects that could match someone's collection (saves memory)."""
-    rows = db.execute(select(Entry.set_code, Entry.collector_number, Entry.name, Entry.scryfall_id)).all()
-    ids = {r.scryfall_id for r in rows if r.scryfall_id}
-    names = {_front(r.name) for r in rows}
-    printings = {(scryfall_set_code(r.set_code).lower(), r.collector_number.lower())
-                 for r in rows if r.set_code and r.collector_number}
+    """Only keep bulk objects that could match someone's collection (saves memory). The keys come
+    from the library, normalised exactly as ``resolve_offline`` matches (aliases, case, numbers)."""
+    keys = index_keys(r.to_collection_entry() for r in db.scalars(select(Entry)))
     for obj in bulk:
-        if obj.get("object") != "card":
-            continue
-        faces = [f.get("name", "") for f in obj.get("card_faces") or []]
-        printing = (str(obj.get("set", "")).lower(), str(obj.get("collector_number", "")).lower())
-        if (obj.get("id") in ids or printing in printings or _front(obj.get("name", "")) in names
-                or any(_front(f) in names for f in faces)):
+        if obj.get("object") == "card" and card_matches_keys(obj, keys):
             yield Card.from_json(obj)
 
 
