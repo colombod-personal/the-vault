@@ -286,10 +286,13 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged }) {
   const [error, setError] = useStateAcc(null);
   const api = window.VaultApi;
 
+  const [loadFailed, setLoadFailed] = useStateAcc(false);
   const reload = () => {
-    api.shares().then(setShares);
-    api.sharedWithMe().then(setIncoming);
-    api.decks().then(setDecks);
+    setLoadFailed(false);
+    const failed = () => setLoadFailed(true);  // offline or server unreachable: say so, keep what's shown
+    api.shares().then(setShares, failed);
+    api.sharedWithMe().then(setIncoming, failed);
+    api.decks().then(setDecks, failed);
   };
   useEffectAcc(reload, []);
 
@@ -317,6 +320,12 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged }) {
   return (
     <Modal title="Account" onClose={onClose}>
       {error && <p style={{ color: 'var(--danger)', marginBottom: 8 }}>{error}</p>}
+      {(loadFailed || !me) && (
+        <p role="status" className="label-mono account-offline" style={{ color: 'var(--danger)', marginBottom: 8 }}>
+          {navigator.onLine === false ? "You're offline. " : "The Vault can't be reached right now. "}
+          Your profile, shares and decks can't be loaded; try again when you're back online.
+        </p>
+      )}
 
       <Section title="Profile">
         <div style={rowStyle}>
@@ -324,9 +333,11 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged }) {
             style={{ flex: 1 }} />
           <button className="btn sm" onClick={saveName}>Save</button>
         </div>
-        <p className="label-mono">
-          {me?.email || 'No e-mail'} · signed in with {(me?.providers || []).join(', ') || '—'}
-        </p>
+        {me && (
+          <p className="label-mono">
+            {me.email || 'No e-mail'} · signed in with {(me.providers || []).join(', ') || '—'}
+          </p>
+        )}
       </Section>
 
       <Section title="Share your collection">

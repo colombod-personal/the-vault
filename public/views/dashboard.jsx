@@ -3,8 +3,10 @@ const { useMemo, useState } = React;
 
 function Dashboard({ data, gotoBrowse, gotoSet, gotoValuation, openCard, onRefresh, refreshing, refreshProgress, refreshError }) {
   const m = data.meta;
-  const pnl = m.totalMarket - m.totalPaid;
-  const pnlPct = m.totalPaid ? (pnl / m.totalPaid) * 100 : 0;
+  // P&L counts only cards with a known cost (see vaultPnL): no full-value "profit" on unrecorded prices.
+  const pnlAll = useMemo(() => window.vaultPnL(data.cards, m.costsHidden), [data]);
+  const pnl = pnlAll.pnl || 0;
+  const pnlPct = pnlAll.pct || 0;
   const fresh = window.vaultFreshness(m.generatedAt);
   // Nothing priced yet (e.g. a Moxfield file, which carries no market prices): don't show a fake loss.
   const unpriced = m.totalQty > 0 && !m.totalMarket;
@@ -105,12 +107,12 @@ function Dashboard({ data, gotoBrowse, gotoSet, gotoValuation, openCard, onRefre
             </>
           )}
         </div>
-        <div className={`stat ${unpriced ? '' : pnl >= 0 ? 'good' : 'bad'}`} style={{ display: window.__vault?.showPnL === false || m.costsHidden ? 'none' : undefined }}>
+        <div className={`stat ${unpriced || !pnlAll.known ? '' : pnl >= 0 ? 'good' : 'bad'}`} style={{ display: window.__vault?.showPnL === false || m.costsHidden ? 'none' : undefined }}>
           <div className="label">Unrealised P&amp;L</div>
-          {unpriced ? (
+          {unpriced || !pnlAll.known ? (
             <>
               <div className="value">—</div>
-              <div className="delta">waiting for market prices</div>
+              <div className="delta">{unpriced ? 'waiting for market prices' : 'no prices paid recorded'}</div>
             </>
           ) : (
             <>
@@ -118,6 +120,11 @@ function Dashboard({ data, gotoBrowse, gotoSet, gotoValuation, openCard, onRefre
                 <span className="currency">$</span>{pnl >= 0 ? '+' : '−'}{Math.abs(pnl).toLocaleString(undefined, { maximumFractionDigits: 0 })}
               </div>
               <div className={`delta ${pnl >= 0 ? 'up' : 'down'}`}>{pnl >= 0 ? '▲' : '▼'} {Math.abs(pnlPct).toFixed(1)}% on cost basis</div>
+              {pnlAll.unknown > 0 && (
+                <div className="delta" style={{ fontSize: 10 }}>
+                  {pnlAll.known.toLocaleString()} of {(pnlAll.known + pnlAll.unknown).toLocaleString()} printings with a price paid
+                </div>
+              )}
             </>
           )}
         </div>
@@ -156,7 +163,7 @@ function Dashboard({ data, gotoBrowse, gotoSet, gotoValuation, openCard, onRefre
             {topSets.map(s => (
               <div className="bar-row" key={s.code} {...window.vaultPressable(() => gotoSet(s.code), `${s.name || s.code} (${s.code})`)} style={{ cursor: 'pointer' }}>
                 <div className="code" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {window.SetIcon && <SetIcon code={s.code} size={14} />}
+                  {window.SetIcon && <SetIcon code={s.code} size={14} fallback={false} />}
                   <span>{s.code}</span>
                 </div>
                 <div className="name">{s.name}</div>

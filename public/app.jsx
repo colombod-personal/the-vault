@@ -38,8 +38,50 @@ window.vaultRecompute = function (base, at) {
   const sets = base.sets
     .map((s) => ({ ...s, value: setVal[s.code] != null ? setVal[s.code] : s.value }))
     .sort((a, b) => b.value - a.value);
+  // The per-name index (Graph, Decks) carries prices too: rebuild it from the new card prices.
+  const byName = {};
+  for (const c of cards) {
+    const k = c.n.toLowerCase();
+    const b = byName[k] || (byName[k] = { name: c.n, total: 0, value: 0, entries: [] });
+    b.total += c.q;
+    b.value += c.mk * c.q;
+    b.entries.push({ s: c.s, sn: c.sn, cn: c.cn, p: c.p, c: c.c, q: c.q, mk: c.mk });
+  }
   const meta = { ...base.meta, totalMarket, generatedAt: at };
-  return { ...base, cards, sets, meta };
+  return { ...base, cards, sets, byName, meta };
+};
+
+// The one rule for cost and profit & loss: a card's cost is known when the owner shares prices
+// paid (not `meta.costsHidden`) and a price paid was recorded (`pd` is 0 when it wasn't).
+// P&L only ever counts cards with a known cost.
+window.vaultCostKnown = (card, costsHidden) => !costsHidden && (card.pd || 0) > 0;
+
+// One card's P&L: { state: 'private' | 'unknown' | 'known', pnl }.
+window.vaultCardPnL = (card, costsHidden) => {
+  if (costsHidden) return { state: 'private', pnl: null };
+  if (!window.vaultCostKnown(card, false)) return { state: 'unknown', pnl: null };
+  return { state: 'known', pnl: (card.mk || 0) * (card.q || 0) - card.pd };
+};
+
+// P&L over many cards, counting only those with a known cost.
+window.vaultPnL = (cards, costsHidden) => {
+  let paid = 0, market = 0, known = 0, unknown = 0;
+  for (const c of cards) {
+    if (window.vaultCostKnown(c, costsHidden)) { paid += c.pd; market += (c.mk || 0) * (c.q || 0); known++; }
+    else unknown++;
+  }
+  const pnl = market - paid;
+  return { hidden: !!costsHidden, known, unknown, paid, market, pnl: known ? pnl : null, pct: paid ? (pnl / paid) * 100 : null };
+};
+
+// Text for one card's "Spent" and "P&L" cells: "private" when the owner hides costs, "—" when unknown.
+window.vaultSpentText = (card, costsHidden) =>
+  costsHidden ? 'private' : window.vaultCostKnown(card, false) ? `$${card.pd.toFixed(2)}` : '—';
+window.vaultPnLText = (card, costsHidden) => {
+  const r = window.vaultCardPnL(card, costsHidden);
+  if (r.state === 'private') return 'private';
+  if (r.state === 'unknown') return '—';
+  return `${r.pnl >= 0 ? '+' : '−'}$${Math.abs(r.pnl).toFixed(2)}`;
 };
 
 // Props that make a clickable tile work from the keyboard and for screen readers, like a button:
@@ -341,16 +383,38 @@ function App() {
 
   if (auth === 'signed-out') return <SignIn />;
   const nav = (view, extra = {}) => setRoute({ view, ...extra });
+  const viewingBanner = viewing && data && (
+    <div className="panel panel-tight" style={{ margin: '12px 24px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderColor: 'var(--gold)' }}>
+      <span className="label-mono">
+        Viewing {viewing.from}'s collection · read-only{data.meta.costsHidden ? ' · prices paid are private' : ''}
+      </span>
+      <button className="btn xs" onClick={backToMine}>Back to my vault</button>
+    </div>
+  );
   let body;
   if (data && data.meta.totalQty === 0) {
     body = (
       <div className="app">
         <header className="topbar">
           <button className="brand" onClick={() => setRoute({ view: 'dashboard' })} aria-label="The Vault: home"><span className="mark"><span>V</span></span><span className="title">The Vault</span></button>
-          <AccountMenu me={me} onImported={onImported} onAccount={openAccount} />
+          <AccountMenu me={me} onImported={onImported} onAccount={openAccount} readOnly={!!viewing} />
         </header>
+        {viewing && viewingBanner}
         {noticeBanner}
-        <main><EmptyVault onImported={onImported} /></main>
+        <main>
+          {viewing ? (
+            // Someone else's collection, shared but empty: nothing to import here.
+            <div style={{ display: 'grid', placeItems: 'center', minHeight: '60vh' }}>
+              <div className="panel" style={{ width: 'min(460px, 100%)', textAlign: 'center' }}>
+                <p className="eyebrow">Shared collection</p>
+                <h1 className="h1" style={{ margin: '8px 0 12px' }}>{viewing.from}'s collection is empty</h1>
+                <p className="label-mono">
+                  There are no cards in it yet. When {viewing.from} imports a collection, it shows up here.
+                </p>
+              </div>
+            </div>
+          ) : <EmptyVault onImported={onImported} />}
+        </main>
         <VaultFooter />
       </div>
     );
@@ -393,14 +457,7 @@ function App() {
           </nav>
           <AccountMenu me={me} onImported={onImported} onAccount={openAccount} readOnly={!!viewing} />
         </header>
-        {viewing && (
-          <div className="panel panel-tight" style={{ margin: '12px 24px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderColor: 'var(--gold)' }}>
-            <span className="label-mono">
-              Viewing {viewing.from}'s collection · read-only{data.meta.costsHidden ? ' · prices paid are private' : ''}
-            </span>
-            <button className="btn xs" onClick={backToMine}>Back to my vault</button>
-          </div>
-        )}
+        {viewing && viewingBanner}
         {noticeBanner}
 
         <main>
@@ -538,7 +595,7 @@ function CardDrawer({ card, onClose, costsHidden }) {
   }, [card]);
 
   const total = (card.mk || 0) * (card.q || 0);
-  const pnl = total - (card.pd || 0);
+  const cardPnl = window.vaultCardPnL(card, costsHidden);
 
   useEffectApp(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
@@ -583,7 +640,7 @@ function CardDrawer({ card, onClose, costsHidden }) {
             <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontFamily: 'var(--mono)', fontSize: 11 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span className="muted">Set</span>
-                {window.SetIcon ? <SetIcon code={card.s} size={16} /> : null}
+                {window.SetIcon ? <SetIcon code={card.s} size={16} fallback={false} /> : null}
                 <span style={{ color: 'var(--gold)' }}>{card.s}</span>
                 <span className="muted">·</span>
                 <span>{card.sn}</span>
@@ -613,9 +670,9 @@ function CardDrawer({ card, onClose, costsHidden }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
               <Stat label="Quantity" value={card.q} />
               <Stat label="Total value" value={`$${total.toFixed(2)}`} color="var(--gold)" />
-              <Stat label="Spent" value={costsHidden ? 'private' : `$${(card.pd || 0).toFixed(2)}`} muted />
-              {costsHidden ? <Stat label="P&L" value="—" muted /> : (
-                <Stat label="P&L" value={`${pnl >= 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(2)}`} color={pnl >= 0 ? 'var(--good)' : 'var(--danger)'} />
+              <Stat label="Spent" value={window.vaultSpentText(card, costsHidden)} muted />
+              {cardPnl.state !== 'known' ? <Stat label="P&L" value={window.vaultPnLText(card, costsHidden)} muted /> : (
+                <Stat label="P&L" value={window.vaultPnLText(card, costsHidden)} color={cardPnl.pnl >= 0 ? 'var(--good)' : 'var(--danger)'} />
               )}
             </div>
             {card.fd && (
@@ -637,7 +694,7 @@ function CardDrawer({ card, onClose, costsHidden }) {
                 {card._ownEntries.map((e, i) => (
                   <tr key={i}>
                     <td style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      {window.SetIcon && <SetIcon code={e.s} size={14} />}
+                      {window.SetIcon && <SetIcon code={e.s} size={14} fallback={false} />}
                       <span style={{ color: 'var(--gold)', fontFamily: 'var(--mono)', fontSize: 11 }}>{e.s}</span> {e.sn}
                     </td>
                     <td className="muted" style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{e.cn}</td>

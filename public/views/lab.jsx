@@ -16,13 +16,15 @@ function Lab({ data, openCard }) {
     let maxQty = null;
     for (const c of data.cards) {
       const total = c.mk * c.q;
-      const paid = c.pd;
-      const pnl = total - paid;
-      if (!biggestGain || pnl > biggestGain.pnl) biggestGain = { c, pnl };
-      if (!biggestLoss || pnl < biggestLoss.pnl) biggestLoss = { c, pnl };
+      // P&L only for cards with a known cost (vaultCostKnown): no full-value "winners" with no price paid.
+      if (window.vaultCostKnown(c, data.meta.costsHidden)) {
+        const pnl = total - c.pd;
+        if (!biggestGain || pnl > biggestGain.pnl) biggestGain = { c, pnl };
+        if (!biggestLoss || pnl < biggestLoss.pnl) biggestLoss = { c, pnl };
+        totalPaid += c.pd;
+        totalCards += c.q;
+      }
       totalValue += total;
-      totalPaid += paid;
-      totalCards += c.q;
       if (c.p && c.p.includes('Foil')) foilValue += total;
       if (!maxQty || c.q > maxQty.q) maxQty = { c, q: c.q };
     }
@@ -156,7 +158,7 @@ function Lab({ data, openCard }) {
         <div className="stat good" style={data.meta.costsHidden ? { display: 'none' } : undefined}>
           <div className="label">Biggest winner</div>
           <div className="value" style={{ fontSize: 28 }}>
-            <span className="currency">$</span>+{stats.biggestGain ? stats.biggestGain.pnl.toFixed(0) : 0}
+            {stats.biggestGain ? <><span className="currency">$</span>{labSigned(stats.biggestGain.pnl)}</> : '—'}
           </div>
           {stats.biggestGain && (
             <div className="delta">{stats.biggestGain.c.n} [{stats.biggestGain.c.s}]</div>
@@ -164,8 +166,8 @@ function Lab({ data, openCard }) {
         </div>
         <div className="stat bad" style={data.meta.costsHidden ? { display: 'none' } : undefined}>
           <div className="label">Biggest loser</div>
-          <div className="value" style={{ fontSize: 28, color: 'var(--danger)' }}>
-            <span className="currency">$</span>{stats.biggestLoss ? stats.biggestLoss.pnl.toFixed(0) : 0}
+          <div className="value" style={{ fontSize: 28, color: stats.biggestLoss && stats.biggestLoss.pnl >= 0 ? 'var(--good)' : 'var(--danger)' }}>
+            {stats.biggestLoss ? <><span className="currency">$</span>{labSigned(stats.biggestLoss.pnl)}</> : '—'}
           </div>
           {stats.biggestLoss && (
             <div className="delta">{stats.biggestLoss.c.n} [{stats.biggestLoss.c.s}]</div>
@@ -178,8 +180,8 @@ function Lab({ data, openCard }) {
         </div>
         <div className="stat" style={data.meta.costsHidden ? { display: 'none' } : undefined}>
           <div className="label">Avg paid per card</div>
-          <div className="value"><span className="currency">$</span>{stats.avgPaidPerCard.toFixed(2)}</div>
-          <div className="delta">your average pull cost</div>
+          <div className="value">{stats.avgPaidPerCard ? <><span className="currency">$</span>{stats.avgPaidPerCard.toFixed(2)}</> : '—'}</div>
+          <div className="delta">your average pull cost{stats.avgPaidPerCard ? ' (cards with a price paid)' : ''}</div>
         </div>
       </div>
 
@@ -214,7 +216,7 @@ function Lab({ data, openCard }) {
                   <td style={{ fontWeight: 600 }}>{row.c.n}</td>
                   <td>
                     <span className="chip" style={{ padding: '2px 8px', fontSize: 10, gap: 4 }}>
-                      {window.SetIcon && <SetIcon code={row.c.s} size={12} />}
+                      {window.SetIcon && <SetIcon code={row.c.s} size={12} fallback={false} />}
                       <span>{row.c.s}</span>
                     </span>
                   </td>
@@ -249,15 +251,21 @@ function Lab({ data, openCard }) {
         </div>
 
         <div className="panel">
-          <p className="eyebrow">Cadence</p>
-          <h2 className="h2" style={{ marginTop: 4, fontSize: 22, marginBottom: 14 }}>Acquisition spend by month</h2>
-          <SpendChart data={spendTimeline} />
-          <div className="divider"></div>
+          {!data.meta.costsHidden && (<>
+            <p className="eyebrow">Cadence</p>
+            <h2 className="h2" style={{ marginTop: 4, fontSize: 22, marginBottom: 14 }}>Acquisition spend by month</h2>
+            <SpendChart data={spendTimeline} />
+            <div className="divider"></div>
+          </>)}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <p className="label-mono">Total spent</p>
-              <p style={{ fontFamily: 'var(--display)', fontSize: 24, fontWeight: 600, marginTop: 4, lineHeight: 1 }}>${data.meta.totalPaid.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
-            </div>
+            {!data.meta.costsHidden && (
+              <div>
+                <p className="label-mono">Total spent</p>
+                <p style={{ fontFamily: 'var(--display)', fontSize: 24, fontWeight: 600, marginTop: 4, lineHeight: 1 }}>
+                  {data.meta.totalPaid > 0 ? `$${data.meta.totalPaid.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '—'}
+                </p>
+              </div>
+            )}
             <div>
               <p className="label-mono">Most duplicated</p>
               <p style={{ fontSize: 13, marginTop: 4, lineHeight: 1.3 }}>
@@ -374,10 +382,13 @@ function Lab({ data, openCard }) {
   );
 }
 
+// A signed whole-dollar amount: +12 / −3.
+const labSigned = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(0)}`;
+
 function SpendChart({ data }) {
   if (!data?.length) return <p className="muted">No spend data.</p>;
   const w = 600, h = 140, pad = 20;
-  const maxS = Math.max(...data.map(d => d.spend));
+  const maxS = Math.max(1, ...data.map(d => d.spend));  // no spend recorded: 0, not NaN
   const step = (w - pad * 2) / Math.max(data.length - 1, 1);
   const pts = data.map((d, i) => [pad + i * step, h - pad - (d.spend / maxS) * (h - pad * 2)]);
   const bars = data.map((d, i) => {
