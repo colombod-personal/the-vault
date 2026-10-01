@@ -303,3 +303,17 @@ def test_an_idempotent_import_that_fails_late_is_undone_and_can_be_retried(signe
     retry = signed_in.post(f"{V1}/imports", files={"file": ("e.csv", CSV, "text/csv")}, headers=headers)
     assert retry.status_code == 201, retry.text
     assert signed_in.get(f"{V1}/imports").json()["total"] == 1
+
+
+@pytest.mark.parametrize("identifier", [{}, {"set": "c21"}, {"collector_number": "263"}])
+def test_mcp_lookup_identifiers_need_an_id_a_name_or_a_set_and_number(agent, bot, identifier):
+    read = make_token(agent)
+    res = rpc(bot, "tools/call", {"name": "lookup_cards", "arguments": {"identifiers": [identifier]}}, read)
+    assert res.status_code == 200 and res.json()["error"]["code"] == -32602, res.text
+
+
+@pytest.mark.parametrize("arguments", [[], "", 0, False])
+def test_mcp_arguments_given_as_a_non_object_are_invalid_even_when_empty(agent, bot, arguments):
+    read = make_token(agent)
+    res = rpc(bot, "tools/call", {"name": "get_collection_summary", "arguments": arguments}, read)
+    assert res.status_code == 200 and res.json()["error"]["code"] == -32602, res.text

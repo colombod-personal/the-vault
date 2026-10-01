@@ -126,6 +126,10 @@ window.Scryfall = (() => {
       for (const c of found) {
         const slim = slimCard(c);
         foundByName.set(c.name.toLowerCase(), slim);
+        // Double-faced and split cards ("Fire // Ice") are also asked for by one face's name.
+        for (const face of c.name.split(' // ')) {
+          if (!foundByName.has(face.toLowerCase())) foundByName.set(face.toLowerCase(), slim);
+        }
         foundBySetNum.set(`${c.set}/${c.collector_number}`, slim);
       }
       for (const b of batch) {

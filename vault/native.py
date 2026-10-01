@@ -111,6 +111,9 @@ class NativeVerifier:
                          and claims.get("azp") in self.audiences["google"])
         if not (auds & self.audiences[provider] or via_server_id):
             raise NativeTokenError("Token was issued for another app")
+        # A token for several audiences must also have been issued to the app (Google's rule).
+        if provider == "google" and len(auds) > 1 and claims.get("azp") not in self.audiences["google"]:
+            raise NativeTokenError("Token was issued to another party")
         if not isinstance(claims.get("exp"), (int, float)) or claims["exp"] < now - 60:
             raise NativeTokenError("Token expired")
         if nonce is not None:

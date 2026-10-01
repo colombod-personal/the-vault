@@ -72,7 +72,7 @@ JSON_TYPES = {"string": (str,), "integer": (int,), "number": (int, float), "bool
 def _invalid(schema: dict, value: Any, where: str) -> str | None:
     """Why ``value`` doesn't match ``schema``, or None. Tool schemas are otherwise only
     descriptive, and paths and API bodies are built from these values. Covers the keywords the
-    tools use: type, enum, bounds, lengths, items, properties, required, additionalProperties."""
+    tools use: type, enum, bounds, lengths, items, properties, required, additionalProperties, anyOf."""
     kind = schema.get("type")
     if kind in JSON_TYPES:
         if (isinstance(value, bool) and kind != "boolean") or not isinstance(value, JSON_TYPES[kind]):
@@ -93,6 +93,8 @@ def _invalid(schema: dict, value: Any, where: str) -> str | None:
         for i, item in enumerate(value):
             if "items" in schema and (why := _invalid(schema["items"], item, f"{where}[{i}]")):
                 return why
+    if "anyOf" in schema and all(_invalid(option, value, where) for option in schema["anyOf"]):
+        return f"{where} doesn't match any allowed form"
     if isinstance(value, dict) and ("properties" in schema or "required" in schema):
         properties = schema.get("properties", {})
         for name in schema.get("required", []):
@@ -153,9 +155,12 @@ TOOLS = [
          body=lambda a: {"text": a["text"]}),
     Tool("lookup_cards", "Card data (type, text, colours, artist, image links) and current prices for up to 75 "
          "printings, by Scryfall id, set + collector number, or name. Works for any card, owned or not.",
-         {"identifiers": {"type": "array", "maxItems": 75, "items": {"type": "object", "properties": {
+         {"identifiers": {"type": "array", "minItems": 1, "maxItems": 75, "items": {"type": "object", "properties": {
              "id": {"type": "string"}, "set": {"type": "string"}, "collector_number": {"type": "string"},
-             "name": {"type": "string"}}, "additionalProperties": False}}}, ["identifiers"],
+             "name": {"type": "string"}}, "additionalProperties": False,
+             # one of: a Scryfall id, a name (optionally with a set), or a set and collector number
+             "anyOf": [{"required": ["id"]}, {"required": ["name"]}, {"required": ["set", "collector_number"]}]}}},
+         ["identifiers"],
          method="POST", path=lambda a: f"{V1}/cards/lookup", body=lambda a: {"identifiers": a["identifiers"]}),
     Tool("list_decks", "The person's saved decks.", dict(PAGING), path=lambda a: f"{V1}/decks", query=("limit", "cursor")),
     Tool("get_deck", "A saved deck with its text and coverage against the collection.",
@@ -279,7 +284,9 @@ def build_router(optional_user) -> APIRouter:
             return _result(id_, {"tools": [t.schema() for t in TOOLS if not t.write or "write" in scopes]})
         if method == "tools/call":
             tool = BY_NAME.get(params.get("name", ""))
-            args = params.get("arguments") or {}
+            args = params.get("arguments")
+            if args is None:  # omitted: no arguments
+                args = {}
             if tool is None:
                 return _rpc_error(id_, -32602, f"Unknown tool: {params.get('name')}")
             if not isinstance(args, dict):

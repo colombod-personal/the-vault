@@ -344,3 +344,21 @@ def test_bad_tokens_do_not_make_the_vault_refetch_provider_keys(client, idp):
         token = idp.apple.native_id_token(BUNDLE, "a-x", key=stranger)
         assert client.post(f"{V1}/auth/native/apple", json={"id_token": token}).status_code == 401
     assert keys() == before + 1  # one refresh, then the cooldown
+
+
+@pytest.mark.parametrize("aud, azp, ok", [
+    ([GOOGLE_IOS, "someone-else"], GOOGLE_IOS, True),  # several audiences, issued to our app
+    ([GOOGLE_IOS, "someone-else"], "someone-else", False),  # several audiences, issued to another party
+    ([GOOGLE_IOS, "someone-else"], None, False),  # several audiences and no authorized party
+])
+def test_google_tokens_with_several_audiences_must_be_issued_to_the_app(client, idp, aud, azp, ok):
+    claims = {**_claims(idp.google.native_id_token(GOOGLE_IOS, f"g-multi-{ok}")), "aud": aud, "azp": azp}
+    token = idp.google.sign({k: v for k, v in claims.items() if v is not None})
+    res = client.post(f"{V1}/auth/native/google", json={"id_token": token})
+    assert (res.status_code == 200) is ok, res.text
+
+
+def _claims(token):
+    import base64 as b64, json as js
+    part = token.split(".")[1]
+    return js.loads(b64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
