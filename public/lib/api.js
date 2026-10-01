@@ -303,7 +303,7 @@ window.VaultApi = (() => {
     shares: () => all(V1 + '/shares'),
     createShare: (kind, deck_id, show_costs) => create(V1 + '/shares', { json: { kind, deck_id, show_costs } }),
     removeShare: (id) => call(V1 + '/shares/' + id, { method: 'DELETE' }),
-    acceptInvite: (token) => call(V1 + '/shares/accept', { method: 'POST', json: { token } }),
+    acceptInvite: (token) => create(V1 + '/shares/accept', { json: { token } }),  // keyed: a lost answer can be retried
     sharedWithMe: () => all(V1 + '/shared'),
     sharedCollection: (id, onProgress) => loadCollection(V1 + '/shared/' + id + '/collection', onProgress),
     sharedDeck: (id) => call(V1 + '/shared/' + id + '/deck'),

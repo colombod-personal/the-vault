@@ -80,7 +80,7 @@ def accept_invite(db: Session, user: User, token: str, *, retry: bool = True) ->
             db.rollback()
             raise HTTPException(404, "This invite link is invalid or has already been used")
         existing.show_costs = share.show_costs
-        db.commit()
+        db.flush()  # the caller commits (with the Idempotency-Key answer)
         return existing
     try:
         claimed = db.execute(update(Share).where(*unused).values(
@@ -93,7 +93,7 @@ def accept_invite(db: Session, user: User, token: str, *, retry: bool = True) ->
     if not claimed:
         db.rollback()
         raise HTTPException(404, "This invite link is invalid or has already been used")
-    db.commit()
+    db.flush()  # the caller commits (with the Idempotency-Key answer)
     db.refresh(share)
     return share
 

@@ -165,6 +165,7 @@ def test_racing_accepts_claim_an_invite_once(client, monkeypatch):
                 db.add(carol)
                 db.commit()
                 sharing.accept_invite(db, carol, token)
+                db.commit()
         return real_aware(dt)
 
     login(client, "bob@example.com")
@@ -190,6 +191,7 @@ def test_two_invites_accepted_at_once_give_one_grant_on_any_database(client, mon
             raced.append(True)
             with client.app.state.db.sessions() as other:
                 sharing.accept_invite(other, other.get(sharing.User, user.id), first)
+                other.commit()
         return found
 
     monkeypatch.setattr(sharing, "_grant_of", first_invite_accepted_meanwhile)
@@ -197,6 +199,20 @@ def test_two_invites_accepted_at_once_give_one_grant_on_any_database(client, mon
     assert raced and len(client.get("/api/v1/shared").json()["items"]) == 1
     login(client, "alice@example.com")
     assert [s["with"] is not None for s in client.get("/api/v1/shares").json()["items"]] == [True]
+
+
+def test_accepting_an_invite_can_be_retried_with_its_idempotency_key(client):
+    """If the answer is lost after the invite was accepted, a retry with the same key gets the
+    same answer instead of "invalid or already used"."""
+    login(client, "alice@example.com")
+    token = client.post("/api/v1/shares", json={"kind": "collection"}).json()["url"].split("invite=")[1]
+    login(client, "bob@example.com")
+    headers = {"Idempotency-Key": "accept-1"}
+    first = client.post("/api/v1/shares/accept", json={"token": token}, headers=headers)
+    again = client.post("/api/v1/shares/accept", json={"token": token}, headers=headers)
+    assert first.status_code == again.status_code == 200, again.text
+    assert again.json() == first.json() and again.headers.get("idempotent-replayed") == "true"
+    assert client.post("/api/v1/shares/accept", json={"token": token}).status_code == 404  # still single use
 
 
 def test_sharing_never_reveals_an_email_address(client, settings):
@@ -247,6 +263,7 @@ def test_two_invites_from_one_owner_accepted_at_once_give_one_grant():
     def accept_second():
         with Session(db.engine) as s:
             accept_invite(s, s.get(User, guest_id), second)
+            s.commit()
             done["ok"] = True
 
     with Session(db.engine) as s:

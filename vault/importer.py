@@ -119,7 +119,10 @@ def export_entries(db: Session, user: User, fmt: str) -> list[CollectionEntry]:
             e.set_code, e.collector_number, e.scryfall_id = card.set_code, card.collector_number, card.scryfall_id
             e.set_name = e.set_name or card.set_name
         else:
-            e.set_code, e.scryfall_id = scryfall_set(e.set_code) or None, None
+            # Not in the Vault's card table yet (e.g. before the first sync): an exact id is still
+            # right and is kept; a name-only guess is not exported as if it were the printing.
+            e.set_code = scryfall_set(e.set_code) or None
+            e.scryfall_id = row.scryfall_id if row.match_method in EXACT else None
         if row.price_finish:  # the printing exists only in this finish (e.g. blank Printing on etched-only cards)
             e.finish = Finish(row.price_finish)
     return entries

@@ -112,3 +112,16 @@ def test_exports_are_owner_only_and_in_the_data_download(signed_in, client):
     assert signed_in.get(f"/api/v1/shared/{share['id']}/collection/exports").status_code == 404
     z = zipfile.ZipFile(io.BytesIO(signed_in.get(f"{V1}/me/export").content))
     assert {"collection.csv", "collection-moxfield.csv", "collection-generic.csv"} <= set(z.namelist())
+
+
+def test_a_fresh_generic_import_keeps_its_scryfall_ids_before_any_sync(signed_in):
+    """Before the first daily sync the Vault has no card records yet; an id the file carried is
+    still the file's, and exporting must give it back."""
+    from mtg_toolkits.formats import GENERIC_COLUMNS
+
+    row = {"quantity": "1", "trade_quantity": "0", "name": "Sol Ring", "set_code": "c21", "collector_number": "263",
+           "finish": "nonfoil", "scryfall_id": "9a1b2c3d-0000-4000-8000-000000000001"}
+    content = (",".join(GENERIC_COLUMNS) + "\n" + ",".join(row.get(c, "") for c in GENERIC_COLUMNS) + "\n").encode()
+    assert upload(signed_in, content, "generic.csv").json()["source"] == "csv"
+    generic = list(csv.DictReader(io.StringIO(download(signed_in, "csv").text)))
+    assert generic[0]["scryfall_id"] == "9a1b2c3d-0000-4000-8000-000000000001"

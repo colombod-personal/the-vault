@@ -600,13 +600,18 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         db.commit()
         return {"deleted": True}
 
-    @router.post("/shares/accept", tags=["sharing"], summary="Accept an invite link's token")
-    def accept_share(body: S.AcceptIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-        share = accept_invite(db, user, body.token)
-        deck = db.get(Deck, share.deck_id) if share.deck_id else None
-        target = f"{V1}/shared/{share.id}/" + ("collection" if share.kind == "collection" else "deck")
-        return {"id": share.id, "kind": share.kind, "from": display_name(db.get(User, share.owner_id)),
-                "deck_name": deck.name if deck else None, "_links": {"shared": link(target)}}
+    @router.post("/shares/accept", tags=["sharing"], summary="Accept an invite link's token (send an "
+                 "Idempotency-Key to retry safely: the link itself works once)")
+    def accept_share(request: Request, body: S.AcceptIn, user: User = Depends(current_user),
+                     db: Session = Depends(get_db)):
+        def run() -> dict:
+            share = accept_invite(db, user, body.token)
+            deck = db.get(Deck, share.deck_id) if share.deck_id else None
+            target = f"{V1}/shared/{share.id}/" + ("collection" if share.kind == "collection" else "deck")
+            return {"id": share.id, "kind": share.kind, "from": display_name(db.get(User, share.owner_id)),
+                    "deck_name": deck.name if deck else None, "_links": {"shared": link(target)}}
+
+        return idempotent(request, db, user, 200, run)
 
     @router.get("/shared", tags=["sharing"], response_model=S.SharedPage, summary="What others have shared with you")
     def shared_with_me(request: Request, cursor: str | None = None, limit: int | None = None,
