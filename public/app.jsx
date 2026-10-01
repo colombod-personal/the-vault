@@ -451,7 +451,8 @@ function App() {
         </main>
 
         <VaultFooter />
-        {drawerCard && <CardDrawer card={drawerCard} onClose={() => closeOverlay(() => setDrawerCard(null))} />}
+        {drawerCard && <CardDrawer card={drawerCard} costsHidden={!!data?.meta?.costsHidden}
+                                   onClose={() => closeOverlay(() => setDrawerCard(null))} />}
 
         <TweaksPanel title="Tweaks">
           <TweakSection label="Theme" />
@@ -525,7 +526,7 @@ function App() {
   return <>{body}{accountPanel}</>;
 }
 
-function CardDrawer({ card, onClose }) {
+function CardDrawer({ card, onClose, costsHidden }) {
   const [scry, setScry] = useStateApp(() => card._scry || window.Scryfall.cached(card.n, card.s, card.cn));
   useEffectApp(() => {
     if (scry) return;
@@ -612,8 +613,10 @@ function CardDrawer({ card, onClose }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
               <Stat label="Quantity" value={card.q} />
               <Stat label="Total value" value={`$${total.toFixed(2)}`} color="var(--gold)" />
-              <Stat label="Spent" value={`$${(card.pd || 0).toFixed(2)}`} muted />
-              <Stat label="P&L" value={`${pnl >= 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(2)}`} color={pnl >= 0 ? 'var(--good)' : 'var(--danger)'} />
+              <Stat label="Spent" value={costsHidden ? 'private' : `$${(card.pd || 0).toFixed(2)}`} muted />
+              {costsHidden ? <Stat label="P&L" value="—" muted /> : (
+                <Stat label="P&L" value={`${pnl >= 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(2)}`} color={pnl >= 0 ? 'var(--good)' : 'var(--danger)'} />
+              )}
             </div>
             {card.fd && (
               <p className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', marginTop: 12 }}>

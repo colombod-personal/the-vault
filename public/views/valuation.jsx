@@ -128,6 +128,13 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
           <div className="value"><span className="currency">$</span>{Math.round(last.marketCum).toLocaleString()}</div>
           <div className="delta">at prices as of {fresh.abs}</div>
         </div>
+        {m.costsHidden ? (
+          <div className="stat">
+            <div className="label">Cost basis</div>
+            <div className="value muted">private</div>
+            <div className="delta">{m.sharedBy || 'The owner'} keeps prices paid private</div>
+          </div>
+        ) : (<>
         <div className="stat accent">
           <div className="label">Cost basis</div>
           <div className="value"><span className="currency">$</span>{Math.round(last.costCum).toLocaleString()}</div>
@@ -140,6 +147,7 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
           </div>
           <div className={`delta ${last.gainCum >= 0 ? 'up' : 'down'}`}>{last.gainCum >= 0 ? '▲' : '▼'} {Math.abs(pnlPct).toFixed(1)}% over cost</div>
         </div>
+        </>)}
         <div className="stat">
           <div className="label">Last 12 months</div>
           <div className="value" style={{ color: 'var(--gold)' }}><span className="currency">$</span>+{Math.round(yoy).toLocaleString()}</div>
@@ -153,7 +161,7 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
         <div className="section-head" style={{ marginBottom: 18 }}>
           <div>
             <p className="eyebrow">Growth curve</p>
-            <h2 className="h2" style={{ marginTop: 4, fontSize: 22 }}>Cumulative value vs. cost basis</h2>
+            <h2 className="h2" style={{ marginTop: 4, fontSize: 22 }}>{m.costsHidden ? 'Cumulative value' : 'Cumulative value vs. cost basis'}</h2>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
             {[['all', 'All'], ['24', '24M'], ['12', '12M']].map(([k, lbl]) =>
@@ -164,11 +172,11 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
 
         <div style={{ display: 'flex', gap: 20, marginBottom: 14, flexWrap: 'wrap' }}>
           <Legend swatch="gold" label="Market value (at current prices)" />
-          <Legend swatch="copper" label="Cost basis (what you paid)" />
-          <Legend swatch="band" label="Unrealised gain" />
+          {!m.costsHidden && <Legend swatch="copper" label="Cost basis (what you paid)" />}
+          {!m.costsHidden && <Legend swatch="band" label="Unrealised gain" />}
         </div>
 
-        <ValueChart series={series} />
+        <ValueChart series={series} costsHidden={m.costsHidden} />
 
         <p className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', lineHeight: 1.6, marginTop: 16, maxWidth: 760 }}>
           Each point is your holdings as of that month. The cost line is what you actually paid over
@@ -431,7 +439,7 @@ function Legend({ swatch, label }) {
 
 }
 
-function ValueChart({ series }) {
+function ValueChart({ series, costsHidden }) {
   const wrapRef = useRefVal(null);
   const [w, setW] = useStateVal(900);
   const [hover, setHover] = useStateVal(null);
@@ -507,18 +515,18 @@ function ValueChart({ series }) {
         null)}
 
         {/* areas */}
-        <path d={gainBand} fill="url(#vc-gain)" />
-        <path d={costArea} fill="url(#vc-cost)" />
+        {!costsHidden && <path d={gainBand} fill="url(#vc-gain)" />}
+        {!costsHidden && <path d={costArea} fill="url(#vc-cost)" />}
 
         {/* lines */}
-        <path d={costLine} fill="none" stroke="var(--copper)" strokeWidth="1.5" strokeOpacity="0.85" />
+        {!costsHidden && <path d={costLine} fill="none" stroke="var(--copper)" strokeWidth="1.5" strokeOpacity="0.85" />}
         <path className="vc-market" d={marketLine} fill="none" stroke="var(--gold)" strokeWidth="2.5" pathLength="1" />
 
         {/* hover */}
         {hv &&
         <g>
             <line x1={x(hover)} y1={padT} x2={x(hover)} y2={baseY} stroke="var(--gold)" strokeWidth="1" strokeOpacity="0.5" strokeDasharray="3 3" />
-            <circle cx={x(hover)} cy={y(hv.costCum)} r="3.5" fill="var(--bg)" stroke="var(--copper)" strokeWidth="1.5" />
+            {!costsHidden && <circle cx={x(hover)} cy={y(hv.costCum)} r="3.5" fill="var(--bg)" stroke="var(--copper)" strokeWidth="1.5" />}
             <circle cx={x(hover)} cy={y(hv.marketCum)} r="4" fill="var(--bg)" stroke="var(--gold)" strokeWidth="2" />
           </g>
         }
@@ -528,8 +536,8 @@ function ValueChart({ series }) {
       <div className="vc-tip" style={{ left: tipLeft, transform: `translateX(${tipSide === 'right' ? '-100%' : '0'})`, marginLeft: tipSide === 'right' ? -10 : 10 }}>
           <div className="vc-tip-month">{hv.label}</div>
           <div className="vc-tip-row"><span className="sw gold"></span>Market<b>{fmtFull(hv.marketCum)}</b></div>
-          <div className="vc-tip-row"><span className="sw copper"></span>Cost<b>{fmtFull(hv.costCum)}</b></div>
-          <div className="vc-tip-row gain"><span className="sw band"></span>Gain<b>{hv.gainCum >= 0 ? '+' : '−'}{fmtFull(Math.abs(hv.gainCum))}</b></div>
+          {!costsHidden && <div className="vc-tip-row"><span className="sw copper"></span>Cost<b>{fmtFull(hv.costCum)}</b></div>}
+          {!costsHidden && <div className="vc-tip-row gain"><span className="sw band"></span>Gain<b>{hv.gainCum >= 0 ? '+' : '−'}{fmtFull(Math.abs(hv.gainCum))}</b></div>}
           {hv.marketAdd > 0 && <div className="vc-tip-add">+{fmtFull(hv.marketAdd)} added · {hv.cardsAdd.toLocaleString()} cards</div>}
         </div>
       }
