@@ -160,10 +160,13 @@ class Auth:
         if provider == "apple":  # name arrives once, as JSON in the POSTed form
             form = await request.form()
             try:
-                n = json.loads(form.get("user") or "{}").get("name") or {}
-                name = " ".join(filter(None, [n.get("firstName"), n.get("lastName")])) or None
-            except ValueError:
-                name = None
+                posted = json.loads(form.get("user") or "{}")
+            except (TypeError, ValueError):
+                posted = None
+            # Whatever was POSTed: only a {"name": {"firstName": "...", "lastName": "..."}} gives a name.
+            n = posted.get("name") if isinstance(posted, dict) else None
+            parts = [n.get(k) for k in ("firstName", "lastName")] if isinstance(n, dict) else []
+            name = " ".join(p for p in parts if isinstance(p, str) and p) or None
         email = info.get("email") or info.get("preferred_username")
         return Profile(provider, str(info["sub"]), email, name)
 
@@ -198,6 +201,7 @@ def find_or_create(db: Session, profile: Profile, current: User | None = None) -
 
 
 def _find_or_create(db: Session, profile: Profile, current: User | None) -> User:
+    name = (profile.name or "")[:200] or None  # users.name is String(200), whatever the provider sent
     identity = db.scalar(
         select(Identity).where(Identity.provider == profile.provider, Identity.subject == profile.subject)
     )
@@ -207,12 +211,12 @@ def _find_or_create(db: Session, profile: Profile, current: User | None) -> User
         user = identity.user
         identity.email = profile.email or identity.email
     else:
-        user = current or User(email=profile.email, name=profile.name)
+        user = current or User(email=profile.email, name=name)
         if current is None:
             db.add(user)
         user.identities.append(Identity(provider=profile.provider, subject=profile.subject, email=profile.email))
-    if profile.name and not user.name:
-        user.name = profile.name
+    if name and not user.name:
+        user.name = name
     if profile.email and not user.email:
         user.email = profile.email
     db.commit()

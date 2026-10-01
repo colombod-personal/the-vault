@@ -335,3 +335,19 @@ def test_a_sign_in_checked_against_a_stale_count_is_refused_on_sqlite(tmp_path):
         assert raced and res.status_code == 401, res.text
         with app.state.db.sessions() as s:
             assert s.scalar(select(Passkey.sign_count)) == 2
+
+
+@pytest.mark.parametrize("transports, kept", [
+    (5, []), ("usb", []), ({"a": 1}, []),
+    (["internal", 7, None, "x" * 33, "hybrid"], ["internal", "hybrid"]),
+    (["usb"] * 20, ["usb"] * 8),
+])
+def test_passkey_transports_keep_only_short_strings(client, transports, kept):
+    device = SoftAuthenticator()
+    options = post(client, "/api/auth/passkey/signup/options", {"name": "Ann"}).json()
+    credential = device.create(options, ORIGIN)
+    credential["response"]["transports"] = transports
+    res = post(client, "/api/auth/passkey/signup/verify", {"credential": credential})
+    assert res.status_code == 200, res.text
+    with Session(client.app.state.db.engine) as s:
+        assert s.get(Passkey, res.json()["passkey_id"]).transports == kept

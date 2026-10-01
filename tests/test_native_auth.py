@@ -414,3 +414,8 @@ def test_a_native_sign_in_needs_a_nonce_and_each_token_works_once(client, idp):
     replay = client.post(f"{V1}/auth/native/google", json={"id_token": token, "nonce": raw})
     assert replay.status_code == 401 and "already used" in replay.json()["detail"]
     assert apple_sign_in(client, idp).status_code == 200  # Apple: SHA-256 of the raw nonce in the token
+
+
+def test_a_native_name_longer_than_an_account_name_is_invalid(client, idp):
+    assert apple_sign_in(client, idp, name="N" * 201).status_code == 422
+    assert apple_sign_in(client, idp, name="N" * 200).status_code == 200

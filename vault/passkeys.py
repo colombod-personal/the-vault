@@ -140,9 +140,10 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
             raise HTTPException(409, "This passkey is already registered")
         if not db.scalar(select(Identity).where(Identity.user_id == user.id, Identity.provider == PROVIDER)):
             user.identities.append(Identity(provider=PROVIDER, subject=pending["handle"]))
-        transports = (body.credential.get("response") or {}).get("transports") or []
+        transports = (body.credential.get("response") or {}).get("transports")
+        transports = [t for t in transports if isinstance(t, str) and len(t) <= 32] if isinstance(transports, list) else []
         passkey = Passkey(user_id=user.id, credential_id=credential_id, public_key=verified.credential_public_key,
-                          sign_count=verified.sign_count, transports=list(transports)[:8],
+                          sign_count=verified.sign_count, transports=transports[:8],
                           name=_label(body.credential, body.name), aaguid=verified.aaguid,
                           backed_up=verified.credential_backed_up)
         db.add(passkey)

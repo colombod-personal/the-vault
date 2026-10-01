@@ -210,7 +210,8 @@ class NativeSignIn(BaseModel):
     id_token: str
     nonce: str = Field(min_length=16, max_length=200,
                        description="The raw nonce the app generated for this sign-in (required; each works once)")
-    name: str | None = Field(None, description="Apple sends the user's name to the app only once; pass it here")
+    name: str | None = Field(None, max_length=200,
+                             description="Apple sends the user's name to the app only once; pass it here")
     device_name: str | None = None
 
 
