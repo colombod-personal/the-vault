@@ -191,10 +191,14 @@ def test_a_sign_up_challenge_is_used_once_even_with_a_saved_cookie(client):
     assert replay.status_code == 400
 
 
-@pytest.mark.skipif(not os.environ.get("VAULT_TEST_POSTGRES_URL"), reason="needs Postgres (row locks)")
-def test_two_removals_at_once_cannot_remove_the_last_passkey():
-    """Two passkeys, no other sign-in: removing both at the same time must leave one."""
-    db = Database(os.environ["VAULT_TEST_POSTGRES_URL"])
+DATABASES = ["sqlite"] + (["postgres"] if os.environ.get("VAULT_TEST_POSTGRES_URL") else [])
+
+
+@pytest.mark.parametrize("backend", DATABASES)
+def test_two_removals_at_once_cannot_remove_the_last_passkey(backend, tmp_path):
+    """Two passkeys, no other sign-in: removing both at the same time must leave one, on
+    Postgres (row lock) and on SQLite (which ignores FOR UPDATE)."""
+    db = Database(os.environ["VAULT_TEST_POSTGRES_URL"] if backend == "postgres" else f"sqlite:///{tmp_path}/race.db")
     with db.engine.begin() as conn:
         Base.metadata.drop_all(conn)
         conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
@@ -300,3 +304,34 @@ def test_two_sign_ins_at_once_cannot_roll_the_counter_back():
         Base.metadata.drop_all(conn)
         conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
     db.engine.dispose()
+
+
+def test_a_sign_in_checked_against_a_stale_count_is_refused_on_sqlite(tmp_path):
+    """SQLite ignores FOR UPDATE, so the count is saved only if it is still the one this
+    sign-in was checked against: a count saved meanwhile by another sign-in is never lowered."""
+    from sqlalchemy import event
+
+    settings = Settings(database_url=f"sqlite:///{tmp_path}/count.db", session_secret="s" * 32, base_url=ORIGIN)
+    app = create_app(settings, serve_static=False)
+    key = SoftAuthenticator()
+    with TestClient(app, base_url=ORIGIN) as client:
+        assert signup(client, key).status_code == 200
+        client.cookies.clear()
+        earlier = key.get(post(client, "/api/auth/passkey/login/options").json(), ORIGIN)  # count 1
+        raced = []
+
+        def a_later_sign_in_saves_first(conn, cursor, statement, *args):
+            if not raced and statement.lstrip().upper().startswith("UPDATE PASSKEYS"):
+                raced.append(True)  # count 2, saved between this sign-in's check and its write
+                with app.state.db.engine.connect() as other:
+                    other.execute(text("UPDATE passkeys SET sign_count = 2"))
+                    other.commit()
+
+        event.listen(app.state.db.engine, "before_cursor_execute", a_later_sign_in_saves_first)
+        try:
+            res = post(client, "/api/auth/passkey/login/verify", {"credential": earlier})
+        finally:
+            event.remove(app.state.db.engine, "before_cursor_execute", a_later_sign_in_saves_first)
+        assert raced and res.status_code == 401, res.text
+        with app.state.db.sessions() as s:
+            assert s.scalar(select(Passkey.sign_count)) == 2

@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 from webauthn import (
     generate_authentication_options,
@@ -225,8 +225,14 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         handle = (body.credential.get("response") or {}).get("userHandle")
         if identity is None or (handle and handle != identity.subject):
             raise HTTPException(401, "This passkey belongs to a different account")
-        passkey.sign_count = verified.new_sign_count
-        passkey.last_used_at = _now()
+        # Saved only if the count is still the one checked above (SQLite ignores the row lock):
+        # a count another sign-in saved meanwhile is never lowered; this one is refused instead.
+        saved = db.execute(update(Passkey).where(Passkey.id == passkey.id, Passkey.sign_count == passkey.sign_count)
+                           .values(sign_count=verified.new_sign_count, last_used_at=_now())
+                           .execution_options(synchronize_session=False)).rowcount
+        if not saved:
+            db.rollback()
+            raise HTTPException(401, "This passkey was just used for another sign-in; try again")
         db.commit()
         sign_in(db, request, _profile(identity.subject), link=False)
         return {"signed_in": True}
@@ -237,19 +243,26 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
 def remove_passkey(db: Session, user_id: int, passkey_id: int) -> None:
     """Delete one of the account's passkeys, unless it is the last way to sign in (409).
 
-    The account row is locked first (``SELECT … FOR UPDATE``), so two removals running at the
-    same time take turns: the second sees what the first left and can't remove the last method.
-    The caller commits."""
+    Two removals running at the same time must not both pass the "another way to sign in is
+    left" check. On Postgres the account row is locked first (``SELECT … FOR UPDATE``), so they
+    take turns. SQLite ignores that lock, so the check is also part of the DELETE itself: one
+    statement that removes the passkey only if another passkey or sign-in remains, evaluated
+    when it runs (SQLite runs writers one at a time). The caller commits."""
     db.execute(select(User.id).where(User.id == user_id).with_for_update())
     passkey = db.get(Passkey, passkey_id, populate_existing=True)
     if passkey is None or passkey.user_id != user_id:
         raise HTTPException(404, "Passkey not found")
-    others = db.scalar(select(func.count(Passkey.id)).where(Passkey.user_id == user_id, Passkey.id != passkey_id))
-    providers = set(db.scalars(select(Identity.provider).where(Identity.user_id == user_id)))
-    if not others and not providers - {PROVIDER}:
+    db.expunge(passkey)
+    passkeys = select(func.count(Passkey.id)).where(Passkey.user_id == user_id).scalar_subquery()
+    other_sign_ins = select(func.count(Identity.id)).where(
+        Identity.user_id == user_id, Identity.provider != PROVIDER).scalar_subquery()
+    removed = db.execute(
+        delete(Passkey).where(Passkey.id == passkey_id, Passkey.user_id == user_id, passkeys + other_sign_ins > 1)
+        .execution_options(synchronize_session=False)).rowcount
+    if not removed:
         raise HTTPException(409, "This is your only way to sign in. Add another passkey or sign-in method first.")
-    db.delete(passkey)
-    if not others:  # no passkeys left: the passkey identity goes too
+    if not db.scalar(select(func.count(Passkey.id)).where(Passkey.user_id == user_id)):
+        # no passkeys left: the passkey identity goes too
         db.execute(delete(Identity).where(Identity.user_id == user_id, Identity.provider == PROVIDER))
     db.flush()
 
