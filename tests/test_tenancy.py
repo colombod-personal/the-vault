@@ -1,6 +1,13 @@
 """Multi-tenancy: nothing crosses between users unless the owner shares it."""
 
+import os
+import threading
+import time
 from pathlib import Path
+
+import pytest
+from sqlalchemy import func, select, text
+from sqlalchemy.orm import Session
 
 CSV = (Path(__file__).parent / "fixtures" / "collection.csv").read_bytes()
 
@@ -186,3 +193,51 @@ def test_sharing_never_reveals_an_email_address(client, settings):
     with engine.begin() as conn:
         conn.execute(text("UPDATE users SET name = NULL WHERE email = 'bob@example.com'"))
     assert "bob@example.com" not in (client.get("/api/v1/shares").json()["items"][0]["with"] or "")
+
+
+@pytest.mark.skipif(not os.environ.get("VAULT_TEST_POSTGRES_URL"), reason="needs Postgres (row locks)")
+def test_two_invites_from_one_owner_accepted_at_once_give_one_grant():
+    """Accepting two invites from the same owner at the same time leaves one grant, so revoking
+    it really ends access."""
+    from vault.db import Base, Database
+    from vault.models import Share, User
+    from vault.sharing import accept_invite, create_invite
+
+    db = Database(os.environ["VAULT_TEST_POSTGRES_URL"])
+    with db.engine.begin() as conn:
+        Base.metadata.drop_all(conn)
+        conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
+    db.migrate()
+    with Session(db.engine) as s:
+        owner, guest = User(name="Owner"), User(name="Guest")
+        s.add_all([owner, guest])
+        s.commit()
+        (_, first), (_, second) = create_invite(s, owner, "collection", None, False), create_invite(s, owner, "collection", None, False)
+        guest_id = guest.id
+
+    done = {}
+
+    def accept_second():
+        with Session(db.engine) as s:
+            accept_invite(s, s.get(User, guest_id), second)
+            done["ok"] = True
+
+    with Session(db.engine) as s:
+        # the first acceptance is half-way: it holds the guest's lock and hasn't committed
+        s.execute(select(User.id).where(User.id == guest_id).with_for_update())
+        accept_invite_no_commit = s.get(User, guest_id)
+        share = s.scalar(select(Share).where(Share.grantee_id.is_(None)).order_by(Share.id))
+        share.grantee_id, share.token_hash = accept_invite_no_commit.id, None
+        s.flush()
+        racer = threading.Thread(target=accept_second)
+        racer.start()
+        time.sleep(0.5)
+        assert racer.is_alive()  # waits for the first acceptance instead of deciding on stale data
+        s.commit()
+    racer.join(10)
+    with Session(db.engine) as s:
+        assert s.scalar(select(func.count(Share.id)).where(Share.grantee_id == guest_id)) == 1
+    with db.engine.begin() as conn:
+        Base.metadata.drop_all(conn)
+        conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
+    db.engine.dispose()

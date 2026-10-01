@@ -107,7 +107,10 @@ class NativeVerifier:
         auds = set(aud) if isinstance(aud, list) else {aud}
         if claims.get("iss") not in ISSUERS[provider]:
             raise NativeTokenError("Wrong issuer")
-        via_server_id = (provider == "google" and self.google_server_audience in auds
+        if not aud or not all(isinstance(a, str) and a for a in auds):
+            raise NativeTokenError("Token has no audience")
+        via_server_id = (provider == "google" and self.google_server_audience is not None
+                         and self.google_server_audience in auds
                          and claims.get("azp") in self.audiences["google"])
         if not (auds & self.audiences[provider] or via_server_id):
             raise NativeTokenError("Token was issued for another app")

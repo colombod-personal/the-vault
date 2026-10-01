@@ -436,3 +436,5 @@ class CatalogSet(BaseModel):
 
 class SetCatalog(Page):
     items: list[CatalogSet]
+    aliases: dict[str, str] = Field(default_factory=dict,
+                                    description="Dragon Shield set codes and the Scryfall set code each stands for")

@@ -59,6 +59,9 @@ def accept_invite(db: Session, user: User, token: str) -> Share:
         raise HTTPException(410, "This invite link has expired")
     if share.owner_id == user.id:
         raise HTTPException(400, "You can't accept your own invite")
+    # Two invites from one owner accepted at once must not both see "no grant yet": hold the
+    # guest's row until this claim is committed.
+    db.execute(select(User.id).where(User.id == user.id).with_for_update())
     existing = db.scalar(select(Share).where(
         Share.owner_id == share.owner_id, Share.grantee_id == user.id,
         Share.kind == share.kind,

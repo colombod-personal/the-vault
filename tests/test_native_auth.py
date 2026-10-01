@@ -362,3 +362,18 @@ def _claims(token):
     import base64 as b64, json as js
     part = token.split(".")[1]
     return js.loads(b64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+
+
+def test_a_google_token_without_an_audience_is_refused_when_no_server_client_is_set(tmp_path):
+    """Only the iOS client configured (no web client): a token with no `aud` must not slip
+    through the server-client path as `None in {None}`."""
+    settings = Settings(database_url=f"sqlite:///{tmp_path}/noaud.db", session_secret="test",
+                        base_url="http://testserver", google_ios_client_id=GOOGLE_IOS)
+    universe = Universe()
+    universe.register_vault(settings)
+    with TestClient(create_app(settings, serve_static=False, transport=universe.transport)) as c:
+        claims = _claims(universe.google.native_id_token(GOOGLE_IOS, "g-noaud"))
+        claims.pop("aud")
+        claims["azp"] = GOOGLE_IOS
+        res = c.post(f"{V1}/auth/native/google", json={"id_token": universe.google.sign(claims)})
+        assert res.status_code == 401, res.text

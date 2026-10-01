@@ -114,6 +114,7 @@ def test_sets_catalog_is_public_and_cached(app, universe):
         body = res.json()
         assert body["count"] == len(body["items"]) > 0
         assert {"code", "name", "icon_svg_uri"} <= set(body["items"][0])
+        assert body["aliases"]["gk2_orzhov"] == "gk2"  # Dragon Shield's set codes, for the set icons
         anonymous.get(f"{V1}/catalog/sets")
     assert len([c for c in universe.scryfall.calls if c.path == "/sets"]) == 1
 
