@@ -95,4 +95,32 @@ def test_a_full_create_all_database_of_the_current_models_is_adopted(database):
     # create_all of today's models: every table and column already there, no alembic_version
     Base.metadata.create_all(database.engine)
     database.migrate()
-    assert _revision(database) == "0003" and _diff(database) == []
+    assert _revision(database) == "0004" and _diff(database) == []
+
+
+def test_duplicate_grants_from_before_are_merged_when_the_unique_index_arrives(database):
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+
+    import vault.db
+
+    config = Config()
+    config.set_main_option("script_location", str(Path(vault.db.__file__).parent / "migrations"))
+    with database.engine.begin() as conn:  # the schema as 0003 left it
+        config.attributes["connection"] = conn
+        command.upgrade(config, "0003")
+    with database.engine.begin() as conn:
+        conn.execute(text("INSERT INTO users (id, name, created_at) VALUES (1, 'Owner', CURRENT_TIMESTAMP), "
+                          "(2, 'Guest', CURRENT_TIMESTAMP)"))
+        for show in (False, True):  # two grants of the same collection, the newer showing costs
+            conn.execute(text("INSERT INTO shares (owner_id, kind, grantee_id, show_costs, created_at) "
+                              "VALUES (1, 'collection', 2, :show, CURRENT_TIMESTAMP)"), {"show": show})
+        conn.execute(text("INSERT INTO shares (owner_id, kind, token_hash, show_costs, created_at) "
+                          "VALUES (1, 'collection', 'pending', false, CURRENT_TIMESTAMP)"))  # an open invite
+    database.migrate()
+    with database.engine.connect() as conn:
+        rows = conn.execute(text("SELECT grantee_id, show_costs FROM shares ORDER BY id")).all()
+    assert [(g, bool(s)) for g, s in rows] == [(2, True), (None, False)]  # one grant (the newest), the invite kept
+    assert _diff(database) == []

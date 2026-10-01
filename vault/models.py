@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from mtg_toolkits.models import CollectionEntry, Condition, Finish
-from sqlalchemy import JSON, Boolean, Index, LargeBinary, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Index, LargeBinary, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -142,6 +142,10 @@ class Share(Base):
     """
 
     __tablename__ = "shares"
+    # One accepted grant per owner, person and thing shared (pending invites have no grantee, and
+    # NULLs never collide): the database refuses a duplicate even where row locks don't exist.
+    __table_args__ = (Index("uq_shares_grant", "owner_id", "grantee_id", "kind",
+                            text("coalesce(deck_id, 0)"), unique=True),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)

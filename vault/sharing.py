@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .models import Deck, Share, User
@@ -51,7 +52,15 @@ def create_invite(db: Session, owner: User, kind: str, deck_id: int | None, show
     return share, token
 
 
-def accept_invite(db: Session, user: User, token: str) -> Share:
+def _grant_of(db: Session, share: Share, user: User) -> Share | None:
+    """``user``'s accepted grant of the same thing ``share`` offers, if any."""
+    return db.scalar(select(Share).where(
+        Share.owner_id == share.owner_id, Share.grantee_id == user.id, Share.kind == share.kind,
+        Share.deck_id.is_(None) if share.deck_id is None else Share.deck_id == share.deck_id,
+    ))
+
+
+def accept_invite(db: Session, user: User, token: str, *, retry: bool = True) -> Share:
     share = db.scalar(select(Share).where(Share.token_hash == _hash(token)))
     if share is None or share.grantee_id is not None:
         raise HTTPException(404, "This invite link is invalid or has already been used")
@@ -62,11 +71,7 @@ def accept_invite(db: Session, user: User, token: str) -> Share:
     # Two invites from one owner accepted at once must not both see "no grant yet": hold the
     # guest's row until this claim is committed.
     db.execute(select(User.id).where(User.id == user.id).with_for_update())
-    existing = db.scalar(select(Share).where(
-        Share.owner_id == share.owner_id, Share.grantee_id == user.id,
-        Share.kind == share.kind,
-        Share.deck_id.is_(None) if share.deck_id is None else Share.deck_id == share.deck_id,
-    ))
+    existing = _grant_of(db, share, user)
     # Claim the invite atomically: of two requests racing for one link, only one matches the
     # unused row; the other gets the same 404 as a used link.
     unused = (Share.id == share.id, Share.token_hash == share.token_hash, Share.grantee_id.is_(None))
@@ -77,8 +82,14 @@ def accept_invite(db: Session, user: User, token: str) -> Share:
         existing.show_costs = share.show_costs
         db.commit()
         return existing
-    claimed = db.execute(update(Share).where(*unused).values(
-        grantee_id=user.id, token_hash=None, accepted_at=datetime.now(timezone.utc))).rowcount  # single use
+    try:
+        claimed = db.execute(update(Share).where(*unused).values(
+            grantee_id=user.id, token_hash=None, accepted_at=datetime.now(timezone.utc))).rowcount  # single use
+    except IntegrityError:  # a grant appeared since we looked (uq_shares_grant): fold into it
+        db.rollback()
+        if not retry:
+            raise
+        return accept_invite(db, user, token, retry=False)
     if not claimed:
         db.rollback()
         raise HTTPException(404, "This invite link is invalid or has already been used")
