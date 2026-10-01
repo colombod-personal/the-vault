@@ -89,10 +89,12 @@ def import_collection(db: Session, user: User, filename: str, content: bytes) ->
             e, user_id=user.id, import_id=imp.id, position=position, match_method=method,
             price_finish=price_finish,
         ))
+    # Today's value right away, so the value-over-time chart starts with the first import (the
+    # daily sync writes it again with that day's prices). Same transaction as the import: if
+    # anything fails, nothing is written and an Idempotency-Key retry imports once.
+    db.flush()
+    compute_values(db, date.today(), user.id, commit=False)
     db.commit()
-    # Today's value right away, so the value-over-time chart starts with the first import
-    # (the daily sync writes it again with that day's prices).
-    compute_values(db, date.today(), user.id)
     return imp
 
 

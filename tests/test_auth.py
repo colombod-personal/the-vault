@@ -1,4 +1,6 @@
+import pytest
 import base64
+import pytest
 import hashlib
 import hmac
 import json
@@ -107,3 +109,8 @@ def test_account_marker_cookie_follows_the_signed_in_account(client):
     client.post("/api/auth/logout")
     client.get("/api/auth/providers")
     assert "vault_account" not in client.cookies
+
+
+@pytest.mark.parametrize("payload", [[1, 2], "user", 42])
+def test_facebook_signed_request_that_is_not_an_object_is_refused(payload):
+    assert parse_signed_request(_signed(payload, "fb-secret"), "fb-secret") is None

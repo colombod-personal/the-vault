@@ -8,7 +8,10 @@ we check the signature against the provider's published keys, the issuer, the au
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import hashlib
+import json
 import time
 
 import httpx
@@ -27,6 +30,7 @@ ISSUERS = {
     "google": {"https://accounts.google.com", "accounts.google.com"},
 }
 CACHE_SECONDS = 3600
+REFRESH_COOLDOWN = 60  # seconds between early key refreshes (for a token with an unknown key id)
 
 
 class NativeTokenError(Exception):
@@ -50,15 +54,25 @@ class NativeVerifier:
         self.google_server_audience = settings.google_client_id if settings.google_ios_client_id else None
         self.transport = transport
         self._keys: dict[str, tuple[float, KeySet]] = {}
+        self._refreshed: dict[str, float] = {}  # provider -> when keys were last refetched early
+        self._locks: dict[str, asyncio.Lock] = {}
 
     @property
     def enabled(self) -> list[str]:
         return [p for p, auds in self.audiences.items() if auds]
 
     async def _keyset(self, provider: str, refresh: bool = False) -> KeySet:
+        asked = time.time()
         cached = self._keys.get(provider)
-        if cached and not refresh and time.time() - cached[0] < CACHE_SECONDS:
+        if cached and not refresh and asked - cached[0] < CACHE_SECONDS:
             return cached[1]
+        async with self._locks.setdefault(provider, asyncio.Lock()):  # one fetch at a time
+            cached = self._keys.get(provider)
+            if cached and (cached[0] >= asked if refresh else time.time() - cached[0] < CACHE_SECONDS):
+                return cached[1]  # another request fetched them while this one waited
+            return await self._fetch_keys(provider)
+
+    async def _fetch_keys(self, provider: str) -> KeySet:
         try:
             async with httpx.AsyncClient(transport=self.transport, timeout=10) as client:
                 meta = (await client.get(DISCOVERY[provider])).raise_for_status().json()
@@ -73,9 +87,17 @@ class NativeVerifier:
         if provider not in self.audiences or not self.audiences[provider]:
             raise NativeTokenError(f"Native sign-in with {provider} is not configured")
         try:
+            keys = await self._keyset(provider)
             try:
-                token = jwt.decode(id_token, await self._keyset(provider))
-            except JoseError:  # maybe the provider rotated its keys
+                token = jwt.decode(id_token, keys)
+            except JoseError:
+                # Only a key id we don't have means the provider rotated its keys. Anything else
+                # (a forged or broken token) is refused from the cached keys, so bad tokens can't
+                # make us call the provider; and an early refresh happens at most once a minute.
+                kid = _key_id(id_token)
+                if not kid or _has_kid(keys, kid) or time.time() - self._refreshed.get(provider, 0) < REFRESH_COOLDOWN:
+                    raise
+                self._refreshed[provider] = time.time()
                 token = jwt.decode(id_token, await self._keyset(provider, refresh=True))
         except (JoseError, ValueError) as exc:
             raise NativeTokenError(f"Invalid ID token: {exc}") from exc
@@ -99,3 +121,17 @@ class NativeVerifier:
         if not claims.get("sub"):
             raise NativeTokenError("Token has no subject")
         return claims
+
+
+def _key_id(token: str) -> str | None:
+    """The ``kid`` in a JWT's header, read without trusting anything else in it."""
+    try:
+        header = token.split(".", 1)[0]
+        kid = json.loads(base64.urlsafe_b64decode(header + "=" * (-len(header) % 4))).get("kid")
+    except (ValueError, AttributeError, TypeError):
+        return None
+    return kid if isinstance(kid, str) else None
+
+
+def _has_kid(keys: KeySet, kid: str) -> bool:
+    return any(k.kid == kid for k in keys.keys)

@@ -20,6 +20,7 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from .importer import export_collection
+from .sharing import display_name
 from .models import AccessToken, ApiSession, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionValue, Deck, Entry, Identity, Import, Share, User
 from .prices import history
 from .collection_view import CollectionView
@@ -62,7 +63,8 @@ def _json(data) -> bytes:
 
 
 def _display(user: User | None) -> str | None:
-    return (user.name or user.email) if user else None
+    """Other people in your export are named as sharing names them: never by e-mail address."""
+    return display_name(user) if user else None
 
 
 def export_archive(db: Session, user: User) -> bytes:

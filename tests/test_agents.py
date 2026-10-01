@@ -268,3 +268,38 @@ def test_mcp_arguments_of_the_wrong_type_are_invalid(agent, bot, tool, arguments
     read = make_token(agent)
     res = rpc(bot, "tools/call", {"name": tool, "arguments": arguments}, read)
     assert res.status_code == 200 and res.json()["error"]["code"] == -32602, res.text
+
+
+@pytest.mark.parametrize("arguments", [
+    {"identifiers": [1]},  # an identifier that isn't an object
+    {"identifiers": [{"nope": "x"}]},  # a property the schema doesn't allow
+    {"identifiers": [{"id": 5}]},  # a nested value of the wrong type
+    {"identifiers": [{"name": "Sol Ring"}] * 76},  # more than maxItems
+])
+def test_mcp_tool_arguments_are_checked_all_the_way_down(agent, bot, arguments):
+    read = make_token(agent)
+    res = rpc(bot, "tools/call", {"name": "lookup_cards", "arguments": arguments}, read)
+    assert res.status_code == 200 and res.json()["error"]["code"] == -32602, res.text
+
+
+def test_an_idempotent_import_that_fails_late_is_undone_and_can_be_retried(signed_in, monkeypatch):
+    """If anything fails after the import was written, the import and the key go together: a
+    retry with the same key imports once, never twice."""
+    from vault import importer
+
+    real = importer.compute_values
+    calls = {"n": 0}
+
+    def flaky(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("the database went away")
+        return real(*a, **kw)
+
+    monkeypatch.setattr(importer, "compute_values", flaky)
+    headers = {"Idempotency-Key": "import-late-failure"}
+    with pytest.raises(RuntimeError):
+        signed_in.post(f"{V1}/imports", files={"file": ("e.csv", CSV, "text/csv")}, headers=headers)
+    retry = signed_in.post(f"{V1}/imports", files={"file": ("e.csv", CSV, "text/csv")}, headers=headers)
+    assert retry.status_code == 201, retry.text
+    assert signed_in.get(f"{V1}/imports").json()["total"] == 1

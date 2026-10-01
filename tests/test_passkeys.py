@@ -235,3 +235,28 @@ def test_two_removals_at_once_cannot_remove_the_last_passkey():
         Base.metadata.drop_all(conn)
         conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
     db.engine.dispose()
+
+
+def test_passkeys_added_from_two_devices_at_once_both_sign_in(tmp_path):
+    """An account without a passkey yet, registering on two devices at the same time: both
+    passkeys must carry the account's one WebAuthn user handle, or the second is refused."""
+    origin = "http://localhost:8000"
+    settings = Settings(database_url=f"sqlite:///{tmp_path}/two.db", session_secret="s" * 32,
+                        base_url=origin, dev_login=True)
+    app = create_app(settings, serve_static=False)
+    with TestClient(app, base_url=origin) as a, TestClient(app, base_url=origin) as b:
+        a.post("/api/auth/dev-login")
+        b.post("/api/auth/dev-login")  # the same account, a second session
+        phone, laptop = SoftAuthenticator(), SoftAuthenticator()
+        options_a = a.post("/api/auth/passkey/register/options").json()
+        options_b = b.post("/api/auth/passkey/register/options").json()
+        assert a.post("/api/auth/passkey/register/verify",
+                      json={"credential": phone.create(options_a, origin)}).status_code == 200
+        second = b.post("/api/auth/passkey/register/verify", json={"credential": laptop.create(options_b, origin)})
+        if second.status_code == 200:  # kept: it must work for signing in
+            b.cookies.clear()
+            options = b.post("/api/auth/passkey/login/options").json()
+            res = b.post("/api/auth/passkey/login/verify", json={"credential": laptop.get(options, origin)})
+            assert res.status_code == 200, res.text
+        else:
+            assert second.status_code == 409

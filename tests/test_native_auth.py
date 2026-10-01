@@ -326,3 +326,21 @@ def test_native_endpoint_takes_only_tokens_made_for_the_app(tmp_path, provider, 
         token = twin.native_id_token(aud, f"{provider[0]}-aud", **extra)
         res = c.post(f"{V1}/auth/native/{provider}", json={"id_token": token})
         assert (res.status_code == 200) is ok, res.text
+
+
+def test_bad_tokens_do_not_make_the_vault_refetch_provider_keys(client, idp):
+    """Only a token signed with a key id the Vault hasn't seen triggers a key refresh, and at
+    most once a minute: a flood of forged tokens can't turn into calls to Apple."""
+    assert apple_sign_in(client, idp).status_code == 200  # keys cached
+    keys = lambda: sum(c.path == "/auth/keys" for c in idp.apple.calls)  # noqa: E731
+    before = keys()
+    forger = RSAKey.generate_key(2048, parameters={"kid": idp.apple.keys[0].kid})
+    for _ in range(5):  # known key id, wrong signature
+        token = idp.apple.native_id_token(BUNDLE, "a-x", key=forger)
+        assert client.post(f"{V1}/auth/native/apple", json={"id_token": token}).status_code == 401
+    assert keys() == before
+    for i in range(5):  # unknown key ids
+        stranger = RSAKey.generate_key(2048, parameters={"kid": f"unknown-{i}"})
+        token = idp.apple.native_id_token(BUNDLE, "a-x", key=stranger)
+        assert client.post(f"{V1}/auth/native/apple", json={"id_token": token}).status_code == 401
+    assert keys() == before + 1  # one refresh, then the cooldown

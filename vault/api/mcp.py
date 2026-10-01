@@ -69,23 +69,42 @@ JSON_TYPES = {"string": (str,), "integer": (int,), "number": (int, float), "bool
               "array": (list,), "object": (dict,)}
 
 
-def _fits(schema: dict, value: Any) -> bool:
-    """Whether an argument matches its input schema's type, enum and bounds. Tool schemas are
-    otherwise only descriptive, and paths are built from these values."""
+def _invalid(schema: dict, value: Any, where: str) -> str | None:
+    """Why ``value`` doesn't match ``schema``, or None. Tool schemas are otherwise only
+    descriptive, and paths and API bodies are built from these values. Covers the keywords the
+    tools use: type, enum, bounds, lengths, items, properties, required, additionalProperties."""
     kind = schema.get("type")
     if kind in JSON_TYPES:
-        if isinstance(value, bool) and kind != "boolean":  # JSON true is not a number
-            return False
-        if not isinstance(value, JSON_TYPES[kind]):
-            return False
+        if (isinstance(value, bool) and kind != "boolean") or not isinstance(value, JSON_TYPES[kind]):
+            return f"{where} must be {'an' if kind[0] in 'aeiou' else 'a'} {kind}"
     if "enum" in schema and value not in schema["enum"]:
-        return False
+        return f"{where} must be one of {schema['enum']}"
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         if "minimum" in schema and value < schema["minimum"]:
-            return False
+            return f"{where} must be at least {schema['minimum']}"
         if "maximum" in schema and value > schema["maximum"]:
-            return False
-    return True
+            return f"{where} must be at most {schema['maximum']}"
+    if isinstance(value, str):
+        if len(value) < schema.get("minLength", 0) or len(value) > schema.get("maxLength", len(value)):
+            return f"{where} has the wrong length"
+    if isinstance(value, list):
+        if len(value) < schema.get("minItems", 0) or len(value) > schema.get("maxItems", len(value)):
+            return f"{where} has the wrong number of items"
+        for i, item in enumerate(value):
+            if "items" in schema and (why := _invalid(schema["items"], item, f"{where}[{i}]")):
+                return why
+    if isinstance(value, dict) and ("properties" in schema or "required" in schema):
+        properties = schema.get("properties", {})
+        for name in schema.get("required", []):
+            if value.get(name) in (None, ""):
+                return f"{where}.{name} is required"
+        for name, item in value.items():
+            if name not in properties:
+                if schema.get("additionalProperties", True) is False:
+                    return f"{where}.{name} is not allowed"
+            elif item is not None and (why := _invalid(properties[name], item, f"{where}.{name}")):
+                return why
+    return None
 
 
 def _base(args: dict) -> str:
@@ -265,13 +284,9 @@ def build_router(optional_user) -> APIRouter:
                 return _rpc_error(id_, -32602, f"Unknown tool: {params.get('name')}")
             if not isinstance(args, dict):
                 return _rpc_error(id_, -32602, "Invalid arguments: must be an object")
-            missing = [r for r in tool.required if args.get(r) in (None, "")]
-            unknown = [k for k in args if k not in tool.properties]
-            if missing or unknown:
-                return _rpc_error(id_, -32602, f"Invalid arguments: missing {missing}, unknown {unknown}")
-            wrong = [k for k, v in args.items() if v is not None and not _fits(tool.properties[k], v)]
-            if wrong:
-                return _rpc_error(id_, -32602, f"Invalid arguments: wrong type or value for {wrong}")
+            why = _invalid(tool.schema()["inputSchema"], args, "arguments")
+            if why:
+                return _rpc_error(id_, -32602, f"Invalid arguments: {why}")
             status, body = await call_api(request, tool, args, part)
             body = _with_cursor(body)
             text = json.dumps(body, separators=(",", ":"), default=str)

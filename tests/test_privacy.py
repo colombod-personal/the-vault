@@ -74,3 +74,23 @@ def test_every_table_referencing_users_is_purged():
         if any(fk.column.table.name == "users" for fk in t.foreign_keys)
     } | {"users"}
     assert referencing == set(personal_data(0)), "add new per-user tables to vault.privacy.personal_data"
+
+
+def test_export_never_contains_someone_elses_email(client, settings):
+    """shares.json names the people you share with by display name, never by e-mail."""
+    from sqlalchemy import create_engine, text
+
+    def login(email):
+        client.cookies.clear()
+        client.post("/api/auth/dev-login", params={"email": email})
+
+    login("alice@example.com")
+    token = client.post("/api/v1/shares", json={"kind": "collection"}).json()["url"].split("invite=")[1]
+    login("bob@example.com")
+    client.post("/api/v1/shares/accept", json={"token": token})
+    with create_engine(settings.database_url).begin() as conn:
+        conn.execute(text("UPDATE users SET name = NULL"))
+    for me, other in (("alice@example.com", "bob@example.com"), ("bob@example.com", "alice@example.com")):
+        login(me)
+        shares = zipfile.ZipFile(io.BytesIO(client.get("/api/v1/me/export").content)).read("shares.json").decode()
+        assert other not in shares, shares

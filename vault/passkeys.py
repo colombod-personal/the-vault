@@ -186,6 +186,13 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         pending = _take(request, db, "register")
         if pending.get("uid") != user.id:
             raise HTTPException(400, "This passkey request belongs to another session")
+        # The account has one WebAuthn user handle. If another device added the first passkey
+        # while this request was open, its handle won: a passkey made with ours could never sign
+        # in, so start again (the account row is locked so two of these can't both decide).
+        db.execute(select(User.id).where(User.id == user.id).with_for_update())
+        identity = db.scalar(select(Identity).where(Identity.user_id == user.id, Identity.provider == PROVIDER))
+        if identity is not None and identity.subject != pending["handle"]:
+            raise HTTPException(409, "A passkey was just added to this account from another device. Please try again.")
         passkey = save_credential(db, user, pending, body)
         return {"added": True, "passkey_id": passkey.id}
 

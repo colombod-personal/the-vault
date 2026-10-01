@@ -38,8 +38,9 @@ def unit_price(row: Entry, snap: PriceSnapshot | None) -> tuple[float, bool]:
     return float((row.source_prices or {}).get("market") or 0.0), False
 
 
-def compute_values(db: Session, day: date, user_id: int | None = None) -> int:
-    """Write every user's (or one user's) collection value for ``day``. Returns users processed."""
+def compute_values(db: Session, day: date, user_id: int | None = None, *, commit: bool = True) -> int:
+    """Write every user's (or one user's) collection value for ``day``. Returns users processed.
+    ``commit=False`` leaves it in the caller's transaction."""
     query = select(Entry) if user_id is None else select(Entry).where(Entry.user_id == user_id)
     rows = list(db.scalars(query))
     prices = latest_prices(db, {r.scryfall_id for r in rows if r.scryfall_id})
@@ -56,7 +57,8 @@ def compute_values(db: Session, day: date, user_id: int | None = None) -> int:
             user_id=user_id, day=day, market_usd=round(market, 2), cost_usd=round(cost, 2),
             copies=int(copies), priced_copies=int(priced),
         ))
-    db.commit()
+    if commit:
+        db.commit()
     return len(totals)
 
 

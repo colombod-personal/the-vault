@@ -55,4 +55,6 @@ def parse_signed_request(signed_request: str, secret: str) -> dict | None:
         payload = json.loads(_b64decode(payload_b64))
     except (ValueError, TypeError):
         return None
-    return payload if payload.get("algorithm", "").upper() == "HMAC-SHA256" and "user_id" in payload else None
+    if not isinstance(payload, dict) or str(payload.get("algorithm", "")).upper() != "HMAC-SHA256":
+        return None
+    return payload if "user_id" in payload else None
