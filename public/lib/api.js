@@ -193,7 +193,7 @@ window.VaultApi = (() => {
         version: summary.version, source: summary.source, offline: !!origin.offline, fromCache: !!origin.fromCache, savedAt: origin.savedAt,
       },
       sets: sets.map((s) => ({ code: s.code, name: s.name, qty: s.copies, value: s.market_value, unique: s.printings })),
-      timeline: timeline.months.map((m) => ({ month: m.month, qty: m.copies })),
+      timeline: timeline.months.map((m) => ({ month: m.month, qty: m.copies, market: m.market, paid: m.paid })),
       cards, byName, history,
     };
   }

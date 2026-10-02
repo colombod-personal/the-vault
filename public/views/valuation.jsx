@@ -13,10 +13,16 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
   const m = data.meta;
   const fresh = window.vaultFreshness(m.generatedAt);
 
-  // Build monthly cumulative series from acquisition dates, valued at current prices.
+  // Build monthly cumulative series from acquisition dates, valued at current prices. The server's
+  // timeline counts each purchase in its own month (a printing bought in several months is one
+  // card here, dated by its first purchase); the per-card fallback is for older saved copies.
   const full = useMemoVal(() => {
     const byMonth = {};
-    for (const c of data.cards) {
+    const perMonth = (data.timeline || []).length && data.timeline.every((t) => typeof t.market === 'number');
+    if (perMonth) {
+      for (const t of data.timeline) byMonth[t.month] = { market: t.market, cost: t.paid || 0, cards: t.qty || 0 };
+    }
+    for (const c of perMonth ? [] : data.cards) {
       const ym = (c.fd || '').slice(0, 7);
       if (!ym) continue;
       const b = byMonth[ym] || (byMonth[ym] = { market: 0, cost: 0, cards: 0 });

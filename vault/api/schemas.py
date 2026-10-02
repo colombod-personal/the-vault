@@ -151,6 +151,7 @@ class SetPage(Page):
 class Month(BaseModel):
     month: str
     copies: int
+    market: float = Field(0.0, description="Today's market value of the copies bought that month")
     paid: float | None = None
 
 

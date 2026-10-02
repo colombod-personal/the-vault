@@ -573,3 +573,12 @@ def test_the_data_export_has_only_finite_values_in_its_history(app, signed_in):
     text = z.read("value_history.json").decode()
     rows = json.loads(text, parse_constant=lambda c: pytest.fail(f"{c} in value_history.json"))
     assert rows and all(r["market"] is None and r["cost"] is None for r in rows)
+
+
+def test_the_timeline_puts_each_copys_value_in_the_month_it_was_bought(signed_in):
+    """A printing bought in several months (3 copies in February, 1 in March) adds each copy's
+    market value and cost to its own month, not all of them to the first purchase."""
+    upload(signed_in)
+    months = {m["month"]: m for m in signed_in.get(f"{V1}/collection/timeline").json()["months"]}
+    assert (months["2024-02"]["copies"], months["2024-02"]["market"], months["2024-02"]["paid"]) == (3, 0.27, 0.18)
+    assert (months["2024-03"]["copies"], months["2024-03"]["market"], months["2024-03"]["paid"]) == (1, 0.09, 0.05)

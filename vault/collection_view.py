@@ -109,6 +109,7 @@ class CollectionView:
         set_names = dict(db.execute(select(Card.scryfall_id, Card.set_name).where(Card.scryfall_id.in_(ids))).all()) if ids else {}
         groups: dict[str, Group] = {}
         months: Counter = Counter()
+        worth: Counter = Counter()  # today's market value of the copies bought each month
         spend: Counter = Counter()
         for r in rows:
             printing = _printing(r)
@@ -140,9 +141,10 @@ class CollectionView:
                 g.low, g.mid = plausible_price(sp.get("low", g.low)), plausible_price(sp.get("mid", g.mid))
             if day:
                 months[day[:7]] += r.quantity
+                worth[day[:7]] += price * r.quantity
                 spend[day[:7]] += (paid or 0.0) * r.quantity
         ordered = sorted(groups.values(), key=lambda g: (g.name.lower(), g.set_code, g.number, g.id))
-        timeline = [(m, months[m], round(spend[m], 2)) for m in sorted(months)]
+        timeline = [(m, months[m], round(spend[m], 2), round(worth[m], 2)) for m in sorted(months)]
         latest = db.execute(select(Import.created_at, Import.source).where(Import.user_id == user.id)
                             .order_by(Import.id.desc()).limit(1)).first()
         return ordered, timeline, latest[0] if latest else None, latest[1] if latest else None
@@ -221,7 +223,8 @@ class CollectionView:
         return sorted(sets.values(), key=lambda s: (-s["market_value"], s["code"]))
 
     def timeline(self) -> list[dict]:
-        return [{"month": m, "copies": q, "paid": None if self.hide_costs else paid} for m, q, paid in self.months]
+        return [{"month": m, "copies": q, "market": market, "paid": None if self.hide_costs else paid}
+                for m, q, paid, market in self.months]
 
     def stats(self, top: int = 8) -> dict:
         foil_value = sum(g.value for g in self.groups if "foil" in g.printing.lower() or g.finish != "nonfoil")
