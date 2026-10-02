@@ -44,9 +44,9 @@ def latest_prices(db: Session, scryfall_ids: set[str]) -> dict[str, PriceSnapsho
 def unit_price(row: Entry, snap: PriceSnapshot | None) -> tuple[float, bool]:
     """(price, from_scryfall). Falls back to the file's own market price."""
     if snap is not None:
-        price = snap.for_finish(row.price_finish or row.finish)
-        if price is not None:
-            return plausible_price(price) or 0.0, True
+        price = plausible_price(snap.for_finish(row.price_finish or row.finish))
+        if price is not None:  # an implausible stored price falls back to the file's, like a missing one
+            return price, True
     return plausible_price((row.source_prices or {}).get("market")) or 0.0, False
 
 

@@ -533,3 +533,13 @@ def test_daily_values_ignore_prices_no_import_would_accept(app, signed_in):
         compute_values(db, date(2026, 9, 28))
         [value] = db.scalars(select(CollectionValue).where(CollectionValue.day == date(2026, 9, 28))).all()
         assert (value.market_usd, value.cost_usd) == (0.0, 0.0)
+
+
+@pytest.mark.parametrize("stored", [float("inf"), 1.7e308])
+def test_an_implausible_scryfall_price_falls_back_to_the_files_price(stored):
+    from types import SimpleNamespace
+
+    from vault.prices import unit_price
+    row = SimpleNamespace(price_finish=None, finish="nonfoil", source_prices={"market": 2.5})
+    snap = SimpleNamespace(for_finish=lambda finish: stored)
+    assert unit_price(row, snap) == (2.5, False)
