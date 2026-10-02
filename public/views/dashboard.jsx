@@ -1,7 +1,7 @@
 // Dashboard view — Vault overview
 const { useMemo, useState } = React;
 
-function Dashboard({ data, gotoBrowse, gotoSet, gotoValuation, openCard, onRefresh, refreshing, refreshProgress, refreshError }) {
+function Dashboard({ data, gotoBrowse, gotoSets, gotoSet, gotoValuation, openCard, onRefresh, refreshing, refreshProgress, refreshError }) {
   const m = data.meta;
   // P&L counts only cards with a known cost (see vaultPnL): no full-value "profit" on unrecorded prices.
   const pnlAll = useMemo(() => window.vaultPnL(data.cards, m.costsHidden), [data]);
@@ -157,7 +157,7 @@ function Dashboard({ data, gotoBrowse, gotoSet, gotoValuation, openCard, onRefre
               <p className="eyebrow">Composition</p>
               <h2 className="h2" style={{ marginTop: 4, fontSize: 22 }}>Top sets by market value</h2>
             </div>
-            <button className="btn ghost sm" onClick={() => gotoBrowse({ view: 'sets' })}>All sets →</button>
+            <button className="btn ghost sm" onClick={gotoSets}>All sets →</button>
           </div>
           <div>
             {topSets.map(s => (

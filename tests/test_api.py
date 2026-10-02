@@ -499,3 +499,16 @@ def test_an_import_matches_known_printings_the_way_the_library_does(app, client)
     assert upload(client, padded).status_code == 201
     cards = {c["name"]: c for c in all_cards(client)}
     assert cards["Sol Ring"]["price"]["source"] == "scryfall"
+
+
+def test_pnl_counts_only_copies_with_a_known_cost(signed_in):
+    # One printing, two rows: 1 copy bought at $1.00, 3 copies with no price paid, market $2.00.
+    rows = ("Folder Name,Quantity,Trade Quantity,Card Name,Set Code,Set Name,Card Number,Condition,Printing,Language,"
+            "Price Bought,Date Bought,LOW,MID,MARKET\n"
+            "a,1,0,Sol Ring,C21,Commander 2021,263,Mint,Normal,English,1.00,2024-01-01,1,2,2.00\n"
+            "a,3,0,Sol Ring,C21,Commander 2021,263,Mint,Normal,English,,2024-01-02,1,2,2.00\n")
+    assert upload(signed_in, rows.encode()).status_code in (200, 201)
+    [sol] = all_cards(signed_in)
+    assert (sol["quantity"], sol["paid"], sol["paid_quantity"]) == (4, 1.0, 1)
+    st = signed_in.get(f"{V1}/collection/stats").json()
+    assert st["biggest_gains"][0]["gain"] == 1.0  # 1 copy × $2 − $1, not 4 copies × $2 − $1

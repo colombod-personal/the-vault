@@ -170,7 +170,7 @@ window.VaultApi = (() => {
     const cards = items.map((c) => ({
       key: c.id, n: c.name, s: c.set.code, sn: c.set.name, cn: c.collector_number, p: c.printing,
       c: CONDITION[c.condition] || c.condition, l: LANGUAGE[c.language] || c.language, q: c.quantity,
-      pd: c.paid || 0, lo: c.price.low, mi: c.price.mid, mk: c.price.market,
+      pd: c.paid || 0, pq: c.paid_quantity, lo: c.price.low, mi: c.price.mid, mk: c.price.market,
       fd: c.acquired.first || '', ld: c.acquired.last || '', id: c.scryfall_id, fin: c.finish, src: c.price.source,
       href: c._links.self.href,
     }));

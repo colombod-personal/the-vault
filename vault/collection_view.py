@@ -53,6 +53,7 @@ class Group:
     language: str
     quantity: int = 0
     paid: float = 0.0
+    paid_quantity: int = 0  # copies with a recorded price paid; P&L counts only these
     price: float = 0.0
     price_source: str = "file"
     low: float | None = None
@@ -128,6 +129,8 @@ class CollectionView:
                              "purchase_date": day})
             g.quantity += r.quantity
             g.paid += (paid or 0.0) * r.quantity
+            if paid:
+                g.paid_quantity += r.quantity
             g.scryfall_id = g.scryfall_id or r.scryfall_id
             sp = r.source_prices or {}
             if day and (g.first_acquired is None or day < g.first_acquired):
@@ -151,6 +154,7 @@ class CollectionView:
             "collector_number": g.number, "printing": g.printing, "finish": g.finish,
             "condition": g.condition, "language": g.language, "quantity": g.quantity,
             "paid": None if self.hide_costs else round(g.paid, 2),
+            "paid_quantity": None if self.hide_costs else g.paid_quantity,
             "price": {"market": g.price, "low": g.low, "mid": g.mid, "currency": "USD", "source": g.price_source},
             "value": g.value, "acquired": {"first": g.first_acquired, "last": g.last_acquired},
             "scryfall_id": g.scryfall_id,
@@ -230,7 +234,8 @@ class CollectionView:
             "most_valuable": [self.item(g) for g in sorted(self.groups, key=lambda g: -g.value)[:top]],
         }
         if not self.hide_costs:
-            pnl = [(g.value - g.paid, g) for g in self.groups if g.paid > 0]
+            # only copies with a known cost: their market value against what was paid for them
+            pnl = [(g.price * g.paid_quantity - g.paid, g) for g in self.groups if g.paid_quantity]
             out["biggest_gains"] = [dict(self.item(g), gain=round(d, 2)) for d, g in sorted(pnl, key=lambda x: -x[0])[:top]]
             out["biggest_losses"] = [dict(self.item(g), gain=round(d, 2)) for d, g in sorted(pnl, key=lambda x: x[0])[:top]]
         return out

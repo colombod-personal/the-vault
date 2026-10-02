@@ -17,12 +17,13 @@ function Lab({ data, openCard }) {
     for (const c of data.cards) {
       const total = c.mk * c.q;
       // P&L only for cards with a known cost (vaultCostKnown): no full-value "winners" with no price paid.
-      if (window.vaultCostKnown(c, data.meta.costsHidden)) {
-        const pnl = total - c.pd;
+      const r = window.vaultCardPnL(c, data.meta.costsHidden);
+      if (r.state === 'known') {
+        const pnl = r.pnl;
         if (!biggestGain || pnl > biggestGain.pnl) biggestGain = { c, pnl };
         if (!biggestLoss || pnl < biggestLoss.pnl) biggestLoss = { c, pnl };
-        totalPaid += c.pd;
-        totalCards += c.q;
+        totalPaid += r.paid;
+        totalCards += r.qty;
       }
       totalValue += total;
       if (c.p && c.p.includes('Foil')) foilValue += total;
@@ -40,13 +41,10 @@ function Lab({ data, openCard }) {
 
   // P&L lists (winners / losers) per printing
   const pnlList = useMemoL(() => {
-    const withPnL = data.cards.map(c => ({
-      c,
-      total: c.mk * c.q,
-      paid: c.pd,
-      pnl: c.mk * c.q - c.pd,
-      pnlPct: c.pd > 0 ? ((c.mk * c.q - c.pd) / c.pd) * 100 : null,
-    })).filter(x => x.paid > 0);
+    // only copies with a known cost (vaultCardPnL), against what was paid for them
+    const withPnL = data.cards.map(c => ({ c, r: window.vaultCardPnL(c, data.meta.costsHidden) }))
+      .filter(x => x.r.state === 'known')
+      .map(({ c, r }) => ({ c, qty: r.qty, total: r.market, paid: r.paid, pnl: r.pnl, pnlPct: (r.pnl / r.paid) * 100 }));
     return {
       winners: withPnL.slice().sort((a, b) => b.pnl - a.pnl).slice(0, 8),
       losers: withPnL.slice().sort((a, b) => a.pnl - b.pnl).slice(0, 8),
@@ -220,7 +218,7 @@ function Lab({ data, openCard }) {
                       <span>{row.c.s}</span>
                     </span>
                   </td>
-                  <td className="num">{row.c.q}</td>
+                  <td className="num">{row.qty}</td>
                   <td className="num muted">${row.paid.toFixed(2)}</td>
                   <td className="num" style={{ color: 'var(--gold)' }}>${row.total.toFixed(2)}</td>
                   <td className="num" style={{ color: row.pnl >= 0 ? 'var(--good)' : 'var(--danger)' }}>

@@ -51,39 +51,6 @@ window.vaultRecompute = function (base, at) {
   return { ...base, cards, sets, byName, meta };
 };
 
-// The one rule for cost and profit & loss: a card's cost is known when the owner shares prices
-// paid (not `meta.costsHidden`) and a price paid was recorded (`pd` is 0 when it wasn't).
-// P&L only ever counts cards with a known cost.
-window.vaultCostKnown = (card, costsHidden) => !costsHidden && (card.pd || 0) > 0;
-
-// One card's P&L: { state: 'private' | 'unknown' | 'known', pnl }.
-window.vaultCardPnL = (card, costsHidden) => {
-  if (costsHidden) return { state: 'private', pnl: null };
-  if (!window.vaultCostKnown(card, false)) return { state: 'unknown', pnl: null };
-  return { state: 'known', pnl: (card.mk || 0) * (card.q || 0) - card.pd };
-};
-
-// P&L over many cards, counting only those with a known cost.
-window.vaultPnL = (cards, costsHidden) => {
-  let paid = 0, market = 0, known = 0, unknown = 0;
-  for (const c of cards) {
-    if (window.vaultCostKnown(c, costsHidden)) { paid += c.pd; market += (c.mk || 0) * (c.q || 0); known++; }
-    else unknown++;
-  }
-  const pnl = market - paid;
-  return { hidden: !!costsHidden, known, unknown, paid, market, pnl: known ? pnl : null, pct: paid ? (pnl / paid) * 100 : null };
-};
-
-// Text for one card's "Spent" and "P&L" cells: "private" when the owner hides costs, "—" when unknown.
-window.vaultSpentText = (card, costsHidden) =>
-  costsHidden ? 'private' : window.vaultCostKnown(card, false) ? `$${card.pd.toFixed(2)}` : '—';
-window.vaultPnLText = (card, costsHidden) => {
-  const r = window.vaultCardPnL(card, costsHidden);
-  if (r.state === 'private') return 'private';
-  if (r.state === 'unknown') return '—';
-  return `${r.pnl >= 0 ? '+' : '−'}$${Math.abs(r.pnl).toFixed(2)}`;
-};
-
 // Props that make a clickable tile work from the keyboard and for screen readers, like a button:
 // focusable, announced as a button, activated with Enter or Space.
 window.vaultPressable = (action, label) => ({
@@ -465,6 +432,7 @@ function App() {
             <Dashboard
               data={data}
               gotoBrowse={(q) => nav('browse', { initialQuery: q })}
+              gotoSets={() => nav('sets')}
               gotoSet={code => nav('setdetail', { code })}
               gotoValuation={() => nav('valuation')}
               onRefresh={doRefresh}
