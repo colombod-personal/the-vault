@@ -201,12 +201,45 @@ python -m jobs.vercel_setup --scope wintermute2 --provider google   # or microso
 unset VERCEL_TOKEN
 ```
 
-| Provider | Where | Notes |
-|---|---|---|
-| Google | Google Cloud Console → APIs & Services → Credentials → OAuth client (Web) | Consent screen with `openid email profile`; no Google review needed for these scopes. |
-| Microsoft | Entra admin center → App registrations | Supported accounts: *any organizational directory and personal Microsoft accounts*. Add a client secret. |
-| Apple | Apple Developer (paid program) → Identifiers: an App ID with Sign in with Apple, then a **Services ID** (= `APPLE_CLIENT_ID`) with your domain and return URL; Keys → a Sign in with Apple key (`.p8` → `APPLE_PRIVATE_KEY`, its id → `APPLE_KEY_ID`) | The server signs a fresh short-lived client secret itself, so there's no 6-month rotation. Apple sends the user's name only on first sign-in and may hide the e-mail behind a relay address. Needs HTTPS. |
-| Facebook | Meta for Developers → app with Facebook Login | Set the privacy policy URL and the data deletion callback `{BASE_URL}/api/facebook/data-deletion`. `email` and `public_profile` need no app review. |
+In every step below, `https://YOUR-DOMAIN` is the production address (`python -m jobs.vercel_setup`
+prints it, and the exact redirect URIs, under "Redirect URIs to register with each provider").
+
+**Google** (about 5 minutes; no review needed for these scopes)
+1. [Google Cloud Console](https://console.cloud.google.com/) → create or pick a project.
+2. APIs & Services → OAuth consent screen: *External*, app name "The Vault", your support e-mail;
+   scopes `openid`, `email`, `profile`; add `https://YOUR-DOMAIN/privacy.html` as the privacy policy.
+   Publish the app (until then only listed test users can sign in).
+3. APIs & Services → Credentials → Create credentials → OAuth client ID → *Web application*.
+   Authorized redirect URI: `https://YOUR-DOMAIN/api/auth/callback/google`.
+4. `python -m jobs.vercel_setup --scope wintermute2 --provider google` and paste the client id and secret.
+
+**Microsoft** (about 5 minutes; personal and work accounts)
+1. [Entra admin center](https://entra.microsoft.com/) → Applications → App registrations → New registration.
+2. Name "The Vault"; supported account types: *Accounts in any organizational directory and personal
+   Microsoft accounts*; redirect URI: platform *Web*, `https://YOUR-DOMAIN/api/auth/callback/microsoft`.
+3. Certificates & secrets → New client secret; copy its **Value** (shown once). The client id is the
+   *Application (client) ID* on the Overview page.
+4. `python -m jobs.vercel_setup --scope wintermute2 --provider microsoft` and paste both.
+   Client secrets expire (24 months at most): put a reminder in your calendar.
+
+**Facebook** (about 10 minutes; `email` and `public_profile` need no app review)
+1. [Meta for Developers](https://developers.facebook.com/apps/) → Create app → *Authenticate and request
+   data from users with Facebook Login*.
+2. Facebook Login → Settings → Valid OAuth Redirect URIs: `https://YOUR-DOMAIN/api/auth/callback/facebook`.
+3. App settings → Basic: privacy policy URL `https://YOUR-DOMAIN/privacy.html`; user data deletion →
+   *Data deletion callback URL* `https://YOUR-DOMAIN/api/facebook/data-deletion`; app domain `YOUR-DOMAIN`.
+4. Switch the app to **Live** (in Development mode only people with a role on the app can sign in).
+5. `python -m jobs.vercel_setup --scope wintermute2 --provider facebook` and paste the App ID and App Secret.
+
+**Apple** (paid Apple Developer program): Identifiers → an App ID with Sign in with Apple, then a
+**Services ID** (= `APPLE_CLIENT_ID`) with your domain and the return URL
+`https://YOUR-DOMAIN/api/auth/callback/apple`; Keys → a Sign in with Apple key (`.p8` →
+`APPLE_PRIVATE_KEY`, its id → `APPLE_KEY_ID`). The server signs a fresh short-lived client secret
+itself, so there's no 6-month rotation. Apple sends the user's name only on first sign-in and may hide
+the e-mail behind a relay address.
+
+After storing credentials, redeploy (or merge) for them to apply; the provider's button then appears
+on the sign-in screen.
 
 Accounts are **not** merged by e-mail. Signing in with a second provider while signed in
 links it to the same account; otherwise each provider identity is its own account.
