@@ -333,3 +333,15 @@ def test_passkey_transports_keep_only_short_strings(client, transports, kept):
     assert res.status_code == 200, res.text
     with Session(client.app.state.db.engine) as s:
         assert s.get(Passkey, res.json()["passkey_id"]).transports == kept
+
+
+def test_a_sign_in_without_the_accounts_user_handle_is_refused(client):
+    """Sign-in uses discoverable passkeys, which always return the account's user handle: an
+    assertion without it (or with another account's) is refused, not trusted on the key alone."""
+    phone = SoftAuthenticator()
+    assert signup(client, phone).status_code == 200
+    client.cookies.clear()
+    assertion = phone.get(post(client, "/api/auth/passkey/login/options").json(), ORIGIN)
+    assertion["response"].pop("userHandle", None)
+    res = post(client, "/api/auth/passkey/login/verify", {"credential": assertion})
+    assert res.status_code == 401 and client.get(f"{V1}/me").status_code == 401

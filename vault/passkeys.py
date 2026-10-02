@@ -244,7 +244,8 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
             raise HTTPException(401, f"The passkey could not be verified: {exc}") from exc
         identity = db.scalar(select(Identity).where(Identity.user_id == passkey.user_id, Identity.provider == PROVIDER))
         handle = (body.credential.get("response") or {}).get("userHandle")
-        if identity is None or (handle and handle != identity.subject):
+        # Sign-in uses discoverable passkeys, which always return the account's user handle.
+        if identity is None or handle != identity.subject:
             raise HTTPException(401, "This passkey belongs to a different account")
         # Saved only if the count is still the one checked above (compare-and-swap):
         # a count another sign-in saved meanwhile is never lowered; this one is refused instead.

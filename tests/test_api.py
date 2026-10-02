@@ -556,3 +556,20 @@ def test_an_implausible_stored_price_does_not_break_a_cards_history(app, signed_
     res = signed_in.get(sol["_links"]["self"]["href"])
     assert res.status_code == 200 and "Infinity" not in res.text
     assert res.json()["price_history"] == [{"day": "2026-09-27", "price": 3.0}, {"day": "2026-09-28", "price": None}]
+
+
+def test_the_data_export_has_only_finite_values_in_its_history(app, signed_in):
+    import io
+    import json
+    import zipfile
+
+    from vault.models import CollectionValue
+    upload(signed_in)
+    with app.state.db.sessions() as db:
+        for v in db.scalars(select(CollectionValue)):
+            v.market_usd, v.cost_usd = float("inf"), float("nan")
+        db.commit()
+    z = zipfile.ZipFile(io.BytesIO(signed_in.get(f"{V1}/me/export").content))
+    text = z.read("value_history.json").decode()
+    rows = json.loads(text, parse_constant=lambda c: pytest.fail(f"{c} in value_history.json"))
+    assert rows and all(r["market"] is None and r["cost"] is None for r in rows)

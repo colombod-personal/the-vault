@@ -89,8 +89,9 @@ def compute_values(db: Session, day: date, user_id: int | None = None, *, commit
 
 def history(db: Session, user: User) -> list[dict]:
     rows = db.scalars(select(CollectionValue).where(CollectionValue.user_id == user.id).order_by(CollectionValue.day))
+    finite = lambda x: x if isinstance(x, (int, float)) and math.isfinite(x) else None  # noqa: E731  (JSON has no infinity)
     return [
-        {"day": v.day.isoformat(), "market": v.market_usd, "cost": v.cost_usd,
+        {"day": v.day.isoformat(), "market": finite(v.market_usd), "cost": finite(v.cost_usd),
          "copies": v.copies, "priced": v.priced_copies}
         for v in rows
     ]
