@@ -19,7 +19,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "webauthn>=3.0",
     "alembic>=1.13",
-    "mtg-toolkits @ git+https://github.com/colombod-personal/mtg-toolkits@3bf35662a2136fc314be8666c69046aee96fa1d6",
+    "mtg-toolkits @ git+https://github.com/colombod-personal/mtg-toolkits@bdf89d7bfb344446cc6199c291555be2659a109c",
 ]
 
 [project.optional-dependencies]
