@@ -1,7 +1,6 @@
 import base64
 import csv
 import json
-import os
 from datetime import date
 from pathlib import Path
 
@@ -357,7 +356,8 @@ def test_prices_already_stored_out_of_range_do_not_break_reading(app, signed_in)
     upload(signed_in)
     with app.state.db.sessions() as db:
         for e in db.scalars(select(Entry)):
-            e.purchase_price, e.source_prices = float("inf"), {"low": float("inf"), "mid": 1.0, "market": float("inf")}
+            # Postgres floats hold infinity; its JSON can't, so the file's prices get the largest finite value
+            e.purchase_price, e.source_prices = float("inf"), {"low": 1.7e308, "mid": 1.0, "market": 1.7e308}
         for v in db.scalars(select(CollectionValue)):
             v.market_usd, v.cost_usd = float("inf"), float("-inf")
         db.commit()
@@ -366,15 +366,14 @@ def test_prices_already_stored_out_of_range_do_not_break_reading(app, signed_in)
         assert res.status_code == 200 and "Infinity" not in res.text, path
 
 
-@pytest.mark.skipif(not os.environ.get("VAULT_TEST_POSTGRES_URL"), reason="needs Postgres (it enforces column sizes)")
-def test_postgres_never_sees_a_value_too_big_for_its_column():
+def test_postgres_never_sees_a_value_too_big_for_its_column(database_url):
     from fastapi.testclient import TestClient
     from sqlalchemy import text
     from vault.app import create_app
     from vault.config import Settings
     from vault.db import Base, Database
 
-    url = os.environ["VAULT_TEST_POSTGRES_URL"]
+    url = database_url
     with Database(url).engine.begin() as conn:
         Base.metadata.drop_all(conn)
         conn.execute(text("DROP TABLE IF EXISTS alembic_version"))

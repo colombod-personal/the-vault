@@ -1,12 +1,10 @@
 """Schema migrations (Alembic, vault/migrations): the app upgrades the database at startup.
 
 - The migrations produce exactly the models' schema, so a model change without a migration fails
-  here. Write one with: DATABASE_URL=sqlite:///./vault.db alembic revision --autogenerate -m "..."
+  here. Write one with: DATABASE_URL=postgresql://… alembic revision --autogenerate -m "..."
 - A database made by the old create_all is adopted: the baseline adds only missing tables.
-- Set VAULT_TEST_POSTGRES_URL to run the same checks against Postgres.
 """
 
-import os
 from datetime import datetime, timezone
 
 import pytest
@@ -17,20 +15,10 @@ from sqlalchemy import inspect, text
 from vault import models  # noqa: F401
 from vault.db import Base, Database
 
-POSTGRES = os.environ.get("VAULT_TEST_POSTGRES_URL")
-URLS = ["sqlite"] + (["postgres"] if POSTGRES else [])
-
-
-@pytest.fixture(params=URLS)
-def database(request, tmp_path):
-    if request.param == "sqlite":
-        db = Database(f"sqlite:///{tmp_path}/schema.db")
-        yield db
-    else:
-        db = Database(POSTGRES)
-        _drop_everything(db)
-        yield db
-        _drop_everything(db)
+@pytest.fixture
+def database(blank_database_url):
+    db = Database(blank_database_url)
+    yield db
     db.engine.dispose()
 
 

@@ -35,7 +35,7 @@ def upgrade() -> None:
         "DELETE FROM identities WHERE provider = 'passkey' AND id NOT IN "
         "(SELECT min(id) FROM identities WHERE provider = 'passkey' GROUP BY user_id)"))
     op.create_index('uq_identities_one_passkey', 'identities', ['user_id'], unique=True,
-                    sqlite_where=sa.text("provider = 'passkey'"), postgresql_where=sa.text("provider = 'passkey'"), if_not_exists=True)
+                    postgresql_where=sa.text("provider = 'passkey'"), if_not_exists=True)
 
 
 def downgrade() -> None:

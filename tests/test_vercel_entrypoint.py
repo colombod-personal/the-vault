@@ -29,9 +29,9 @@ def test_vercel_json_routes_requests_to_the_app_unchanged():
     assert config["regions"] == ["fra1"] and "api/index.py" in config["functions"]
 
 
-def test_misconfigured_deployment_explains_itself(monkeypatch, tmp_path):
-    monkeypatch.setenv("VERCEL", "1")  # on Vercel without DATABASE_URL: create_app refuses sqlite
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/x.db")
+def test_misconfigured_deployment_explains_itself(monkeypatch):
+    monkeypatch.setenv("VERCEL", "1")  # on Vercel without a database connected yet
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.syspath_prepend(str(ROOT))
     sys.modules.pop("api.index", None)
     index = importlib.import_module("api.index")
@@ -97,4 +97,13 @@ def test_an_https_deployment_needs_a_real_session_secret(secret):
     from vault.config import Settings
 
     with pytest.raises(RuntimeError, match="SESSION_SECRET must be set"):
-        Settings(database_url="sqlite://", base_url="https://vault.example.com", session_secret=secret).check()
+        Settings(database_url="postgresql://u@db/vault", base_url="https://vault.example.com", session_secret=secret).check()
+
+
+@pytest.mark.parametrize("url", ["sqlite:///./vault.db", "mysql://u@db/vault"])
+def test_only_postgres_is_accepted(url):
+    """Production runs on Postgres, and so do development and the tests: nothing else is accepted."""
+    from vault.db import make_engine
+
+    with pytest.raises(RuntimeError, match="Postgres only"):
+        make_engine(url)

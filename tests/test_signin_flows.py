@@ -29,9 +29,9 @@ def new_key() -> str:
 APPLE_KEY = new_key()
 
 
-def vault_settings(tmp_path, **overrides):
+def vault_settings(database_url, **overrides):
     return Settings(**{
-        "database_url": f"sqlite:///{tmp_path}/auth.db", "session_secret": "test", "base_url": "http://testserver",
+        "database_url": database_url, "session_secret": "test", "base_url": "http://testserver",
         "google_client_id": "google-app", "google_client_secret": "g-secret",
         "microsoft_client_id": "ms-app", "microsoft_client_secret": "m-secret",
         "facebook_client_id": "fb-app", "facebook_client_secret": "f-secret",
@@ -41,16 +41,16 @@ def vault_settings(tmp_path, **overrides):
 
 
 @pytest.fixture
-def universe(tmp_path):
+def universe(database_url, tmp_path):
     u = Universe()
-    u.register_vault(vault_settings(tmp_path))
+    u.register_vault(vault_settings(database_url))
     yield u
     assert not u.escapes, f"calls left the twin universe: {u.escapes}"
 
 
 @pytest.fixture
-def client(tmp_path, universe):
-    with TestClient(create_app(vault_settings(tmp_path), serve_static=False, transport=universe.transport)) as c:
+def client(database_url, tmp_path, universe):
+    with TestClient(create_app(vault_settings(database_url), serve_static=False, transport=universe.transport)) as c:
         yield c
 
 
@@ -146,8 +146,8 @@ def test_apple_form_post_signed_secret_and_one_time_name(client, universe):
     assert me(client)["name"] == "Cy Doe"
 
 
-def test_apple_refuses_a_client_secret_signed_with_the_wrong_key(tmp_path, universe):
-    settings = vault_settings(tmp_path, apple_private_key=new_key())  # not the key registered with Apple
+def test_apple_refuses_a_client_secret_signed_with_the_wrong_key(database_url, tmp_path, universe):
+    settings = vault_settings(database_url, apple_private_key=new_key())  # not the key registered with Apple
     with TestClient(create_app(settings, serve_static=False, transport=universe.transport)) as c:
         assert sign_in(c, universe.apple, "a-5").startswith("/?signin_error=")
         assert c.get("/api/v1/me").status_code == 401
@@ -215,10 +215,10 @@ def test_code_is_single_use_at_the_provider(client, universe):
     assert replay.status_code == 400 and replay.json()["error"] == "invalid_grant"
 
 
-def test_wrong_base_url_is_caught_by_the_provider(tmp_path, universe):
+def test_wrong_base_url_is_caught_by_the_provider(database_url, tmp_path, universe):
     """A deployment whose BASE_URL doesn't match the provider console fails at the provider,
     as it would in production."""
-    settings = vault_settings(tmp_path, base_url="http://wrong.example")
+    settings = vault_settings(database_url, base_url="http://wrong.example")
     with TestClient(create_app(settings, serve_static=False, transport=universe.transport)) as c:
         location = start(c, "google")
     page = universe.client().get(location)

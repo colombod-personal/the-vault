@@ -135,9 +135,9 @@ into a proper build with a small backend.
      server, never to `api.scryfall.com`.
   2. **Record price history.** Snapshot total value daily → the valuation chart becomes a *real*
      historical curve instead of a derived one. Biggest functional win.
-  3. **Own the collection.** Move `collection.json` into a DB (SQLite is plenty) with CSV import, so you
+  3. **Own the collection.** Move `collection.json` into a DB (Postgres) with CSV import, so you
      can add/edit cards in-app instead of regenerating a file.
-- **DB:** SQLite (file-based, trivial on a Linux server) or Postgres if you want it networked.
+- **DB:** Postgres (what the Vault uses, everywhere).
 - **Deploy:** `vite build` → static frontend served by Caddy/nginx; backend as a systemd service behind
   the same reverse proxy. Or Docker Compose (frontend + backend + db) for one-command deploys.
 
@@ -151,7 +151,7 @@ collection_value date, total_market, total_cost          -- daily rollup → pow
 ### Migration order (what to tell Claude Code)
 1. Scaffold Vite + React + TS; move `styles.css` over unchanged.
 2. Port `app.jsx` + each `views/*.jsx` to `.tsx` components (mechanical — they're already React).
-3. Stand up the backend; move `collection.json` → SQLite; add CSV import using `raw_collection.csv`.
+3. Stand up the backend; move `collection.json` → Postgres; add CSV import using `raw_collection.csv`.
 4. Implement the server-side Scryfall bulk-sync cron (logic mirrors `lib/scryfall.js` `bulkSync`).
 5. Add the `price_snapshots` / `collection_value` tables; rewrite the valuation chart to read real
    recorded history.

@@ -25,8 +25,8 @@ def universe():
 
 
 @pytest.fixture
-def app(tmp_path, universe):
-    settings = Settings(database_url=f"sqlite:///{tmp_path}/test.db", session_secret="test", dev_login=True,
+def app(database_url, tmp_path, universe):
+    settings = Settings(database_url=database_url, session_secret="test", dev_login=True,
                         base_url="http://testserver")
     return create_app(settings, serve_static=False, transport=universe.transport)
 
@@ -152,8 +152,8 @@ class HookLock:
         self.inner.release()
 
 
-def test_a_lookup_that_waited_for_the_lock_uses_the_cards_stored_meanwhile(tmp_path, universe):
-    db = Database(f"sqlite:///{tmp_path}/race.db")
+def test_a_lookup_that_waited_for_the_lock_uses_the_cards_stored_meanwhile(database_url, tmp_path, universe):
+    db = Database(database_url)
     db.migrate()
     catalog = Catalog(universe.transport)
     other = Catalog(universe.transport)

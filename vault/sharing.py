@@ -25,7 +25,7 @@ def invite_token(secret: str, share: Share) -> str:
     """The invite's link token, derived from the server's secret, the invite's id and its expiry
     time: the same every time, so a retried create can show the link again without storing it,
     and concurrent retries all show the same, valid link. The expiry makes it unique even if a
-    database reuses a deleted invite's id (SQLite does), so a revoked link never comes back.
+    deleted invite's id were ever reused, so a revoked link never comes back.
     Only its SHA-256 is stored."""
     micros = (_aware(share.expires_at) - EPOCH) // timedelta(microseconds=1)
     mac = hmac.new(secret.encode(), f"vault-invite:{share.id}:{micros}".encode(), hashlib.sha256).digest()
@@ -36,7 +36,7 @@ EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
 def _aware(dt: datetime | None) -> datetime | None:
-    # SQLite returns naive datetimes; treat them as UTC.
+    # Columns without a time zone come back naive; they hold UTC.
     return dt.replace(tzinfo=timezone.utc) if dt is not None and dt.tzinfo is None else dt
 
 

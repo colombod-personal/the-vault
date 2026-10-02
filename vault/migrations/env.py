@@ -1,7 +1,7 @@
 """Alembic environment for the Vault. The app runs migrations itself (``Database.migrate``);
 the ``alembic`` command line (see ``alembic.ini``) is for writing new ones:
 
-    DATABASE_URL=sqlite:///./vault.db alembic revision --autogenerate -m "what changed"
+    DATABASE_URL=postgresql://vault@localhost:5432/vault alembic revision --autogenerate -m "what changed"
 """
 
 from __future__ import annotations
@@ -21,13 +21,12 @@ def _configure(connection) -> None:
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
-        render_as_batch=connection.dialect.name == "sqlite",  # SQLite can't ALTER most things in place
         compare_type=True,
     )
 
 
 def run_migrations_offline() -> None:
-    context.configure(url=normalise_url(os.environ.get("DATABASE_URL", "sqlite:///./vault.db")),
+    context.configure(url=normalise_url(os.environ["DATABASE_URL"]),
                       target_metadata=target_metadata, literal_binds=True, compare_type=True)
     with context.begin_transaction():
         context.run_migrations()
@@ -40,7 +39,7 @@ def run_migrations_online() -> None:
         with context.begin_transaction():
             context.run_migrations()
         return
-    engine = create_engine(normalise_url(os.environ.get("DATABASE_URL", "sqlite:///./vault.db")))
+    engine = create_engine(normalise_url(os.environ["DATABASE_URL"]))
     with engine.connect() as connection:
         _configure(connection)
         with context.begin_transaction():

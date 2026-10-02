@@ -9,7 +9,8 @@ decks against what you own.
 - **Front end:** the React prototype from the design handoff, in `public/`,
   now loading data from the server (see `docs/prototype-handoff.md`).
 - **Sign-in:** Google, Microsoft, Apple and Facebook (OAuth 2 / OpenID Connect via Authlib).
-- **Storage:** Postgres in production (Neon via the Vercel Marketplace), SQLite locally.
+- **Storage:** Postgres, and only Postgres: Neon (via the Vercel Marketplace) in production, a
+  local Postgres for development and the tests, so what is tested is what runs.
 - **Prices:** a daily GitHub Actions job downloads Scryfall's bulk file, matches every
   collection offline and stores that day's prices, so the value chart is real history.
 - **Credits:** every service the Vault relies on is credited where it's used, in the footer of
@@ -20,10 +21,18 @@ decks against what you own.
 
 ## Run it locally
 
+The Vault runs on Postgres only. Start one (any Postgres 14+ works; this is Docker's):
+
+```bash
+docker run -d --name vault-pg -p 5432:5432 -e POSTGRES_USER=vault -e POSTGRES_PASSWORD=vault \
+  -e POSTGRES_DB=vault postgres:16
+docker exec vault-pg createdb -U vault vault_test   # for the tests, which wipe it
+```
+
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env            # DEV_LOGIN=1 gives you a "Local dev sign-in" button
+cp .env.example .env            # DATABASE_URL points at the database above; DEV_LOGIN=1 gives you a "Local dev sign-in" button
 set -a && . ./.env && set +a
 uvicorn --factory vault.app:create_app --reload --port 8000
 # open http://localhost:8000, sign in, import your Dragon Shield or Moxfield CSV
@@ -35,7 +44,8 @@ Get prices without waiting for the daily job:
 python -m jobs.sync_prices      # downloads Scryfall's default_cards file (~75 MB)
 ```
 
-Tests: `pytest`
+Tests: `VAULT_TEST_DATABASE_URL=postgresql://vault:vault@localhost:5432/vault_test pytest`
+(each test starts from an empty schema in that database, so never point it at real data)
 
 Everything offline, without real accounts or Scryfall: run the **digital twin universe**,
 behavioural clones of Google, Microsoft, Apple, Facebook, Scryfall and Archidekt. See

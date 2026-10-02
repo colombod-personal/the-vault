@@ -246,7 +246,7 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         handle = (body.credential.get("response") or {}).get("userHandle")
         if identity is None or (handle and handle != identity.subject):
             raise HTTPException(401, "This passkey belongs to a different account")
-        # Saved only if the count is still the one checked above (SQLite ignores the row lock):
+        # Saved only if the count is still the one checked above (compare-and-swap):
         # a count another sign-in saved meanwhile is never lowered; this one is refused instead.
         saved = db.execute(update(Passkey).where(Passkey.id == passkey.id, Passkey.sign_count == passkey.sign_count)
                            .values(sign_count=verified.new_sign_count, last_used_at=_now())
@@ -265,10 +265,9 @@ def remove_passkey(db: Session, user_id: int, passkey_id: int) -> None:
     """Delete one of the account's passkeys, unless it is the last way to sign in (409).
 
     Two removals running at the same time must not both pass the "another way to sign in is
-    left" check. On Postgres the account row is locked first (``SELECT … FOR UPDATE``), so they
-    take turns. SQLite ignores that lock, so the check is also part of the DELETE itself: one
-    statement that removes the passkey only if another passkey or sign-in remains, evaluated
-    when it runs (SQLite runs writers one at a time). The caller commits."""
+    left" check. The account row is locked first (``SELECT … FOR UPDATE``), so they take turns,
+    and the check is also part of the DELETE itself: one statement that removes the passkey only
+    if another passkey or sign-in remains, evaluated when it runs. The caller commits."""
     db.execute(select(User.id).where(User.id == user_id).with_for_update())
     passkey = db.get(Passkey, passkey_id, populate_existing=True)
     if passkey is None or passkey.user_id != user_id:

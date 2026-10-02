@@ -2,22 +2,18 @@
 across serverless instances, keyed by a hash of the client's IP."""
 
 import dataclasses
-import os
 import threading
 import time
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select, text
+from sqlalchemy import delete, select
 
 from twins.authenticator import SoftAuthenticator
 from vault import ratelimit
 from vault.app import create_app
-from vault.db import Base, Database
+from vault.db import Database
 from vault.models import PasskeyChallenge, RateHit
-
-POSTGRES = os.environ.get("VAULT_TEST_POSTGRES_URL")
-DATABASES = ["sqlite"] + (["postgres"] if POSTGRES else [])
 
 ENDPOINTS = [  # (method, path): every way in, each with its own bucket
     ("POST", "/api/auth/passkey/signup/options"), ("POST", "/api/auth/passkey/signup/verify"),
@@ -74,7 +70,10 @@ def test_forwarded_headers_count_only_on_vercel(settings):
     spoofed = [{"x-forwarded-for": f"198.51.100.{i}"} for i in range(3)]
     with limited_client(settings) as c:  # not on Vercel: anyone could send these headers
         assert [c.get("/api/auth/login/google", headers=h).status_code for h in spoofed][-1] == 429
-    with limited_client(settings, on_vercel=True, database_url=settings.database_url + "-vercel") as c:
+    with limited_client(settings, on_vercel=True) as c:
+        with c.app.state.db.sessions() as s:  # start counting afresh
+            s.execute(delete(RateHit))
+            s.commit()
         assert [c.get("/api/auth/login/google", headers=h).status_code for h in spoofed][-1] != 429
         same = {"x-forwarded-for": "203.0.113.7, 10.0.0.1"}
         assert [c.get("/api/auth/login/google", headers=same).status_code for _ in range(3)][-1] == 429
@@ -84,13 +83,8 @@ def test_forwarded_headers_count_only_on_vercel(settings):
         assert len(keys) == 5 and all(len(k) == 64 and "203.0" not in k and "198.51" not in k for k in keys)
 
 
-@pytest.mark.parametrize("backend", DATABASES)
-def test_hits_are_counted_exactly_under_concurrency(backend, tmp_path):
-    db = Database(POSTGRES if backend == "postgres" else f"sqlite:///{tmp_path}/rl.db")
-    if backend == "postgres":
-        Base.metadata.drop_all(db.engine)
-        with db.engine.begin() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
+def test_hits_are_counted_exactly_under_concurrency(database_url):
+    db = Database(database_url)
     db.migrate()
     counts, barrier = [], threading.Barrier(8)
 

@@ -18,7 +18,7 @@ import time
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import delete
-from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 
 from .config import Settings
@@ -39,7 +39,7 @@ def client_ip(request: Request, settings: Settings) -> str:
 def hit(db: Session, key: str, minute: int) -> int:
     """Count one request; returns the window's count so far. One statement, so concurrent
     requests never lose a count. The caller commits."""
-    insert = postgresql.insert if db.bind.dialect.name == "postgresql" else sqlite.insert
+    insert = postgresql.insert
     stmt = insert(RateHit).values(key=key, minute=minute, hits=1)
     stmt = stmt.on_conflict_do_update(index_elements=["key", "minute"], set_={"hits": RateHit.hits + 1})
     return db.execute(stmt.returning(RateHit.hits)).scalar_one()

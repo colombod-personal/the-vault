@@ -80,7 +80,7 @@ def sync(db: Session, cards: Iterable[Card], day: date | None = None) -> dict:
     # The matches are written by id with plain UPDATEs, not through the loaded rows: an import
     # that replaced someone's collection while this ran deleted some of these rows, and an ORM
     # flush would then fail the whole sync (everyone's prices with it). Gone rows are skipped, and
-    # so is a new row that reuses a deleted one's id (SQLite does): it belongs to another import.
+    # so is a new row that has a deleted one's id: it belongs to another import.
     updates = []
     for row, res in zip(todo, resolve_offline([fresh(r) for r in todo], cards)):
         if res.card is None:

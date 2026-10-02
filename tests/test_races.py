@@ -1,7 +1,6 @@
 """Concurrent requests and stale credentials: what one request does while another is running,
 and what an old cookie or link can still do afterwards."""
 
-import os
 import threading
 import time
 from datetime import date
@@ -114,7 +113,7 @@ def test_an_account_has_one_passkey_identity_even_without_row_locks(app, client)
 
 
 def test_a_deleted_accounts_cookie_does_not_sign_in_the_next_account(client):
-    """SQLite reuses a deleted row's id. A cookie left from a deleted account must not sign in
+    """A deleted row's id can come back. A cookie left from a deleted account must not sign in
     whoever gets that id next."""
     first = login(client, "gone@example.com")
     stale = dict(client.cookies)
@@ -156,8 +155,7 @@ def test_an_agent_token_cannot_hand_out_access(signed_in):
     assert res.status_code == 403
 
 
-@pytest.mark.skipif(not os.environ.get("VAULT_TEST_POSTGRES_URL"), reason="needs Postgres (concurrent writers)")
-def test_two_imports_at_once_on_postgres_leave_one_file():
+def test_two_imports_at_once_on_postgres_leave_one_file(database_url):
     """On Postgres two imports really run side by side: the second waits for the first's claim
     on the collection and is then refused, instead of deleting nothing and adding its cards."""
     from sqlalchemy import func, text
@@ -166,7 +164,7 @@ def test_two_imports_at_once_on_postgres_leave_one_file():
     from vault.db import Base, Database
     from vault.importer import ImportConflict, import_collection
 
-    db = Database(os.environ["VAULT_TEST_POSTGRES_URL"])
+    db = Database(database_url)
 
     def reset():
         with db.engine.begin() as conn:
@@ -208,7 +206,7 @@ def test_two_imports_at_once_on_postgres_leave_one_file():
 
 
 def test_the_sync_does_not_write_a_stale_match_into_a_row_that_reused_an_id(app, signed_in, monkeypatch):
-    """SQLite reuses a deleted row's id. If an import replaced the collection while the sync
+    """A deleted row's id can come back. If an import replaced the collection while the sync
     ran, a new row can carry an old row's id: the old row's match must not land on it."""
     from tests.test_api import BULK
     from vault import sync as sync_module

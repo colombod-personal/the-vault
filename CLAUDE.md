@@ -38,13 +38,14 @@ React prototype as the front end (`public/`). Read `README.md` first.
 - Tests never reach real services: use the twin universe (`twins/`, `docs/twins.md`). When the
   Vault starts using a new endpoint or field of an outside service, teach the twin and add a
   conformance check in `tests/conformance`. A new outside service gets a new twin.
-- Run `pytest` before pushing.
+- Run `pytest` before pushing, with `VAULT_TEST_DATABASE_URL` set to a Postgres database the tests
+  may wipe (README → Run it locally). The Vault runs on Postgres only, in the tests too.
 - CI and deployment security (README → Security, enforced by `tests/test_workflows.py`): only
   merges to `main` deploy; secrets live in the `vercel-production` environment and reach only
   jobs that run for `main`, never on push/PR; read-only `permissions`, `persist-credentials: false`,
   pinned tools, values through `env` (no `${{ }}` in scripts), integrity hashes on CDN scripts.
 - Schema changes need a migration (Alembic, `vault/migrations`): change the model, then
-  `DATABASE_URL=sqlite:///./vault.db alembic revision --autogenerate -m "what changed"`, review
-  the file (it must work on SQLite and Postgres), and commit it. The app applies migrations at
+  `DATABASE_URL=postgresql://vault:vault@localhost:5432/vault alembic revision --autogenerate -m "what changed"`,
+  review the file, and commit it. The app applies migrations at
   startup (`Database.migrate`); `tests/test_schema_migrations.py` fails if models and migrations
   disagree. Never edit a migration that has shipped: add a new one.

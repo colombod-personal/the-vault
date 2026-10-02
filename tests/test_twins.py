@@ -71,9 +71,9 @@ def test_scryfall_rate_limit_and_lockout(universe):
     assert get() == 200
 
 
-def test_daily_price_sync_through_the_twin(tmp_path, monkeypatch, universe):
+def test_daily_price_sync_through_the_twin(database_url, tmp_path, monkeypatch, universe):
     """The real job: bulk-data listing -> download the .jsonl.gz -> match -> prices in the API."""
-    db = f"sqlite:///{tmp_path}/sync.db"
+    db = database_url
     settings = Settings(database_url=db, session_secret="t", base_url="http://testserver", dev_login=True)
     with TestClient(create_app(settings, serve_static=False, transport=universe.transport)) as client:
         client.post("/api/auth/dev-login")
@@ -95,10 +95,10 @@ def test_daily_price_sync_through_the_twin(tmp_path, monkeypatch, universe):
 
 # -- Archidekt --------------------------------------------------------------------------------
 
-def test_archidekt_decks_through_the_twin(tmp_path, universe):
+def test_archidekt_decks_through_the_twin(database_url, tmp_path, universe):
     public = universe.archidekt.add_deck("Elves", "ann", [(1, "Llanowar Elves", None, None, "Ramp"), (1, "Sol Ring")])
     private = universe.archidekt.add_deck("Secret", "ann", [(1, "Sol Ring")], private=True)
-    settings = Settings(database_url=f"sqlite:///{tmp_path}/a.db", session_secret="t", base_url="http://testserver", dev_login=True)
+    settings = Settings(database_url=database_url, session_secret="t", base_url="http://testserver", dev_login=True)
     with TestClient(create_app(settings, serve_static=False, transport=universe.transport)) as client:
         client.post("/api/auth/dev-login")
         deck = client.get(f"/api/v1/archidekt/decks/{public['id']}").json()
@@ -154,4 +154,5 @@ def test_vault_routes_outbound_calls_to_the_twin_server():
     assert outbound.browser_url(settings, "https://accounts.google.com/o/oauth2/v2/auth?a=b") == \
         "http://localhost:9000/h/accounts.google.com/o/oauth2/v2/auth?a=b"
     with pytest.raises(RuntimeError, match="local development only"):
-        Settings(twins_url="http://localhost:9000", base_url="https://vault.example", session_secret="s").check()
+        Settings(database_url="postgresql://u@db/vault", twins_url="http://localhost:9000",
+                 base_url="https://vault.example", session_secret="s").check()

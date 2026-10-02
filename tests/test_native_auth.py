@@ -24,9 +24,9 @@ V1 = "/api/v1"
 
 
 @pytest.fixture
-def settings(tmp_path):
+def settings(database_url, tmp_path):
     return Settings(
-        database_url=f"sqlite:///{tmp_path}/native.db", session_secret="test", base_url="http://testserver",
+        database_url=database_url, session_secret="test", base_url="http://testserver",
         google_client_id="google-web", google_client_secret="x", apple_app_bundle_id=BUNDLE,
         google_ios_client_id=GOOGLE_IOS, app_redirect_uris=("vault://auth",),
         auth_verify_rate_limit=100,  # some tests sign in more than the limit allows (test_rate_limits.py)
@@ -338,9 +338,9 @@ def test_racing_code_redemptions_issue_one_session(app, client, idp):
     ("google", "google-web", "google-web", False),  # a token from the web sign-in
     ("apple", "com.example.vault.web", None, False),  # the web Services ID
 ])
-def test_native_endpoint_takes_only_tokens_made_for_the_app(tmp_path, provider, aud, azp, ok):
+def test_native_endpoint_takes_only_tokens_made_for_the_app(database_url, tmp_path, provider, aud, azp, ok):
     settings = Settings(
-        database_url=f"sqlite:///{tmp_path}/aud.db", session_secret="test", base_url="http://testserver",
+        database_url=database_url, session_secret="test", base_url="http://testserver",
         google_client_id="google-web", google_client_secret="x", google_ios_client_id=GOOGLE_IOS,
         apple_client_id="com.example.vault.web", apple_team_id="T", apple_key_id="K", apple_private_key=APPLE_KEY,
         apple_app_bundle_id=BUNDLE)
@@ -393,10 +393,10 @@ def _claims(token):
     return js.loads(b64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
 
 
-def test_a_google_token_without_an_audience_is_refused_when_no_server_client_is_set(tmp_path):
+def test_a_google_token_without_an_audience_is_refused_when_no_server_client_is_set(database_url, tmp_path):
     """Only the iOS client configured (no web client): a token with no `aud` must not slip
     through the server-client path as `None in {None}`."""
-    settings = Settings(database_url=f"sqlite:///{tmp_path}/noaud.db", session_secret="test",
+    settings = Settings(database_url=database_url, session_secret="test",
                         base_url="http://testserver", google_ios_client_id=GOOGLE_IOS)
     universe = Universe()
     universe.register_vault(settings)

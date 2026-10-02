@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import date
 
 from sqlalchemy import func, select
-from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 
 from .models import CollectionValue, Entry, PriceSnapshot, User
@@ -43,7 +43,7 @@ def upsert(db: Session, model, rows: list[dict], keys: tuple[str, ...]) -> None:
     """INSERT … ON CONFLICT DO UPDATE: one statement, so concurrent writers of a row never collide."""
     if not rows:
         return
-    insert = postgresql.insert if db.bind.dialect.name == "postgresql" else sqlite.insert
+    insert = postgresql.insert
     table = model.__table__
     for i in range(0, len(rows), 1000):
         stmt = insert(table).values(rows[i:i + 1000])

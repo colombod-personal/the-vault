@@ -25,7 +25,7 @@ def _default_base_url() -> str:
 
 @dataclass(frozen=True)
 class Settings:
-    database_url: str = field(default_factory=lambda: _env("DATABASE_URL", "sqlite:///./vault.db"))
+    database_url: str = field(default_factory=lambda: _env("DATABASE_URL"))  # Postgres, always
     session_secret: str = field(default_factory=lambda: _env("SESSION_SECRET", "dev-insecure-secret"))
     base_url: str = field(default_factory=lambda: _default_base_url().rstrip("/"))
     dev_login: bool = field(default_factory=lambda: _env("DEV_LOGIN") in ("1", "true", "yes"))
@@ -65,10 +65,10 @@ class Settings:
         return self.base_url.startswith("https://")
 
     def check(self) -> None:
-        if os.environ.get("VERCEL") and self.database_url.startswith("sqlite"):
+        if not self.database_url:
             raise RuntimeError(
-                "DATABASE_URL is not set. Connect a Neon Postgres database to the Vercel project "
-                "(Storage -> Neon) and redeploy."
+                "DATABASE_URL is not set. On Vercel, connect a Neon Postgres database to the project "
+                "(Storage -> Neon) and redeploy; locally, see README -> Run it locally."
             )
         if os.environ.get("VERCEL") and not self.secure_cookies:
             # Secure cookies, the session-secret check and OAuth redirects all follow BASE_URL.

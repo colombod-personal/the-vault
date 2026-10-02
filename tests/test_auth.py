@@ -4,7 +4,6 @@ import pytest
 import hashlib
 import hmac
 import json
-import os
 import threading
 import time
 
@@ -50,8 +49,8 @@ def _request():
     return Request(scope)
 
 
-def test_sign_in_links_providers_but_never_merges_by_email(tmp_path):
-    db = Database(f"sqlite:///{tmp_path}/a.db")
+def test_sign_in_links_providers_but_never_merges_by_email(database_url, tmp_path):
+    db = Database(database_url)
     db.migrate()
     with db.sessions() as s:
         req = _request()
@@ -119,15 +118,14 @@ def test_facebook_signed_request_that_is_not_an_object_is_refused(payload):
     assert parse_signed_request(_signed(payload, "fb-secret"), "fb-secret") is None
 
 
-@pytest.mark.skipif(not os.environ.get("VAULT_TEST_POSTGRES_URL"), reason="needs Postgres (unique index waits)")
-def test_two_first_sign_ins_at_once_end_in_one_account():
+def test_two_first_sign_ins_at_once_end_in_one_account(database_url):
     """Two callbacks for the same new identity: the one that loses the insert race signs in
     to the account the winner created, instead of failing."""
     from sqlalchemy import func, select, text
     from sqlalchemy.orm import Session
     from vault.auth import find_or_create
     from vault.db import Base
-    db = Database(os.environ["VAULT_TEST_POSTGRES_URL"])
+    db = Database(database_url)
     with db.engine.begin() as conn:
         Base.metadata.drop_all(conn)
         conn.execute(text("DROP TABLE IF EXISTS alembic_version"))

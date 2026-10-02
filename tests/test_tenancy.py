@@ -1,11 +1,9 @@
 """Multi-tenancy: nothing crosses between users unless the owner shares it."""
 
-import os
 import threading
 import time
 from pathlib import Path
 
-import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
@@ -174,33 +172,6 @@ def test_racing_accepts_claim_an_invite_once(client, monkeypatch):
     assert raced and client.get("/api/v1/shared").json()["items"] == []
 
 
-def test_two_invites_accepted_at_once_give_one_grant_on_any_database(client, monkeypatch):
-    """Row locks don't exist on SQLite: the database itself must refuse a second grant from the
-    same owner to the same person, and the losing acceptance folds into the winner's grant."""
-    from vault import sharing
-
-    login(client, "alice@example.com")
-    first, second = (client.post("/api/v1/shares", json={"kind": "collection"}).json()["url"].split("invite=")[1]
-                     for _ in range(2))
-    login(client, "bob@example.com")
-    real_grant, raced = sharing._grant_of, []
-
-    def first_invite_accepted_meanwhile(db, share, user):
-        found = real_grant(db, share, user)
-        if not raced:  # Bob's other tab accepts the first invite right after this one looked
-            raced.append(True)
-            with client.app.state.db.sessions() as other:
-                sharing.accept_invite(other, other.get(sharing.User, user.id), first)
-                other.commit()
-        return found
-
-    monkeypatch.setattr(sharing, "_grant_of", first_invite_accepted_meanwhile)
-    assert client.post("/api/v1/shares/accept", json={"token": second}).status_code == 200
-    assert raced and len(client.get("/api/v1/shared").json()["items"]) == 1
-    login(client, "alice@example.com")
-    assert [s["with"] is not None for s in client.get("/api/v1/shares").json()["items"]] == [True]
-
-
 def test_accepting_an_invite_can_be_retried_with_its_idempotency_key(client):
     """If the answer is lost after the invite was accepted, a retry with the same key gets the
     same answer instead of "invalid or already used"."""
@@ -237,15 +208,14 @@ def test_sharing_never_reveals_an_email_address(client, settings):
     assert "bob@example.com" not in (client.get("/api/v1/shares").json()["items"][0]["with"] or "")
 
 
-@pytest.mark.skipif(not os.environ.get("VAULT_TEST_POSTGRES_URL"), reason="needs Postgres (row locks)")
-def test_two_invites_from_one_owner_accepted_at_once_give_one_grant():
+def test_two_invites_from_one_owner_accepted_at_once_give_one_grant(database_url):
     """Accepting two invites from the same owner at the same time leaves one grant, so revoking
     it really ends access."""
     from vault.db import Base, Database
     from vault.models import Share, User
     from vault.sharing import accept_invite, create_invite
 
-    db = Database(os.environ["VAULT_TEST_POSTGRES_URL"])
+    db = Database(database_url)
     with db.engine.begin() as conn:
         Base.metadata.drop_all(conn)
         conn.execute(text("DROP TABLE IF EXISTS alembic_version"))

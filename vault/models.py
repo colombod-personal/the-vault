@@ -52,10 +52,10 @@ class Identity(Base):
 
     __tablename__ = "identities"
     # An account has one WebAuthn user handle (its passkey identity); the index makes the database
-    # refuse a second one even where row locks don't exist (SQLite).
+    # refuse a second one.
     __table_args__ = (UniqueConstraint("provider", "subject"),
                       Index("uq_identities_one_passkey", "user_id", unique=True,
-                            sqlite_where=text("provider = 'passkey'"), postgresql_where=text("provider = 'passkey'")))
+                            postgresql_where=text("provider = 'passkey'")))
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)

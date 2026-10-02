@@ -17,7 +17,7 @@ from datetime import date, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .importer import user_entries
+from .importer import MAX_PRICE, user_entries
 from .models import Card, Entry, Import, PriceSnapshot, User
 from .prices import latest_prices, unit_price
 
@@ -26,6 +26,13 @@ def finite(value: float | None) -> float | None:
     """``value``, or None when it is not a finite number. Imports drop such prices; this keeps one
     stored before that (or by hand) from making every page unanswerable (JSON has no infinity)."""
     return value if isinstance(value, (int, float)) and math.isfinite(value) else None
+
+
+def plausible_price(value: float | None) -> float | None:
+    """A price for one copy, or None when it is not one an import would accept (not finite, or
+    above MAX_PRICE). A huge stored value would otherwise overflow to infinity in the totals."""
+    value = finite(value)
+    return value if value is not None and abs(value) <= MAX_PRICE else None
 
 
 def _printing(row: Entry) -> str:
@@ -115,7 +122,7 @@ class CollectionView:
             set_code = (r.extra or {}).get("Set Code") or (r.set_code or "").upper()
             gid = group_id(r.name, set_code, r.collector_number or "", printing, r.condition, r.language)
             price, from_scryfall = unit_price(r, prices.get(r.scryfall_id) if r.scryfall_id else None)
-            price, paid = finite(price) or 0.0, finite(r.purchase_price)
+            price, paid = plausible_price(price) or 0.0, plausible_price(r.purchase_price)
             day = r.purchase_date.isoformat() if r.purchase_date else None
             g = groups.get(gid)
             if g is None:
@@ -137,7 +144,7 @@ class CollectionView:
                 g.first_acquired = day
             if day is None or g.last_acquired is None or day >= g.last_acquired:
                 g.last_acquired = day or g.last_acquired
-                g.low, g.mid = finite(sp.get("low", g.low)), finite(sp.get("mid", g.mid))
+                g.low, g.mid = plausible_price(sp.get("low", g.low)), plausible_price(sp.get("mid", g.mid))
             if day:
                 months[day[:7]] += r.quantity
                 spend[day[:7]] += (paid or 0.0) * r.quantity
