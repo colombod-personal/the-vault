@@ -17,22 +17,15 @@ from datetime import date, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .importer import MAX_PRICE, user_entries
+from .importer import user_entries
 from .models import Card, Entry, Import, PriceSnapshot, User
-from .prices import latest_prices, unit_price
+from .prices import latest_prices, plausible_price, unit_price
 
 
 def finite(value: float | None) -> float | None:
     """``value``, or None when it is not a finite number. Imports drop such prices; this keeps one
     stored before that (or by hand) from making every page unanswerable (JSON has no infinity)."""
     return value if isinstance(value, (int, float)) and math.isfinite(value) else None
-
-
-def plausible_price(value: float | None) -> float | None:
-    """A price for one copy, or None when it is not one an import would accept (not finite, or
-    above MAX_PRICE). A huge stored value would otherwise overflow to infinity in the totals."""
-    value = finite(value)
-    return value if value is not None and abs(value) <= MAX_PRICE else None
 
 
 def _printing(row: Entry) -> str:

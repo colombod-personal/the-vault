@@ -7,7 +7,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.exc import IntegrityError
 
 from vault.models import ApiSession, CollectionValue, Entry, Identity, User
@@ -235,3 +235,24 @@ def test_the_sync_does_not_write_a_stale_match_into_a_row_that_reused_an_id(app,
     with app.state.db.sessions() as db:
         island = db.get(Entry, sol_id)
         assert (island.name, island.scryfall_id, island.match_method) == ("Island", None, None)
+
+
+def test_a_recreated_account_with_a_reused_id_gets_a_new_offline_marker(client, settings):
+    """The web app keys its offline copy by the account marker cookie. Ids can come back (a
+    restored or reset database): a new account with a deleted one's id must get a new marker,
+    so it never opens the deleted account's offline collection."""
+    from sqlalchemy import create_engine
+
+    from vault.db import normalise_url
+
+    login(client, "gone@example.com")
+    gone = client.get(f"{V1}/me").json()["id"]
+    old_marker = client.cookies.get("vault_account")
+    assert client.request("DELETE", f"{V1}/me", json={"confirm": "DELETE"}).status_code == 200
+    engine = create_engine(normalise_url(settings.database_url))
+    with engine.begin() as conn:
+        conn.execute(text(f"ALTER SEQUENCE users_id_seq RESTART WITH {gone}"))
+    engine.dispose()
+    login(client, "new@example.com")
+    assert client.get(f"{V1}/me").json()["id"] == gone
+    assert old_marker and client.cookies.get("vault_account") != old_marker

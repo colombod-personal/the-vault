@@ -14,13 +14,12 @@ from sqlalchemy import delete, select, tuple_, update
 from sqlalchemy.orm import Session
 
 from .models import Card, Entry, Import, User
-from .prices import compute_values
+from .prices import MAX_PRICE, compute_values
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 EXACT = ("set_number", "id")
 MAX_QUANTITY = 1_000_000  # copies of one row
 MAX_COPIES = 2**31 - 1  # the collection's total, stored in INTEGER columns
-MAX_PRICE = 10_000_000.0  # USD per copy; anything above is a typo or junk, and sums of it overflow
 # Column sizes (vault.models.Entry). Free text is clipped to fit; the printing's identity is
 # never clipped (it would become another printing), so a value too long for those is refused.
 CLIP = {"name": 300, "set_name": 200, "folder": 200}

@@ -518,3 +518,18 @@ def test_the_card_schema_documents_paid_quantity(client):
     # the published contract has to list the field the front end relies on.
     item = client.get("/api/openapi.json").json()["components"]["schemas"]["CardItem"]["properties"]
     assert {"paid", "paid_quantity"} <= set(item)
+
+
+def test_daily_values_ignore_prices_no_import_would_accept(app, signed_in):
+    """The daily totals read the same stored prices as the collection pages: a price stored
+    before imports bounded them (infinite, or finite but huge) must not make a total infinite."""
+    from vault.models import CollectionValue, Entry
+    from vault.prices import compute_values
+    upload(signed_in)
+    with app.state.db.sessions() as db:
+        for e in db.scalars(select(Entry)):
+            e.purchase_price, e.source_prices = float("inf"), {"low": 1.0, "mid": 1.0, "market": 1.7e308}
+        db.commit()
+        compute_values(db, date(2026, 9, 28))
+        [value] = db.scalars(select(CollectionValue).where(CollectionValue.day == date(2026, 9, 28))).all()
+        assert (value.market_usd, value.cost_usd) == (0.0, 0.0)

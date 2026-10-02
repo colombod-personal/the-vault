@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from datetime import date
 
@@ -10,6 +11,16 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 
 from .models import CollectionValue, Entry, PriceSnapshot, User
+
+MAX_PRICE = 10_000_000.0  # USD per copy; anything above is a typo or junk, and sums of it overflow
+
+
+def plausible_price(value) -> float | None:
+    """A price for one copy, or None when it is not one an import would accept (not a finite
+    number, or above MAX_PRICE). A huge stored value would otherwise overflow the totals."""
+    if not isinstance(value, (int, float)) or not math.isfinite(value) or abs(value) > MAX_PRICE:
+        return None
+    return float(value)
 
 
 def latest_prices(db: Session, scryfall_ids: set[str]) -> dict[str, PriceSnapshot]:
@@ -35,8 +46,8 @@ def unit_price(row: Entry, snap: PriceSnapshot | None) -> tuple[float, bool]:
     if snap is not None:
         price = snap.for_finish(row.price_finish or row.finish)
         if price is not None:
-            return price, True
-    return float((row.source_prices or {}).get("market") or 0.0), False
+            return plausible_price(price) or 0.0, True
+    return plausible_price((row.source_prices or {}).get("market")) or 0.0, False
 
 
 def upsert(db: Session, model, rows: list[dict], keys: tuple[str, ...]) -> None:
@@ -62,7 +73,7 @@ def compute_values(db: Session, day: date, user_id: int | None = None, *, commit
         price, priced = unit_price(r, prices.get(r.scryfall_id) if r.scryfall_id else None)
         t = totals[r.user_id]
         t[0] += price * r.quantity
-        t[1] += (r.purchase_price or 0.0) * r.quantity
+        t[1] += (plausible_price(r.purchase_price) or 0.0) * r.quantity
         t[2] += r.quantity
         t[3] += r.quantity if priced else 0
     # An upsert, not select-then-insert: the daily sync and a user's first import of the day can

@@ -93,8 +93,12 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
         The web app keys its offline copy by it, so after the account changes, by any route,
         an offline browser never shows the previous account's collection."""
         response = await call_next(request)
-        uid = (request.scope.get("session") or {}).get("uid")
-        marker = hmac.new(account_marker_key, str(uid).encode(), hashlib.sha256).hexdigest()[:32] if uid else None
+        session = request.scope.get("session") or {}
+        uid = session.get("uid")
+        # The account's session key is in it too: an account recreated with a reused id (a restored
+        # database) gets a new marker, and so does every browser after "sign out everywhere".
+        account = f"{uid}:{session.get('sk', '')}".encode()
+        marker = hmac.new(account_marker_key, account, hashlib.sha256).hexdigest()[:32] if uid else None
         current = request.cookies.get(ACCOUNT_COOKIE)
         if marker and marker != current:
             response.set_cookie(ACCOUNT_COOKIE, marker, max_age=30 * 24 * 3600, path="/", samesite="lax",
