@@ -181,7 +181,8 @@ class CollectionView:
             select(PriceSnapshot).where(PriceSnapshot.scryfall_id == g.scryfall_id)
             .order_by(PriceSnapshot.day.desc()).limit(days)
         )
-        return [{"day": p.day.isoformat(), "price": p.for_finish(g.finish)} for p in reversed(list(rows))]
+        # the same bound as everywhere else: a stored price no import would accept is no price
+        return [{"day": p.day.isoformat(), "price": plausible_price(p.for_finish(g.finish))} for p in reversed(list(rows))]
 
     def summary(self) -> dict:
         total_qty = sum(g.quantity for g in self.groups)

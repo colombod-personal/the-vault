@@ -46,7 +46,7 @@ function Dashboard({ data, gotoBrowse, gotoSets, gotoSet, gotoValuation, openCar
         <div style={{ textAlign: 'right' }}>
           <p className="label-mono">Generated</p>
           <p style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-2)', marginTop: 4 }}>
-            {new Date(m.generatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+            {m.generatedAt ? new Date(m.generatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
           </p>
           {window.RefreshButton && onRefresh && (
             <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
@@ -103,7 +103,7 @@ function Dashboard({ data, gotoBrowse, gotoSets, gotoSet, gotoValuation, openCar
           ) : (
             <>
               <div className="value"><span className="currency">$</span>{m.totalPaid.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
-              <div className="delta">avg ${(m.totalPaid / m.totalQty).toFixed(2)} / card</div>
+              <div className="delta">{m.totalQty ? `avg $${(m.totalPaid / m.totalQty).toFixed(2)} / card` : 'no cards yet'}</div>
             </>
           )}
         </div>

@@ -543,3 +543,16 @@ def test_an_implausible_scryfall_price_falls_back_to_the_files_price(stored):
     row = SimpleNamespace(price_finish=None, finish="nonfoil", source_prices={"market": 2.5})
     snap = SimpleNamespace(for_finish=lambda finish: stored)
     assert unit_price(row, snap) == (2.5, False)
+
+
+def test_an_implausible_stored_price_does_not_break_a_cards_history(app, signed_in):
+    from vault.models import PriceSnapshot
+    upload(signed_in)
+    with app.state.db.sessions() as db:
+        sync(db, BULK, day=date(2026, 9, 27))
+        db.add(PriceSnapshot(scryfall_id="sol", day=date(2026, 9, 28), usd=float("inf"), usd_foil=float("inf")))
+        db.commit()
+    sol = {c["name"]: c for c in all_cards(signed_in)}["Sol Ring"]
+    res = signed_in.get(sol["_links"]["self"]["href"])
+    assert res.status_code == 200 and "Infinity" not in res.text
+    assert res.json()["price_history"] == [{"day": "2026-09-27", "price": 3.0}, {"day": "2026-09-28", "price": None}]
