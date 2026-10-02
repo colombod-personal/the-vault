@@ -43,8 +43,9 @@ jobs:
         env:
           VAULT_TEST_DATABASE_URL: postgresql://vault:vault@localhost:5432/vault_test
         run: |
-          pip install -e ".[dev]"
-          pytest -q
+          pip install --require-hashes --no-deps -r requirements-lock.txt  # exact versions, hash-checked
+          pip install --no-build-isolation --no-deps -r requirements-vcs.txt  # mtg-toolkits at a pinned commit
+          python -m pytest -q
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: "20"

@@ -4,8 +4,13 @@ MTG collection manager: FastAPI server (`vault/`) on top of the `mtg-toolkits` l
 React prototype as the front end (`public/`). Read `README.md` first.
 
 - Library logic (CSV formats, Scryfall matching, deltas, decklists) belongs in
-  `colombod-personal/mtg-toolkits`, not here. Bump the pinned commit in both `pyproject.toml`
-  and `requirements.txt` together.
+  `colombod-personal/mtg-toolkits`, not here. Bump the pinned commit in `pyproject.toml`,
+  `requirements.txt` and `requirements-vcs.txt` together.
+- CI and the jobs install Python packages only at hash-checked versions: `requirements-lock.txt`
+  (the app, its tests, the build backend) and `jobs/requirements-ops.txt` (httpx for the Vercel
+  jobs). After changing a dependency, regenerate them (`tests/test_workflows.py` checks):
+  `uv pip compile <inputs> --python-version 3.12 --python-platform x86_64-unknown-linux-gnu --generate-hashes`,
+  where the inputs are requirements.txt without mtg-toolkits, plus the dev extras, httpx and hatchling.
 - Never commit collection data (CSV exports, collection.json). `.gitignore` blocks them.
 - One API for web and native apps: `/api/v1` (`docs/api.md`). Every list is paged with a cursor
   (`vault.api.hal.paginate`, max 500); never add an endpoint whose response grows with the

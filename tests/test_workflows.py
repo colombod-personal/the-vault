@@ -135,3 +135,41 @@ def test_the_vercel_build_never_sees_pulled_secrets(path):
                     pulled = False
                 elif "vercel build" in line:
                     assert not pulled, "pulled env files are still on disk when `vercel build` runs"
+
+
+@pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
+def test_python_packages_are_installed_only_at_hash_checked_versions(path):
+    """A version range lets a newly published (or compromised) release run next to the secrets:
+    every pip install takes exact, hash-checked versions from a lock file. The one git
+    dependency (mtg-toolkits) is pinned to a commit and built without fetching anything."""
+    for job in load(path)["jobs"].values():
+        for step in job.get("steps", []):
+            for line in step.get("run", "").splitlines():
+                cmd = line.split("#")[0].strip()
+                if not re.match(r"(python -m )?pip3? install\b", cmd):
+                    continue
+                assert "--no-deps" in cmd, cmd
+                assert ("--require-hashes" in cmd and re.search(r"-r (jobs/requirements-ops|requirements-lock)\.txt", cmd)) \
+                    or ("--no-build-isolation" in cmd and "-r requirements-vcs.txt" in cmd), cmd
+
+
+def test_the_locks_cover_every_dependency():
+    """requirements-lock.txt (hash-checked) holds every dependency the app, its tests, the library
+    and the build need; requirements-vcs.txt pins the library to the same commit as pyproject."""
+    import tomllib
+
+    def names(text):
+        return {re.split(r"[\[<>=@ ;]", line.strip(), maxsplit=1)[0].lower().replace("_", "-")
+                for line in text.splitlines() if line.strip() and not line.startswith((" ", "#", "-"))}
+
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    wanted = names("\n".join(project["dependencies"] + project["optional-dependencies"]["dev"]))
+    wanted |= {"httpx", "hatchling"}  # mtg-toolkits' dependency, and the build backend
+    locked = names((ROOT / "requirements-lock.txt").read_text())
+    assert wanted - {"mtg-toolkits"} <= locked, wanted - locked
+    assert all(re.search(rf"^{re.escape(n)}==\S+ \\\n\s+--hash=sha256:", (ROOT / "requirements-lock.txt").read_text(), re.M | re.I)
+               for n in locked)
+    [vcs] = [d for d in project["dependencies"] if d.startswith("mtg-toolkits")]
+    assert (ROOT / "requirements-vcs.txt").read_text().strip() == vcs
+    assert vcs in (ROOT / "requirements.txt").read_text()
+    assert "httpx==" in (ROOT / "jobs" / "requirements-ops.txt").read_text()
