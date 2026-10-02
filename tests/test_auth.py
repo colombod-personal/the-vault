@@ -223,3 +223,26 @@ def test_a_facebook_deletion_request_works_once(client, app):
     assert replay.status_code == 400, replay.text
     with app.state.db.sessions() as s:
         assert s.query(User).count() == 1
+
+
+def test_a_facebook_deletion_that_fails_can_be_retried(client, app, monkeypatch):
+    """The used-request record is committed with the deletion: when the deletion fails, Meta's
+    retry of the same request still deletes the account."""
+    from vault.api import meta
+
+    payload = {"algorithm": "HMAC-SHA256", "user_id": "999", "issued_at": int(time.time())}
+    signed = _signed(payload, "fb-secret")
+    with app.state.db.sessions() as s:
+        sign_in(s, _request(), Profile("facebook", "999", None, "Gil"))
+    real = meta.purge_user
+
+    def fails(db, user_id):
+        raise RuntimeError("database went away")
+
+    monkeypatch.setattr(meta, "purge_user", fails)
+    with pytest.raises(RuntimeError):
+        client.post("/api/facebook/data-deletion", data={"signed_request": signed})
+    monkeypatch.setattr(meta, "purge_user", real)
+    assert client.post("/api/facebook/data-deletion", data={"signed_request": signed}).status_code == 200
+    with app.state.db.sessions() as s:
+        assert s.query(User).count() == 0

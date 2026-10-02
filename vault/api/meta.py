@@ -39,12 +39,13 @@ def build_router(get_db, settings) -> APIRouter:
         if not isinstance(issued, (int, float)) or not -MAX_SKEW <= time.time() - issued <= MAX_AGE:
             raise HTTPException(400, "This signed_request has expired")
         # And each request works once: it is recorded (by hash) until it would expire anyway, so a
-        # copy replayed within the hour can't delete an account made since.
+        # copy replayed within the hour can't delete an account made since. The record is committed
+        # with the deletion itself: if the deletion fails, Meta's retry of the same request works.
         db.execute(delete(NativeNonce).where(NativeNonce.expires < time.time()))
         db.add(NativeNonce(id=hashlib.sha256(f"facebook-deletion:{signed_request}".encode()).hexdigest(),
                            expires=float(issued) + MAX_AGE + MAX_SKEW))
         try:
-            db.commit()
+            db.flush()
         except IntegrityError:
             db.rollback()
             raise HTTPException(400, "This signed_request was already used") from None
@@ -64,6 +65,7 @@ def build_router(get_db, settings) -> APIRouter:
                 db.commit()
             else:
                 purge_user(db, identity.user_id)
+        db.commit()
         code = _sign(settings.session_secret, secrets.token_urlsafe(12))
         return {"url": f"{settings.base_url}/api/facebook/deletion-status?code={code}", "confirmation_code": code}
 
