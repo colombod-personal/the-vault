@@ -65,6 +65,8 @@ class CardItem(Hal):
     language: str
     quantity: int
     paid: float | None = Field(None, description="Total paid for these copies; null when the owner hides it")
+    paid_quantity: int | None = Field(None, description="How many of these copies `paid` covers (copies with no "
+                                      "price paid recorded are left out of P&L); null when the owner hides it")
     price: Price
     value: float
     acquired: Acquired

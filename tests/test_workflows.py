@@ -119,3 +119,19 @@ def test_the_vercel_build_never_sees_the_token(path):
             for line in step.get("run", "").splitlines():
                 if "vercel build" in line:
                     assert "env -u VERCEL_TOKEN" in line and "--token" not in line, line.strip()
+
+
+@pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
+def test_the_vercel_build_never_sees_pulled_secrets(path):
+    """`vercel pull` writes the project's environment (database URL, OAuth secrets) to
+    .vercel/.env.*; those files are deleted before `vercel build` runs the install and build steps."""
+    for job in load(path)["jobs"].values():
+        for step in job.get("steps", []):
+            pulled = False
+            for line in step.get("run", "").splitlines():
+                if "vercel pull" in line:
+                    pulled = True
+                elif "rm -f .vercel/.env." in line:
+                    pulled = False
+                elif "vercel build" in line:
+                    assert not pulled, "pulled env files are still on disk when `vercel build` runs"

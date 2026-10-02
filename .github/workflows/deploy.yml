@@ -46,7 +46,10 @@ jobs:
           scope=(); [ -n "$VERCEL_SCOPE" ] && scope=(--scope "$VERCEL_SCOPE")
           ship() {
             vercel pull --yes --environment=production --token "$VERCEL_TOKEN" "${scope[@]}"
-            # The build runs the project's install and build steps: keep the token out of its reach.
+            # The build runs the project's install and build steps: keep the token and the pulled
+            # env values (database URL, OAuth secrets) out of its reach. The app reads them at
+            # runtime from the Vercel project, not at build time.
+            rm -f .vercel/.env.*
             env -u VERCEL_TOKEN vercel build --prod
             vercel deploy --prebuilt --prod --token "$VERCEL_TOKEN" "${scope[@]}"
           }

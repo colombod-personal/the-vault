@@ -512,3 +512,10 @@ def test_pnl_counts_only_copies_with_a_known_cost(signed_in):
     assert (sol["quantity"], sol["paid"], sol["paid_quantity"]) == (4, 1.0, 1)
     st = signed_in.get(f"{V1}/collection/stats").json()
     assert st["biggest_gains"][0]["gain"] == 1.0  # 1 copy × $2 − $1, not 4 copies × $2 − $1
+
+
+def test_the_card_schema_documents_paid_quantity(client):
+    # /collection/cards answers with its own Response (for ETags), so the model never filters it;
+    # the published contract has to list the field the front end relies on.
+    item = client.get("/api/openapi.json").json()["components"]["schemas"]["CardItem"]["properties"]
+    assert {"paid", "paid_quantity"} <= set(item)
