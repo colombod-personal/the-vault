@@ -11,10 +11,11 @@ import time
 
 from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi.responses import PlainTextResponse
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..models import Identity, User
+from ..models import Identity, NativeNonce, User
 from ..privacy import purge_user
 from ..ratelimit import limited
 
@@ -37,6 +38,16 @@ def build_router(get_db, settings) -> APIRouter:
         issued = payload.get("issued_at")
         if not isinstance(issued, (int, float)) or not -MAX_SKEW <= time.time() - issued <= MAX_AGE:
             raise HTTPException(400, "This signed_request has expired")
+        # And each request works once: it is recorded (by hash) until it would expire anyway, so a
+        # copy replayed within the hour can't delete an account made since.
+        db.execute(delete(NativeNonce).where(NativeNonce.expires < time.time()))
+        db.add(NativeNonce(id=hashlib.sha256(f"facebook-deletion:{signed_request}".encode()).hexdigest(),
+                           expires=float(issued) + MAX_AGE + MAX_SKEW))
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(400, "This signed_request was already used") from None
         identity = db.scalar(
             select(Identity).where(Identity.provider == "facebook", Identity.subject == str(payload["user_id"]))
         )

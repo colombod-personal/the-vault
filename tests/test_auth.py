@@ -207,3 +207,19 @@ def test_an_address_too_long_to_be_real_is_not_stored(client, app):
         user = sign_in(s, _request(), Profile("google", "g-long", "a" * 400 + "@example.com", "Lo"))
         assert user.email is None and user.identities[0].email is None
     assert client.post("/api/auth/dev-login", params={"email": "x" * 300}).status_code == 422
+
+
+def test_a_facebook_deletion_request_works_once(client, app):
+    """A copy of a fresh request replayed within its hour (after the person signed up again)
+    must not delete the new account."""
+    payload = {"algorithm": "HMAC-SHA256", "user_id": "888", "issued_at": int(time.time())}
+    signed = _signed(payload, "fb-secret")
+    with app.state.db.sessions() as s:
+        sign_in(s, _request(), Profile("facebook", "888", None, "Fi"))
+    assert client.post("/api/facebook/data-deletion", data={"signed_request": signed}).status_code == 200
+    with app.state.db.sessions() as s:
+        sign_in(s, _request(), Profile("facebook", "888", None, "Fi again"))  # signs up again
+    replay = client.post("/api/facebook/data-deletion", data={"signed_request": signed})
+    assert replay.status_code == 400, replay.text
+    with app.state.db.sessions() as s:
+        assert s.query(User).count() == 1

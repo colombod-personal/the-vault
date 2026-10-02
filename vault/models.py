@@ -221,9 +221,9 @@ class AuthCode(Base):
 
 
 class NativeNonce(Base):
-    """A nonce a native sign-in (Apple / Google ID token) already used, kept until its token
-    expires: the same ID token can't sign in twice. Rows name no one (a hash of provider and
-    nonce)."""
+    """A one-time value already used, kept until it would expire anyway: a native sign-in's nonce
+    (the same Apple / Google ID token can't sign in twice) or a Facebook data-deletion request
+    (it can't be replayed). Rows name no one (hashes)."""
 
     __tablename__ = "native_nonces"
 
