@@ -98,3 +98,24 @@ def test_local_secrets_are_never_committed(path, ignored):
         pytest.skip("not a git checkout")
     result = subprocess.run(["git", "check-ignore", "-q", "--no-index", path], cwd=ROOT)
     assert (result.returncode == 0) is ignored, path
+
+
+@pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
+def test_actions_are_pinned_to_commits(path):
+    """A tag like @v4 can be moved to new code; a full commit SHA can't. Jobs here hold production
+    secrets, so every action is pinned to the commit that was reviewed."""
+    for name, job in load(path)["jobs"].items():
+        for step in job.get("steps", []):
+            if "uses" in step:
+                assert re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", step["uses"]), f"{name}: pin {step['uses']} to a SHA"
+
+
+@pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
+def test_the_vercel_build_never_sees_the_token(path):
+    """`vercel build` runs the project's install and build steps, which must not be able to read the
+    deployment token: only `pull`, `link` and `deploy` get it."""
+    for job in load(path)["jobs"].values():
+        for step in job.get("steps", []):
+            for line in step.get("run", "").splitlines():
+                if "vercel build" in line:
+                    assert "env -u VERCEL_TOKEN" in line and "--token" not in line, line.strip()

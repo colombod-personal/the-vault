@@ -23,17 +23,17 @@ jobs:
       VAULT_URL: ${{ vars.VAULT_URL }}
       VERCEL_CLI: vercel@60.1.3  # pinned: this step holds the token
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Tests must pass before deploying (no secrets here)
         run: |
           pip install -e ".[dev]"
           pytest -q
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: "20"
       - run: npm install --global "$VERCEL_CLI"
@@ -46,7 +46,8 @@ jobs:
           scope=(); [ -n "$VERCEL_SCOPE" ] && scope=(--scope "$VERCEL_SCOPE")
           ship() {
             vercel pull --yes --environment=production --token "$VERCEL_TOKEN" "${scope[@]}"
-            vercel build --prod --token "$VERCEL_TOKEN" "${scope[@]}"
+            # The build runs the project's install and build steps: keep the token out of its reach.
+            env -u VERCEL_TOKEN vercel build --prod
             vercel deploy --prebuilt --prod --token "$VERCEL_TOKEN" "${scope[@]}"
           }
           # Creates the "the-vault" project on the first run, links to it afterwards.
