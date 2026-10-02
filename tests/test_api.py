@@ -266,7 +266,7 @@ ID_TOO_BIG = [2**31, 10**30]  # ids are 32-bit INTEGER columns on Postgres
 @pytest.mark.parametrize("method, path", [
     ("GET", "/decks/{}"), ("GET", "/imports/{}"), ("GET", "/shared/{}/deck"), ("GET", "/shared/{}/collection"),
     ("GET", "/shared/{}/collection/cards"), ("DELETE", "/me/sessions/{}"), ("DELETE", "/me/tokens/{}"),
-    ("DELETE", "/me/passkeys/{}"), ("DELETE", "/shares/{}"), ("DELETE", "/decks/{}"),
+    ("DELETE", "/me/passkeys/{}"), ("DELETE", "/shares/{}"), ("DELETE", "/decks/{}"), ("GET", "/archidekt/decks/{}"),
 ])
 def test_ids_too_big_for_the_database_are_invalid_not_server_errors(signed_in, method, path, big):
     res = signed_in.request(method, V1 + path.format(big))

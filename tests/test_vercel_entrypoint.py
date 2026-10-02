@@ -88,3 +88,13 @@ def test_a_vercel_deployment_refuses_a_plain_http_base_url(monkeypatch):
         plain.check()
     Settings(database_url="postgresql://db.example/vault", base_url="https://vault.example.com",
              session_secret="s" * 32).check()  # the right setup still starts
+
+
+@pytest.mark.parametrize("secret", ["", "   ", "dev-insecure-secret"])
+def test_an_https_deployment_needs_a_real_session_secret(secret):
+    """Session cookies are signed with SESSION_SECRET: an empty one (or the development default)
+    would make them forgeable, so the app refuses to start."""
+    from vault.config import Settings
+
+    with pytest.raises(RuntimeError, match="SESSION_SECRET must be set"):
+        Settings(database_url="sqlite://", base_url="https://vault.example.com", session_secret=secret).check()

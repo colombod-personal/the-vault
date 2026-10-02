@@ -564,7 +564,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return {"deleted": True}
 
     @router.get("/archidekt/decks/{deck_id}", tags=["decks"], summary="A public Archidekt deck (fetched server-side)")
-    def archidekt_deck(deck_id: int, user: User = Depends(current_user)) -> dict:
+    def archidekt_deck(deck_id: Id, user: User = Depends(current_user)) -> dict:
         try:
             with ArchidektClient(client=httpx.Client(transport=transport, timeout=30, follow_redirects=True)) as client:
                 return client.get_deck(deck_id).raw
