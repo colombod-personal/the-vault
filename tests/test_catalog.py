@@ -208,3 +208,15 @@ def test_an_incomplete_identifier_is_refused_before_any_lookup(client, universe,
     res = lookup(client, ident)
     assert res.status_code == 422, res.text
     assert collection_calls(universe) == []
+
+
+def test_an_implausible_stored_price_is_no_price_in_a_lookup(app, client):
+    from datetime import date as day
+
+    from vault.models import PriceSnapshot
+    assert lookup(client, {"id": SOL_RING}).status_code == 200
+    with app.state.db.sessions() as db:
+        db.merge(PriceSnapshot(scryfall_id=SOL_RING, day=day(2099, 1, 1), usd=float("inf"), usd_foil=1.7e308, eur=2.5))
+        db.commit()
+    prices = lookup(client, {"id": SOL_RING}).json()["data"][0]["prices"]
+    assert (prices["usd"], prices["usd_foil"], prices["eur"]) == (None, None, "2.50")

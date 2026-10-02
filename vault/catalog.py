@@ -25,6 +25,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from .models import Card, PriceSnapshot
+from .prices import plausible_price
 from .sync import card_row, price_row, upsert
 
 MAX_IDENTIFIERS = 75  # Scryfall's own limit per /cards/collection request
@@ -93,7 +94,8 @@ class Catalog:
                 "unavailable": unavailable}
 
     def _card_json(self, c: Card, p: PriceSnapshot | None) -> dict[str, Any]:
-        money = lambda v: None if v is None else f"{v:.2f}"  # noqa: E731  (Scryfall sends prices as strings)
+        # Scryfall sends prices as strings; a stored price no import would accept is no price
+        money = lambda v: None if (v := plausible_price(v)) is None else f"{v:.2f}"  # noqa: E731
         return {
             "object": "card", "id": c.scryfall_id, "oracle_id": c.oracle_id, "name": c.name,
             "set": c.set_code, "set_name": c.set_name, "collector_number": c.collector_number,

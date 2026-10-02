@@ -582,3 +582,13 @@ def test_the_timeline_puts_each_copys_value_in_the_month_it_was_bought(signed_in
     months = {m["month"]: m for m in signed_in.get(f"{V1}/collection/timeline").json()["months"]}
     assert (months["2024-02"]["copies"], months["2024-02"]["market"], months["2024-02"]["paid"]) == (3, 0.27, 0.18)
     assert (months["2024-03"]["copies"], months["2024-03"]["market"], months["2024-03"]["paid"]) == (1, 0.09, 0.05)
+
+
+def test_a_cards_detail_lists_a_bounded_number_of_copy_rows(signed_in):
+    """One printing can come from many rows (folders, dates): the detail lists the first 500 and
+    says how many there are, so the response stays small whatever the import holds."""
+    rows = "".join(ds_row(folder=f"box {i}") for i in range(501))
+    assert upload(signed_in, (DS_HEADER + rows).encode()).status_code == 201
+    [sol] = all_cards(signed_in)
+    detail = signed_in.get(sol["_links"]["self"]["href"]).json()
+    assert (len(detail["copies"]), detail["copies_total"], detail["quantity"]) == (500, 501, 501)

@@ -167,7 +167,7 @@ ignored and the connection's address is used.
 | POST / GET / DELETE | `/api/v1/me/tokens[/{id}]` | personal access tokens for agents and scripts (shown once) |
 | GET | `/api/v1/collection` | summary: copies, printings, value, cost, dates, links |
 | GET | `/api/v1/collection/cards` | printings, paged. Filters: `q`, `set`, `name`, `finish`, `condition`. `sort`: `name`, `-value`, `value`, `-quantity`, `set`, `-acquired`. Each printing has `paid` (total paid) and `paid_quantity` (how many copies that covers; copies with no price recorded are left out), both `null` when costs are hidden |
-| GET | `/api/v1/collection/cards/{id}` | one printing: copies, card data, image with artist credit, 90-day price history |
+| GET | `/api/v1/collection/cards/{id}` | one printing: the rows it came from (the first 500; `copies_total` counts all), card data, image with artist credit, 90-day price history |
 | GET | `/api/v1/collection/sets` | value by set, paged |
 | GET | `/api/v1/collection/timeline` | per month: copies acquired, their market value today, and what was paid (null when costs are hidden) |
 | GET | `/api/v1/collection/history` | daily market value and cost, paged (`since`); `imported` marks the days a file was imported |

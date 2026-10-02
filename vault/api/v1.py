@@ -48,6 +48,7 @@ from .idempotency import idempotent
 V1 = "/api/v1"
 Id = Annotated[int, Path(ge=1, le=S.MAX_ID)]  # a row id: anything larger can't exist (and would overflow the column)
 DELETE_CONFIRMATION = "DELETE"
+MAX_COPY_ROWS = 500  # rows listed in one card's detail; copies_total says how many there are
 
 
 def _iso(dt) -> str | None:
@@ -345,7 +346,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 raise HTTPException(404, "Card not found")
 
             def body():
-                copies = [dict(c, purchase_price=None if ctx.hide_costs else c["purchase_price"]) for c in g.copies]
+                # the rows this printing came from, bounded so one response stays small (copies_total counts all)
+                copies = [dict(c, purchase_price=None if ctx.hide_costs else c["purchase_price"]) for c in g.copies[:MAX_COPY_ROWS]]
                 links = card_links(ctx, g) | {"collection": link(ctx.base),
                                               "same_card": link(f"{ctx.base}/cards?{urlencode({'name': g.name.split(' // ')[0]})}")}
                 card_data = view.card_data(g)
@@ -355,7 +357,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 if card_data and card_data.get("scryfall_uri"):
                     links["scryfall"] = link(card_data["scryfall_uri"], title="View on Scryfall")
                 return {**view.item(g), "card": card_data, "price_history": view.price_history(g),
-                        "copies": copies, "_links": links}
+                        "copies": copies, "copies_total": len(g.copies), "_links": links}
 
             return etag_response(request, view.version, body)
 

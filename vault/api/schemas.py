@@ -111,7 +111,8 @@ class CopyRow(BaseModel):
 class CardDetail(CardItem):
     card: CardData | None = None
     price_history: list[PricePoint] = []
-    copies: list[CopyRow] = []
+    copies: list[CopyRow] = Field([], description="The rows this printing came from: the first 500")
+    copies_total: int = Field(0, description="How many rows this printing came from in all")
 
 
 class CardPage(Page):
