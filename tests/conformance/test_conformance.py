@@ -188,3 +188,70 @@ def test_archidekt_search_and_deck(real, twin):
 
     gone = real.get("https://archidekt.com/api/decks/1/")
     assert gone.status_code == twin.get("https://archidekt.com/api/decks/1/").status_code
+
+
+# -- Vercel (jobs/vercel_setup.py) ------------------------------------------------------------
+
+VERCEL = "https://api.vercel.com"
+VERCEL_CALLS = [
+    ("GET", "/v10/projects/the-vault/env"),
+    ("POST", "/v10/projects/the-vault/env"),
+    ("PATCH", "/v9/projects/the-vault/env/env_x"),
+    ("GET", "/v9/projects/the-vault/domains"),
+    ("GET", "/v13/deployments/the-vault.vercel.app"),
+    ("POST", "/v13/deployments"),
+]
+
+
+@pytest.mark.parametrize("auth", ["missing", "invalid"])
+@pytest.mark.parametrize("method,path", VERCEL_CALLS, ids=[f"{m} {p}" for m, p in VERCEL_CALLS])
+def test_vercel_refuses_without_a_valid_token(real, twin, auth, method, path):
+    headers = {"Authorization": "Bearer not-a-token"} if auth == "invalid" else {}
+    body = {} if method != "GET" else None
+    r = real.request(method, VERCEL + path, headers=headers, json=body)
+    t = twin.request(method, VERCEL + path, headers=headers, json=body)
+    assert r.status_code == t.status_code == 403
+    assert r.json() == t.json()
+
+
+@pytest.fixture(scope="module")
+def vercel_project():
+    """A scratch Vercel project with a production deployment and one variable, never the app's
+    own: VERCEL_CONFORMANCE_TOKEN, VERCEL_CONFORMANCE_PROJECT (and VERCEL_CONFORMANCE_SCOPE)."""
+    token, project = os.environ.get("VERCEL_CONFORMANCE_TOKEN"), os.environ.get("VERCEL_CONFORMANCE_PROJECT")
+    if not (token and project):
+        pytest.skip("set VERCEL_CONFORMANCE_TOKEN and VERCEL_CONFORMANCE_PROJECT (a scratch project)")
+    assert project != "the-vault", "conformance never touches the production project"
+    scope = os.environ.get("VERCEL_CONFORMANCE_SCOPE")
+    return project, {"Authorization": f"Bearer {token}"}, {"slug": scope} if scope else {}
+
+
+def test_vercel_contract_used_by_the_setup_job(real, twin, vercel_project):
+    """Read-only, plus one redeploy of a deployment that doesn't exist (refused, builds nothing)."""
+    project, headers, params = vercel_project
+    v = twin.universe.vercel
+    v.add_project("scratch", ["scratch.vercel.app"], [{"key": "EXAMPLE", "target": ["production"]}])
+    v.deploy("scratch", {"vaultEnvFingerprint": "abc"})
+    tw = {"Authorization": "Bearer twin-vercel-token"}
+
+    r = real.get(f"{VERCEL}/v10/projects/{project}/env", headers=headers, params=params).json()
+    t = twin.get(f"{VERCEL}/v10/projects/scratch/env", headers=tw).json()
+    assert r["envs"], "give the scratch project one production variable"
+    assert missing(r["envs"][0], ["id", "key", "target", "createdAt", "updatedAt"]) == []
+    assert invented(t, r) == []
+
+    r = real.get(f"{VERCEL}/v9/projects/{project}/domains", headers=headers, params=params).json()
+    t = twin.get(f"{VERCEL}/v9/projects/scratch/domains", headers=tw).json()
+    assert missing(r["domains"][0], ["name", "verified", "redirect", "gitBranch"]) == []
+    assert invented(t, r) == []
+
+    domain = next(d["name"] for d in r["domains"] if not d.get("redirect"))
+    r = real.get(f"{VERCEL}/v13/deployments/{domain}", headers=headers, params=params).json()
+    t = twin.get(f"{VERCEL}/v13/deployments/scratch.vercel.app", headers=tw).json()
+    assert missing(r, ["id", "url", "createdAt", "meta"]) == [] and r["target"] == "production"
+    assert invented(t, r) == []
+
+    body = {"name": project, "deploymentId": "dpl_doesnotexist", "target": "production"}
+    r = real.post(f"{VERCEL}/v13/deployments", headers=headers, params=params, json=body)
+    t = twin.post(f"{VERCEL}/v13/deployments", headers=tw, json={**body, "name": "scratch"})
+    assert r.status_code == t.status_code and r.json()["error"]["code"] == t.json()["error"]["code"]

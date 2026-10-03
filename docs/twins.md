@@ -1,7 +1,8 @@
 # The digital twin universe
 
-The Vault depends on six outside services: Google, Microsoft, Apple and Facebook for sign-in,
-Scryfall for card data and prices, and Archidekt for decks. `twins/` contains a **behavioural
+The Vault depends on seven outside services: Google, Microsoft, Apple and Facebook for sign-in,
+Scryfall for card data and prices, Archidekt for decks, and Vercel's API for the setup job
+(`jobs/vercel_setup.py`). `twins/` contains a **behavioural
 clone** ("digital twin") of each one. The idea comes from StrongDM's Digital Twin Universe and
 Microsoft's `amplifier-bundle-digital-twin-universe`.
 
@@ -22,6 +23,7 @@ Microsoft's `amplifier-bundle-digital-twin-universe`.
   - `rotate_keys()` on identity twins
   - `set_price()` on Scryfall
   - `private` decks on Archidekt
+  - `deploy()`, `promote()` (an Instant Rollback) and `add_domain()` on Vercel
 - **Sealed.** A request to a host outside the universe fails as a network error and is recorded
   in `universe.escapes`. The tests assert that it stays empty.
 - **Checked against reality every night.** `tests/conformance` sends the same requests to each real
@@ -116,5 +118,9 @@ redirects to the twin page, and the handoff to `vault://auth?code=…` is the re
   relies on it.
 - **When the Vault starts using a new endpoint or field** of an outside service, add it to the
   twin and add a conformance check.
+- **Vercel:** the token checks run nightly with no secrets. The contract check
+  (`test_vercel_contract_used_by_the_setup_job`) needs a scratch Vercel project with a
+  production deployment and one variable: set the repository variable
+  `VERCEL_CONFORMANCE_PROJECT` to its name. It never touches `the-vault`.
 - **A new outside service** gets a twin (hosts, routes, error format, scenario knobs), is added to
   `Universe`, and gets conformance checks. Nothing reaches a real service from the tests.

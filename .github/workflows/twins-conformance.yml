@@ -23,3 +23,26 @@ jobs:
       - run: python -m pytest -q -m live tests/conformance
         env:
           TWINS_LIVE: "1"
+
+  vercel:
+    # jobs/vercel_setup.py's Vercel calls against a scratch project (never the app's own): set the
+    # repository variable VERCEL_CONFORMANCE_PROJECT to enable it. Read-only, plus one refused redeploy.
+    if: github.ref == 'refs/heads/main' && vars.VERCEL_CONFORMANCE_PROJECT != ''
+    runs-on: ubuntu-latest
+    environment: vercel-production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.12"
+      - run: |
+          pip install --require-hashes --no-deps -r requirements-lock.txt  # exact versions, hash-checked
+          pip install --no-build-isolation --no-deps -r requirements-vcs.txt  # mtg-toolkits at a pinned commit
+      - run: python -m pytest -q -m live tests/conformance -k test_vercel_contract
+        env:
+          TWINS_LIVE: "1"
+          VERCEL_CONFORMANCE_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_CONFORMANCE_PROJECT: ${{ vars.VERCEL_CONFORMANCE_PROJECT }}
+          VERCEL_CONFORMANCE_SCOPE: ${{ vars.VERCEL_SCOPE || 'wintermute2' }}

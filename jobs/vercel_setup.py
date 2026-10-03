@@ -18,13 +18,15 @@ land in a file, the shell history or a chat:
 
     VERCEL_TOKEN=... python -m jobs.vercel_setup --scope TEAM --provider google
 
-Variables only reach new deployments: ``--redeploy`` rebuilds production when one is newer than it.
+Variables only reach new deployments: ``--redeploy`` rebuilds production unless it was built from
+the current ones (each redeploy is stamped with a fingerprint of them).
 """
 
 from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
 import json
 import os
 import secrets
@@ -34,6 +36,7 @@ from pathlib import Path
 import httpx
 
 API = "https://api.vercel.com"
+FINGERPRINT = "vaultEnvFingerprint"  # deployment meta: the production variables it was built with
 PROVIDERS = {
     "google": ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"),
     "microsoft": ("MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_SECRET"),
@@ -99,19 +102,27 @@ class Vercel:
         res.raise_for_status()
         return res.json()
 
+    def production_fingerprint(self) -> str:
+        """Which production variables exist, and when each last changed. Adding, editing, deleting
+        or un-targeting one changes it; values are never read."""
+        rows = sorted(f"{e['id']}:{e['key']}:{e['updated']}" for e in self.envs() if "production" in e["target"])
+        return hashlib.sha256("\n".join(rows).encode()).hexdigest()[:32]
+
     def redeploy_production(self) -> str | None:
-        """Rebuild the live production deployment when a production variable is newer than it
-        (variables only reach new deployments). Returns the new address, or None when it is
-        up to date or nothing is deployed yet. Decided from Vercel's own timestamps, so a failed
-        redeploy is retried on the next run."""
+        """Rebuild the live production deployment unless it was built from the current production
+        variables (variables only reach new deployments). Each redeploy is stamped with their
+        fingerprint, so a deleted variable counts as a change and a failed redeploy is retried on
+        the next run. A deployment made by a merge carries no stamp, so it is redeployed once.
+        Returns the new address, or None when it is up to date or nothing is deployed yet."""
         live = self.live_production()
         if not live:
             return None
-        newest = max((e["updated"] for e in self.envs() if "production" in e["target"]), default=0)
-        if newest <= live.get("createdAt", 0):
+        fingerprint = self.production_fingerprint()
+        if (live.get("meta") or {}).get(FINGERPRINT) == fingerprint:
             return None
         res = self.http.post("/v13/deployments", params={**self.params, "forceNew": "1"},
-                             json={"name": self.project, "deploymentId": live["id"], "target": "production"})
+                             json={"name": self.project, "deploymentId": live["id"], "target": "production",
+                                   "meta": {FINGERPRINT: fingerprint}})
         res.raise_for_status()
         return f"https://{res.json()['url']}"
 
@@ -212,7 +223,7 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
     parser.add_argument("--provider", choices=sorted(PROVIDERS),
                         help="store this sign-in provider's credentials in Production (asks for them)")
     parser.add_argument("--redeploy", action="store_true",
-                        help="redeploy production when a variable is newer than it (variables only apply to new deployments)")
+                        help="redeploy production unless it was built from the current variables (they only reach new deployments)")
     args = parser.parse_args(argv)
     token = os.environ.get("VERCEL_TOKEN")
     if not token:

@@ -1,9 +1,10 @@
 name: sync-prices
 # Daily: configure the Vercel project (jobs/vercel_setup.py: SESSION_SECRET, BASE_URL, checklist;
-# redeploys production when a variable is newer than it), then download Scryfall's bulk card
-# file, match every collection, store prices and each user's collection value. Runs only from main, in the "vercel-production" environment
-# (README → Security). Uses that environment's DATABASE_URL secret if set; otherwise it reads the
-# database address from the Vercel project (Neon integration) with VERCEL_TOKEN.
+# redeploys production unless it was built from the current variables), then download
+# Scryfall's bulk card file, match every collection, store prices and each user's collection
+# value. Runs only from main, in the "vercel-production" environment (README → Security).
+# Uses that environment's DATABASE_URL secret if set; otherwise it reads the database address
+# from the Vercel project (Neon integration) with VERCEL_TOKEN.
 on:
   schedule:
     - cron: "17 10 * * *"   # Scryfall regenerates bulk files around 09:00 UTC
