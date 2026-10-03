@@ -231,7 +231,7 @@ def test_vercel_contract_used_by_the_setup_job(real, twin, vercel_project):
     project, headers, params = vercel_project
     v = twin.universe.vercel
     v.add_project("scratch", ["scratch.vercel.app"], [{"key": "EXAMPLE", "target": ["production"]}])
-    v.deploy("scratch", {"vaultEnvFingerprint": "abc"})
+    v.deploy("scratch")  # unstamped, like a deployment vercel_setup never redeployed
     tw = {"Authorization": "Bearer twin-vercel-token"}
 
     r = real.get(f"{VERCEL}/v10/projects/{project}/env", headers=headers, params=params).json()

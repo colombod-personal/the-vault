@@ -137,6 +137,33 @@ def test_redeploys_what_serves_the_domain_after_a_rollback():
     assert fake.redeploys == [fake.live["id"]]  # the release that serves the domain, not the newest
 
 
+def test_a_redeploy_never_puts_older_code_back():
+    """Rebuilding the live deployment takes main's latest commit, not the one it was built from."""
+    fake = FakeVercel(domains=["the-vault.vercel.app"])
+    fake.twin.head = "c2"  # merged, its build still running
+    vercel_setup.main(["--redeploy"], fake.transport)
+    assert fake.twin.commits[fake.serving()["id"]] == "c2"
+
+
+def test_a_release_going_live_meanwhile_is_left_alone():
+    fake = FakeVercel(domains=["the-vault.vercel.app"])
+    vercel_setup.main(["--redeploy"], fake.transport)  # stamped
+    fake.twin.store_env("the-vault", "EXAMPLE", "x", ["production"])  # something to apply
+    lookups = []
+
+    def merge_lands():
+        lookups.append(1)
+        if len(lookups) == 1:
+            fake.twin.head = "c2"
+            fake.twin.deploy("the-vault")
+    fake.twin.on_lookup = merge_lands
+    state = vercel_setup.main(["--redeploy"], fake.transport)
+    assert state["redeployed"] is None and len(fake.redeploys) == 1  # the merge's release stays
+    assert fake.twin.commits[fake.serving()["id"]] == "c2"
+    fake.twin.on_lookup = None
+    assert vercel_setup.main(["--redeploy"], fake.transport)["redeployed"]  # and is stamped next run
+
+
 def test_a_failed_redeploy_is_retried_by_the_next_run():
     fake = FakeVercel(domains=["the-vault.vercel.app"])
     fake.twin.fail_next("/v13/deployments", 500)

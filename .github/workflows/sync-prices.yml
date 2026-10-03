@@ -11,7 +11,7 @@ on:
   workflow_dispatch: {}
 permissions:
   contents: read
-concurrency: sync-prices
+concurrency: vercel-production  # one at a time with the manual deploy
 jobs:
   sync:
     if: github.ref == 'refs/heads/main'

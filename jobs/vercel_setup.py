@@ -109,20 +109,27 @@ class Vercel:
         return hashlib.sha256("\n".join(rows).encode()).hexdigest()[:32]
 
     def redeploy_production(self) -> str | None:
-        """Rebuild the live production deployment unless it was built from the current production
+        """Rebuild production unless the live deployment was built from the current production
         variables (variables only reach new deployments). Each redeploy is stamped with their
         fingerprint, so a deleted variable counts as a change and a failed redeploy is retried on
         the next run. A deployment made by a merge carries no stamp, so it is redeployed once.
-        Returns the new address, or None when it is up to date or nothing is deployed yet."""
+
+        It never puts older code back: the rebuild takes main's latest commit
+        (``withLatestCommit``), and it is skipped if another release went live meanwhile (the
+        next run stamps that one). Returns the new address, or None when it is up to date,
+        nothing is deployed yet, or a newer release took over."""
         live = self.live_production()
         if not live:
             return None
         fingerprint = self.production_fingerprint()
         if (live.get("meta") or {}).get(FINGERPRINT) == fingerprint:
             return None
+        current = self.live_production()
+        if not current or current["id"] != live["id"]:
+            return None
         res = self.http.post("/v13/deployments", params={**self.params, "forceNew": "1"},
                              json={"name": self.project, "deploymentId": live["id"], "target": "production",
-                                   "meta": {FINGERPRINT: fingerprint}})
+                                   "withLatestCommit": True, "meta": {FINGERPRINT: fingerprint}})
         res.raise_for_status()
         return f"https://{res.json()['url']}"
 

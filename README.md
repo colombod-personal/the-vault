@@ -117,7 +117,8 @@ with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic
 - The **sync-prices** workflow (daily, or Actions → sync-prices → *Run workflow*) first
   configures the project with `jobs/vercel_setup.py --redeploy`: it sets `SESSION_SECRET` and
   `BASE_URL`, redeploys production unless it was built from the current production variables
-  (variables only reach new deployments, so a merge's deployment is redeployed once), and writes a checklist of what's missing with the OAuth redirect URIs. Then it
+  (variables only reach new deployments, so a merge's deployment is redeployed once; the rebuild
+  takes main's latest commit and steps aside if another release just went live), and writes a checklist of what's missing with the OAuth redirect URIs. Then it
   syncs prices.
 - **deploy (manual fallback)** is a Vercel CLI deploy of `main`, for when the integration isn't
   connected.

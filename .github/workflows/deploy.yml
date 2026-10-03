@@ -10,7 +10,7 @@ on:
   workflow_dispatch: {}
 permissions:
   contents: read
-concurrency: deploy-production
+concurrency: vercel-production  # one at a time with sync-prices, which redeploys
 
 jobs:
   deploy:

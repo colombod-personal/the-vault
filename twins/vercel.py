@@ -6,6 +6,9 @@
 - Deployments: ``GET /v13/deployments/{id or host}`` answers the deployment a host serves now (so
   after a rollback, not the newest one), and ``POST /v13/deployments`` with ``deploymentId``
   redeploys it, which here goes live at once and takes over the project's production domains.
+  The rebuild uses the source deployment's commit, or main's latest (:attr:`VercelTwin.head`)
+  with ``withLatestCommit``. Commits are kept on the side (:attr:`VercelTwin.commits`): a
+  deployment made with the CLI has no ``gitSource``.
 
 Errors are Vercel's ``{"error": {"code", "message"}}``; a missing or unknown token answers 403
 with ``invalidToken`` (or ``missingToken``). Times are milliseconds since the epoch, always increasing.
@@ -32,6 +35,9 @@ class VercelTwin(Twin):
         self.deployments: dict[str, dict] = {}
         self.aliases: dict[str, str] = {}  # host -> deployment id serving it
         self.redeployed_from: list[str] = []
+        self.head = "c1"  # main's latest commit
+        self.commits: dict[str, str] = {}  # deployment id -> the commit it was built from
+        self.on_lookup = None  # called after each deployment lookup: lets a test race a release in
         self._ids = itertools.count(1)
         self._last = 0
         r = self.route
@@ -52,6 +58,9 @@ class VercelTwin(Twin):
         self.deployments.clear()
         self.aliases.clear()
         self.redeployed_from.clear()
+        self.commits.clear()
+        self.head = "c1"
+        self.on_lookup = None
 
     def now(self) -> int:
         self._last = max(self._last + 1, int(time.time() * 1000))
@@ -79,12 +88,14 @@ class VercelTwin(Twin):
         self.projects[project]["envs"].append(env)
         return env
 
-    def deploy(self, project: str, meta: dict | None = None, *, live: bool = True) -> dict:
-        """A production deployment (as from a merge to main); ``live`` points the domains at it."""
+    def deploy(self, project: str, meta: dict | None = None, *, live: bool = True, commit: str | None = None) -> dict:
+        """A production deployment (as from a merge to main, of ``commit`` or main's latest);
+        ``live`` points the domains at it."""
         n = next(self._ids)
         dpl = {"id": f"dpl_{n}", "url": f"{project}-{n}.vercel.app", "name": project, "target": "production",
                "readyState": "READY", "createdAt": self.now(), "meta": dict(meta or {})}
         self.deployments[dpl["id"]] = dpl
+        self.commits[dpl["id"]] = commit or self.head
         if live:
             self.promote(project, dpl["id"])
         return dpl
@@ -175,6 +186,8 @@ class VercelTwin(Twin):
         ref = req.params["ref"]
         dpl = self.deployments.get(self.aliases.get(ref, ref)) or next(
             (d for d in self.deployments.values() if d["url"] == ref), None)
+        if self.on_lookup:
+            self.on_lookup()
         return json_response(200, dpl) if dpl else self.error(404, "not_found", "Deployment not found")
 
     def _redeploy(self, req: Request):
@@ -186,4 +199,6 @@ class VercelTwin(Twin):
         if source is None or body.get("name") != source["name"]:
             return self.error(404, "not_found", "Deployment not found")
         self.redeployed_from.append(source["id"])
-        return json_response(200, self.deploy(source["name"], {**source["meta"], **(body.get("meta") or {})}))
+        commit = self.head if body.get("withLatestCommit") else self.commits[source["id"]]
+        return json_response(200, self.deploy(source["name"], {**source["meta"], **(body.get("meta") or {})},
+                                              commit=commit))
