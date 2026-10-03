@@ -7,7 +7,10 @@ sign-in, and keep only the user id in a signed session cookie.
 
 Accounts are never merged by e-mail address: if someone is already signed in
 and signs in with another provider, that provider is *linked* to the current
-account; otherwise a new account is created.
+account; otherwise a new account is created. A sign-in that already has its own
+account moves over only when that account is empty (``account_is_empty``); the
+emptied account is deleted once it has no way to sign in left. Accounts holding
+data are never merged.
 
 Provider quirks handled here:
 
@@ -39,7 +42,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from joserfc import jwt
 from joserfc.jwk import ECKey
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -186,18 +189,82 @@ CANCELLED = {"user_cancelled_authorize": "access_denied", "user_denied": "access
 
 
 class IdentityInUse(Exception):
-    """Linking a sign-in that already belongs to another Vault account."""
+    """Linking a sign-in that already belongs to another Vault account that holds data."""
 
     def __init__(self) -> None:
-        super().__init__("This sign-in already belongs to another Vault account, so it can't be linked to this one")
+        super().__init__(
+            "This sign-in already belongs to another Vault account that holds data, so it can't be linked to "
+            "this one. Sign in with it, export or delete that account (Account → Delete my account), "
+            "then link it here again.")
+
+
+def account_is_empty(db: Session, user_id: int) -> bool:
+    """True when the account holds nothing anyone would miss, so a sign-in on it can move to the
+    account that is linking it.
+
+    Data: collection rows, imports, decks, shares given or received (pending invites too),
+    unexpired personal access tokens, and value history with any value or copies. Not data, and
+    removed with the account: its profile (name, e-mail), web and app sessions, one-time codes,
+    stored idempotent answers, expired tokens and all-zero value rows. Its sign-in methods
+    (identities, passkeys) are handled by :func:`_claim_identity`."""
+    from .models import AccessToken, CollectionValue, Deck, Entry, Import, Share
+
+    held = (
+        select(Entry.id).where(Entry.user_id == user_id),
+        select(Import.id).where(Import.user_id == user_id),
+        select(Deck.id).where(Deck.user_id == user_id),
+        select(Share.id).where(or_(Share.owner_id == user_id, Share.grantee_id == user_id)),
+        select(AccessToken.id).where(AccessToken.user_id == user_id, AccessToken.expires_at > func.now()),
+        select(CollectionValue.user_id).where(
+            CollectionValue.user_id == user_id,
+            or_(CollectionValue.copies != 0, CollectionValue.market_usd != 0, CollectionValue.cost_usd != 0)),
+    )
+    return not any(db.scalar(q.limit(1)) is not None for q in held)
+
+
+def _claim_identity(db: Session, identity: Identity, current: User) -> None:
+    """Move ``identity`` from the (empty) account that owns it to ``current``, in the caller's
+    transaction. Raises IdentityInUse, with nothing changed, when that account holds data.
+
+    Only this identity moves. The other account loses its sessions; if this was its last way to
+    sign in (no identity or passkey left), it is deleted, with everything
+    :func:`vault.privacy.personal_data` lists. Two non-empty accounts are never merged."""
+    from .models import Passkey
+    from .privacy import personal_data
+
+    other_id = identity.user_id
+    # Both accounts locked (in id order, so two links the other way round can't deadlock): an
+    # import into the other account waits, and then sees it gone or no longer owning this sign-in.
+    db.execute(select(User.id).where(User.id.in_([other_id, current.id])).order_by(User.id).with_for_update())
+    db.refresh(identity)
+    if identity.user_id == current.id:  # a concurrent link already moved it
+        return
+    if identity.user_id != other_id or not account_is_empty(db, identity.user_id):
+        db.rollback()
+        raise IdentityInUse()
+    other = db.get(User, other_id)
+    identity.user = current
+    db.flush()
+    left = db.scalar(select(func.count(Identity.id)).where(Identity.user_id == other_id)) + db.scalar(
+        select(func.count(Passkey.id)).where(Passkey.user_id == other_id))
+    if left:
+        other.session_key = new_session_key()  # signs out every browser on it
+    else:
+        db.expunge(other)
+        for stmt in personal_data(other_id).values():
+            db.execute(stmt.execution_options(synchronize_session=False))
+    # No audit table: a log line without personal data.
+    log.info("linked a %s sign-in from an empty account (%s)", identity.provider,
+             "kept: it has other sign-in methods" if left else "deleted")
 
 
 def find_or_create(db: Session, profile: Profile, current: User | None = None) -> User:
     """The user owning ``profile``'s identity. A new identity is linked to ``current`` when
     someone is already signed in; otherwise it gets a new account. Never merged by e-mail.
 
-    Raises IdentityInUse when ``current`` is set and the identity belongs to someone else:
-    linking never switches accounts.
+    When ``current`` is set and the identity belongs to another account, it moves to ``current``
+    if that account is empty (:func:`account_is_empty`, :func:`_claim_identity`); otherwise
+    IdentityInUse is raised and nothing changes. Linking never switches accounts.
 
     Two first sign-ins with one identity at the same time both try to create it; the unique
     (provider, subject) index lets one win, and the other then signs in to the winner's account."""
@@ -217,7 +284,7 @@ def _find_or_create(db: Session, profile: Profile, current: User | None) -> User
     )
     if identity:
         if current is not None and identity.user_id != current.id:
-            raise IdentityInUse()
+            _claim_identity(db, identity, current)
         user = identity.user
         identity.email = profile.email or identity.email
     else:
@@ -333,6 +400,9 @@ def build_router(auth: Auth, get_db) -> APIRouter:
                 request.session.pop("app_flow", None)
                 return RedirectResponse(f"{app_flow['app_redirect_uri']}?{urlencode({'error': code})}", status_code=303)
             return RedirectResponse(f"/?{urlencode({'signin_error': code, 'provider': provider})}", status_code=303)
+        current = session_user(db, request)
+        owner = db.scalar(select(Identity.user_id).where(
+            Identity.provider == profile.provider, Identity.subject == profile.subject)) if current else None
         try:
             user = sign_in(db, request, profile)
         except IdentityInUse:
@@ -340,7 +410,15 @@ def build_router(auth: Auth, get_db) -> APIRouter:
                 request.session.pop("app_flow", None)
                 return RedirectResponse(f"{app_flow['app_redirect_uri']}?{urlencode({'error': 'identity_in_use'})}",
                                         status_code=303)
-            return RedirectResponse("/?link_error=identity_in_use", status_code=303)
+            return RedirectResponse(f"/?{urlencode({'link_error': 'identity_in_use', 'provider': provider})}",
+                                    status_code=303)
+        # Linked while signed in: the web app says so once. When the sign-in came from another
+        # (empty) account, it also says whether that account was removed or kept.
+        linked = {}
+        if current is not None and owner != current.id:
+            linked = {"linked": provider}
+            if owner is not None:
+                linked["empty_account"] = "removed" if db.get(User, owner) is None else "kept"
         if app_flow:
             # The code goes to the app only after the person confirms here. Anyone can start this
             # flow with their own PKCE challenge and send the link to someone; a silent sign-in
@@ -348,7 +426,7 @@ def build_router(auth: Auth, get_db) -> APIRouter:
             request.session.pop("app_flow", None)
             request.session["app_handoff"] = {**app_flow, "uid": user.id}
             return RedirectResponse("/api/auth/app-handoff", status_code=303)
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse(f"/?{urlencode(linked)}" if linked else "/", status_code=303)
 
     @router.get("/app-handoff", response_class=HTMLResponse)
     def app_handoff_page(request: Request, db: Session = Depends(get_db)):

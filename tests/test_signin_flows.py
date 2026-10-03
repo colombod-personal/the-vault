@@ -248,3 +248,47 @@ def test_apple_user_field_of_any_shape_signs_in(client, universe, user, name):
     cb = universe.apple.approve(start(client, "apple"), universe.apple.add_account("a-9", "cy@icloud.com", "Cy Doe"))
     assert deliver(client, Callback(cb.url, cb.method, {**cb.data, "user": user})) == "/"
     assert me(client)["name"] == name
+
+
+# -- "Link Microsoft" when that Microsoft sign-in already made its own (empty) account --------------
+
+def two_browsers(client, universe):
+    """This browser is signed in to Ann's vault (with a deck); another browser signed in once with
+    Microsoft, which made a second account."""
+    sign_in(client, universe.google, universe.google.add_account("g-ann", "ann@gmail.com", "Ann"))
+    assert client.post("/api/v1/decks", json={"name": "Ann's deck", "text": "4 Island"}).status_code == 201
+    other = TestClient(client.app)
+    sign_in(other, universe.microsoft, universe.microsoft.add_account("m-ann", "ann@outlook.com", "Ann"))
+    return me(client)["id"], other
+
+
+def test_linking_a_sign_in_from_an_empty_account_moves_it_and_removes_that_account(client, universe):
+    ann, other = two_browsers(client, universe)
+    empty = me(other)["id"]
+    assert sign_in(client, universe.microsoft, "m-ann") == "/?linked=microsoft&empty_account=removed"
+    mine = me(client)
+    assert mine["id"] == ann and mine["providers"] == ["google", "microsoft"]
+    assert [d["name"] for d in client.get("/api/v1/decks").json()["items"]] == ["Ann's deck"]
+    assert other.get("/api/v1/me").status_code == 401  # the removed account's browser is signed out
+    client.cookies.clear()  # Microsoft now opens Ann's vault
+    sign_in(client, universe.microsoft, "m-ann")
+    assert me(client)["id"] == ann != empty
+
+
+def test_linking_a_sign_in_whose_account_holds_data_is_refused(client, universe):
+    ann, other = two_browsers(client, universe)
+    assert other.post("/api/v1/decks", json={"name": "Second deck", "text": "1 Forest"}).status_code == 201
+    theirs = me(other)
+    assert sign_in(client, universe.microsoft, "m-ann") == "/?link_error=identity_in_use&provider=microsoft"
+    assert me(client)["id"] == ann and me(client)["providers"] == ["google"]
+    assert me(other) == theirs  # untouched, and still signed in
+    assert [d["name"] for d in other.get("/api/v1/decks").json()["items"]] == ["Second deck"]  # never merged
+    assert [d["name"] for d in client.get("/api/v1/decks").json()["items"]] == ["Ann's deck"]
+
+
+def test_linking_a_new_sign_in_says_so_and_linking_one_already_here_changes_nothing(client, universe):
+    sign_in(client, universe.google, universe.google.add_account("g-cy", "cy@gmail.com", "Cy"))
+    assert sign_in(client, universe.facebook, universe.facebook.add_account("f-cy", "cy@fb.test", "Cy")) == \
+        "/?linked=facebook"
+    assert sign_in(client, universe.google, "g-cy") == "/"  # already linked here: a plain sign-in
+    assert me(client)["providers"] == ["facebook", "google"]

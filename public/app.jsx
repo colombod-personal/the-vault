@@ -54,22 +54,19 @@ try { localStorage.removeItem('vault_refreshed_at'); } catch {}
 const VAULT_INVITE_KEY = 'vault_pending_invite';
 
 // An invite link (/?invite=TOKEN) may arrive before sign-in: park the token, clean the URL.
-// A failed "Link Google" (etc.) comes back as /?link_error=CODE: show it once, clean the URL.
+// "Link Google" (etc.) comes back as /?linked=… or /?link_error=… (lib/linkNotice.js words it):
+// show it once, clean the URL.
 const VAULT_START_NOTICE = (() => {
   const params = new URLSearchParams(location.search);
   const token = params.get('invite');
-  const linkError = params.get('link_error');
+  const link = window.VaultLinkNotice.noticeFromSearch(location.search);
   if (token) {
     try { localStorage.setItem(VAULT_INVITE_KEY, token); } catch {}
-    params.delete('invite');
   }
-  params.delete('link_error');
-  if (token || linkError) history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params : ''));
-  if (linkError === 'identity_in_use') {
-    return 'That sign-in is already used by another Vault account, so it was not linked. ' +
-      'Sign in with it to open that account, or remove it there first.';
-  }
-  return linkError ? `Linking failed (${linkError}). Please try again.` : null;
+  const rest = link ? link.params : params;
+  rest.delete('invite');
+  if (token || link) history.replaceState(null, '', location.pathname + (rest.toString() ? '?' + rest : ''));
+  return link ? link.text : null;
 })();
 // Navigation lives in the URL hash (#/browse, #/sets/MKM, …), so the browser's Back and Forward
 // buttons, refresh and bookmarks work. Opening a card or the account panel adds a history

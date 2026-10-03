@@ -256,6 +256,25 @@ on the sign-in screen.
 Accounts are **not** merged by e-mail. Signing in with a second provider while signed in
 links it to the same account; otherwise each provider identity is its own account.
 
+**Linking a sign-in that already has its own account** (say Microsoft, used once by mistake and
+so holding a second, empty vault) works only when that other account is *empty*
+(`vault.auth.account_is_empty`): no collection rows, imports, decks, shares given or received
+(pending invites too), unexpired personal access tokens, or value history with any value. Its
+profile, sessions, one-time codes and expired tokens don't count. Then, in one transaction:
+- only the identity being linked moves to the signed-in account;
+- the other account is signed out everywhere; if it has no sign-in or passkey left, it is deleted
+  with everything `vault.privacy.personal_data` lists (its app sessions end too);
+- the web app shows "Microsoft is now linked to this vault (its empty test account was removed)"
+  (`/?linked=microsoft&empty_account=removed`, or `kept`).
+
+If the other account holds data, nothing changes and the link is refused
+(`/?link_error=identity_in_use&provider=…`; apps get `error=identity_in_use` or `409`): sign in
+with that provider, download that account's data if you want it, delete it (Account → Delete my
+account), then link the provider again. Two accounts with data are never merged. The web
+callback, the app hand-off (`app_redirect_uri`) and native ID-token sign-in follow the same rule.
+A passkey can't be moved: it carries its account's WebAuthn user handle, so add a new passkey to
+the account you keep (a passkey sign-in switches accounts, it never links).
+
 ### Testing sign-in
 
 **Automated, on every push:** `tests/test_signin_flows.py` and `tests/test_native_auth.py`
@@ -267,6 +286,7 @@ run the real sign-in flows against the providers' digital twins (`twins/`, see
   and Hide My Email
 - Facebook users who don't share their e-mail
 - linking a second provider, and no merging by e-mail
+- linking a sign-in from an empty account (moved, that account removed) or one with data (refused)
 - cancelled sign-ins, and replayed or forged callbacks (wrong nonce, audience or issuer)
 - provider outages
 - signing-key rotation
