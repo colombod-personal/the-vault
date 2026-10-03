@@ -18,7 +18,7 @@ land in a file, the shell history or a chat:
 
     VERCEL_TOKEN=... python -m jobs.vercel_setup --scope TEAM --provider google
 
-Variables only reach new deployments: ``--redeploy`` rebuilds production when this run changed one.
+Variables only reach new deployments: ``--redeploy`` rebuilds production when one is newer than it.
 """
 
 from __future__ import annotations
@@ -59,7 +59,8 @@ class Vercel:
         out = []
         for env in self._get(f"/v10/projects/{self.project}/env").get("envs", []):
             target = env.get("target") or []
-            out.append({"id": env.get("id"), "key": env["key"], "target": [target] if isinstance(target, str) else target})
+            out.append({"id": env.get("id"), "key": env["key"], "target": [target] if isinstance(target, str) else target,
+                        "updated": env.get("updatedAt") or env.get("createdAt") or 0})
         return out
 
     def env_keys(self) -> dict[str, set[str]]:
@@ -86,18 +87,31 @@ class Vercel:
         default = [d["name"] for d in domains if d["name"].endswith(".vercel.app")]
         return (sorted(custom, key=len) or sorted(default, key=len) or [None])[0]
 
-    def redeploy_production(self) -> str | None:
-        """Rebuild the live production deployment so it reads the variables just set.
-        Returns its address, or None when nothing has been deployed to production yet."""
-        project_id = self._get(f"/v9/projects/{self.project}")["id"]
-        res = self.http.get("/v6/deployments", params={**self.params, "projectId": project_id,
-                                                         "target": "production", "state": "READY", "limit": 1})
+    def live_production(self) -> dict | None:
+        """The deployment serving the production domain now (after a rollback, not the newest
+        one), or None before the first production deploy."""
+        domain = self.production_domain()
+        if not domain:
+            return None
+        res = self.http.get(f"/v13/deployments/{domain}", params=self.params)
+        if res.status_code == 404:
+            return None
         res.raise_for_status()
-        live = res.json().get("deployments", [])
+        return res.json()
+
+    def redeploy_production(self) -> str | None:
+        """Rebuild the live production deployment when a production variable is newer than it
+        (variables only reach new deployments). Returns the new address, or None when it is
+        up to date or nothing is deployed yet. Decided from Vercel's own timestamps, so a failed
+        redeploy is retried on the next run."""
+        live = self.live_production()
         if not live:
             return None
+        newest = max((e["updated"] for e in self.envs() if "production" in e["target"]), default=0)
+        if newest <= live.get("createdAt", 0):
+            return None
         res = self.http.post("/v13/deployments", params={**self.params, "forceNew": "1"},
-                             json={"name": self.project, "deploymentId": live[0]["uid"], "target": "production"})
+                             json={"name": self.project, "deploymentId": live["id"], "target": "production"})
         res.raise_for_status()
         return f"https://{res.json()['url']}"
 
@@ -198,7 +212,7 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
     parser.add_argument("--provider", choices=sorted(PROVIDERS),
                         help="store this sign-in provider's credentials in Production (asks for them)")
     parser.add_argument("--redeploy", action="store_true",
-                        help="redeploy production when a variable changed (variables only apply to new deployments)")
+                        help="redeploy production when a variable is newer than it (variables only apply to new deployments)")
     args = parser.parse_args(argv)
     token = os.environ.get("VERCEL_TOKEN")
     if not token:
@@ -207,7 +221,7 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
     stored = set_provider(vercel, args.provider, prompt) if args.provider else []
     state = configure(vercel)
     state["changed"] += stored
-    state["redeployed"] = vercel.redeploy_production() if args.redeploy and state["changed"] else None
+    state["redeployed"] = vercel.redeploy_production() if args.redeploy else None
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as fh:

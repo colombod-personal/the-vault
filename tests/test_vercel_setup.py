@@ -11,9 +11,12 @@ from jobs import vercel_setup
 class FakeVercel:
     def __init__(self, domains=(), envs=None):
         self.domains = [{"name": d, "verified": True, "redirect": None} for d in domains]
-        self.envs = [{"id": f"env{i}", **e} for i, e in enumerate(envs or [])]
-        self.deployments = [{"uid": "dpl_live", "url": "the-vault-live.vercel.app"}]
+        self.clock = 1000  # Vercel's millisecond timestamps
+        self.envs = [{"id": f"env{i}", "updatedAt": 1, **e} for i, e in enumerate(envs or [])]
+        # Each domain -> the deployment serving it, which after a rollback isn't the newest one.
+        self.serving = {d: {"id": "dpl_live", "url": "the-vault-live.vercel.app", "createdAt": 500} for d in domains}
         self.redeploys = []
+        self.fail_redeploy = False
         self.transport = httpx.MockTransport(self.handle)
 
     def handle(self, req: httpx.Request) -> httpx.Response:
@@ -27,22 +30,27 @@ class FakeVercel:
             if clash and req.url.params.get("upsert") != "true":
                 return httpx.Response(400, json={"error": {"code": "ENV_ALREADY_EXISTS"}})
             self.envs = [e for e in self.envs if e not in clash]
-            self.envs.append({"id": f"env{len(self.envs)}", **new})
+            self.clock += 1
+            self.envs.append({"id": f"env{len(self.envs)}", "updatedAt": self.clock, **new})
             return httpx.Response(201, json={"created": self.envs[-1]})
         if path.startswith("/v9/projects/the-vault/env/") and req.method == "PATCH":
             env = next(e for e in self.envs if e["id"] == path.rsplit("/", 1)[1])
-            env.update(json.loads(req.content))
+            self.clock += 1
+            env.update(json.loads(req.content), updatedAt=self.clock)
             return httpx.Response(200, json=env)
         if path == "/v9/projects/the-vault/domains":
             return httpx.Response(200, json={"domains": self.domains})
-        if path == "/v9/projects/the-vault":
-            return httpx.Response(200, json={"id": "prj_1", "name": "the-vault"})
-        if path == "/v6/deployments":
-            assert (req.url.params["projectId"], req.url.params["target"], req.url.params["state"]) == ("prj_1", "production", "READY")
-            return httpx.Response(200, json={"deployments": self.deployments[:1]})
+        if path.startswith("/v13/deployments/") and req.method == "GET":
+            live = self.serving.get(path.rsplit("/", 1)[1])
+            return httpx.Response(200, json=live) if live else httpx.Response(404, json={"error": {"code": "not_found"}})
         if path == "/v13/deployments" and req.method == "POST":
+            if self.fail_redeploy:
+                return httpx.Response(500, json={"error": {"code": "internal_error"}})
             self.redeploys.append(json.loads(req.content))
-            return httpx.Response(200, json={"id": "dpl_new", "url": "the-vault-new.vercel.app"})
+            self.clock += 1
+            new = {"id": f"dpl_{self.clock}", "url": "the-vault-new.vercel.app", "createdAt": self.clock}
+            self.serving = {d: new for d in self.serving}
+            return httpx.Response(200, json=new)
         return httpx.Response(404, json={"error": {"code": "not_found"}})
 
     def value(self, key, target="production"):
@@ -126,7 +134,7 @@ def test_provider_credentials_are_asked_for_and_stored_in_production_only(capsys
 
 def test_redeploy_applies_what_changed_and_only_then(token):
     """Vercel reads variables when it builds: after setting SESSION_SECRET or BASE_URL the live
-    deployment is redeployed so it uses them. Nothing changed, nothing is redeployed."""
+    deployment is redeployed so it uses them. Once it is newer than every variable, it isn't."""
     fake = FakeVercel(domains=["the-vault.vercel.app"])
     state = vercel_setup.main(["--redeploy"], fake.transport)
     assert state["redeployed"] == "https://the-vault-new.vercel.app"
@@ -136,8 +144,30 @@ def test_redeploy_applies_what_changed_and_only_then(token):
     assert "Redeployed" in token.read_text(encoding="utf-8")
 
 
-def test_without_a_production_deployment_there_is_nothing_to_redeploy():
-    fake = FakeVercel()
-    fake.deployments = []
+def test_redeploys_what_serves_the_domain_after_a_rollback():
+    fake = FakeVercel(domains=["the-vault.vercel.app"])
+    fake.serving["the-vault.vercel.app"] = {"id": "dpl_rolled_back_to", "url": "old.vercel.app", "createdAt": 400}
+    vercel_setup.main(["--redeploy"], fake.transport)
+    assert fake.redeploys[0]["deploymentId"] == "dpl_rolled_back_to"
+
+
+def test_a_failed_redeploy_is_retried_by_the_next_run():
+    fake = FakeVercel(domains=["the-vault.vercel.app"])
+    fake.fail_redeploy = True
+    with pytest.raises(httpx.HTTPStatusError):
+        vercel_setup.main(["--redeploy"], fake.transport)
+    fake.fail_redeploy = False
     state = vercel_setup.main(["--redeploy"], fake.transport)
-    assert state["changed"] and state["redeployed"] is None and fake.redeploys == []
+    assert state["changed"] == [] and state["redeployed"] and len(fake.redeploys) == 1
+
+
+def test_settings_saved_before_the_first_deploy_is_live_are_applied_later():
+    fake = FakeVercel()
+    first = vercel_setup.main(["--redeploy"], fake.transport)
+    assert first["changed"] and first["redeployed"] is None and fake.redeploys == []
+    # The first deployment was building while those variables were saved, then went live.
+    fake.domains = [{"name": "the-vault.vercel.app", "verified": True, "redirect": None}]
+    fake.serving = {"the-vault.vercel.app": {"id": "dpl_first", "url": "first.vercel.app", "createdAt": 1001}}
+    state = vercel_setup.main(["--redeploy"], fake.transport)
+    assert state["redeployed"] and fake.redeploys[0]["deploymentId"] == "dpl_first"
+    assert vercel_setup.main(["--redeploy"], fake.transport)["redeployed"] is None

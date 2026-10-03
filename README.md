@@ -116,8 +116,8 @@ with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic
   smoke-tests that exact deployment from outside with `jobs/smoke_test.py`, without secrets.
 - The **sync-prices** workflow (daily, or Actions → sync-prices → *Run workflow*) first
   configures the project with `jobs/vercel_setup.py --redeploy`: it sets `SESSION_SECRET` and
-  `BASE_URL`, redeploys production if that changed anything (variables only reach new
-  deployments), and writes a checklist of what's missing with the OAuth redirect URIs. Then it
+  `BASE_URL`, redeploys production when a production variable is newer than the live
+  deployment (variables only reach new deployments), and writes a checklist of what's missing with the OAuth redirect URIs. Then it
   syncs prices.
 - **deploy (manual fallback)** is a Vercel CLI deploy of `main`, for when the integration isn't
   connected.
