@@ -33,3 +33,18 @@ def test_every_view_is_in_the_bundle_and_nothing_compiles_in_the_browser():
     assert 'src="app.bundle.js"' in html
     assert "text/babel" not in html and "babel" not in html.lower()
     assert ".development.js" not in html  # React's production build
+
+
+ICONS = ("favicon.ico", "favicon.svg", "apple-touch-icon.png")
+
+
+def test_every_page_has_the_site_icon():
+    """Browsers ask for /favicon.ico even when a page links none, so it sits at the root of public/
+    (the smoke test checks it is served)."""
+    for page in PUBLIC.glob("*.html"):
+        html = page.read_text(encoding="utf-8")
+        for name in ICONS:
+            assert (PUBLIC / name).is_file() and f'href="/{name}"' in html, f"{page.name}: {name}"
+    assert (PUBLIC / "favicon.ico").read_bytes()[:4] == b"\0\0\1\0"  # an icon file, not a renamed PNG
+    assert (PUBLIC / "apple-touch-icon.png").read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+    assert (PUBLIC / "favicon.svg").read_text(encoding="utf-8").startswith("<svg")
