@@ -573,7 +573,7 @@ function CardDrawer({ card, onClose, costsHidden }) {
             <img src={window.SetIcons.get(card.s).icon} alt="" style={{ filter: 'brightness(0) invert(1)' }} />
           </div>
         )}
-        <button className="close" onClick={onClose}>×</button>
+        <button className="close" onClick={onClose} aria-label="Close card details">×</button>
         <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 20, marginBottom: 24 }}>
           <div style={{ aspectRatio: '488 / 680', background: 'var(--bg-2)', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border)' }}>
             {scry?.img_normal ? (
