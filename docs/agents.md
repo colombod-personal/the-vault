@@ -43,9 +43,12 @@ Tools (the `share_id` argument reads a collection someone shared with you):
 | Tool | API |
 |---|---|
 | `get_collection_summary` | `GET /collection` |
-| `search_cards` (query, set, name, finish, condition, sort, limit ≤ 100, cursor) | `GET /collection/cards` |
+| `search_cards` (query, set, name, finish, condition, printing, sort, limit ≤ 100, cursor) | `GET /collection/cards` |
 | `get_card` | `GET /collection/cards/{id}` |
-| `list_sets`, `get_collection_stats`, `get_value_history`, `get_acquisition_timeline` | `/collection/...` |
+| `list_sets` (query, sort), `get_collection_stats` (limit), `get_value_history`, `get_acquisition_timeline` | `/collection/...` |
+| `get_collection_breakdowns`, `get_valuation` | `GET /collection/breakdowns`, `/collection/valuation` |
+| `list_card_names` (sort, colors, type, min_value, limit, cursor) | `GET /collection/names` |
+| `refresh_prices`* (cursor, force) | `POST /collection/refresh` |
 | `check_decklist`, `parse_decklist` | `POST /decks/coverage`, `/decks/parse` |
 | `list_decks`, `get_deck`, `save_deck`*, `update_deck`* | `/decks` |
 | `get_archidekt_deck` | `/archidekt/decks/{id}` |
