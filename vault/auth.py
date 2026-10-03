@@ -131,6 +131,11 @@ class Auth:
     def enabled(self) -> list[str]:
         return [p for p in PROVIDERS if self.oauth.create_client(p) is not None]
 
+    @property
+    def offered(self) -> list[str]:
+        """The enabled providers the sign-in screen shows (AUTH_HIDDEN_PROVIDERS left out)."""
+        return [p for p in self.enabled if p not in self.settings.hidden_providers]
+
     def client(self, provider: str):
         client = self.oauth.create_client(provider) if provider in PROVIDERS else None
         if client is None:
@@ -279,7 +284,7 @@ def build_router(auth: Auth, get_db) -> APIRouter:
     def providers() -> dict:
         from .passkeys import enabled as passkeys_enabled
 
-        return {"providers": auth.enabled, "dev_login": auth.settings.dev_login,
+        return {"providers": auth.offered, "dev_login": auth.settings.dev_login,
                 "passkeys": passkeys_enabled(auth.settings)}
 
     @router.get("/login/{provider}", dependencies=limited("oauth-login"))

@@ -44,6 +44,14 @@ def test_only_configured_providers_are_enabled():
     assert Auth(Settings()).enabled == []
 
 
+def test_hidden_providers_stay_enabled_but_are_not_offered():
+    auth = Auth(Settings(google_client_id="g", google_client_secret="x", facebook_client_id="f",
+                         facebook_client_secret="y", hidden_providers=("facebook",)))
+    assert auth.enabled == ["google", "facebook"]  # sign-in and linking still work
+    assert auth.offered == ["google"]              # but the sign-in screen doesn't show it
+    auth.client("facebook")                        # still a configured client, not a 404
+
+
 def _request():
     scope = {"type": "http", "session": {}, "method": "GET", "headers": []}
     return Request(scope)
