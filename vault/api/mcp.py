@@ -40,7 +40,13 @@ priced daily from Scryfall, plus their saved decks and what others have shared w
 - Start with get_collection_summary. Use search_cards to find printings; it pages (pass
   next_cursor back as cursor), sorts with sort="-value" (most valuable first), and filters by
   query, set, name, finish and condition.
-- check_decklist tells which cards of any pasted decklist the person owns, partly owns, or is missing.
+- check_decklist tells which cards of any pasted decklist the person owns, partly owns, or is missing,
+  and what the missing copies would cost.
+- Analytics are computed by the Vault: get_collection_summary has P&L (pnl, over copies with a
+  known price paid only), get_collection_breakdowns splits the collection by colour, type, mana
+  value and rarity, get_valuation gives value and cost by month, and list_card_names rolls the
+  collection up by card name. refresh_prices (write) fetches today's prices; call it again with
+  the cursor it returns until remaining is 0.
 - Prices are USD market prices; "paid" is what the person paid (hidden on shared collections
   unless the owner allowed it).
 - Collections shared with the person: list_shared_with_me, then pass share_id to the
@@ -138,6 +144,7 @@ ID = {"type": "integer", "minimum": 1, "maximum": MAX_ID}
 SHARE = {"share_id": {**ID, "description": "Read a collection someone shared with you (from list_shared_with_me) instead of your own"}}
 DECKLIST = {"type": "string", "maxLength": 50_000}  # as the API's TextIn and DeckIn
 SOURCE_URL = {"type": "string", "maxLength": 500, "description": "Where the deck came from (an http or https link)"}
+SET_SORTS = ["-value", "value", "-quantity", "quantity", "-unique", "unique", "name", "code", "release", "-release"]
 PAGING = {
     "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25, "description": "Items per page"},
     "cursor": {"type": "string", "description": "next_cursor from the previous page"},
@@ -154,18 +161,55 @@ TOOLS = [
           "name": {"type": "string", "description": "Exact card name (front face for double-faced cards)"},
           "finish": {"type": "string", "enum": ["nonfoil", "foil", "etched"]},
           "condition": {"type": "string", "enum": ["mint", "near_mint", "excellent", "good", "light_played", "played", "poor"]},
-          "sort": {"type": "string", "enum": ["name", "-value", "value", "-quantity", "set", "-acquired"], "default": "name",
-                   "description": "'-value' = most valuable first, '-acquired' = most recently bought first"},
+          "printing": {"type": "string", "maxLength": 40, "description": "Printing label, e.g. 'Foil', 'Normal', 'Etched'"},
+          "sort": {"type": "string", "enum": ["name", "-name", "-value", "value", "-quantity", "set", "-acquired", "acquired"],
+                   "default": "name",
+                   "description": "'-value' = most valuable first, '-acquired' = most recently bought first, "
+                                  "'acquired' = first bought first"},
           **PAGING, **SHARE},
-         path=lambda a: _base(a) + "/cards", query=("q", "set", "name", "finish", "condition", "sort", "limit", "cursor")),
+         path=lambda a: _base(a) + "/cards",
+         query=("q", "set", "name", "finish", "condition", "printing", "sort", "limit", "cursor")),
     Tool("get_card", "One printing in detail: every copy (condition, language, folder, price paid, date), "
          "Scryfall card data (type, text, image with artist credit) and 90 days of prices.",
          {"card_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$", "description": "The id from search_cards"},
           **SHARE}, ["card_id"], path=lambda a: _base(a) + f"/cards/{quote(a['card_id'], safe='')}"),
-    Tool("list_sets", "Market value, copies and printings per set. Paged.", {**PAGING, **SHARE},
-         path=lambda a: _base(a) + "/sets", query=("limit", "cursor")),
-    Tool("get_collection_stats", "Highlights: most valuable printings, biggest price gains and losses, duplicates.",
-         dict(SHARE), path=lambda a: _base(a) + "/stats"),
+    Tool("list_sets", "Market value, copies, printings and colour mix (copies by colour identity) per set. Paged.",
+         {"query": {"type": "string", "maxLength": 200, "description": "Text in the set's code or name"},
+          "sort": {"type": "string", "enum": SET_SORTS, "default": "-value",
+                   "description": "'-value' = most valuable first; 'unique' = distinct printings; "
+                                  "'release' = by release date"},
+          **PAGING, **SHARE},
+         path=lambda a: _base(a) + "/sets", query=("q", "sort", "limit", "cursor")),
+    Tool("get_collection_stats", "Highlights: most valuable printings, biggest price gains and losses, and the "
+         "cards owned in the most copies (with how many printings of each).",
+         {"limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 8, "description": "Items per list"},
+          **SHARE},
+         path=lambda a: _base(a) + "/stats", query=("limit",)),
+    Tool("get_collection_breakdowns", "Copies, printings and market value by colour identity (W, U, B, R, G, "
+         "multicolour, colourless), main card type, mana value (0-7, 8+), rarity, and colour x type. Printings "
+         "without card data yet count as 'unknown'.", dict(SHARE), path=lambda a: _base(a) + "/breakdowns"),
+    Tool("get_valuation", "Month by month (by purchase date): copies bought, their market value today, what was "
+         "paid, running totals and gain; the month that added the most value; the last 12 months' change.",
+         dict(SHARE), path=lambda a: _base(a) + "/valuation"),
+    Tool("list_card_names", "The collection rolled up by card name: copies, market value, unit price, printings, "
+         "sets, colour, main type, mana value, rarity and an image (credit its artist). Paged; the first page "
+         "sorted by -value is the top N.",
+         {"sort": {"type": "string", "enum": ["-value", "value", "-quantity", "quantity", "name", "-name"],
+                   "default": "-value"},
+          "colors": {"type": "string", "pattern": "^[WUBRGMCwubrgmc](,[WUBRGMCwubrgmc])*$",
+                     "description": "Comma-separated W,U,B,R,G,M,C; a multicolour card matches any of its colours"},
+          "type": {"type": "string", "maxLength": 20, "description": "Main type, e.g. 'Creature'"},
+          "min_value": {"type": "number", "minimum": 0, "description": "Only names worth at least this (USD)"},
+          **PAGING, **SHARE},
+         path=lambda a: _base(a) + "/names", query=("sort", "colors", "type", "min_value", "limit", "cursor")),
+    Tool("refresh_prices", "Fetch fresh card data and today's prices from Scryfall for the person's own "
+         "printings, up to 300 per call, and recompute today's collection value. Call again with the returned "
+         "cursor until remaining is 0.",
+         {"cursor": {"type": "string", "maxLength": 36, "description": "cursor from the previous call"},
+          "force": {"type": "boolean", "default": False,
+                    "description": "Also refresh printings that already have today's price"}},
+         method="POST", path=lambda a: f"{V1}/collection/refresh",
+         body=lambda a: {"cursor": a.get("cursor"), "force": bool(a.get("force", False))}, write=True),
     Tool("get_value_history", "The collection's market value (and cost) day by day. Paged.",
          {"since": {"type": "string", "format": "date", "description": "YYYY-MM-DD"}, **PAGING, **SHARE},
          path=lambda a: _base(a) + "/history", query=("since", "limit", "cursor")),
@@ -249,7 +293,7 @@ def build_router(optional_user) -> APIRouter:
         kwargs: dict[str, Any] = {"headers": headers}
         params = {"q" if k == "query" else k: v for k, v in args.items() if v is not None}
         kwargs["params"] = {k: v for k, v in params.items() if k in tool.query}
-        if tool.name in ("search_cards",) or "limit" in tool.query:
+        if tool.name in ("search_cards",) or "cursor" in tool.query:  # paged: a small page by default
             kwargs["params"].setdefault("limit", 25)
         if tool.name == "import_collection_csv":
             kwargs["files"] = {"file": (args.get("filename") or "agent-import.csv", args["csv"].encode(), "text/csv")}
