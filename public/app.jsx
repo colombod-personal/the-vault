@@ -16,7 +16,8 @@ window.vaultFreshness = function (iso) {
   return { rel, abs, tone, days };
 };
 
-// Pick the live USD price for a card from the Scryfall cache, by its finish (as the server does).
+// Pick the live USD price for a card from its card data (a lookup made by "Update now" first), by
+// its finish (as the server does).
 window.vaultPriceFor = function (card) {
   const s = window.Scryfall && window.Scryfall.cached(card.n, card.s, card.cn);
   return s && s.prices ? window.Scryfall.priceFor(s.prices, card) : null;
@@ -194,7 +195,8 @@ function App() {
       setAuth('signed-in');
       setViewing(null);
       acceptPendingInvite();
-      // If the user pulled live prices in this browser since the server's last sync, replay them.
+      // If the user pulled live prices on this page since the server's last sync, replay them
+      // (after a reload there is nothing to replay: the server stored what "Update now" fetched).
       const at = localStorage.getItem(VAULT_REFRESH_KEY);
       const serverAt = j.meta.generatedAt;
       if (at && (!serverAt || at > serverAt) && window.Scryfall && window.Scryfall.cacheSize() > 0) {
@@ -534,16 +536,6 @@ function App() {
             options={['small', 'normal']}
             onChange={(v) => setTweak('imageQuality', v)}
           />
-
-          <TweakSection label="Cache" />
-          <TweakButton
-            label="Clear Scryfall cache"
-            subtitle={`${window.Scryfall?.cacheSize?.() || 0} cards cached`}
-            onClick={() => {
-              window.Scryfall.clearCache();
-              alert('Scryfall cache cleared. Refresh to start over.');
-            }}
-          />
         </TweaksPanel>
       </div>
     );
@@ -552,7 +544,7 @@ function App() {
 }
 
 function CardDrawer({ card, onClose, costsHidden }) {
-  const [scry, setScry] = useStateApp(() => card._scry || window.Scryfall.cached(card.n, card.s, card.cn));
+  const [scry, setScry] = useStateApp(() => card._scry || window.Scryfall.cached(card.n, card.s, card.cn) || card.scry);
   useEffectApp(() => {
     if (scry) return;
     let dead = false;
