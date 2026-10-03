@@ -12,6 +12,8 @@ class FakeVercel:
     def __init__(self, domains=(), envs=None):
         self.domains = [{"name": d, "verified": True, "redirect": None} for d in domains]
         self.envs = [{"id": f"env{i}", **e} for i, e in enumerate(envs or [])]
+        self.deployments = [{"uid": "dpl_live", "url": "the-vault-live.vercel.app"}]
+        self.redeploys = []
         self.transport = httpx.MockTransport(self.handle)
 
     def handle(self, req: httpx.Request) -> httpx.Response:
@@ -33,6 +35,14 @@ class FakeVercel:
             return httpx.Response(200, json=env)
         if path == "/v9/projects/the-vault/domains":
             return httpx.Response(200, json={"domains": self.domains})
+        if path == "/v9/projects/the-vault":
+            return httpx.Response(200, json={"id": "prj_1", "name": "the-vault"})
+        if path == "/v6/deployments":
+            assert (req.url.params["projectId"], req.url.params["target"], req.url.params["state"]) == ("prj_1", "production", "READY")
+            return httpx.Response(200, json={"deployments": self.deployments[:1]})
+        if path == "/v13/deployments" and req.method == "POST":
+            self.redeploys.append(json.loads(req.content))
+            return httpx.Response(200, json={"id": "dpl_new", "url": "the-vault-new.vercel.app"})
         return httpx.Response(404, json={"error": {"code": "not_found"}})
 
     def value(self, key, target="production"):
@@ -112,3 +122,22 @@ def test_provider_credentials_are_asked_for_and_stored_in_production_only(capsys
     out = capsys.readouterr()
     assert "s3cret" not in out.out + out.err  # names only, never values
     assert "https://the-vault.vercel.app/api/auth/callback/google" in out.err
+
+
+def test_redeploy_applies_what_changed_and_only_then(token):
+    """Vercel reads variables when it builds: after setting SESSION_SECRET or BASE_URL the live
+    deployment is redeployed so it uses them. Nothing changed, nothing is redeployed."""
+    fake = FakeVercel(domains=["the-vault.vercel.app"])
+    state = vercel_setup.main(["--redeploy"], fake.transport)
+    assert state["redeployed"] == "https://the-vault-new.vercel.app"
+    assert fake.redeploys == [{"name": "the-vault", "deploymentId": "dpl_live", "target": "production"}]
+    again = vercel_setup.main(["--redeploy"], fake.transport)
+    assert again["changed"] == [] and again["redeployed"] is None and len(fake.redeploys) == 1
+    assert "Redeployed" in token.read_text(encoding="utf-8")
+
+
+def test_without_a_production_deployment_there_is_nothing_to_redeploy():
+    fake = FakeVercel()
+    fake.deployments = []
+    state = vercel_setup.main(["--redeploy"], fake.transport)
+    assert state["changed"] and state["redeployed"] is None and fake.redeploys == []

@@ -17,6 +17,8 @@ Store a sign-in provider's credentials in Production, typed at a hidden prompt s
 land in a file, the shell history or a chat:
 
     VERCEL_TOKEN=... python -m jobs.vercel_setup --scope TEAM --provider google
+
+Variables only reach new deployments: ``--redeploy`` rebuilds production when this run changed one.
 """
 
 from __future__ import annotations
@@ -83,6 +85,21 @@ class Vercel:
         custom = [d["name"] for d in domains if not d["name"].endswith(".vercel.app")]
         default = [d["name"] for d in domains if d["name"].endswith(".vercel.app")]
         return (sorted(custom, key=len) or sorted(default, key=len) or [None])[0]
+
+    def redeploy_production(self) -> str | None:
+        """Rebuild the live production deployment so it reads the variables just set.
+        Returns its address, or None when nothing has been deployed to production yet."""
+        project_id = self._get(f"/v9/projects/{self.project}")["id"]
+        res = self.http.get("/v6/deployments", params={**self.params, "projectId": project_id,
+                                                         "target": "production", "state": "READY", "limit": 1})
+        res.raise_for_status()
+        live = res.json().get("deployments", [])
+        if not live:
+            return None
+        res = self.http.post("/v13/deployments", params={**self.params, "forceNew": "1"},
+                             json={"name": self.project, "deploymentId": live[0]["uid"], "target": "production"})
+        res.raise_for_status()
+        return f"https://{res.json()['url']}"
 
 
 def _session_secrets(v: Vercel) -> list[str]:
@@ -167,6 +184,8 @@ def checklist(state: dict) -> str:
     if state["redirect_uris"]:
         lines += ["", "Redirect URIs to register with each provider:", ""]
         lines += [f"- {p}: `{uri}`" for p, uri in state["redirect_uris"].items()]
+    if state.get("redeployed"):
+        lines += ["", f"Redeployed production so the new settings apply: {state['redeployed']}"]
     if state["dev_login_set"]:
         lines += ["", "⚠️ DEV_LOGIN is set in Vercel: remove it (the app refuses to start with it on https)."]
     return "\n".join(lines) + "\n"
@@ -178,6 +197,8 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
     parser.add_argument("--scope", default=os.environ.get("VERCEL_SCOPE") or None)
     parser.add_argument("--provider", choices=sorted(PROVIDERS),
                         help="store this sign-in provider's credentials in Production (asks for them)")
+    parser.add_argument("--redeploy", action="store_true",
+                        help="redeploy production when a variable changed (variables only apply to new deployments)")
     args = parser.parse_args(argv)
     token = os.environ.get("VERCEL_TOKEN")
     if not token:
@@ -186,6 +207,7 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
     stored = set_provider(vercel, args.provider, prompt) if args.provider else []
     state = configure(vercel)
     state["changed"] += stored
+    state["redeployed"] = vercel.redeploy_production() if args.redeploy and state["changed"] else None
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as fh:
