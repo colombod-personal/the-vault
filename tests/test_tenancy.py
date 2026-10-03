@@ -255,3 +255,19 @@ def test_two_invites_from_one_owner_accepted_at_once_give_one_grant(database_url
         Base.metadata.drop_all(conn)
         conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
     db.engine.dispose()
+
+
+def test_shared_analytics_answer_only_the_grantee(client):
+    login(client, "alice@example.com")
+    client.post("/api/v1/imports", files={"file": ("a.csv", CSV, "text/csv")})
+    token = client.post("/api/v1/shares", json={"kind": "collection"}).json()["url"].split("invite=")[1]
+    login(client, "bob@example.com")
+    share_id = client.post("/api/v1/shares/accept", json={"token": token}).json()["id"]
+    paths = [f"/api/v1/shared/{share_id}/collection/{p}" for p in ("breakdowns", "valuation", "names")]
+    assert all(client.get(p).status_code == 200 for p in paths)
+    assert client.get(paths[2]).json()["total"] == 4
+    login(client, "carol@example.com")
+    assert all(client.get(p).status_code == 404 for p in paths)
+    assert client.get("/api/v1/collection/names").json()["total"] == 0  # Carol's own, empty
+    # the refresh is for one's own collection only: there is no shared variant
+    assert client.post(f"/api/v1/shared/{share_id}/collection/refresh").status_code in (404, 405)

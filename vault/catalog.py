@@ -127,6 +127,11 @@ class Catalog:
             self._sets = (time.monotonic(), items)
             return items
 
+    def cached_sets(self) -> list[dict[str, Any]]:
+        """The set list this process already has (possibly stale), without calling Scryfall; [] if none."""
+        cached = self._sets
+        return cached[1] if cached else []
+
     def _fresh_sets(self) -> list[dict[str, Any]] | None:
         cached = self._sets
         return cached[1] if cached and time.monotonic() - cached[0] < SETS_TTL else None

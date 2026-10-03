@@ -54,6 +54,9 @@ class Settings:
     auth_rate_limit: int = field(default_factory=lambda: int(_env("AUTH_RATE_LIMIT", "30")))
     auth_verify_rate_limit: int = field(default_factory=lambda: int(_env("AUTH_VERIFY_RATE_LIMIT", "10")))
     passkey_challenge_cap: int = field(default_factory=lambda: int(_env("PASSKEY_CHALLENGE_CAP", "10000")))
+    # Calls per minute per user to POST /api/v1/collection/refresh (each fetches up to 300
+    # printings from Scryfall, so a whole collection takes a few calls).
+    refresh_rate_limit: int = field(default_factory=lambda: int(_env("REFRESH_RATE_LIMIT", "20")))
     # Behind Vercel's edge, which sets the client's address in x-forwarded-for / x-real-ip.
     on_vercel: bool = field(default_factory=lambda: bool(os.environ.get("VERCEL")))
 

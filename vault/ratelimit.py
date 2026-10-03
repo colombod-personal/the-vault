@@ -73,3 +73,21 @@ def limited(bucket: str, *, verify: bool = False) -> list:
                                 headers={"Retry-After": str(max(1, math.ceil((minute + 1) * WINDOW - now)))})
 
     return [Depends(check)]
+
+
+def per_user(request: Request, bucket: str, user_id: int, allowed: int) -> None:
+    """Limit one signed-in user's calls to an expensive endpoint (e.g. a refresh that calls
+    Scryfall) to ``allowed`` a minute, whichever device or token they come from. Counted like the
+    sign-in limits, under a keyed hash of the bucket and user id, so the rows name no one."""
+    settings: Settings = request.app.state.settings
+    now = time.time()
+    minute = int(now // WINDOW)
+    key = hmac.new(settings.session_secret.encode(), f"user:{bucket}:{user_id}".encode(), hashlib.sha256).hexdigest()
+    with request.app.state.db.sessions() as db:
+        count = hit(db, key, minute)
+        if count == 1:
+            db.execute(delete(RateHit).where(RateHit.minute < minute - KEEP))
+        db.commit()
+    if count > allowed:
+        raise HTTPException(429, "Too many refreshes. Try again in a minute.",
+                            headers={"Retry-After": str(max(1, math.ceil((minute + 1) * WINDOW - now)))})
