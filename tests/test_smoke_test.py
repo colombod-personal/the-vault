@@ -29,7 +29,7 @@ def test_healthy_deployment(settings):
     with TestClient(create_app(production, serve_static=True), base_url="https://vault.test") as client:
         results, configured = smoke_test.run("https://vault.test", Passthrough(client))
     assert configured and [(n, d) for n, ok, d in results if not ok] == []
-    assert len(results) == 13
+    assert len(results) == 14
 
 
 def test_protected_preview_is_reported_not_failed(monkeypatch):

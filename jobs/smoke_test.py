@@ -48,6 +48,7 @@ def run(base: str, transport: httpx.BaseTransport | None = None) -> tuple[list[t
             results[-1] = ("GET /api/health", False, "503 not configured yet: " + health.text[:200])
             return results, False
         home = check("GET / (web app)", "GET", "/", 200, lambda r: "The Vault" in r.text)
+        check("GET /favicon.ico (site icon)", "GET", "/favicon.ico", 200, lambda r: r.content[:4] == b"\0\0\1\0")
         for page in ("/credits.html", "/privacy.html", "/llms.txt"):
             check(f"GET {page}", "GET", page, 200)
         check("GET /api/v1 (hypermedia root)", "GET", "/api/v1", 200, lambda r: r.json().get("version") == "1")
