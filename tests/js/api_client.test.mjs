@@ -14,7 +14,7 @@ const json = (status, body, headers = {}) => ({
 
 // `route(url, init)` answers each request; returns the client, the requests made and every
 // localStorage write.
-function load(route) {
+function load(route, { cookie = '', indexedDB } = {}) {
   const calls = [], writes = [];
   const sandbox = {
     fetch: async (url, init = {}) => {
@@ -26,9 +26,11 @@ function load(route) {
       getItem: () => null, setItem: (k, v) => writes.push(['set', k, v]), removeItem: (k) => writes.push(['remove', k]),
       clear: () => writes.push(['clear']), key: () => null, length: 0,
     },
-    location: { href: 'https://vault.test/' }, document: { cookie: '' },
+    location: { href: 'https://vault.test/' }, document: { cookie }, indexedDB,
     crypto: { randomUUID: () => 'uuid' }, Event: class { constructor(type) { this.type = type; } },
-    dispatchEvent: () => true, URL, URLSearchParams, Headers: Map, setTimeout, clearTimeout, Promise, Date, Math, JSON, console,
+    dispatchEvent: () => true, URL, URLSearchParams, Headers: Map, clearTimeout, Promise, Date, Math, JSON, console,
+    // long waits (the local copy's time limit) are shortened so the tests stay fast
+    setTimeout: (fn, ms) => setTimeout(fn, Math.min(ms, 20)),
   };
   sandbox.window = sandbox;
   vm.runInNewContext(readFileSync(new URL('../../public/lib/api.js', import.meta.url), 'utf8'), sandbox);
@@ -129,3 +131,109 @@ test('names follow the server next links up to the asked number, with filters as
   assert.equal(calls[1].url, '/api/v1/shared/7/collection/names?colors=W%2CM&min_value=5&sort=-value&limit=3');
   assert.equal(calls[2].url, '/api/v1/shared/7/collection/names?cursor=x');
 });
+
+// -- load freeze regressions: every paging loop ends, and the local copy never holds up a load --
+
+// A minimal IndexedDB: one 'kv' store in a Map, answered asynchronously like the real one.
+// `block`: the open is blocked (another tab holds the database); `hang`: it never answers.
+function fakeIndexedDB(store = new Map(), { block = false, hang = false } = {}) {
+  const later = (fn) => setTimeout(fn, 0);
+  const request = (tx, fn) => { const r = {}; later(() => { r.result = fn(); if (tx.oncomplete) tx.oncomplete(); }); return r; };
+  const db = {
+    transaction: () => {
+      const tx = {};
+      tx.objectStore = () => ({
+        get: (k) => request(tx, () => (store.has(k) ? structuredClone(store.get(k)) : undefined)),
+        put: (v, k) => request(tx, () => { store.set(k, structuredClone(v)); }),
+        delete: (k) => request(tx, () => { store.delete(k); }),
+        clear: () => request(tx, () => { store.clear(); }),
+      });
+      return tx;
+    },
+  };
+  return {
+    store,
+    open: () => {
+      const req = {};
+      later(() => {
+        if (hang) return;
+        if (block) { if (req.onblocked) req.onblocked(); return; }
+        req.result = db;
+        req.onsuccess();
+      });
+      return req;
+    },
+  };
+}
+const set = (code) => ({ code, name: code, copies: 1, market_value: 1, printings: 1, colors: {}, released_at: null, _links: {} });
+// /sets whose second page links to itself: a server (or a stored copy) answering a cycle.
+const cyclingSets = (url) => {
+  if (url === '/api/v1/collection') return json(200, summary);
+  if (url.includes('cursor=p2')) {
+    return json(200, { items: [set('B')], count: 1, total: 2, _links: { next: { href: '/api/v1/collection/sets?limit=500&cursor=p2' } } });
+  }
+  return json(200, { items: [set('A')], count: 1, total: 2, _links: { next: { href: '/api/v1/collection/sets?limit=500&cursor=p2' } } });
+};
+
+test('a next link that points back at a page ends the list', { timeout: 5000 }, async () => {
+  const { api, calls } = load(cyclingSets);
+  const data = await api.collection();
+  const sets = await data.api.sets();
+  assert.deepEqual(Array.from(sets.items, (s) => s.code), ['A', 'B']);
+  assert.equal(calls.filter((c) => c.url.includes('/sets')).length, 2, 'each page asked for once');
+});
+
+test('a cycle answered from the local copy ends without spinning in the browser', { timeout: 5000 }, async () => {
+  const idb = fakeIndexedDB();
+  const { api, calls } = load(cyclingSets, { cookie: 'vault_account=abc', indexedDB: idb });
+  await (await api.collection()).api.sets();
+  assert.ok([...idb.store.keys()].some((k) => k.startsWith('res:abc:/api/v1/collection/sets')), 'pages are stored');
+  const before = calls.length;
+  // the next visit, same version: every page comes from the local copy, none from the server
+  const sets = await (await api.collection()).api.sets();
+  assert.deepEqual(Array.from(sets.items, (s) => s.code), ['A', 'B']);
+  assert.deepEqual(calls.slice(before).map((c) => c.url), ['/api/v1/collection'], 'only the summary is asked again');
+});
+
+test('following next links (all) stops at a link already followed or an empty page', { timeout: 5000 }, async () => {
+  const deck = (id) => ({ id, name: 'd' + id, _links: {} });
+  const { api, calls } = load((url) => (url.includes('cursor=2')
+    ? json(200, { items: [deck(2)], count: 1, total: 2, _links: { next: { href: '/api/v1/decks?cursor=2' } } })
+    : json(200, { items: [deck(1)], count: 1, total: 2, _links: { next: { href: '/api/v1/decks?cursor=2' } } })));
+  const decks = await api.decks();
+  assert.deepEqual(Array.from(decks, (d) => d.id), [1, 2]);
+  assert.equal(calls.length, 2);
+  const empty = load(() => json(200, { items: [], count: 0, total: 0, _links: { next: { href: '/api/v1/decks?cursor=x' } } }));
+  assert.equal((await empty.api.decks()).length, 0);
+  assert.equal(empty.calls.length, 1);
+});
+
+test('a refresh answer that hands back the same cursor stops the loop', { timeout: 5000 }, async () => {
+  const { api, calls } = load(() => json(200, progress({ done: 300, total: 700, remaining: 400, cursor: 'same' })));
+  await api.refreshCollection({ wait: async () => {} });
+  assert.equal(calls.length, 2, 'the second answer repeats the cursor it was sent: no third call');
+});
+
+test('an old whole-collection copy is dropped on load without being read', { timeout: 5000 }, async () => {
+  const old = { format: 2, version: 'old', items: Array.from({ length: 20000 }, (_, i) => ({ id: i, name: 'Card ' + i })) };
+  const idb = fakeIndexedDB(new Map([['collection:abc:/api/v1/collection', old], ['collection:/api/v1/collection', old]]));
+  const { api, calls } = load((url) => (url === '/api/v1/collection' ? json(200, summary)
+    : json(200, { items: [card('a', 1)], count: 1, total: 1, value_total: 4, _links: {} })), { cookie: 'vault_account=abc', indexedDB: idb });
+  const data = await api.collection();
+  await data.api.cards({ sort: '-value', limit: 12 });
+  await new Promise((r) => setTimeout(r, 30));
+  assert.deepEqual([...idb.store.keys()].filter((k) => k.startsWith('collection:')), [], 'old copies removed');
+  assert.ok(idb.store.has('summary:abc:/api/v1/collection'));
+  assert.deepEqual(calls.map((c) => c.url), ['/api/v1/collection', '/api/v1/collection/cards?sort=-value&limit=12']);
+});
+
+for (const [what, opts] of [['blocked', { block: true }], ['never answers', { hang: true }]]) {
+  test(`a local copy that is ${what} doesn't hold up the load: the server answers`, { timeout: 5000 }, async () => {
+    const idb = fakeIndexedDB(new Map(), opts);
+    const { api } = load((url) => (url === '/api/v1/collection' ? json(200, summary)
+      : json(200, { items: [card('a', 1)], count: 1, total: 1, value_total: 4, _links: {} })), { cookie: 'vault_account=abc', indexedDB: idb });
+    const data = await api.collection();
+    const page = await data.api.cards({ sort: '-value', limit: 12 });
+    assert.equal(page.items[0].n, 'Sol Ring');
+  });
+}

@@ -80,6 +80,10 @@ window.VaultApi = (() => {
   // by URL with the collection's `version`. While the version is unchanged, a resource is answered
   // from here without a request; offline, the last copy is shown. Everything is computed by the
   // server: this is only a cache of its answers. Cleared on sign-out and account deletion.
+  // The copy is only a cache: it never holds up the app. An open that is blocked (another tab
+  // holding the database), a transaction that aborts (e.g. the origin's quota is full) or one that
+  // takes longer than STORE_WAIT_MS counts as a miss, and the server answers instead.
+  const STORE_WAIT_MS = 3000;
   const localStore = (() => {
     let dbp = null;
     const open = () => dbp || (dbp = new Promise((resolve, reject) => {
@@ -87,15 +91,19 @@ window.VaultApi = (() => {
       req.onupgradeneeded = () => req.result.createObjectStore('kv');
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
-    }));
-    const run = async (mode, fn) => {
-      const db = await open();
-      return new Promise((resolve, reject) => {
+      req.onblocked = () => reject(new Error('local copy blocked'));
+    }).catch((e) => { dbp = null; throw e; }));  // try again next time
+    const run = (mode, fn) => {
+      const work = open().then((db) => new Promise((resolve, reject) => {
         const tx = db.transaction('kv', mode);
         const req = fn(tx.objectStore('kv'));
         tx.oncomplete = () => resolve(req.result);
         tx.onerror = () => reject(tx.error);
-      });
+        tx.onabort = () => reject(tx.error || new Error('aborted'));
+      }));
+      let timer;
+      const late = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('local copy too slow')), STORE_WAIT_MS); });
+      return Promise.race([work, late]).finally(() => clearTimeout(timer));
     };
     return {
       get: (k) => run('readonly', (st) => st.get(k)).catch(() => undefined),
@@ -108,14 +116,24 @@ window.VaultApi = (() => {
   // Follow `next` links and return every item. The browser revalidates each page with its
   // ETag, so unchanged pages come back as cheap 304s.
   async function all(href, onPage) {
-    const items = [];
+    const items = [], seen = new Set();
     for (let url = href; url; ) {
+      seen.add(url);
       const page = await call(url);
       items.push(...page.items);
       if (onPage) onPage(items.length, page.total);
-      url = page._links.next ? page._links.next.href : null;
+      url = nextHref(page, seen);
     }
     return items;
+  }
+  // The page's `next` link, or null when following it can't add anything: no link, an empty page,
+  // or a link already followed in this list. Every paging loop goes through here, so a server
+  // (or a stored copy) answering a cycle ends the list instead of looping forever. With the local
+  // copy, a cycle would never reach the network: the browser would spin, growing the list.
+  function nextHref(page, seen) {
+    const next = page._links && page._links.next ? page._links.next.href : null;
+    if (!next || !page.items || !page.items.length || seen.has(next)) return null;
+    return next;
   }
 
   const CONDITION = { mint: 'Mint', near_mint: 'NearMint', excellent: 'Excellent', good: 'Good',
@@ -223,11 +241,14 @@ window.VaultApi = (() => {
 
   // A page of a list, with `more()` for the next page (null on the last).
   function pager(base, mapItem) {
-    const wrap = (page) => ({
-      ...page, items: page.items.map(mapItem),
-      more: page._links.next ? () => cachedGet(base, page._links.next.href).then(wrap) : null,
-    });
-    return (href) => cachedGet(base, href).then(wrap);
+    const wrap = (seen) => (page) => {
+      const next = nextHref(page, seen);
+      return {
+        ...page, items: page.items.map(mapItem),
+        more: next ? () => { seen.add(next); return cachedGet(base, next).then(wrap(seen)); } : null,
+      };
+    };
+    return (href) => cachedGet(base, href).then(wrap(new Set([href])));
   }
   // Up to `n` items of a list (every item when n is Infinity), following `next` links.
   async function upTo(first, n) {
@@ -316,7 +337,8 @@ window.VaultApi = (() => {
       waits = 0;
       if (onProgress) onProgress({ done: r.done, total: r.total, remaining: r.remaining });
       // Finished, or (defensively) a call that moved nothing forward: stop rather than spin.
-      if (r.remaining === 0 || !r.cursor || (!r.processed && !r.unavailable)) return r;
+      // A cursor handed back unchanged would ask for the same chunk again: stop there too.
+      if (r.remaining === 0 || !r.cursor || r.cursor === cursor || (!r.processed && !r.unavailable)) return r;
       cursor = r.cursor;
     }
   }
