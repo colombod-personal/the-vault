@@ -136,6 +136,8 @@ class CardDetail(CardItem):
 
 class CardPage(Page):
     items: list[CardItem]
+    value_total: float | None = Field(None, description="Market value of every printing matching the filters "
+                                      "(all pages, not just this one)")
 
 
 class CollectionSummary(Hal):
@@ -154,6 +156,14 @@ class CollectionSummary(Hal):
     imported_at: str | None = None
     prices_as_of: str | None = None
     owner: str | None = Field(None, description="Display name of the owner, for shared collections")
+    pnl: float | None = Field(None, description="Unrealised gain or loss on the copies with a known cost: "
+                              "known_cost_market - known_cost_paid. Null when no cost is known or costs are hidden")
+    pnl_pct: float | None = Field(None, description="pnl as a percentage of known_cost_paid")
+    known_cost_paid: float | None = Field(None, description="What was paid for the copies with a recorded price paid")
+    known_cost_market: float | None = Field(None, description="Today's market value of those same copies")
+    known_cost_copies: int | None = Field(None, description="Copies with a recorded price paid (P&L counts only these)")
+    unknown_cost_copies: int | None = Field(None, description="Copies without one: left out of P&L, never valued at "
+                                            "zero cost")
 
 
 class SetItem(Hal):
@@ -162,6 +172,10 @@ class SetItem(Hal):
     copies: int
     printings: int
     market_value: float
+    colors: dict[str, int] = Field(default_factory=dict, description="Copies by colour identity: W, U, B, R, G, "
+                                   "M (multicolour), C (colourless), unknown (printing not in the card table yet)")
+    released_at: str | None = Field(None, description="The set's release date, from the Scryfall set catalog when "
+                                    "the Vault has it")
 
 
 class SetPage(Page):
@@ -301,6 +315,15 @@ class ParsedDeck(BaseModel):
     unparsed: list[str]
 
 
+class OwnedPrinting(BaseModel):
+    set: str
+    collector_number: str
+    printing: str
+    finish: str
+    quantity: int
+    unit_price: float
+
+
 class CoverageLine(BaseModel):
     name: str
     set: str | None = None
@@ -309,11 +332,17 @@ class CoverageLine(BaseModel):
     have: int
     missing: int
     status: Literal["owned", "partial", "missing"]
+    unit_price: float | None = Field(None, description="Cheapest known USD market price of the card (of the line's "
+                                     "printing when it names one the Vault knows), any finish; null when unknown")
+    missing_cost: float | None = Field(None, description="unit_price times missing; null when no price is known")
+    owned_printings: list[OwnedPrinting] = Field([], description="The card's printings in the collection (first 50)")
 
 
 class Coverage(BaseModel):
     cards: list[CoverageLine]
     unparsed: list[str]
+    missing_cost: float | None = Field(None, description="What the missing copies cost at the cheapest known prices")
+    missing_unpriced: int | None = Field(None, description="Lines with missing copies and no known price")
 
 
 class Deck(Hal):
@@ -488,3 +517,117 @@ class SetCatalog(Page):
                                     description="Dragon Shield set codes and the Scryfall set code each stands for")
     alias_prefixes: list[str] = Field(default_factory=list,
                                       description="Any other code starting with one of these stands for its first three characters")
+
+
+# -- analytics (computed in Postgres, vault.analytics) --------------------------------------------
+
+class Counts(BaseModel):
+    copies: int
+    printings: int = Field(description="Distinct printings (as /collection/cards groups them)")
+    market_value: float
+
+
+class Bucket(Counts):
+    key: str
+    label: str
+
+
+class MatrixCell(Counts):
+    color: str
+    type: str
+
+
+class Breakdowns(Hal):
+    totals: Counts
+    colors: list[Bucket] = Field(description="By colour identity: W, U, B, R, G, M (multicolour), C (colourless), unknown")
+    types: list[Bucket] = Field(description="By main card type of the front face (see docs/api.md), or unknown")
+    mana_values: list[Bucket] = Field(description="By mana value: 0 to 7, then 8+, or unknown")
+    rarities: list[Bucket]
+    matrix: list[MatrixCell] = Field(description="Colour x main type")
+
+
+class ValuationMonth(BaseModel):
+    month: str
+    copies: int
+    market: float = Field(description="Today's market value of the copies bought that month")
+    paid: float | None = Field(None, description="Spent that month; null when costs are hidden")
+    copies_cum: int
+    market_cum: float
+    cost_cum: float | None = None
+    gain_cum: float | None = Field(None, description="market_cum - cost_cum (every dated copy)")
+    known_gain_cum: float | None = Field(None, description="Running P&L: copies with a known cost only")
+
+
+class ValuationTotals(BaseModel):
+    copies: int
+    market: float
+    cost: float | None = None
+    gain: float | None = None
+    known_gain: float | None = None
+
+
+class ValuationPeak(BaseModel):
+    month: str
+    market: float
+    copies: int
+
+
+class Trailing(BaseModel):
+    since: str
+    until: str
+    copies: int
+    market: float
+    paid: float | None = None
+
+
+class Undated(BaseModel):
+    copies: int
+    market: float
+
+
+class Valuation(Hal):
+    months: list[ValuationMonth]
+    totals: ValuationTotals
+    peak: ValuationPeak | None = Field(None, description="The month whose copies are worth the most today")
+    trailing_12m: Trailing | None = Field(None, description="The 12 calendar months up to the latest month bought")
+    undated: Undated = Field(description="Copies with no purchase date: in the market value, not in the months")
+    costs_hidden: bool
+
+
+class NameItem(Hal):
+    name: str
+    copies: int
+    market_value: float
+    unit_price: float = Field(description="market_value / copies")
+    printings: int
+    sets: list[str]
+    color: str = Field(description="W, U, B, R, G, M, C, or unknown")
+    color_identity: list[str] = []
+    type: str = Field(description="Main card type, or unknown")
+    type_line: str | None = None
+    cmc: float | None = None
+    rarity: str | None = None
+    image: CardImage | None = Field(None, description="The most valuable printing's image, with its artist")
+    scryfall_id: str | None = None
+
+
+class NamePage(Page):
+    items: list[NameItem]
+
+
+class RefreshIn(BaseModel):
+    cursor: str | None = Field(None, max_length=36, description="The `cursor` from the previous call's answer")
+    force: bool = Field(False, description="Refresh printings that already have today's price too")
+
+
+class RefreshProgress(Hal):
+    done: int
+    total: int = Field(description="Printings in the collection")
+    remaining: int = Field(description="Printings still to refresh: call again (with `cursor`) until 0")
+    processed: int = Field(description="Printings fetched from Scryfall by this call")
+    not_found: int = Field(0, description="Printings Scryfall didn't know, in this call")
+    unmatched_rows: int = Field(description="Rows not matched to a printing yet (the daily sync matches them)")
+    cursor: str | None = Field(None, description="Send it back to continue; null when finished")
+    unavailable: bool = Field(False, description="Scryfall didn't answer part of this call: wait, then call again")
+    prices_as_of: str | None = None
+    version: str = Field(description="The collection's version after this call")

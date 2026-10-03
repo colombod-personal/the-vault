@@ -299,3 +299,35 @@ def history_days(db: Session, user: User, since: date | None = None) -> list:
     if since:
         stmt = stmt.where(CollectionValue.day >= since)
     return list(db.scalars(stmt.order_by(CollectionValue.day)))
+
+
+def view_version(db: Session, user: User, *, hide_costs: bool = False) -> str:
+    """The version a :class:`CollectionView` of ``user`` would have, without building the view:
+    for endpoints answered by SQL aggregates (vault.analytics) that still need an ETag and must
+    change whenever the collection or its prices do. Same parts as ``CollectionView.version``."""
+    last_import = db.execute(select(func.count(Import.id), func.max(Import.id), func.max(Import.created_at))
+                             .where(Import.user_id == user.id)).one()
+    prices_as_of = db.scalar(select(func.max(PriceSnapshot.day)))
+    cards_updated = db.scalar(select(func.max(Card.updated_at)))
+    return (f"{user.id}.{user.created_at}.{'.'.join(map(str, last_import))}."
+            f"{prices_as_of or '-'}.{cards_updated or '-'}.{int(hide_costs)}")
+
+
+# Sorts added for the analytics clients: oldest purchase first, and names Z to A. A descending
+# string is keyed by its negated code points, closed by 1 so a name sorts after its longer
+# extensions ("Ab" after "Abc"), which keeps the keyset cursor plain JSON.
+def _descending(s: str) -> list[int]:
+    return [-ord(ch) for ch in s] + [1]
+
+
+SORTS["acquired"] = lambda g: (date.fromisoformat(g.first_acquired).toordinal() if g.first_acquired else 10**7,
+                               g.name.lower())
+SORTS["-name"] = lambda g: (_descending(g.name.lower()), _descending(g.set_code), _descending(g.number))
+
+
+def filtered_printing(groups: list[Group], printing: str | None) -> list[Group]:
+    """Only the printings with this printing label (e.g. Foil, Normal, Etched), any case."""
+    if not printing:
+        return groups
+    wanted = printing.strip().lower()
+    return [g for g in groups if g.printing.lower() == wanted]

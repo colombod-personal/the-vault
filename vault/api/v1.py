@@ -13,15 +13,16 @@ from __future__ import annotations
 
 import hashlib
 import time
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date
 from typing import Annotated
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Path, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, UploadFile
 from fastapi.responses import Response
-from mtg_toolkits import decklist, delta
+from mtg_toolkits import decklist, delta, normalize_set_code
 from mtg_toolkits.formats import FORMATS
 from mtg_toolkits.archidekt import ArchidektClient
 from mtg_toolkits.normalize import SET_ALIAS_PREFIXES, set_alias_map
@@ -30,25 +31,47 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .. import outbound, tokens
+from .. import analytics, outbound, tokens
 from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
-from ..collection_view import SORTS, CollectionView, filtered, finite, history_days, import_days
+from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, import_days, view_version
 from ..importer import MAX_UPLOAD_BYTES, ImportConflict, ImportError_, export_collection, import_collection, user_entries
-from ..models import AccessToken, ApiSession, Deck, Import, NativeNonce, Passkey, Share, User
+from ..models import AccessToken, ApiSession, Deck, Import, NativeNonce, Passkey, PriceSnapshot, Share, User
 from ..native import LEEWAY as NATIVE_LEEWAY, NativeTokenError, NativeVerifier, ProviderUnavailable
 from ..passkeys import remove_passkey
+from ..prices import compute_values
 from ..privacy import export_archive, purge_user
-from ..ratelimit import limited
+from ..ratelimit import limited, per_user
 from ..sharing import accept_invite, create_invite, display_name, incoming_share, invite_again, owned_deck
 from . import schemas as S
-from .hal import etag_response, link, page_body, paginate
+from .hal import clamp_limit, decode_cursor, encode_cursor, etag_response, link, page_body, paginate
 from .idempotency import idempotent
 
 V1 = "/api/v1"
 Id = Annotated[int, Path(ge=1, le=S.MAX_ID)]  # a row id: anything larger can't exist (and would overflow the column)
 DELETE_CONFIRMATION = "DELETE"
 MAX_COPY_ROWS = 500  # rows listed in one card's detail; copies_total says how many there are
+MAX_STATS = 50  # items per list in /collection/stats
+
+
+def _scryfall_set(code: str) -> str:
+    """The Scryfall set code a collection's set code stands for (Dragon Shield's GK2_ORZHOV is gk2)."""
+    return (normalize_set_code(code) or code).lower()
+
+
+def _ordinal(day: str | None) -> int | None:
+    return date.fromisoformat(day).toordinal() if day else None
+
+
+# /collection/sets sorts (keys for hal.paginate; ties broken by set code). Unreleased last both ways.
+SET_SORTS = {
+    "-value": lambda s: (-s["market_value"],), "value": lambda s: (s["market_value"],),
+    "-quantity": lambda s: (-s["copies"],), "quantity": lambda s: (s["copies"],),
+    "-unique": lambda s: (-s["printings"],), "unique": lambda s: (s["printings"],),
+    "name": lambda s: ((s["name"] or "").lower(),), "code": lambda s: (s["code"].lower(),),
+    "release": lambda s: (_ordinal(s["released_at"]) or 10**7,),
+    "-release": lambda s: (-(_ordinal(s["released_at"]) or -10**7),),
+}
 
 
 def _iso(dt) -> str | None:
@@ -318,31 +341,42 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                     "most_valuable": link(f"{ctx.base}/cards?sort=-value"), "sets": link(f"{ctx.base}/sets"),
                     "timeline": link(f"{ctx.base}/timeline"), "history": link(f"{ctx.base}/history"),
                     "stats": link(f"{ctx.base}/stats"),
+                    "breakdowns": link(f"{ctx.base}/breakdowns", title="By colour, type, mana value, rarity"),
+                    "valuation": link(f"{ctx.base}/valuation", title="Cumulative value and cost by month"),
+                    "names": link(f"{ctx.base}/names", title="One row per card name"),
                 }
                 if ctx.own:
                     links |= {"imports": link(f"{V1}/imports"), "export": link(f"{ctx.base}/export.csv"),
-                              "exports": link(f"{ctx.base}/exports", title="Export to Moxfield, Archidekt, CSV, text")}
+                              "exports": link(f"{ctx.base}/exports", title="Export to Moxfield, Archidekt, CSV, text"),
+                              "refresh": link(f"{V1}/collection/refresh", title="POST: refresh card data and today's "
+                                              "prices from Scryfall, a chunk per call")}
                 version = hashlib.sha256(view.version.encode()).hexdigest()[:16]  # changes whenever the data does
-                return {**view.summary(), "owner": ctx.owner_name, "version": version, "_links": links}
+                # P&L in SQL, over the copies with a known cost only (vault.analytics; public/lib/pnl.js)
+                pnl = analytics.HIDDEN_PNL if ctx.hide_costs else analytics.pnl(ctx.db, ctx.owner.id)
+                return {**view.summary(), **pnl, "owner": ctx.owner_name, "version": version, "_links": links}
 
             return etag_response(request, view.version, body)
 
         @r.get("/cards", response_model=S.CardPage, summary="Printings you own, one page at a time")
         def cards(request: Request, q: str | None = None, set: str | None = None, name: str | None = None,
                   finish: str | None = None, condition: str | None = None, sort: str = "name",
-                  cursor: str | None = None, limit: int | None = None, ctx: Ctx = Depends(ctx_dep)):
+                  cursor: str | None = None, limit: int | None = None, ctx: Ctx = Depends(ctx_dep),
+                  printing: str | None = Query(None, description="Printing label: Normal, Foil, Etched, … (any case)")):
             if sort not in SORTS:
                 raise HTTPException(400, f"sort must be one of {sorted(SORTS)}")
             view = ctx.view()
 
             def body():
                 items = filtered(view, q=q, set_code=set, finish=finish, condition=condition, name=name)
+                items = filtered_printing(items, printing)
                 page, nxt = paginate(items, SORTS[sort], lambda g: g.id, cursor=cursor, limit=limit)
                 cards = view.cards(page)  # card data for the whole page in one query
                 out = [{**view.item(g), "card": card_out(cards.get(g.scryfall_id)), "_links": card_links(ctx, g)}
                        for g in page]
-                return page_body(request, out, nxt, len(items), q=q, set=set, name=name, finish=finish,
-                                 condition=condition, sort=None if sort == "name" else sort, limit=limit)
+                return {**page_body(request, out, nxt, len(items), q=q, set=set, name=name, finish=finish,
+                                    condition=condition, printing=printing, sort=None if sort == "name" else sort,
+                                    limit=limit),
+                        "value_total": round(sum(g.value for g in items), 2)}
 
             return etag_response(request, view.version, body)
 
@@ -366,17 +400,30 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
             return etag_response(request, view.version, body)
 
-        @r.get("/sets", response_model=S.SetPage, summary="Value by set")
-        def sets(request: Request, cursor: str | None = None, limit: int | None = None, ctx: Ctx = Depends(ctx_dep)):
+        @r.get("/sets", response_model=S.SetPage, summary="Value by set, with each set's colour mix")
+        def sets(request: Request, cursor: str | None = None, limit: int | None = None, ctx: Ctx = Depends(ctx_dep),
+                 q: str | None = Query(None, description="Text in the set's code or name"),
+                 sort: str = Query("-value", description=f"One of {', '.join(SET_SORTS)}")):
+            if sort not in SET_SORTS:
+                raise HTTPException(400, f"sort must be one of {sorted(SET_SORTS)}")
             view = ctx.view()
+            released = _release_dates(fetch=sort.lstrip("-") == "release")
 
             def body():
                 rows = view.sets()
-                page, nxt = paginate(rows, lambda s: (-s["market_value"],), lambda s: s["code"], cursor=cursor, limit=limit)
+                if q:
+                    needle = q.lower()
+                    rows = [s for s in rows if needle in s["code"].lower() or needle in (s["name"] or "").lower()]
+                mix = analytics.set_colors(ctx.db, ctx.owner.id)
+                empty = {k: 0 for k in analytics.COLORS + (analytics.UNKNOWN,)}
+                rows = [{**s, "colors": mix.get(s["code"], empty),
+                         "released_at": released.get(_scryfall_set(s["code"]))} for s in rows]
+                page, nxt = paginate(rows, SET_SORTS[sort], lambda s: s["code"], cursor=cursor, limit=limit)
                 items = [{**s, "_links": {"cards": link(f"{ctx.base}/cards?set={s['code']}")}} for s in page]
-                return page_body(request, items, nxt, len(rows), limit=limit)
+                return page_body(request, items, nxt, len(rows), q=q, sort=None if sort == "-value" else sort,
+                                 limit=limit)
 
-            return etag_response(request, view.version, body)
+            return etag_response(request, f"{view.version}.{len(released)}", body)
 
         @r.get("/timeline", response_model=S.Timeline, summary="Copies acquired per month")
         def timeline(request: Request, ctx: Ctx = Depends(ctx_dep)):
@@ -400,18 +447,79 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
             return etag_response(request, view.version, body)
 
-        @r.get("/stats", summary="Highlights: most valuable, gains and losses, duplicates")
-        def stats(request: Request, ctx: Ctx = Depends(ctx_dep)):
+        @r.get("/stats", summary="Highlights: most valuable, gains and losses, duplicates (stockpiles)")
+        def stats(request: Request, ctx: Ctx = Depends(ctx_dep),
+                  limit: int = Query(8, ge=1, le=MAX_STATS, description="How many items in each list")):
             view = ctx.view()
 
             def body():
-                data = view.stats()
+                data = view.stats(top=limit)
                 for key in ("most_valuable", "biggest_gains", "biggest_losses"):
                     for item in data.get(key, []):
                         item["_links"] = {"self": link(f"{ctx.base}/cards/{item['id']}")}
+                # stockpiles: how many printings (as /cards groups them) and how much value each name holds
+                prints, worth = Counter(), Counter()
+                for g in view.groups:
+                    prints[g.name] += 1
+                    worth[g.name] += g.value
+                for item in data["most_copies"]:
+                    item |= {"printings": prints[item["name"]], "market_value": round(worth[item["name"]], 2),
+                             "_links": {"cards": link(f"{ctx.base}/cards?{urlencode({'name': item['name'].split(' // ')[0]})}")}}
                 return {**data, "_links": {"self": link(f"{ctx.base}/stats")}}
 
             return etag_response(request, view.version, body)
+
+        # -- analytics, aggregated in Postgres (vault.analytics) ------------------------------
+        def sql_version(ctx: Ctx) -> str:
+            return view_version(ctx.db, ctx.owner, hide_costs=ctx.hide_costs)
+
+        @r.get("/breakdowns", response_model=S.Breakdowns,
+               summary="Copies, printings and value by colour identity, main type, mana value, rarity, colour x type")
+        def breakdowns(request: Request, ctx: Ctx = Depends(ctx_dep)):
+            return etag_response(request, sql_version(ctx), lambda: {
+                **analytics.breakdowns(ctx.db, ctx.owner.id),
+                "_links": {"self": link(f"{ctx.base}/breakdowns"), "names": link(f"{ctx.base}/names")}})
+
+        @r.get("/valuation", response_model=S.Valuation,
+               summary="Cumulative market value, cost and gain by purchase month; peak month; last 12 months")
+        def valuation(request: Request, ctx: Ctx = Depends(ctx_dep)):
+            return etag_response(request, sql_version(ctx), lambda: {
+                **analytics.valuation(ctx.db, ctx.owner.id, ctx.hide_costs),
+                "_links": {"self": link(f"{ctx.base}/valuation"), "timeline": link(f"{ctx.base}/timeline"),
+                           "history": link(f"{ctx.base}/history")}})
+
+        @r.get("/names", response_model=S.NamePage,
+               summary="One row per card name: copies, value, printings, sets, colour, type (paged)")
+        def names(request: Request, ctx: Ctx = Depends(ctx_dep), cursor: str | None = None,
+                  limit: int | None = Query(None, description="Page size (top N), at most 500"),
+                  sort: str = Query("-value", description=f"One of {', '.join(analytics.NAME_SORTS)}"),
+                  colors: str | None = Query(None, description="Comma-separated W,U,B,R,G,M,C: a multicolour "
+                                             "card matches any of its colours, and M matches every multicolour card"),
+                  type: str | None = Query(None, description="Main type: Creature, Land, …, Other or unknown"),
+                  min_value: float | None = Query(None, ge=0, description="Only names worth at least this (USD)")):
+            if sort not in analytics.NAME_SORTS:
+                raise HTTPException(400, f"sort must be one of {sorted(analytics.NAME_SORTS)}")
+            wanted = [c.strip().upper() for c in (colors or "").split(",") if c.strip()]
+            if any(c not in analytics.COLORS for c in wanted):
+                raise HTTPException(400, f"colors must be among {','.join(analytics.COLORS)}")
+            size = clamp_limit(limit)
+            after = decode_cursor(cursor) if cursor else None
+            if after is not None and not isinstance(after, list):
+                raise HTTPException(400, "Invalid cursor")
+
+            def body():
+                try:
+                    items, total, nxt = analytics.names(ctx.db, ctx.owner.id, sort=sort, colors=wanted, type_=type,
+                                                        min_value=min_value, after=after, limit=size)
+                except analytics.BadCursor:
+                    raise HTTPException(400, "Invalid cursor") from None
+                for item in items:
+                    item["image"] = (card_out({"image": item["image"]}) or {}).get("image") if item["image"] else None
+                    item["_links"] = {"cards": link(f"{ctx.base}/cards?{urlencode({'name': item['name'].split(' // ')[0]})}")}
+                return page_body(request, items, encode_cursor(nxt) if nxt else None, total, sort=None if sort == "-value" else sort,
+                                 colors=colors, type=type, min_value=min_value, limit=limit)
+
+            return etag_response(request, sql_version(ctx), body)
 
         return r
 
@@ -515,7 +623,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     @router.post("/decks/coverage", tags=["decks"], response_model=S.Coverage,
                  summary="Which cards of a decklist you own")
     def deck_coverage(body: S.TextIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-        return _coverage(body.text, user_entries(db, user))
+        return analytics.price_coverage(db, user.id, _coverage(body.text, user_entries(db, user)))
 
     @router.get("/decks", tags=["decks"], response_model=S.DeckPage)
     def list_decks(request: Request, cursor: str | None = None, limit: int | None = None,
@@ -541,7 +649,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     @router.get("/decks/{deck_id}", tags=["decks"], response_model=S.Deck, summary="A saved deck, with coverage")
     def get_deck(deck_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         deck = owned_deck(db, user, deck_id)
-        return _deck(deck, _coverage(deck.text, user_entries(db, user)))
+        return _deck(deck, analytics.price_coverage(db, user.id, _coverage(deck.text, user_entries(db, user))))
 
     @router.put("/decks/{deck_id}", tags=["decks"], response_model=S.Deck)
     def update_deck(deck_id: Id, body: S.DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -598,6 +706,53 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         response.headers["Cache-Control"] = "public, max-age=86400"
         # Dragon Shield's own set codes (e.g. gk2_orzhov) and the Scryfall set each stands for.
         return {**page_body(request, page, nxt, len(items), limit=limit), "aliases": set_alias_map(), "alias_prefixes": list(SET_ALIAS_PREFIXES)}
+
+    def _release_dates(fetch: bool) -> dict[str, str]:
+        """Release date by Scryfall set code. Only ``fetch`` (sort=release) may call Scryfall (once a
+        day per process); otherwise the dates are given only when the set list is already cached."""
+        try:
+            items = catalog.sets() if fetch else catalog.cached_sets()
+        except (ApiError, httpx.HTTPError) as exc:
+            raise HTTPException(503, "Scryfall's set list is unavailable right now", headers={"Retry-After": "60"}) from exc
+        return {s["code"]: s["released_at"] for s in items if s.get("released_at")}
+
+    @router.post("/collection/refresh", tags=["collection"], response_model=S.RefreshProgress,
+                 summary="Refresh your printings' card data and today's prices from Scryfall, one chunk per call",
+                 description="Fetches up to 300 printings per call (Scryfall's collection lookup in batches of 75, "
+                             "through the server's rate-limited client), then recomputes today's collection value, so "
+                             "the collection's `version` changes. Call again with the answer's `cursor` until "
+                             "`remaining` is 0. Printings that already have today's price are skipped unless "
+                             "`force`. Limited per user (REFRESH_RATE_LIMIT a minute); needs the write scope.")
+    def refresh_collection(request: Request, body: S.RefreshIn | None = None, user: User = Depends(current_user),
+                           db: Session = Depends(get_db)) -> dict:
+        body = body or S.RefreshIn()
+        per_user(request, "refresh", user.id, settings.refresh_rate_limit)
+        today = date.today()
+        state = analytics.refresh_state(db, user.id, today, body.cursor, body.force)
+        processed = not_found = 0
+        unavailable, cursor = False, body.cursor
+        ids = state["ids"]
+        for i in range(0, len(ids), 75):  # Scryfall's own limit per /cards/collection request
+            batch = ids[i:i + 75]
+            answer = catalog.lookup(db, [{"id": sid} for sid in batch], refresh=True)
+            if answer["unavailable"]:
+                unavailable = True
+                break
+            processed += len(batch)
+            not_found += len(answer["not_found"])
+            cursor = batch[-1]
+        if processed:
+            compute_values(db, today, user.id)  # today's value at the new prices (commits)
+        elif unavailable:
+            raise HTTPException(503, "Scryfall didn't answer. Try again shortly.", headers={"Retry-After": "30"})
+        after = analytics.refresh_state(db, user.id, today, cursor, body.force, limit=0)
+        version = hashlib.sha256(view_version(db, user).encode()).hexdigest()[:16]
+        prices_as_of = db.scalar(select(func.max(PriceSnapshot.day)))
+        return {"done": after["total"] - after["remaining"], "total": after["total"], "remaining": after["remaining"],
+                "processed": processed, "not_found": not_found, "unmatched_rows": after["unmatched"],
+                "cursor": cursor if after["remaining"] else None, "unavailable": unavailable,
+                "prices_as_of": prices_as_of.isoformat() if prices_as_of else None, "version": version,
+                "_links": {"self": link(f"{V1}/collection/refresh"), "collection": link(f"{V1}/collection")}}
 
     # -- sharing ------------------------------------------------------------------------------
     @router.post("/shares", tags=["sharing"], response_model=S.Invite, status_code=201,
@@ -674,7 +829,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     def shared_deck(share_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         share = incoming_share(db, user, share_id, "deck")
         deck = db.get(Deck, share.deck_id)
-        out = _deck(deck, _coverage(deck.text, user_entries(db, user)))
+        out = _deck(deck, analytics.price_coverage(db, user.id, _coverage(deck.text, user_entries(db, user))))
         out["_links"] = {"self": link(f"{V1}/shared/{share_id}/deck")}
         out["from"] = display_name(db.get(User, share.owner_id))
         return out

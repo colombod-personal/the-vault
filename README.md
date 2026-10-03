@@ -66,6 +66,7 @@ vault/models.py       users, identities, imports, entries, cards, price_snapshot
 vault/migrations/     schema migrations (Alembic), applied at startup; alembic.ini for writing new ones
 vault/importer.py     collection files (Dragon Shield, Moxfield, generic CSV) -> entries, and exports in every format
 vault/collection_view.py  one user's collection as items, sets, timeline, stats (cached per version)
+vault/analytics.py    analytics in Postgres: P&L, breakdowns, valuation, per-name rollup, deck prices, refresh
 vault/tokens.py       bearer access/refresh tokens and PKCE app codes for native apps
 vault/native.py       verifies Apple / Google ID tokens from the iOS SDKs
 vault/sync.py         daily Scryfall sync (offline matching, prices, per-user value)

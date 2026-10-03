@@ -138,6 +138,7 @@ is stored). Over the limit they answer `429` (problem+json) with `Retry-After` i
 |---|---|---|
 | `POST /api/auth/passkey/{signup,register,login}/options`, `GET /api/auth/login/{provider}`, `GET\|POST /api/auth/callback/{provider}`, `POST /api/facebook/data-deletion`, `GET /api/facebook/deletion-status` | 30 | `AUTH_RATE_LIMIT` |
 | `POST /api/auth/passkey/{signup,register,login}/verify`, `POST /api/v1/auth/native/{provider}`, `POST /api/v1/auth/token` | 10 | `AUTH_VERIFY_RATE_LIMIT` |
+| `POST /api/v1/collection/refresh` (per signed-in user, not per IP) | 20 | `REFRESH_RATE_LIMIT` |
 
 At most 10,000 passkey ceremonies may be pending at once (`PASSKEY_CHALLENGE_CAP`); beyond that
 `…/options` answers `429` until some expire. On Vercel the client IP is the first
@@ -165,20 +166,24 @@ ignored and the connection's address is used.
 | GET | `/api/v1/me/export` | everything held about you, as a ZIP (GDPR) |
 | GET / DELETE | `/api/v1/me/sessions[/{id}]` | signed-in apps |
 | POST / GET / DELETE | `/api/v1/me/tokens[/{id}]` | personal access tokens for agents and scripts (shown once) |
-| GET | `/api/v1/collection` | summary: copies, printings, value, cost, dates, links |
-| GET | `/api/v1/collection/cards` | printings, paged. Filters: `q`, `set`, `name`, `finish`, `condition`. `sort`: `name`, `-value`, `value`, `-quantity`, `set`, `-acquired`. Each printing has `paid` (total paid) and `paid_quantity` (how many copies that covers; copies with no price recorded are left out), both `null` when costs are hidden. Each printing also carries `card`: Scryfall's data for it (type line, colours, mana cost, mana value, rarity, layout, power/toughness/loyalty, oracle text, image with artist credit, every finish's latest price), kept in the Vault's card table by the daily sync and read for the whole page in one query; `null` until the printing is matched and synced |
+| GET | `/api/v1/collection` | summary: copies, printings, value, cost, dates, links. P&L over the copies with a known cost only (a non-zero price paid recorded): `pnl` (`known_cost_market - known_cost_paid`, null when no cost is known), `pnl_pct`, `known_cost_paid`, `known_cost_market`, `known_cost_copies`, `unknown_cost_copies` (all null when costs are hidden) |
+| GET | `/api/v1/collection/cards` | printings, paged. Filters: `q`, `set`, `name`, `finish`, `condition`. `printing` (the printing label: `Normal`, `Foil`, `Etched`, …, any case). `sort`: `name`, `-name`, `-value`, `value`, `-quantity`, `set`, `-acquired`, `acquired` (first bought first; undated last). `value_total` is the market value of every printing matching the filters, across all pages. Each printing has `paid` (total paid) and `paid_quantity` (how many copies that covers; copies with no price recorded are left out), both `null` when costs are hidden. Each printing also carries `card`: Scryfall's data for it (type line, colours, mana cost, mana value, rarity, layout, power/toughness/loyalty, oracle text, image with artist credit, every finish's latest price), kept in the Vault's card table by the daily sync and read for the whole page in one query; `null` until the printing is matched and synced |
 | GET | `/api/v1/collection/cards/{id}` | one printing: the rows it came from (the first 500; `copies_total` counts all), card data, image with artist credit, 90-day price history |
-| GET | `/api/v1/collection/sets` | value by set, paged |
+| GET | `/api/v1/collection/sets` | value by set, paged. `q` (text in the code or name); `sort`: `-value` (default), `value`, `-quantity`, `quantity`, `-unique`, `unique` (distinct printings), `name`, `code`, `release`, `-release` (by Scryfall's release date; unknown dates last; may answer 503 while Scryfall's set list is unavailable). Each set has `colors` (copies by colour identity: `W` `U` `B` `R` `G`, `M` multicolour, `C` colourless, `unknown`) and `released_at` when the Vault has the set list |
 | GET | `/api/v1/collection/timeline` | per month: copies acquired, their market value today, and what was paid (null when costs are hidden) |
 | GET | `/api/v1/collection/history` | daily market value and cost, paged (`since`); `imported` marks the days a file was imported |
-| GET | `/api/v1/collection/stats` | most valuable, biggest gains and losses (only copies with a recorded price paid count), duplicates |
+| GET | `/api/v1/collection/stats` | most valuable, biggest gains and losses (only copies with a recorded price paid count), duplicates (`most_copies`, each with `printings` and `market_value`: the stockpiles). `limit` items per list, 1–50 (default 8) |
+| GET | `/api/v1/collection/breakdowns` | copies, distinct printings and market value by colour identity, main type, mana value (`0`–`7`, `8+`), rarity, and colour × type (`matrix`). Fixed buckets, zeros included; printings not in the card table yet count as `unknown` (see Analytics below) |
+| GET | `/api/v1/collection/valuation` | per purchase month (the timeline's months): copies, their market value today, spend, and running `copies_cum`, `market_cum`, `cost_cum`, `gain_cum` (market − cost), `known_gain_cum` (copies with a known cost only); `totals`, `peak` (the month whose copies are worth the most), `trailing_12m` (the 12 calendar months up to the latest month bought), `undated` copies. Costs null when hidden |
+| GET | `/api/v1/collection/names` | one row per card name (case-insensitive), paged: copies, market value, unit price, printings, sets, colour (`W`…`G`, `M`, `C`, `unknown`), colour identity, main type, type line, mana value, rarity, and the most valuable printing's image with its artist. `sort`: `-value` (default), `value`, `-quantity`, `quantity`, `name`, `-name`; `colors` (comma-separated; a multicolour card matches any of its colours, `M` every multicolour card), `type`, `min_value`; `limit` for the top N |
+| POST | `/api/v1/collection/refresh` | refresh your printings' card data and today's prices from Scryfall, up to 300 per call (batches of 75 through the server's rate-limited client), then recompute today's value, so the collection's `version` changes. Body (optional): `{"cursor"?, "force"?}`. Answers `{done, total, remaining, processed, not_found, unmatched_rows, cursor, unavailable, prices_as_of, version}`: call again with `cursor` until `remaining` is 0. Printings that already have today's price are skipped unless `force`. 503 with `Retry-After` when Scryfall doesn't answer; limited per user (`REFRESH_RATE_LIMIT`); write scope |
 | GET | `/api/v1/collection/exports` | export formats (Dragon Shield, Moxfield, Archidekt, generic CSV, text list), each with a download link |
 | GET | `/api/v1/collection/export/{format}` | the collection in that format. Other apps get Scryfall set codes and numbers for matched printings |
 | GET | `/api/v1/collection/export.csv` | Dragon Shield CSV, byte-identical to a Dragon Shield import |
 | POST / GET | `/api/v1/imports` | upload a Dragon Shield, Moxfield or generic CSV, detected from the header (multipart `file`, 201; the import's `source` says which; 409 if another import of the collection finished while this one ran) / list imports with changes |
 | GET | `/api/v1/imports/{id}` | one import |
 | POST | `/api/v1/decks/parse` | parse a pasted decklist |
-| POST | `/api/v1/decks/coverage` | owned / partial / missing per card |
+| POST | `/api/v1/decks/coverage` | owned / partial / missing per card, with `unit_price` (the cheapest known USD price of the line's printing, else of any printing of the card, any finish), `missing_cost`, and `owned_printings`; the deck's `missing_cost` and `missing_unpriced` (lines with missing copies and no known price). `GET /decks/{id}` and `GET /shared/{id}/deck` carry the same |
 | GET / POST | `/api/v1/decks` | saved decks / save one |
 | GET / PUT / DELETE | `/api/v1/decks/{id}` | a deck with coverage / update (an omitted `source_url` is kept) / delete |
 | GET | `/api/v1/archidekt/decks/{id}` | a public Archidekt deck, fetched server-side |
@@ -193,6 +198,15 @@ ignored and the connection's address is used.
 
 Outside v1: `POST /api/mcp` (the MCP server for agents, [`agents.md`](agents.md)), plus the web and provider callbacks: `/api/auth/*` (browser sign-in),
 `/api/facebook/data-deletion` (Meta's callback) and `/api/health`.
+
+## Analytics
+
+The owner's decision: analytics are computed by the server, in Postgres, and clients only render them. `vault/analytics.py` prices every row in SQL exactly as the collection view does (the latest Scryfall price for the row's finish, else the file's own market price), joins it to the card table, and aggregates. Rows whose printing isn't in the card table yet are counted as `unknown`. These endpoints carry an ETag from the same version as the rest of the collection.
+
+- **Known cost**: a copy's cost is known when a non-zero price paid was recorded for it. P&L compares what was paid against today's value of those same copies; the other copies are counted (`unknown_cost_copies`), never treated as free. Hidden costs (shared collections) make every cost field null.
+- **Colour**: the colour identity: one colour is that colour, two or more `M`, none `C`.
+- **Main type**: the front face's card types (the type line before ` // `, then before ` — `), and the first of Creature, Planeswalker, Battle, Land, Instant, Sorcery, Artifact, Enchantment found there; otherwise `Other`. So Legendary, Artifact and Enchantment Creatures are Creatures, an Artifact Land is a Land, and double-faced and split cards are typed by their front face (left half).
+- **Mana value**: whole numbers 0–7, then `8+` (half points round down).
 
 ## Attribution in clients
 
