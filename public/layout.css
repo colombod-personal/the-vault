@@ -102,3 +102,12 @@ button.brand:focus-visible, .nav button:focus-visible { outline: 1px solid var(-
 /* --muted is below 4.5:1 on a panel's background: small grey text there uses --text-2. */
 .panel .muted, .tbl td.muted { color: var(--text-2); }
 .panel .chip:not(.active), .tbl .chip:not(.active) { color: var(--text-2); }
+
+/* Scrollbars in the theme, for the page and every scrolling panel (the graph's Type roster,
+   tables, drawers): standard properties (Firefox, current Chromium), and the WebKit ones for
+   Safari and older Chromium. Elements that hide their scrollbar (.nav) keep doing so. */
+* { scrollbar-color: var(--gold) var(--bg-2); scrollbar-width: thin; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: var(--bg-2); }
+::-webkit-scrollbar-thumb { background: var(--gold); border-radius: 5px; border: 2px solid var(--bg-2); }
+::-webkit-scrollbar-thumb:hover { background: var(--gold-2); }
