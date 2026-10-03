@@ -147,7 +147,8 @@ TOOLS = [
     Tool("get_collection_summary", "Totals for the collection: copies, printings, sets, market value, amount paid, "
          "prices date, and breakdowns by condition and printing.", dict(SHARE), path=_base),
     Tool("search_cards", "Find printings in the collection. Each item has name, set, collector number, finish, "
-         "condition, language, quantity, price (market/low/mid), value, paid and acquisition dates. Paged.",
+         "condition, language, quantity, price (market/low/mid), value, paid, acquisition dates and Scryfall card data "
+         "(type, colours, mana cost, rarity, text, image with artist credit). Paged.",
          {"query": {"type": "string", "description": "Text in the card or set name"},
           "set": {"type": "string", "description": "Set code, e.g. 'mh3'"},
           "name": {"type": "string", "description": "Exact card name (front face for double-faced cards)"},
