@@ -119,11 +119,13 @@ collection. Two things make it dangerous on a free database:
 Estimates (not measured; row sizes as above, "compact" assumes integer cents and a 16-byte key at
 about 60 bytes per row):
 
-| Distinct printings | Daily, 365 days (137 B) | Tiered (129 points, 137 B) | Tiered, compact (60 B) |
+| Distinct printings | Daily, 365 days (137 B) | Tiered (108 points, 137 B) | Tiered, compact (60 B) |
 |---|---|---|---|
-| 10,000 | about 500 MB | about 177 MB | about 77 MB |
-| 30,000 | about 1.5 GB | about 530 MB | about 230 MB |
-| 100,000 | about 5 GB | about 1.8 GB | about 770 MB |
+| 10,000 | about 500 MB | about 148 MB | about 65 MB |
+| 30,000 | about 1.5 GB | about 444 MB | about 194 MB |
+| 100,000 | about 5 GB | about 1.5 GB | about 650 MB |
+
+"Tiered" is 90 daily points plus 2 points a month for the other 9 months (18 points).
 
 ### Proposal: keep at most one year, and thin it
 
@@ -131,7 +133,8 @@ Agreed: **nothing older than 365 days is kept.** That also suits a free, privacy
 indefinite accumulation). But the table shows one year of *daily* points still does not fit, so:
 
 1. **Cap:** delete price rows older than 365 days (daily job).
-2. **Thin:** keep daily points for the last 90 days, then one point per week up to 365 days.
+2. **Thin:** keep daily points for the last 90 days, then **two points a month** (the 1st and the
+   15th, or the nearest day with data) up to 365 days (owner's decision).
 3. **Compact** the row in a later migration (integer cents, shorter key, drop columns nobody reads).
 4. **Per-user value history** (`collection_values`, one row per user per day, a few bytes) keeps the
    same one-year cap for consistency; the chart still works.
