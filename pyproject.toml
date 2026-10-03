@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "the-vault"
+version = "0.1.0"
+description = "The Vault: MTG collection manager and valuation app (FastAPI server on mtg-toolkits)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
+    "authlib>=1.3",
+    "joserfc>=1.0",
+    "cryptography>=42",
+    "httpx>=0.27",
+    "itsdangerous>=2.1",
+    "python-multipart>=0.0.9",
+    "webauthn>=3.0",
+    "alembic>=1.13",
+    "mtg-toolkits @ git+https://github.com/colombod-personal/mtg-toolkits@bdf89d7bfb344446cc6199c291555be2659a109c",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "uvicorn[standard]>=0.30", "pyyaml>=6"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["vault"]
+
+[tool.vercel]
+# Tells Vercel's builder where the app is, so it doesn't have to find it by static analysis.
+entrypoint = "api.index:app"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]
+markers = ["live: talks to the real third-party services (conformance checks for the twins)"]

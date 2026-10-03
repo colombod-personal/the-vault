@@ -14,8 +14,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -216,3 +216,24 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- The Vault ---
+# (lib/ and lib64/ above are anchored to the repo root so public/lib/ is kept)
+# every env file (.env.local from `vercel link`/`vercel env pull` holds tokens), except the example
+.env*
+!.env.example
+# personal Claude Code settings
+.claude/settings.local.json
+*.db
+*.jsonl.gz
+.vercel/
+# personal collection data never goes in the repo
+data/
+*.csv
+!tests/fixtures/*.csv
+# twin seed data is public, twin-made card data (not personal)
+!twins/data/
+# local agent tooling (e.g. the Neon agent-skills installer); never part of the app
+.agents/
+skills-lock.json
+web/node_modules/

@@ -1,0 +1,99 @@
+name: deploy (manual fallback)
+# A manual production deploy with the Vercel CLI, for when Vercel's Git integration isn't
+# connected. Normally merging to main deploys (see vercel.json → ignoreCommand).
+#
+# Runs only from main, in the "vercel-production" environment, which holds VERCEL_TOKEN and
+# should only allow the main branch (README → Security). The token reaches only the steps that
+# talk to Vercel, never the dependency install or the tests.
+# Optional repository variables: VERCEL_SCOPE (team slug), VAULT_URL (public URL for the check).
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency: deploy-production
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: vercel-production
+    services:
+      postgres:  # the tests run on Postgres, like production
+        image: postgres:16
+        env:
+          POSTGRES_USER: vault
+          POSTGRES_PASSWORD: vault
+          POSTGRES_DB: vault_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U vault" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE || 'wintermute2' }}
+      VAULT_URL: ${{ vars.VAULT_URL }}
+      VERCEL_CLI: vercel@60.1.3  # pinned: this step holds the token
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.12"
+      - name: Tests must pass before deploying (no secrets here)
+        env:
+          VAULT_TEST_DATABASE_URL: postgresql://vault:vault@localhost:5432/vault_test
+        run: |
+          pip install --require-hashes --no-deps -r requirements-lock.txt  # exact versions, hash-checked
+          pip install --no-build-isolation --no-deps -r requirements-vcs.txt  # mtg-toolkits at a pinned commit
+          python -m pytest -q
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: "20"
+      - run: npm install --global "$VERCEL_CLI"
+      - name: Deploy to Vercel
+        id: deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          [ -n "$VERCEL_TOKEN" ] || { echo "::error::VERCEL_TOKEN is not set in the vercel-production environment"; exit 1; }
+          scope=(); [ -n "$VERCEL_SCOPE" ] && scope=(--scope "$VERCEL_SCOPE")
+          ship() {
+            vercel pull --yes --environment=production --token "$VERCEL_TOKEN" "${scope[@]}"
+            # The build runs the project's install and build steps: keep the token and the pulled
+            # env values (database URL, OAuth secrets) out of its reach. The app reads them at
+            # runtime from the Vercel project, not at build time.
+            rm -f .vercel/.env.*
+            env -u VERCEL_TOKEN vercel build --prod
+            vercel deploy --prebuilt --prod --token "$VERCEL_TOKEN" "${scope[@]}"
+          }
+          # Creates the "the-vault" project on the first run, links to it afterwards.
+          vercel link --yes --project the-vault --token "$VERCEL_TOKEN" "${scope[@]}"
+          rm -f .vercel/.env.*  # `vercel pull` writes the project's env vars to disk; keep them off the runner
+          # Sets SESSION_SECRET (and BASE_URL once the project has an address); reports what's missing.
+          before=$(python -m jobs.vercel_setup)
+          url=$(ship | tail -n 1)
+          rm -f .vercel/.env.*
+          if [ "$(echo "$before" | python -c 'import json,sys; print(json.load(sys.stdin)["base_url"] or "")')" = "" ]; then
+            # First deploy: the production address exists now. Record it as BASE_URL and redeploy with it.
+            after=$(GITHUB_STEP_SUMMARY=/dev/null python -m jobs.vercel_setup)
+            if echo "$after" | python -c 'import json,sys; sys.exit(0 if "BASE_URL" in json.load(sys.stdin)["changed"] else 1)'; then
+              url=$(ship | tail -n 1)
+              rm -f .vercel/.env.*
+              python -m jobs.vercel_setup >/dev/null  # refresh the checklist with the redirect URIs
+            fi
+          fi
+          base=$(python -m jobs.vercel_setup --project the-vault 2>/dev/null | python -c 'import json,sys; print(json.load(sys.stdin)["base_url"] or "")' || true)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "base=${base:-$VAULT_URL}" >> "$GITHUB_OUTPUT"
+          echo "### Deployed (production): $url" >> "$GITHUB_STEP_SUMMARY"
+      - name: Smoke-test the live site
+        if: steps.deploy.outputs.base != ''
+        env:
+          SITE: ${{ steps.deploy.outputs.base }}
+        run: |
+          for i in 1 2 3 4 5 6; do  # give a cold start a moment
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$SITE/api/health" || true)
+            [ "$code" = "200" ] || [ "$code" = "503" ] && break
+            sleep 10
+          done
+          python -m jobs.smoke_test "$SITE"

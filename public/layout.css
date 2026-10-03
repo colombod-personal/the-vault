@@ -1,0 +1,104 @@
+/* Layout additions on top of styles.css (which stays unchanged): navigation and small screens.
+   Uses only the design tokens defined there. */
+
+/* The logo is the way home. */
+button.brand { padding: 0; text-align: left; }
+button.brand:hover .title { color: var(--gold); }
+button.brand:focus-visible, .nav button:focus-visible { outline: 1px solid var(--gold); outline-offset: 4px; }
+
+/* Grid items may shrink below their content's width, so one wide row can't widen the page. */
+.app > * { min-width: 0; }
+
+@media (max-width: 760px) {
+  /* Logo and account on the first row; the sections on their own row, scrolling sideways. */
+  .topbar { flex-wrap: wrap; gap: 8px 16px; padding: 10px 16px 0; }
+  .brand .subtitle { display: none; }
+  .topbar > :last-child { margin-left: auto; }
+  .nav {
+    order: 3; flex: 1 0 100%; margin-left: 0;
+    overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav button { flex: 0 0 auto; padding: 10px 12px; }
+  main { padding: 16px; }
+}
+
+/* Clickable tiles and rows (window.vaultPressable) show where keyboard focus is. */
+[role="button"]:focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
+
+/* ---- Sign-in screen ---- */
+.signin { min-height: 100vh; display: grid; justify-items: center; align-content: center; gap: 28px; padding: 32px 16px; }
+.signin-card { width: min(880px, 100%); display: grid; grid-template-columns: 1fr 1fr; gap: 0; padding: 0; overflow: hidden; }
+.signin-pitch { padding: 40px 36px; border-right: 1px solid var(--border); background: linear-gradient(160deg, var(--surface-2), transparent 70%); }
+.signin-mark { font-family: var(--display); font-size: 40px; color: var(--gold); line-height: 1; margin-bottom: 12px; }
+.signin-lede { font-size: 16px; color: var(--text); margin: 12px 0 20px; line-height: 1.5; }
+.signin-points { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+.signin-points li { position: relative; padding-left: 20px; color: var(--text-2); font-size: 14px; line-height: 1.5; }
+.signin-points li::before { content: '◇'; position: absolute; left: 0; top: 0; color: var(--gold); font-size: 12px; }
+.signin-form { padding: 40px 36px; display: grid; gap: 14px; align-content: start; }
+.signin-sub { color: var(--text-2); font-size: 14px; margin: -6px 0 4px; }
+.signin-options { display: grid; gap: 10px; }
+.provider-btn {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 46px; padding: 0 16px;
+  background: var(--bg-2); color: var(--text); border: 1px solid var(--border-2); border-radius: var(--radius);
+  font-family: var(--sans); font-size: 15px; font-weight: 600; cursor: pointer; text-align: left;
+  transition: border-color .15s, background .15s;
+}
+.provider-btn:hover:not(:disabled) { border-color: var(--gold); background: var(--surface); }
+.provider-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.provider-btn:disabled { opacity: .6; cursor: progress; }
+.provider-apple { background: #fff; color: #000; border-color: #fff; }  /* Apple asks for a black or white button */
+.provider-apple:hover:not(:disabled) { background: #f2f2f2; border-color: var(--gold); }
+.provider-logo { width: 20px; height: 20px; display: inline-grid; place-items: center; flex: none; color: var(--gold); font-size: 18px; }
+.provider-logo svg { width: 20px; height: 20px; }
+.provider-apple .provider-logo { color: #000; }
+.provider-label { flex: 1; }
+.signin-last { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--gold); border: 1px solid var(--gold); border-radius: 999px; padding: 2px 8px; }
+.provider-apple .signin-last { color: #6b4e00; border-color: #6b4e00; }
+.signin-or { display: flex; align-items: center; gap: 12px; color: var(--text-2); font-family: var(--mono); font-size: 10px; letter-spacing: .18em; text-transform: uppercase; margin: 6px 0 2px; }
+.signin-or::before, .signin-or::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+.signin-link { background: none; border: 0; padding: 6px 0; color: var(--gold); font-family: var(--sans); font-size: 14px; text-decoration: underline; cursor: pointer; justify-self: start; }
+.signin-link:disabled { opacity: .6; cursor: progress; }
+.signin-create { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-2); }
+.signin-create p { margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.5; }
+.signin-field { display: grid; gap: 6px; font-size: 13px; color: var(--text-2); }
+.signin-msg { margin: 0; padding: 10px 12px; border-radius: var(--radius); font-size: 14px; line-height: 1.45; border: 1px solid var(--border); }
+.signin-msg.danger { border-color: var(--danger); color: var(--text); background: oklch(0.66 0.18 25 / 0.12); }
+.signin-msg.info { border-color: var(--gold); color: var(--text); background: oklch(0.80 0.13 80 / 0.08); }
+.signin-skeleton { display: grid; gap: 10px; }
+.signin-skeleton span { height: 46px; border-radius: var(--radius); background: linear-gradient(90deg, var(--bg-2), var(--surface), var(--bg-2)); background-size: 200% 100%; animation: signin-shimmer 1.2s linear infinite; }
+@keyframes signin-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .signin-skeleton span { animation: none; } }
+.signin-fine { margin: 6px 0 0; color: var(--text-2); font-size: 12px; line-height: 1.5; }
+.signin-fine a { color: var(--gold); text-decoration: underline; }
+.signin-footer { width: min(880px, 100%); }
+@media (max-width: 760px) {
+  .signin { align-content: start; padding-top: 20px; }
+  .signin-card { grid-template-columns: 1fr; }
+  .signin-pitch { border-right: 0; border-bottom: 1px solid var(--border); padding: 24px 20px; }
+  .signin-pitch .h1 { font-size: 36px; }
+  .signin-points { display: none; }  /* on a phone, get to the buttons */
+  .signin-lede { margin-bottom: 0; }
+  .signin-form { padding: 24px 20px; }
+}
+
+/* ---- Valuation: market value, day by day ---- */
+.daily-empty { color: var(--text-2); font-size: 14px; line-height: 1.6; margin: 0; max-width: 640px; }
+.daily-empty b { color: var(--gold); }
+.daily-summary { display: flex; flex-wrap: wrap; gap: 12px 32px; margin-bottom: 14px; }
+.daily-summary > div { display: grid; gap: 4px; }
+.daily-summary b { font-family: var(--mono); font-size: 18px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.dv-axis { font-family: var(--mono); font-size: 10px; fill: var(--text-2); }
+.daily-note { color: var(--text-2); font-size: 12px; line-height: 1.6; margin: 12px 0 0; max-width: 760px; }
+/* Small labels on a panel's lighter background need the brighter text colour for contrast. */
+.panel .eyebrow, .panel .label-mono { color: var(--text-2); }
+
+/* A table row's main cell as a real button, so rows open from the keyboard too (Browse). */
+.row-link { background: none; border: 0; padding: 0; margin: 0; color: inherit; font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+.row-link:hover { color: var(--gold); }
+.row-link:focus-visible { outline: 1px solid var(--gold); outline-offset: 3px; }
+/* Table headers on a panel need the brighter text colour for contrast. */
+.tbl th { color: var(--text-2); }
+/* --muted is below 4.5:1 on a panel's background: small grey text there uses --text-2. */
+.panel .muted, .tbl td.muted { color: var(--text-2); }
+.panel .chip:not(.active), .tbl .chip:not(.active) { color: var(--text-2); }
