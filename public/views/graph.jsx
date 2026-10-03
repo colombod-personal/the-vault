@@ -24,7 +24,7 @@ function artUrl(scry) {
   return scry.img_art || (scry.img_normal ? scry.img_normal.replace('/normal/', '/art_crop/') : null);
 }
 
-const MAX_LINKS_SHOWN = 6; // a popular card can be picked by many peers: list the strongest
+const MAX_LINKS_SHOWN = 5; // a popular card can be picked by many peers: list the strongest
 const ART_MODES = new Set(['color', 'affinity', 'scatter', 'deck']); // the modes drawn as a network
 const SAME = { set: 'same set', type: 'same type', color: 'same color group', rarity: 'same rarity', cmc: 'similar mana value', price: 'similar price' };
 
@@ -569,7 +569,7 @@ function GraphView({ data, openCard }) {
             {deck && <button className={`chip ${mode === 'deck' ? 'active' : ''}`} onClick={() => setMode('deck')}>Deck map</button>}
           </div>
           {ART_MODES.has(mode) ?
-          <button className={`chip ${showArt ? 'active' : ''}`} onClick={() => setShowArt((v) => !v)}
+          <button className={`chip ${showArt ? 'active' : ''}`} aria-pressed={showArt} onClick={() => setShowArt((v) => !v)}
           title="Show each card's art inside its circle" style={{ marginLeft: 'auto' }}>Card art</button> :
           <span style={{ marginLeft: 'auto' }} />}
           <div className="row" style={{ gap: 6 }}>
@@ -668,7 +668,10 @@ function GraphView({ data, openCard }) {
           background: 'var(--surface)', border: '1px solid var(--gold)', borderRadius: 4,
           padding: 0, zIndex: 10, overflow: 'hidden'
         }}>
-            {hover.d.card?.scry?.img_normal &&
+            {hover.links && artUrl(hover.d.card?.scry) ?
+          // With its links listed, the card shows its art crop (credited below) so it fits the graph.
+          <img src={artUrl(hover.d.card.scry)} onLoad={placeTip} style={{ width: '100%', aspectRatio: '626 / 457', objectFit: 'cover', display: 'block' }} alt="" /> :
+          hover.d.card?.scry?.img_normal &&
           <img src={hover.d.card.scry.img_normal} onLoad={placeTip} style={{ width: '100%', aspectRatio: '488 / 680', display: 'block' }} alt="" />
           }
             <div style={{ padding: 8 }}>
@@ -686,9 +689,10 @@ function GraphView({ data, openCard }) {
                     {hover.links.length ? `Linked to ${hover.links.length}` : 'No links: nothing shares enough with it'}
                   </div>
                   {hover.links.slice(0, MAX_LINKS_SHOWN).map((l) =>
-              <div key={l.name} style={{ fontSize: 11, lineHeight: 1.35, marginBottom: 3 }}>
+              // One line each (cut with an ellipsis), so five links always fit the graph's height.
+              <div key={l.name} style={{ fontSize: 11, lineHeight: 1.35, marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       <span style={{ fontWeight: 600 }}>{l.name}</span>
-                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--muted)', display: 'block' }}>{l.why}</span>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--muted)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.why}</span>
                     </div>
               )}
                   {hover.links.length > MAX_LINKS_SHOWN &&
