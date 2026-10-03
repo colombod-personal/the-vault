@@ -543,15 +543,21 @@ textarea.input { font-family: var(--mono); font-size: 12px; line-height: 1.6; re
 .drawer-bg img { width: 100%; height: 100%; object-fit: contain; }
 .drawer > *:not(.drawer-bg) { position: relative; z-index: 1; }
 @keyframes drawer-in { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
-.drawer .close {
-  position: absolute; top: 16px; right: 16px;
-  width: 32px; height: 32px;
+/* Above the drawer's content (which would otherwise cover it and take its clicks) and sticky,
+   so it stays in the top-right corner while the drawer scrolls. Takes no space in the layout. */
+.drawer > .close {
+  position: sticky; top: 12px; z-index: 3;
+  margin: -16px -16px -40px auto;
+  width: 40px; height: 40px;
   border: 1px solid var(--border);
   border-radius: 50%;
+  background: var(--bg-2);
   display: grid; place-items: center;
+  font-size: 20px; line-height: 1;
   color: var(--text-2);
+  cursor: pointer;
 }
-.drawer .close:hover { color: var(--gold); border-color: var(--gold); }
+.drawer > .close:hover, .drawer > .close:focus-visible { color: var(--gold); border-color: var(--gold); }
 
 /* ---- Two-col ---- */
 .col-2 { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
