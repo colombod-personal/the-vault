@@ -1,27 +1,25 @@
-// Card data (Scryfall's), fetched from the Vault: POST /api/v1/cards/lookup answers from the
-// server's copy and asks Scryfall itself for anything missing, so the browser never calls
-// Scryfall's API. Images still load from Scryfall's image CDN, as Scryfall asks.
-// Calls stay 500 ms apart (the server's Scryfall limit). Caches results in localStorage.
+// Card data (Scryfall's). Cards you own come with the collection: each item carries the card
+// data the daily sync keeps in Postgres, and api.js hands it over with own(). Anything else
+// (deck cards you don't own, "Update now") is asked of the Vault: POST /api/v1/cards/lookup
+// answers from the server's copy and asks Scryfall itself for anything missing, so the browser
+// never calls Scryfall's API. Images still load from Scryfall's image CDN, as Scryfall asks.
+// Calls stay 500 ms apart (the server's Scryfall limit). Lookups are kept in memory only.
 window.Scryfall = (() => {
   const LOOKUP = '/api/v1/cards/lookup';
-  const CACHE_KEY = 'scry_cache_v3'; // v3: adds artist (credited wherever art is shown)
   const RATE_MS = 500;
   let lastCall = 0;
 
-  let cache = {};
-  try { cache = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}'); } catch {}
+  // Older versions cached card data in localStorage (scry_cache, _v2, _v3): drop it.
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('scry_cache')) localStorage.removeItem(k);
+    }
+  } catch {}
 
-  const pendingWrites = [];
-  let writeTimer = null;
-  function scheduleWrite() {
-    if (writeTimer) return;
-    writeTimer = setTimeout(() => {
-      try { localStorage.setItem(CACHE_KEY, JSON.stringify(cache)); }
-      catch (e) { /* quota — silently drop */ }
-      writeTimer = null;
-    }, 250);
-  }
-  function setCache(key, val) { cache[key] = val; scheduleWrite(); }
+  let cache = {};  // lookups made on this page, fresher than the collection's copy ("Update now")
+  let owned = {};  // the loaded collection's card data
+  function setCache(key, val) { cache[key] = val; }
 
   // Callers take turns through one promise chain, so concurrent lookups stay 500 ms apart.
   let turns = Promise.resolve();
@@ -37,7 +35,7 @@ window.Scryfall = (() => {
 
   function slimCard(c) {
     if (!c) return null;
-    // Strip to essentials to keep cache small
+    // Strip to essentials
     const img = c.image_uris || c.card_faces?.[0]?.image_uris;
     return {
       id: c.id,
@@ -63,8 +61,20 @@ window.Scryfall = (() => {
   }
 
   function cacheKey(name, set, num) {
-    if (set && num) return `${set}/${num}`;
+    if (set && num) return `${set}/${num}`.toLowerCase();
     return `n:${name.toLowerCase().trim()}`;
+  }
+
+  // The loaded collection's cards ({n, s, cn, scry}, scry in slimCard's shape or null): answered
+  // from here, so owned cards never need a lookup. Replaces the previous collection's.
+  function own(cards) {
+    owned = {};
+    for (const c of cards) {
+      if (!c.scry) continue;
+      owned[cacheKey(c.n, c.s, c.cn)] = c.scry;
+      const byName = cacheKey(c.n);
+      if (!owned[byName]) owned[byName] = c.scry;
+    }
   }
 
   // Look up many cards. ids: [{name, set?, collector_number?}, ...]
@@ -75,7 +85,8 @@ window.Scryfall = (() => {
     const toFetch = [];
     ids.forEach((id, idx) => {
       const k = cacheKey(id.name, id.set, id.collector_number);
-      if (!force && cache[k]) results[idx] = cache[k];
+      const known = !force && (cache[k] || owned[k]);
+      if (known) results[idx] = known;
       else toFetch.push({ idx, id, k });
     });
 
@@ -155,7 +166,7 @@ window.Scryfall = (() => {
 
   async function named(name) {
     const k = cacheKey(name);
-    if (cache[k]) return cache[k];
+    if (cache[k] || owned[k]) return cache[k] || owned[k];
     await rateLimit();
     try {
       const r = await fetch(LOOKUP, {
@@ -174,11 +185,11 @@ window.Scryfall = (() => {
 
   function cached(name, set, num) {
     const k = cacheKey(name, set, num);
-    return cache[k] || null;
+    return cache[k] || owned[k] || null;
   }
 
+  // How many cards were looked up on this page (not the collection's own).
   function cacheSize() { return Object.keys(cache).length; }
-  function clearCache() { cache = {}; localStorage.removeItem(CACHE_KEY); }
 
   // The live USD price for a collection card, by the finish it is priced as (`fin`: nonfoil, foil,
   // etched; older saved copies only have the printing `p`). Null when Scryfall has none for it.
@@ -190,5 +201,5 @@ window.Scryfall = (() => {
     return isFinite(v) ? v : null;
   }
 
-  return { collection, named, cached, cacheSize, clearCache, priceFor };
+  return { collection, named, cached, cacheSize, own, priceFor };
 })();

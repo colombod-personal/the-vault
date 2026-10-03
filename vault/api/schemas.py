@@ -54,6 +54,47 @@ class Acquired(BaseModel):
     last: str | None = None
 
 
+class CardImage(BaseModel):
+    small: str | None = None
+    normal: str | None = None
+    artist: str | None = None
+    credit: str
+
+
+class CardPrices(BaseModel):
+    usd: float | None = None
+    usd_foil: float | None = None
+    usd_etched: float | None = None
+    eur: float | None = None
+    eur_foil: float | None = None
+    eur_etched: float | None = None
+    day: str | None = Field(None, description="The day of these prices")
+
+
+class CardData(BaseModel):
+    scryfall_id: str
+    oracle_id: str | None = None
+    name: str
+    set_code: str | None = Field(None, description="Scryfall's set code, lower case")
+    set_name: str | None = None
+    collector_number: str | None = None
+    type_line: str | None = None
+    mana_cost: str | None = None
+    cmc: float | None = None
+    colors: list[str] = []
+    color_identity: list[str] = []
+    oracle_text: str | None = None
+    power: str | None = None
+    toughness: str | None = None
+    loyalty: str | None = None
+    rarity: str | None = None
+    layout: str | None = None
+    finishes: list[str] = []
+    image: CardImage
+    scryfall_uri: str | None = None
+    prices: CardPrices | None = Field(None, description="Scryfall's latest prices for every finish")
+
+
 class CardItem(Hal):
     id: str
     name: str
@@ -71,29 +112,8 @@ class CardItem(Hal):
     value: float
     acquired: Acquired
     scryfall_id: str | None = None
-
-
-class CardImage(BaseModel):
-    small: str | None = None
-    normal: str | None = None
-    artist: str | None = None
-    credit: str
-
-
-class CardData(BaseModel):
-    scryfall_id: str
-    oracle_id: str | None = None
-    name: str
-    type_line: str | None = None
-    mana_cost: str | None = None
-    cmc: float | None = None
-    colors: list[str] = []
-    color_identity: list[str] = []
-    oracle_text: str | None = None
-    rarity: str | None = None
-    finishes: list[str] = []
-    image: CardImage
-    scryfall_uri: str | None = None
+    card: CardData | None = Field(None, description="Scryfall's data for the printing, kept by the daily sync; "
+                                  "null until the printing is matched and synced")
 
 
 class PricePoint(BaseModel):
@@ -109,7 +129,6 @@ class CopyRow(BaseModel):
 
 
 class CardDetail(CardItem):
-    card: CardData | None = None
     price_history: list[PricePoint] = []
     copies: list[CopyRow] = Field([], description="The rows this printing came from: the first 500")
     copies_total: int = Field(0, description="How many rows this printing came from in all")

@@ -1,10 +1,8 @@
-// Insights view — analytical cuts of your collection. No enrichment required for the core.
+// Insights view — analytical cuts of your collection. Color, type and curve use the card data
+// the collection comes with (kept in Postgres by the daily sync).
 const { useState: useStateL, useMemo: useMemoL } = React;
 
 function Lab({ data, openCard }) {
-  const [tick, setTick] = useStateL(0);
-  const [enriching, setEnriching] = useStateL(false);
-  const [progress, setProgress] = useStateL({ done: 0, total: 0 });
   const [pnlMode, setPnlMode] = useStateL('winners'); // winners | losers
   const [typeFocus, setTypeFocus] = useStateL(null);
 
@@ -79,46 +77,32 @@ function Lab({ data, openCard }) {
       .map(([month, spend]) => ({ month, spend: +spend.toFixed(2) }));
   }, [data]);
 
-  // ----- Scryfall-enriched data -----
-  const enriched = useMemoL(() => {
+  // ----- With Scryfall's card data -----
+  const withData = useMemoL(() => {
     const out = [];
     for (const c of data.cards) {
       const s = window.Scryfall.cached(c.n, c.s, c.cn);
       if (s) out.push({ ...c, scry: s });
     }
     return out;
-  }, [data, tick]);
-  const coverage = enriched.length / data.cards.length;
+  }, [data]);
 
-  async function enrichBatch(n = 600) {
-    setEnriching(true);
-    const todo = data.cards
-      .filter(c => !window.Scryfall.cached(c.n, c.s, c.cn))
-      .sort((a, b) => (b.mk * b.q) - (a.mk * a.q))
-      .slice(0, n)
-      .map(c => ({ name: c.n, set: c.s, collector_number: c.cn }));
-    setProgress({ done: 0, total: todo.length });
-    await window.Scryfall.collection(todo, p => setProgress(p));
-    setTick(t => t + 1);
-    setEnriching(false);
-  }
-
-  // Color / type aggregations from enrichment
+  // Color / type aggregations from card data
   const byColor = useMemoL(() => {
     const buckets = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, M: 0 };
     const buckVal = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, M: 0 };
-    for (const c of enriched) {
+    for (const c of withData) {
       const ci = c.scry.color_identity || [];
       const key = ci.length === 0 ? 'C' : ci.length === 1 ? ci[0] : 'M';
       buckets[key] += c.q;
       buckVal[key] += c.mk * c.q;
     }
     return { buckets, buckVal };
-  }, [enriched]);
+  }, [withData]);
 
   const byType = useMemoL(() => {
     const types = {};
-    for (const c of enriched) {
+    for (const c of withData) {
       const tl = c.scry.type_line || '';
       const main = tl.split(' — ')[0].split(' ').pop();
       if (!types[main]) types[main] = { qty: 0, value: 0 };
@@ -126,16 +110,16 @@ function Lab({ data, openCard }) {
       types[main].value += c.mk * c.q;
     }
     return Object.entries(types).map(([t, v]) => ({ type: t, ...v })).sort((a, b) => b.qty - a.qty);
-  }, [enriched]);
+  }, [withData]);
 
   const byCmc = useMemoL(() => {
     const buckets = {};
-    for (const c of enriched) {
+    for (const c of withData) {
       const cmc = Math.min(Math.floor(c.scry.cmc ?? 0), 8);
       buckets[cmc] = (buckets[cmc] || 0) + c.q;
     }
     return buckets;
-  }, [enriched]);
+  }, [withData]);
 
   return (
     <div data-screen-label="05 Insights">
@@ -146,7 +130,7 @@ function Lab({ data, openCard }) {
         </div>
       </div>
 
-      {/* Hero stats — no enrichment required */}
+      {/* Hero stats — no card data required */}
       {data.meta.costsHidden && (
         <p className="label-mono" style={{ marginBottom: 12 }}>
           Prices paid are private for this shared collection, so profit &amp; loss isn't shown.
@@ -275,7 +259,7 @@ function Lab({ data, openCard }) {
         </div>
       </div>
 
-      {/* Enrichment-dependent section */}
+      {/* Card-data section */}
       <div className="section">
         <div className="section-head">
           <div>
@@ -283,17 +267,13 @@ function Lab({ data, openCard }) {
             <h2 className="h2" style={{ marginTop: 4 }}>Color, type and curve</h2>
           </div>
           <div className="row">
-            <span className="label-mono">{enriched.length.toLocaleString()} / {data.cards.length.toLocaleString()} enriched</span>
-            <button className="btn primary" onClick={() => enrichBatch(600)} disabled={enriching}>
-              {enriching ? <><span className="spinner"></span> Enriching ({progress.done}/{progress.total})</> : 'Enrich +600 →'}
-            </button>
-            <button className="btn ghost" onClick={() => enrichBatch(2000)} disabled={enriching}>+2000</button>
+            <span className="label-mono">{withData.length.toLocaleString()} / {data.cards.length.toLocaleString()} with card data</span>
           </div>
         </div>
 
-        {enriched.length === 0 ? (
+        {withData.length === 0 ? (
           <div className="panel" style={{ padding: 40, textAlign: 'center' }}>
-            <p className="muted" style={{ fontSize: 13 }}>Click "Enrich +600" to fetch color, type and mana data from Scryfall and unlock the breakdowns below. Cache persists across reloads.</p>
+            <p className="muted" style={{ fontSize: 13 }}>Card details (color, type, mana value) arrive with the daily sync; these breakdowns fill in once they do.</p>
           </div>
         ) : (
           <>
@@ -337,7 +317,7 @@ function Lab({ data, openCard }) {
                       </button>
                       {isOpen && (
                         <div style={{ padding: '10px 0 4px 14px', borderLeft: '1px solid var(--border)', marginTop: 6, marginLeft: 4 }}>
-                          {enriched
+                          {withData
                             .filter(c => ((c.scry.type_line || '').split(' — ')[0].split(' ').pop() || 'Other') === t.type)
                             .sort((a, b) => b.mk - a.mk)
                             .slice(0, 8)
