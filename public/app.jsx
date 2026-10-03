@@ -16,41 +16,28 @@ window.vaultFreshness = function (iso) {
   return { rel, abs, tone, days };
 };
 
-// Pick the live USD price for a card from its card data (a lookup made by "Update now" first), by
-// its finish (as the server does).
-window.vaultPriceFor = function (card) {
-  const s = window.Scryfall && window.Scryfall.cached(card.n, card.s, card.cn);
-  return s && s.prices ? window.Scryfall.priceFor(s.prices, card) : null;
+// Load what a view shows from the server (VaultApi's collection client): { data, error, loading }.
+// `load` runs again when `deps` change (e.g. the collection's version, after an import or a price
+// refresh); the previous answer stays on screen while the next one loads.
+window.useVaultQuery = function (load, deps) {
+  const [state, setState] = useStateApp({ data: null, error: null, loading: true });
+  useEffectApp(() => {
+    let live = true;
+    setState((s) => ({ ...s, error: null, loading: true }));
+    Promise.resolve().then(load).then(
+      (data) => { if (live) setState({ data, error: null, loading: false }); },
+      (error) => { if (live) setState((s) => ({ data: s.data, error, loading: false })); });
+    return () => { live = false; };
+  }, deps);
+  return state;
 };
 
-// Recompute a data object's market values from freshly-cached Scryfall prices.
-// `at` becomes the new "calculated" timestamp. Cost basis (what you paid) never changes.
-window.vaultRecompute = function (base, at) {
-  const setVal = {};
-  let totalMarket = 0;
-  const cards = base.cards.map((c) => {
-    const live = window.vaultPriceFor(c);
-    const mk = live != null ? live : c.mk;
-    const v = mk * (c.q || 0);
-    totalMarket += v;
-    setVal[c.s] = (setVal[c.s] || 0) + v;
-    return mk === c.mk ? c : { ...c, mk };
-  });
-  const sets = base.sets
-    .map((s) => ({ ...s, value: setVal[s.code] != null ? setVal[s.code] : s.value }))
-    .sort((a, b) => b.value - a.value);
-  // The per-name index (Graph, Decks) carries prices too: rebuild it from the new card prices.
-  const byName = {};
-  for (const c of cards) {
-    const k = c.n.toLowerCase();
-    const b = byName[k] || (byName[k] = { name: c.n, total: 0, value: 0, entries: [] });
-    b.total += c.q;
-    b.value += c.mk * c.q;
-    b.entries.push({ s: c.s, sn: c.sn, cn: c.cn, p: c.p, c: c.c, q: c.q, mk: c.mk });
-  }
-  const meta = { ...base.meta, totalMarket, generatedAt: at };
-  return { ...base, cards, sets, byName, meta };
-};
+// One printing's "Spent" and "P&L" cells, from the server's `paid` and `gain` (the P&L of the
+// copies with a known cost): "private" when the owner hides costs, "—" when no cost is known.
+window.vaultSpentText = (card, costsHidden) =>
+  costsHidden ? 'private' : card.gain != null && card.pd != null ? `$${card.pd.toFixed(2)}` : '—';
+window.vaultGainText = (card, costsHidden) =>
+  costsHidden ? 'private' : card.gain == null ? '—' : `${card.gain >= 0 ? '+' : '−'}$${Math.abs(card.gain).toFixed(2)}`;
 
 // Props that make a clickable tile work from the keyboard and for screen readers, like a button:
 // focusable, announced as a button, activated with Enter or Space.
@@ -61,7 +48,9 @@ window.vaultPressable = (action, label) => ({
   },
 });
 
-const VAULT_REFRESH_KEY = 'vault_refreshed_at';
+// Older versions kept the time of the last "Update now" here and recomputed values in the
+// browser; prices are refreshed and values computed by the server now, so drop it.
+try { localStorage.removeItem('vault_refreshed_at'); } catch {}
 const VAULT_INVITE_KEY = 'vault_pending_invite';
 
 // An invite link (/?invite=TOKEN) may arrive before sign-in: park the token, clean the URL.
@@ -125,6 +114,11 @@ function App() {
   const [accountOpen, setAccountOpen] = useStateApp(false);
   const [viewing, setViewing] = useStateApp(null); // { id, from } while looking at someone's shared collection
   const [deckText, setDeckText] = useStateApp(null); // deck opened from saved/shared decks
+  const refreshingRef = useRefApp(false);      // a server refresh is running (manual or automatic)
+  const autoRefreshTried = useRefApp(false);   // the automatic one runs once per visit
+  const refreshAgain = useRefApp(null);        // asked for while one was running: true (auto) or 'manual'
+  const viewingRef = useRefApp(null);
+  viewingRef.current = viewing;
 
   // Go to a view: a new history entry, unless an open card or panel's entry can be reused.
   const setRoute = (next) => {
@@ -180,13 +174,13 @@ function App() {
     };
   }, [t]);
 
-  // Load the signed-in user's collection from the server (prices are refreshed there daily).
-  const loadCollection = async () => {
+  // Load the signed-in user's collection summary from the server; each view asks the server for
+  // what it shows. Prices are refreshed there daily, and on demand (runRefresh).
+  const loadCollection = async ({ afterImport = false } = {}) => {
     try {
       setLoadError(null);
       setLoadProgress('Opening your vault…');
-      const progress = (n, total) => setLoadProgress(`Opening your vault… ${n.toLocaleString()} / ${total.toLocaleString()} printings`);
-      const j = await window.VaultApi.collection(progress);
+      const j = await window.VaultApi.collection();
       if (j.meta.offline) {
         setNotice(`You're offline: showing your collection as saved on this device ${new Date(j.meta.savedAt).toLocaleString()}.`);
       } else {
@@ -195,15 +189,8 @@ function App() {
       setAuth('signed-in');
       setViewing(null);
       acceptPendingInvite();
-      // If the user pulled live prices on this page since the server's last sync, replay them
-      // (after a reload there is nothing to replay: the server stored what "Update now" fetched).
-      const at = localStorage.getItem(VAULT_REFRESH_KEY);
-      const serverAt = j.meta.generatedAt;
-      if (at && (!serverAt || at > serverAt) && window.Scryfall && window.Scryfall.cacheSize() > 0) {
-        setData(window.vaultRecompute(j, at));
-      } else {
-        setData(j);
-      }
+      setData(j);
+      if (!j.meta.offline) enrichInBackground(j, afterImport);
     } catch (e) {
       if (e.status === 401) setAuth('signed-out');
       else setLoadError(e.message || 'Unknown error');
@@ -284,61 +271,68 @@ function App() {
   const onImported = (res) => {
     setNotice(`Imported ${res.copies.toLocaleString()} cards: ${window.describeChanges(res.changes)}.`);
     setData(null);
-    loadCollection();
+    loadCollection({ afterImport: true });
   };
 
-  // Force-pull current prices for every printing from Scryfall, then recompute.
-  const doRefresh = async () => {
-    if (refreshing || !data) return;
+  // Refresh your collection's card data and today's prices on the server (POST
+  // /collection/refresh, a chunk per call, until nothing remains), then reload the summary: its
+  // new version makes every view ask the server again. The browser never calls Scryfall and
+  // keeps nothing about the refresh. `auto`: started by the app, so it stays quiet on errors.
+  const runRefresh = async (auto) => {
+    if (refreshingRef.current) { refreshAgain.current = refreshAgain.current || auto || 'manual'; return; }
+    refreshingRef.current = true;
     setRefreshError(null);
     setRefreshing(true);
-    const ids = data.cards.map((c) => ({ name: c.n, set: c.s, collector_number: c.cn }));
-    setRefreshProgress({ done: 0, total: ids.length });
+    setRefreshProgress({ done: 0, total: 0, auto });
     try {
-      const results = await window.Scryfall.collection(
-        ids,
-        (p) => setRefreshProgress({ done: p.done, total: p.total }),
-        { force: true }
-      );
-      const got = results.filter(Boolean).length;
-      const failedBatches = results.netErrors || 0;
-      const completed = failedBatches === 0; // every batch came back from Scryfall
-      const blocked = failedBatches >= (results.batches || 1);
-
-      if (completed) {
-        // Full pass — safe to stamp "as of now". (got < total just means some
-        // printings genuinely have no price on Scryfall; that's not staleness.)
-        const at = new Date().toISOString();
-        localStorage.setItem(VAULT_REFRESH_KEY, at);
-        setData(window.vaultRecompute(data, at));
+      await window.VaultApi.refreshCollection({ onProgress: (p) => setRefreshProgress({ ...p, auto }) });
+    } catch (e) {
+      if (!auto) {
         setRefreshError(
-          got < ids.length
-            ? `Updated. ${(ids.length - got).toLocaleString()} printings have no Scryfall price and kept their last value.`
-            : null
-        );
-      } else {
-        // Incomplete — DON'T claim freshness. Leave values and timestamp untouched.
-        setRefreshError(
-          blocked
-            ? "The Vault couldn't reach Scryfall just now — nothing was updated, so values still show the last good prices. Try again in a few minutes."
-            : `Update didn't finish — ${failedBatches} of ${results.batches} batches couldn't be reached. Nothing was changed; press Update now to retry.`
+          e.status === 503 ? "The Vault couldn't reach Scryfall just now, so values still show the last good prices. Try again in a few minutes."
+            : e.status === 429 ? 'Prices were just updated several times in a row. Try again in a minute.'
+            : 'Update failed: ' + e.message
         );
       }
-    } catch (e) {
-      setRefreshError('Update failed: ' + e.message);
     } finally {
+      // What was refreshed before an error is saved on the server too: show it.
+      if (!viewingRef.current) {
+        try { setData(await window.VaultApi.collection()); } catch {}
+      }
+      refreshingRef.current = false;
       setRefreshing(false);
       setRefreshProgress(null);
+      // asked for again while running (e.g. an import finished): once more, for what is new
+      const again = refreshAgain.current;
+      refreshAgain.current = null;
+      if (again) runRefresh(again === true);
     }
   };
 
-  // The server syncs Scryfall's daily bulk file for everyone; this just reloads its latest prices.
+  // Server-side enrichment nobody has to ask for: after an import, and once per visit when the
+  // prices are older than today or some printings have no card data yet. Runs in the background
+  // with a quiet progress note; a failure isn't retried until the next visit.
+  const enrichInBackground = async (j, afterImport) => {
+    if (!j.meta.totalQty || (!afterImport && autoRefreshTried.current)) return;
+    autoRefreshTried.current = true;
+    if (!afterImport) {
+      const today = new Date().toISOString().slice(0, 10);  // the server's day (UTC)
+      let stale = !j.meta.pricesAsOf || j.meta.pricesAsOf < today;
+      if (!stale) {
+        const b = await j.api.breakdowns().catch(() => null);
+        stale = !!b && b.colors.some((x) => x.key === 'unknown' && x.copies > 0);
+      }
+      if (!stale) return;
+    }
+    runRefresh(true);
+  };
+
+  // The server syncs Scryfall's daily bulk file for everyone; this just reloads its latest values.
   const doBulkSync = async () => {
     if (refreshing || !data) return;
     setRefreshError(null);
     setRefreshing(true);
     try {
-      localStorage.removeItem(VAULT_REFRESH_KEY);
       const j = viewing ? await window.VaultApi.sharedCollection(viewing.id) : await window.VaultApi.collection();
       setData(j);
       setRefreshError(j.meta.generatedAt ? null : 'The server has not synced prices yet; values use your file\'s prices.');
@@ -424,6 +418,12 @@ function App() {
             <button className={route.view === 'lab' ? 'active' : ''} onClick={() => nav('lab')}>Lab</button>
             <button className={route.view === 'graph' ? 'active' : ''} onClick={() => nav('graph')}>Graph</button>
           </nav>
+          {refreshing && refreshProgress && refreshProgress.auto && (
+            // the automatic refresh after an import or on a new day: a quiet note, no prompt
+            <span className="label-mono" role="status" style={{ fontSize: 10, whiteSpace: 'nowrap' }}>
+              Updating prices{refreshProgress.total ? ` ${Math.round((refreshProgress.done / refreshProgress.total) * 100)}%` : '…'}
+            </span>
+          )}
           <AccountMenu me={me} onImported={onImported} onAccount={openAccount} readOnly={!!viewing} />
         </header>
         {viewing && viewingBanner}
@@ -437,7 +437,7 @@ function App() {
               gotoSets={() => nav('sets')}
               gotoSet={code => nav('setdetail', { code })}
               gotoValuation={() => nav('valuation')}
-              onRefresh={doRefresh}
+              onRefresh={viewing ? null : () => runRefresh(false)}
               onBulkSync={doBulkSync}
               refreshing={refreshing}
               refreshProgress={refreshProgress}
@@ -467,7 +467,7 @@ function App() {
             <Valuation
               data={data}
               onBack={() => nav('dashboard')}
-              onRefresh={doRefresh}
+              onRefresh={viewing ? null : () => runRefresh(false)}
               onBulkSync={doBulkSync}
               refreshing={refreshing}
               refreshProgress={refreshProgress}
@@ -544,7 +544,7 @@ function App() {
 }
 
 function CardDrawer({ card, onClose, costsHidden }) {
-  const [scry, setScry] = useStateApp(() => card._scry || window.Scryfall.cached(card.n, card.s, card.cn) || card.scry);
+  const [scry, setScry] = useStateApp(() => card._scry || card.scry || window.Scryfall.cached(card.n, card.s, card.cn));
   useEffectApp(() => {
     if (scry) return;
     let dead = false;
@@ -554,8 +554,8 @@ function CardDrawer({ card, onClose, costsHidden }) {
     return () => { dead = true; };
   }, [card]);
 
-  const total = (card.mk || 0) * (card.q || 0);
-  const cardPnl = window.vaultCardPnL(card, costsHidden);
+  // the server's value for a printing you own; a deck line's card shows its unit price × copies owned
+  const total = card.v != null ? card.v : (card.mk || 0) * (card.q || 0);
 
   useEffectApp(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
@@ -631,8 +631,8 @@ function CardDrawer({ card, onClose, costsHidden }) {
               <Stat label="Quantity" value={card.q} />
               <Stat label="Total value" value={`$${total.toFixed(2)}`} color="var(--gold)" />
               <Stat label="Spent" value={window.vaultSpentText(card, costsHidden)} muted />
-              {cardPnl.state !== 'known' ? <Stat label="P&L" value={window.vaultPnLText(card, costsHidden)} muted /> : (
-                <Stat label="P&L" value={window.vaultPnLText(card, costsHidden)} color={cardPnl.pnl >= 0 ? 'var(--good)' : 'var(--danger)'} />
+              {costsHidden || card.gain == null ? <Stat label="P&L" value={window.vaultGainText(card, costsHidden)} muted /> : (
+                <Stat label="P&L" value={window.vaultGainText(card, costsHidden)} color={card.gain >= 0 ? 'var(--good)' : 'var(--danger)'} />
               )}
             </div>
             {card.fd && (
@@ -710,7 +710,7 @@ function RefreshButton({ refreshing, refreshProgress, onRefresh, className }) {
       className={`btn sm refresh-btn ${className || ''}`}
       disabled={refreshing}
       onClick={(e) => { e.stopPropagation(); onRefresh(); }}
-      title="Re-fetch current prices from Scryfall"
+      title="Ask the Vault to fetch current prices and card data from Scryfall"
     >
       {refreshing ? (
         <>

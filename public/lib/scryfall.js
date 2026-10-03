@@ -1,8 +1,8 @@
-// Card data (Scryfall's). Cards you own come with the collection: each item carries the card
-// data the daily sync keeps in Postgres, and api.js hands it over with own(). Anything else
-// (deck cards you don't own, "Update now") is asked of the Vault: POST /api/v1/cards/lookup
-// answers from the server's copy and asks Scryfall itself for anything missing, so the browser
-// never calls Scryfall's API. Images still load from Scryfall's image CDN, as Scryfall asks.
+// Card data (Scryfall's). Printings you own come with their card data from the collection's pages
+// (kept in Postgres by the daily sync). Anything else (deck cards, a card shown without it) is
+// asked of the Vault: POST /api/v1/cards/lookup answers from the server's copy and asks Scryfall
+// itself for anything missing, so the browser never calls Scryfall's API. Prices are refreshed on
+// the server too (POST /api/v1/collection/refresh, VaultApi.refreshCollection). Images still load from Scryfall's image CDN, as Scryfall asks.
 // Calls stay 500 ms apart (the server's Scryfall limit). Lookups are kept in memory only.
 window.Scryfall = (() => {
   const LOOKUP = '/api/v1/cards/lookup';
@@ -17,8 +17,7 @@ window.Scryfall = (() => {
     }
   } catch {}
 
-  let cache = {};  // lookups made on this page, fresher than the collection's copy ("Update now")
-  let owned = {};  // the loaded collection's card data
+  let cache = {};  // lookups made on this page
   function setCache(key, val) { cache[key] = val; }
 
   // Callers take turns through one promise chain, so concurrent lookups stay 500 ms apart.
@@ -65,27 +64,14 @@ window.Scryfall = (() => {
     return `n:${name.toLowerCase().trim()}`;
   }
 
-  // The loaded collection's cards ({n, s, cn, scry}, scry in slimCard's shape or null): answered
-  // from here, so owned cards never need a lookup. Replaces the previous collection's.
-  function own(cards) {
-    owned = {};
-    for (const c of cards) {
-      if (!c.scry) continue;
-      owned[cacheKey(c.n, c.s, c.cn)] = c.scry;
-      const byName = cacheKey(c.n);
-      if (!owned[byName]) owned[byName] = c.scry;
-    }
-  }
-
   // Look up many cards. ids: [{name, set?, collector_number?}, ...]
   // Returns Promise<Array<slimCard|null>> in same order
-  async function collection(ids, onProgress, opts = {}) {
-    const force = !!opts.force; // re-fetch even if cached (used by "Update now")
+  async function collection(ids, onProgress) {
     const results = new Array(ids.length).fill(null);
     const toFetch = [];
     ids.forEach((id, idx) => {
       const k = cacheKey(id.name, id.set, id.collector_number);
-      const known = !force && (cache[k] || owned[k]);
+      const known = cache[k];
       if (known) results[idx] = known;
       else toFetch.push({ idx, id, k });
     });
@@ -113,7 +99,7 @@ window.Scryfall = (() => {
           const resp = await fetch(LOOKUP, {
             method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ ...body, refresh: force }),
+            body: JSON.stringify(body),
           });
           if (resp.status === 429) { lastErr = 'HTTP 429'; await new Promise(r => setTimeout(r, 30000)); continue; }
           if (resp.status >= 500) { lastErr = 'HTTP ' + resp.status; continue; }
@@ -166,7 +152,7 @@ window.Scryfall = (() => {
 
   async function named(name) {
     const k = cacheKey(name);
-    if (cache[k] || owned[k]) return cache[k] || owned[k];
+    if (cache[k]) return cache[k];
     await rateLimit();
     try {
       const r = await fetch(LOOKUP, {
@@ -185,21 +171,8 @@ window.Scryfall = (() => {
 
   function cached(name, set, num) {
     const k = cacheKey(name, set, num);
-    return cache[k] || owned[k] || null;
+    return cache[k] || null;
   }
 
-  // How many cards were looked up on this page (not the collection's own).
-  function cacheSize() { return Object.keys(cache).length; }
-
-  // The live USD price for a collection card, by the finish it is priced as (`fin`: nonfoil, foil,
-  // etched; older saved copies only have the printing `p`). Null when Scryfall has none for it.
-  const FINISH_PRICE = { nonfoil: 'usd', foil: 'usd_foil', etched: 'usd_etched' };
-  function priceFor(prices, card) {
-    const fin = card.fin || (/etched/i.test(card.p || '') ? 'etched' : /foil/i.test(card.p || '') ? 'foil' : 'nonfoil');
-    const raw = prices && prices[FINISH_PRICE[fin] || 'usd'];
-    const v = parseFloat(raw);
-    return isFinite(v) ? v : null;
-  }
-
-  return { collection, named, cached, cacheSize, own, priceFor };
+  return { collection, named, cached };
 })();

@@ -1,46 +1,38 @@
-// Sets view — all sets owned + drill-in
-const { useEffect: useEffectS, useMemo: useMemoS, useState: useStateS } = React;
+// Sets view — all sets owned + drill-in. The server searches, sorts and values the sets
+// (GET /collection/sets) and lists a set's printings (GET /collection/cards?set=).
+const { useEffect: useEffectS, useState: useStateS } = React;
+
+// The view's sort choices, as the server's `sort` parameter.
+const SET_SORTS = { value: '-value', qty: '-quantity', unique: '-unique', newest: '-release', oldest: 'release',
+  code: 'code', name: 'name' };
 
 function Sets({ data, onSetClick }) {
+  const api = data.api;
   const [q, setQ] = useStateS('');
+  const [query, setQuery] = useStateS('');  // sent to the server a moment after typing stops
   const [sort, setSort] = useStateS('value');
-  // Release dates come from the set list, which may arrive after this view: re-sort when it does.
-  const [setsLoaded, setSetsLoaded] = useStateS(0);
-  useEffectS(() => window.SetIcons?.onLoad(() => setSetsLoaded((n) => n + 1)), []);
+  useEffectS(() => {
+    const t = setTimeout(() => setQuery(q), 250);
+    return () => clearTimeout(t);
+  }, [q]);
 
-  const sets = useMemoS(() => {
-    let out = data.sets;
-    if (q) {
-      const ql = q.toLowerCase();
-      out = out.filter(s => s.code.toLowerCase().includes(ql) || s.name.toLowerCase().includes(ql));
-    }
-    const released = (code) => window.SetIcons?.get(code)?.released || '';
-    switch (sort) {
-      case 'value': out = out.slice().sort((a, b) => b.value - a.value); break;
-      case 'qty': out = out.slice().sort((a, b) => b.qty - a.qty); break;
-      case 'unique': out = out.slice().sort((a, b) => b.unique - a.unique); break;
-      case 'code': out = out.slice().sort((a, b) => a.code.localeCompare(b.code)); break;
-      case 'name': out = out.slice().sort((a, b) => a.name.localeCompare(b.name)); break;
-      case 'newest': out = out.slice().sort((a, b) => (released(b.code) || '0').localeCompare(released(a.code) || '0')); break;
-      case 'oldest': out = out.slice().sort((a, b) => (released(a.code) || '9').localeCompare(released(b.code) || '9')); break;
-    }
-    return out;
-  }, [data, q, sort, setsLoaded]);
+  const res = window.useVaultQuery(() => api.sets({ q: query, sort: SET_SORTS[sort] }), [api.base, data.meta.version, query, sort]);
+  const sets = res.data ? res.data.items : [];
 
   // At least $1, so sets all worth $0 (e.g. before the first price sync) give empty bars, not NaN%.
-  const maxVal = Math.max(1, ...data.sets.map(s => s.value));
+  const maxVal = Math.max(1, ...sets.map(s => s.value));
 
   return (
     <div data-screen-label="03 Sets">
       <div style={{ marginBottom: 24 }}>
         <p className="eyebrow">Holdings by expansion</p>
-        <h1 className="h1" style={{ marginTop: 6 }}>{data.sets.length} sets in the vault.</h1>
+        <h1 className="h1" style={{ marginTop: 6 }}>{data.meta.uniqueSets} sets in the vault.</h1>
       </div>
 
       <div className="panel" style={{ marginBottom: 16, padding: 16 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
-          <input className="input" placeholder="Search sets…" value={q} onChange={e => setQ(e.target.value)} />
-          <select className="select" value={sort} onChange={e => setSort(e.target.value)}>
+          <input className="input" placeholder="Search sets…" aria-label="Search sets" value={q} onChange={e => setQ(e.target.value)} />
+          <select className="select" aria-label="Sort sets by" value={sort} onChange={e => setSort(e.target.value)}>
             <option value="value">Sort: total value</option>
             <option value="qty">Sort: card count</option>
             <option value="unique">Sort: unique printings</option>
@@ -50,6 +42,11 @@ function Sets({ data, onSetClick }) {
             <option value="name">Sort: set name</option>
           </select>
         </div>
+        {res.error && (
+          <p role="alert" style={{ marginTop: 10, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--danger)' }}>
+            Couldn't load the sets: {res.error.message}
+          </p>
+        )}
       </div>
 
       <div className="set-grid">
@@ -75,9 +72,14 @@ function Sets({ data, onSetClick }) {
 }
 
 function SetDetail({ data, code, onBack, openCard }) {
-  const set = data.sets.find(s => s.code === code);
-  const cards = useMemoS(() => data.cards.filter(c => c.s === code).sort((a, b) => (b.mk * b.q) - (a.mk * a.q)), [data, code]);
+  const api = data.api;
+  const at = [api.base, data.meta.version, code];
+  const sets = window.useVaultQuery(() => api.sets({ q: code }), at).data;
+  const set = sets && sets.items.find(s => s.code === code);
+  const page = window.useVaultQuery(() => api.cards({ set: code, sort: '-value', limit: 60 }), at).data;
   if (!set) return null;
+  const cards = page ? page.items : [];
+  const more = page ? page.total - cards.length : 0;
   return (
     <div data-screen-label="03 Set Detail">
       <button className="btn ghost" onClick={onBack} style={{ marginBottom: 16 }}>← Back to all sets</button>
@@ -90,8 +92,8 @@ function SetDetail({ data, code, onBack, openCard }) {
         {set.qty} cards · {set.unique} unique printings · ${set.value.toLocaleString()} total market value
       </p>
       <div style={{ marginTop: 24 }}>
-        <CardGrid cards={cards.slice(0, 60)} onClick={openCard} />
-        {cards.length > 60 && <p className="muted" style={{ textAlign: 'center', marginTop: 16 }}>+{cards.length - 60} more</p>}
+        <CardGrid cards={cards} onClick={openCard} />
+        {more > 0 && <p className="muted" style={{ textAlign: 'center', marginTop: 16 }}>+{more} more</p>}
       </div>
     </div>
   );

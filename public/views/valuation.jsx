@@ -11,36 +11,20 @@ const fmtAxis = (v) => v >= 1000 ? '$' + (v / 1000).toFixed(v >= 10000 ? 0 : 1) 
 
 function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, refreshProgress, refreshError }) {
   const m = data.meta;
+  const api = data.api;
   const fresh = window.vaultFreshness(m.generatedAt);
 
-  // Build monthly cumulative series from acquisition dates, valued at current prices. The server's
-  // timeline counts each purchase in its own month (a printing bought in several months is one
-  // card here, dated by its first purchase); the per-card fallback is for older saved copies.
-  const full = useMemoVal(() => {
-    const byMonth = {};
-    const perMonth = (data.timeline || []).length && data.timeline.every((t) => typeof t.market === 'number');
-    if (perMonth) {
-      for (const t of data.timeline) byMonth[t.month] = { market: t.market, cost: t.paid || 0, cards: t.qty || 0 };
-    }
-    for (const c of perMonth ? [] : data.cards) {
-      const ym = (c.fd || '').slice(0, 7);
-      if (!ym) continue;
-      const b = byMonth[ym] || (byMonth[ym] = { market: 0, cost: 0, cards: 0 });
-      b.market += (c.mk || 0) * (c.q || 0);
-      b.cost += c.pd || 0;
-      b.cards += c.q || 0;
-    }
-    const months = Object.keys(byMonth).sort();
-    let mc = 0,cc = 0,qc = 0;
-    return months.map((ym) => {
-      mc += byMonth[ym].market;cc += byMonth[ym].cost;qc += byMonth[ym].cards;
-      return {
-        ym, label: monthLabel(ym),
-        marketCum: mc, costCum: cc, gainCum: mc - cc, cardsCum: qc,
-        marketAdd: byMonth[ym].market, costAdd: byMonth[ym].cost, cardsAdd: byMonth[ym].cards
-      };
-    });
-  }, [data]);
+  // The server's monthly series (GET /collection/valuation): each purchase month's copies, valued
+  // at current prices, with running totals of value, cost and gain, the last 12 months and the
+  // copies without a purchase date. The day-by-day value is the server's history.
+  const at = [api.base, m.version];
+  const valuation = window.useVaultQuery(() => api.valuation(), at).data;
+  const history = window.useVaultQuery(() => api.history(), at).data;
+  const full = useMemoVal(() => (valuation ? valuation.months : []).map((v) => ({
+    ym: v.month, label: monthLabel(v.month),
+    marketCum: v.market_cum, costCum: v.cost_cum || 0, gainCum: v.gain_cum || 0, cardsCum: v.copies_cum,
+    marketAdd: v.market, costAdd: v.paid || 0, cardsAdd: v.copies,
+  })), [valuation]);
 
   const [range, setRange] = useStateVal('all');
   const series = useMemoVal(() => {
@@ -49,19 +33,15 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
     return full.slice(Math.max(0, full.length - n));
   }, [full, range]);
 
-  const last = full[full.length - 1] || { marketCum: 0, costCum: 0, gainCum: 0 };
-  // The headline counts every card, dated or not; gain counts only cards with a known cost.
-  const pnlAll = useMemoVal(() => window.vaultPnL(data.cards, m.costsHidden), [data]);
-  const gain = pnlAll.pnl || 0;
-  const pnlPct = pnlAll.pct || 0;
-  const undated = useMemoVal(() => data.cards.reduce((n, c) => n + ((c.fd || '').slice(0, 7) ? 0 : (c.q || 0)), 0), [data]);
-
-  // Biggest single month by market value added.
-  const peak = useMemoVal(() => full.reduce((a, b) => b.marketAdd > a.marketAdd ? b : a, full[0] || {}), [full]);
-  // Last 12 months net change in market value.
-  const yoy = full.length > 12 ? last.marketCum - full[full.length - 13].marketCum : last.marketCum;
-
-  const monthsDesc = useMemoVal(() => full.slice().reverse(), [full]); // eslint-disable-line no-unused-vars
+  // The headline counts every card, dated or not; gain counts only cards with a known cost (the
+  // summary's P&L).
+  const gainKnown = m.pnl != null;
+  const gain = m.pnl || 0;
+  const pnlPct = m.pnlPct || 0;
+  const undated = valuation ? valuation.undated.copies : 0;
+  // Market value of the copies bought in the last 12 months the collection has purchases in.
+  const trailing = valuation && valuation.trailing_12m;
+  const yoy = trailing ? trailing.market : 0;
 
   // Ledger filtering / sorting so the table never runs off the page.
   const [ledgerQuery, setLedgerQuery] = useStateVal('');
@@ -79,8 +59,6 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
     return rows.sort(sorters[ledgerSort] || sorters.recent);
   }, [full, ledgerQuery, ledgerSort]);
 
-  const bulkBusy = refreshing && refreshProgress && refreshProgress.mode === 'bulk';
-  const mb = (b) => (b / 1048576).toFixed(1) + ' MB';
 
   return (
     <div data-screen-label="Valuation">
@@ -97,31 +75,23 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
             <span>{fresh.rel}</span>
           </div>
           <p style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-2)', marginTop: 4 }}>as of {fresh.abs}</p>
-          {window.RefreshButton && onRefresh && (
+          {window.RefreshButton && (onRefresh || onBulkSync) && (
             <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
-              <RefreshButton refreshing={refreshing} refreshProgress={refreshProgress} onRefresh={onRefresh} />
+              {onRefresh && <RefreshButton refreshing={refreshing} refreshProgress={refreshProgress} onRefresh={onRefresh} />}
               {onBulkSync && (
                 <button className="btn ghost xs bulk-link" disabled={refreshing} onClick={onBulkSync}
-                  title="Reload the prices the server synced from Scryfall's daily file (no Scryfall calls from your browser).">
+                  title="Reload the values the server computed from Scryfall's prices (no Scryfall calls from your browser).">
                   ↓ Load server prices
                 </button>
               )}
-              {bulkBusy && (
-                <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)' }}>
-                  {refreshProgress.phase === 'download'
-                    ? `Downloading daily file… ${mb(refreshProgress.received || 0)}${refreshProgress.total ? ' / ' + mb(refreshProgress.total) : ''}`
-                    : refreshProgress.phase === 'parse' ? 'Reading prices…'
-                    : 'Matching your cards…'}
-                </span>
-              )}
-              {refreshing && refreshProgress && refreshProgress.mode !== 'bulk' && (
+              {refreshing && refreshProgress && (
                 <div className="refresh-bar" style={{ width: 168 }}>
                   <div style={{ width: `${refreshProgress.total ? (refreshProgress.done / refreshProgress.total) * 100 : 0}%` }}></div>
                 </div>
               )}
-              {refreshing && refreshProgress && refreshProgress.mode !== 'bulk' && (
+              {refreshing && refreshProgress && (
                 <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)' }}>
-                  {refreshProgress.done.toLocaleString()} / {refreshProgress.total.toLocaleString()} printings
+                  {refreshProgress.total ? `${refreshProgress.done.toLocaleString()} / ${refreshProgress.total.toLocaleString()} printings` : 'Starting…'}
                 </span>
               )}
               {!refreshing && refreshError && (
@@ -150,14 +120,14 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
           <div className="value"><span className="currency">$</span>{Math.round(m.totalPaid).toLocaleString()}</div>
           <div className="delta">cumulative spend</div>
         </div>
-        {pnlAll.known ? (
+        {gainKnown ? (
           <div className={`stat ${gain >= 0 ? 'good' : 'bad'}`}>
             <div className="label">Unrealised gain</div>
             <div className="value" style={{ color: gain >= 0 ? 'var(--good)' : 'var(--danger)' }}>
               <span className="currency">$</span>{gain >= 0 ? '+' : '−'}{Math.abs(Math.round(gain)).toLocaleString()}
             </div>
             <div className={`delta ${gain >= 0 ? 'up' : 'down'}`}>{gain >= 0 ? '▲' : '▼'} {Math.abs(pnlPct).toFixed(1)}% over cost</div>
-            {pnlAll.unknown > 0 && <div className="delta" style={{ fontSize: 10 }}>on the {pnlAll.known.toLocaleString()} printings with a price paid</div>}
+            {m.unknownCostCopies > 0 && <div className="delta" style={{ fontSize: 10 }}>on the {m.knownCostCopies.toLocaleString()} cards with a price paid</div>}
           </div>
         ) : (
           <div className="stat">
@@ -170,7 +140,7 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
         <div className="stat">
           <div className="label">Last 12 months</div>
           <div className="value" style={{ color: 'var(--gold)' }}><span className="currency">$</span>+{Math.round(yoy).toLocaleString()}</div>
-          <div className="delta">{full.length ? `value added since ${full.length > 12 ? full[full.length - 13].label : full[0].label}` : 'no acquisition dates recorded'}</div>
+          <div className="delta">{trailing ? `value added since ${monthLabel(trailing.since)}` : 'no acquisition dates recorded'}</div>
         </div>
       </div>
       {undated > 0 && (
@@ -179,7 +149,7 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
         </p>
       )}
 
-      <DailyValue history={data.history} />
+      <DailyValue history={history} />
 
       <div className="panel" style={{ marginBottom: 24 }}>
         <div className="section-head" style={{ marginBottom: 18 }}>

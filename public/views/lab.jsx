@@ -1,125 +1,50 @@
-// Insights view — analytical cuts of your collection. Color, type and curve use the card data
-// the collection comes with (kept in Postgres by the daily sync).
-const { useState: useStateL, useMemo: useMemoL } = React;
+// Insights view — analytical cuts of your collection, all computed by the server: winners and
+// losers and stockpiles (GET /collection/stats), spend by month (/valuation), colour, type and
+// mana value (/breakdowns), a type's priciest cards (/names).
+const { useState: useStateL } = React;
+
+const LAB_COLORS = [['W', 'White'], ['U', 'Blue'], ['B', 'Black'], ['R', 'Red'], ['G', 'Green'], ['M', 'Multi'], ['C', 'Colorless']];
+const LAB_MANA = ['0', '1', '2', '3', '4', '5', '6', '7', '8+'];
 
 function Lab({ data, openCard }) {
+  const m = data.meta;
+  const api = data.api;
   const [pnlMode, setPnlMode] = useStateL('winners'); // winners | losers
   const [typeFocus, setTypeFocus] = useStateL(null);
+  const at = [api.base, m.version];
 
-  // ----- Stats that don't need Scryfall -----
-  const stats = useMemoL(() => {
-    let biggestGain = null, biggestLoss = null;
-    let foilValue = 0, totalValue = 0;
-    let totalPaid = 0, totalCards = 0;
-    let maxQty = null;
-    for (const c of data.cards) {
-      const total = c.mk * c.q;
-      // P&L only for cards with a known cost (vaultCostKnown): no full-value "winners" with no price paid.
-      const r = window.vaultCardPnL(c, data.meta.costsHidden);
-      if (r.state === 'known') {
-        const pnl = r.pnl;
-        if (!biggestGain || pnl > biggestGain.pnl) biggestGain = { c, pnl };
-        if (!biggestLoss || pnl < biggestLoss.pnl) biggestLoss = { c, pnl };
-        totalPaid += r.paid;
-        totalCards += r.qty;
-      }
-      totalValue += total;
-      if (c.p && c.p.includes('Foil')) foilValue += total;
-      if (!maxQty || c.q > maxQty.q) maxQty = { c, q: c.q };
-    }
-    return {
-      biggestGain, biggestLoss,
-      foilPct: totalValue > 0 ? (foilValue / totalValue) * 100 : 0,
-      foilValue,
-      avgPaidPerCard: totalCards > 0 ? totalPaid / totalCards : 0,
-      maxQty,
-      totalValue,
-    };
-  }, [data]);
+  const stats = window.useVaultQuery(() => api.stats(12), at).data;
+  const valuation = window.useVaultQuery(() => api.valuation(), at).data;
+  const breakdowns = window.useVaultQuery(() => api.breakdowns(), at).data;
+  const typeCards = window.useVaultQuery(() => (typeFocus ? api.names({ type: typeFocus }, 8) : null),
+    [...at, typeFocus]).data;
 
-  // P&L lists (winners / losers) per printing
-  const pnlList = useMemoL(() => {
-    // only copies with a known cost (vaultCardPnL), against what was paid for them
-    const withPnL = data.cards.map(c => ({ c, r: window.vaultCardPnL(c, data.meta.costsHidden) }))
-      .filter(x => x.r.state === 'known')
-      .map(({ c, r }) => ({ c, qty: r.qty, total: r.market, paid: r.paid, pnl: r.pnl, pnlPct: (r.pnl / r.paid) * 100 }));
-    return {
-      winners: withPnL.slice().sort((a, b) => b.pnl - a.pnl).slice(0, 8),
-      losers: withPnL.slice().sort((a, b) => a.pnl - b.pnl).slice(0, 8),
-    };
-  }, [data]);
+  // Open a card name's most valuable printing (per-name lists carry no printing of their own).
+  const openName = (name) => api.topPrinting(name).then((c) => c && openCard(c)).catch(() => {});
 
-  // Biggest stockpiles (most duplicates owned)
-  const stockpiles = useMemoL(() => {
-    const byName = {};
-    for (const c of data.cards) {
-      const k = c.n.toLowerCase();
-      if (!byName[k]) byName[k] = { name: c.n, total: 0, value: 0, entries: [], firstC: c };
-      byName[k].total += c.q;
-      byName[k].value += c.mk * c.q;
-      byName[k].entries.push(c);
-    }
-    return Object.values(byName)
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 12);
-  }, [data]);
+  // P&L rows: the server's biggest gains and losses, over the copies with a known cost only.
+  const pnlRow = (c) => ({ c, qty: c.pq, paid: c.pd, total: c.pd + c.gain, pnl: c.gain, pnlPct: c.pd ? (c.gain / c.pd) * 100 : null });
+  const pnlList = {
+    winners: (stats?.biggest_gains || []).slice(0, 8).map(pnlRow),
+    losers: (stats?.biggest_losses || []).slice(0, 8).map(pnlRow),
+  };
+  const biggestGain = pnlList.winners[0] || null;
+  const biggestLoss = pnlList.losers[0] || null;
+  const foilShare = stats ? stats.foil_share_of_value : 0;
+  const avgPaidPerCard = m.knownCostCopies ? m.knownCostPaid / m.knownCostCopies : 0;
+  const stockpiles = stats?.most_copies || [];
+  const maxQty = stockpiles[0] || null;
+  const spendTimeline = (valuation?.months || []).map((v) => ({ month: v.month, spend: v.paid || 0 }));
 
-  // Acquisition spend over time (months)
-  const spendTimeline = useMemoL(() => {
-    const months = {};
-    for (const c of data.cards) {
-      const m = (c.fd || '').slice(0, 7);
-      if (!m) continue;
-      months[m] = (months[m] || 0) + c.pd;
-    }
-    return Object.entries(months)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([month, spend]) => ({ month, spend: +spend.toFixed(2) }));
-  }, [data]);
-
-  // ----- With Scryfall's card data -----
-  const withData = useMemoL(() => {
-    const out = [];
-    for (const c of data.cards) {
-      const s = window.Scryfall.cached(c.n, c.s, c.cn);
-      if (s) out.push({ ...c, scry: s });
-    }
-    return out;
-  }, [data]);
-
-  // Color / type aggregations from card data
-  const byColor = useMemoL(() => {
-    const buckets = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, M: 0 };
-    const buckVal = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, M: 0 };
-    for (const c of withData) {
-      const ci = c.scry.color_identity || [];
-      const key = ci.length === 0 ? 'C' : ci.length === 1 ? ci[0] : 'M';
-      buckets[key] += c.q;
-      buckVal[key] += c.mk * c.q;
-    }
-    return { buckets, buckVal };
-  }, [withData]);
-
-  const byType = useMemoL(() => {
-    const types = {};
-    for (const c of withData) {
-      const tl = c.scry.type_line || '';
-      const main = tl.split(' — ')[0].split(' ').pop();
-      if (!types[main]) types[main] = { qty: 0, value: 0 };
-      types[main].qty += c.q;
-      types[main].value += c.mk * c.q;
-    }
-    return Object.entries(types).map(([t, v]) => ({ type: t, ...v })).sort((a, b) => b.qty - a.qty);
-  }, [withData]);
-
-  const byCmc = useMemoL(() => {
-    const buckets = {};
-    for (const c of withData) {
-      const cmc = Math.min(Math.floor(c.scry.cmc ?? 0), 8);
-      buckets[cmc] = (buckets[cmc] || 0) + c.q;
-    }
-    return buckets;
-  }, [withData]);
+  // Colour, type and mana value: the server's buckets ("unknown" = no card data yet).
+  const bucket = (list, key) => (list || []).find((b) => b.key === key) || { copies: 0, printings: 0, market_value: 0 };
+  const totalPrintings = breakdowns ? breakdowns.totals.printings : 0;
+  const withData = totalPrintings - bucket(breakdowns?.colors, 'unknown').printings;
+  const byType = (breakdowns?.types || []).filter((t) => t.key !== 'unknown' && t.copies > 0)
+    .sort((a, b) => b.copies - a.copies);
+  const manaCopies = LAB_MANA.map((k) => bucket(breakdowns?.mana_values, k).copies);
+  const manaTotal = manaCopies.reduce((a, b) => a + b, 0) || 1;
+  const manaMax = Math.max(...manaCopies, 1);
 
   return (
     <div data-screen-label="05 Insights">
@@ -131,44 +56,44 @@ function Lab({ data, openCard }) {
       </div>
 
       {/* Hero stats — no card data required */}
-      {data.meta.costsHidden && (
+      {m.costsHidden && (
         <p className="label-mono" style={{ marginBottom: 12 }}>
           Prices paid are private for this shared collection, so profit &amp; loss isn't shown.
         </p>
       )}
       <div className="stat-grid">
-        <div className="stat good" style={data.meta.costsHidden ? { display: 'none' } : undefined}>
+        <div className="stat good" style={m.costsHidden ? { display: 'none' } : undefined}>
           <div className="label">Biggest winner</div>
           <div className="value" style={{ fontSize: 28 }}>
-            {stats.biggestGain ? <><span className="currency">$</span>{labSigned(stats.biggestGain.pnl)}</> : '—'}
+            {biggestGain ? <><span className="currency">$</span>{labSigned(biggestGain.pnl)}</> : '—'}
           </div>
-          {stats.biggestGain && (
-            <div className="delta">{stats.biggestGain.c.n} [{stats.biggestGain.c.s}]</div>
+          {biggestGain && (
+            <div className="delta">{biggestGain.c.n} [{biggestGain.c.s}]</div>
           )}
         </div>
-        <div className="stat bad" style={data.meta.costsHidden ? { display: 'none' } : undefined}>
+        <div className="stat bad" style={m.costsHidden ? { display: 'none' } : undefined}>
           <div className="label">Biggest loser</div>
-          <div className="value" style={{ fontSize: 28, color: stats.biggestLoss && stats.biggestLoss.pnl >= 0 ? 'var(--good)' : 'var(--danger)' }}>
-            {stats.biggestLoss ? <><span className="currency">$</span>{labSigned(stats.biggestLoss.pnl)}</> : '—'}
+          <div className="value" style={{ fontSize: 28, color: biggestLoss && biggestLoss.pnl >= 0 ? 'var(--good)' : 'var(--danger)' }}>
+            {biggestLoss ? <><span className="currency">$</span>{labSigned(biggestLoss.pnl)}</> : '—'}
           </div>
-          {stats.biggestLoss && (
-            <div className="delta">{stats.biggestLoss.c.n} [{stats.biggestLoss.c.s}]</div>
+          {biggestLoss && (
+            <div className="delta">{biggestLoss.c.n} [{biggestLoss.c.s}]</div>
           )}
         </div>
         <div className="stat accent">
           <div className="label">Foil share of value</div>
-          <div className="value">{stats.foilPct.toFixed(1)}<span style={{ fontSize: 18, color: 'var(--muted)' }}>%</span></div>
-          <div className="delta">${stats.foilValue.toFixed(0)} of foil cards</div>
+          <div className="value">{(foilShare * 100).toFixed(1)}<span style={{ fontSize: 18, color: 'var(--muted)' }}>%</span></div>
+          <div className="delta">${(foilShare * m.totalMarket).toFixed(0)} of foil cards</div>
         </div>
-        <div className="stat" style={data.meta.costsHidden ? { display: 'none' } : undefined}>
+        <div className="stat" style={m.costsHidden ? { display: 'none' } : undefined}>
           <div className="label">Avg paid per card</div>
-          <div className="value">{stats.avgPaidPerCard ? <><span className="currency">$</span>{stats.avgPaidPerCard.toFixed(2)}</> : '—'}</div>
-          <div className="delta">your average pull cost{stats.avgPaidPerCard ? ' (cards with a price paid)' : ''}</div>
+          <div className="value">{avgPaidPerCard ? <><span className="currency">$</span>{avgPaidPerCard.toFixed(2)}</> : '—'}</div>
+          <div className="delta">your average pull cost{avgPaidPerCard ? ' (cards with a price paid)' : ''}</div>
         </div>
       </div>
 
       {/* P&L panel */}
-      <div className="section" style={data.meta.costsHidden ? { display: 'none' } : undefined}>
+      <div className="section" style={m.costsHidden ? { display: 'none' } : undefined}>
         <div className="section-head">
           <div>
             <p className="eyebrow">Profit &amp; loss</p>
@@ -224,35 +149,35 @@ function Lab({ data, openCard }) {
           <p className="eyebrow">Biggest stockpiles</p>
           <h2 className="h2" style={{ marginTop: 4, fontSize: 22, marginBottom: 14 }}>Cards you own most copies of</h2>
           {stockpiles.map((s, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid oklch(0.36 0.014 65 / 0.4)', cursor: 'pointer' }} {...window.vaultPressable(() => openCard(s.firstC), s.name)}>
+            <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid oklch(0.36 0.014 65 / 0.4)', cursor: 'pointer' }} {...window.vaultPressable(() => openName(s.name), s.name)}>
               <span style={{ flex: 1, fontWeight: 500 }}>{s.name}</span>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)', marginRight: 12 }}>{s.entries.length} prints</span>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--gold)', minWidth: 50, textAlign: 'right' }}>×{s.total}</span>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)', marginRight: 12 }}>{s.printings} prints</span>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--gold)', minWidth: 50, textAlign: 'right' }}>×{s.copies}</span>
             </div>
           ))}
         </div>
 
         <div className="panel">
-          {!data.meta.costsHidden && (<>
+          {!m.costsHidden && (<>
             <p className="eyebrow">Cadence</p>
             <h2 className="h2" style={{ marginTop: 4, fontSize: 22, marginBottom: 14 }}>Acquisition spend by month</h2>
             <SpendChart data={spendTimeline} />
             <div className="divider"></div>
           </>)}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            {!data.meta.costsHidden && (
+            {!m.costsHidden && (
               <div>
                 <p className="label-mono">Total spent</p>
                 <p style={{ fontFamily: 'var(--display)', fontSize: 24, fontWeight: 600, marginTop: 4, lineHeight: 1 }}>
-                  {data.meta.totalPaid > 0 ? `$${data.meta.totalPaid.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '—'}
+                  {m.totalPaid > 0 ? `$${m.totalPaid.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '—'}
                 </p>
               </div>
             )}
             <div>
               <p className="label-mono">Most duplicated</p>
               <p style={{ fontSize: 13, marginTop: 4, lineHeight: 1.3 }}>
-                {stats.maxQty?.c?.n}<br/>
-                <span style={{ fontFamily: 'var(--mono)', color: 'var(--gold)', fontSize: 12 }}>×{stats.maxQty?.q}</span>
+                {maxQty?.name}<br/>
+                <span style={{ fontFamily: 'var(--mono)', color: 'var(--gold)', fontSize: 12 }}>×{maxQty?.copies}</span>
               </p>
             </div>
           </div>
@@ -267,30 +192,26 @@ function Lab({ data, openCard }) {
             <h2 className="h2" style={{ marginTop: 4 }}>Color, type and curve</h2>
           </div>
           <div className="row">
-            <span className="label-mono">{withData.length.toLocaleString()} / {data.cards.length.toLocaleString()} with card data</span>
+            <span className="label-mono">{withData.toLocaleString()} / {totalPrintings.toLocaleString()} with card data</span>
           </div>
         </div>
 
-        {withData.length === 0 ? (
+        {withData === 0 ? (
           <div className="panel" style={{ padding: 40, textAlign: 'center' }}>
             <p className="muted" style={{ fontSize: 13 }}>Card details (color, type, mana value) arrive with the daily sync; these breakdowns fill in once they do.</p>
           </div>
         ) : (
           <>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10, marginBottom: 20 }}>
-              {[
-                ['W', 'White'], ['U', 'Blue'], ['B', 'Black'], ['R', 'Red'], ['G', 'Green'],
-                ['M', 'Multi'], ['C', 'Colorless'],
-              ].map(([k, name]) => {
-                const total = Object.values(byColor.buckets).reduce((a, b) => a + b, 0) || 1;
-                const pct = (byColor.buckets[k] / total) * 100;
+              {LAB_COLORS.map(([k, name]) => {
+                const b = bucket(breakdowns?.colors, k);
                 return (
                   <div key={k} className="panel" style={{ padding: 14, textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
                     <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 3, background: `var(--mana-${k.toLowerCase()})` }}></div>
                     <span className={`pip ${k}`} style={{ width: 28, height: 28, fontSize: 13, marginBottom: 6 }}>{k}</span>
                     <div className="label-mono" style={{ marginTop: 6 }}>{name}</div>
-                    <div style={{ fontFamily: 'var(--display)', fontSize: 22, fontWeight: 600, marginTop: 4, lineHeight: 1 }}>{byColor.buckets[k].toLocaleString()}</div>
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 11, marginTop: 4, color: 'var(--gold)' }}>${byColor.buckVal[k].toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                    <div style={{ fontFamily: 'var(--display)', fontSize: 22, fontWeight: 600, marginTop: 4, lineHeight: 1 }}>{b.copies.toLocaleString()}</div>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 11, marginTop: 4, color: 'var(--gold)' }}>${b.market_value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
                   </div>
                 );
               })}
@@ -302,29 +223,26 @@ function Lab({ data, openCard }) {
                 <h2 className="h2" style={{ marginTop: 4, fontSize: 22, marginBottom: 12 }}>What's in your library</h2>
                 <p className="muted" style={{ fontSize: 11, marginBottom: 10 }}>Click a type to expand its priciest cards.</p>
                 {byType.slice(0, 10).map(t => {
-                  const maxT = byType[0].qty || 1;
-                  const isOpen = typeFocus === t.type;
+                  const maxT = byType[0].copies || 1;
+                  const isOpen = typeFocus === t.key;
                   return (
-                    <div key={t.type} style={{ marginBottom: 10 }}>
-                      <button onClick={() => setTypeFocus(isOpen ? null : t.type)} style={{ display: 'block', width: '100%', textAlign: 'left', padding: 0 }}>
+                    <div key={t.key} style={{ marginBottom: 10 }}>
+                      <button aria-expanded={isOpen} onClick={() => setTypeFocus(isOpen ? null : t.key)} style={{ display: 'block', width: '100%', textAlign: 'left', padding: 0 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
-                          <span style={{ color: isOpen ? 'var(--gold)' : 'var(--text)' }}>{isOpen ? '▼ ' : '▸ '}{t.type}</span>
+                          <span style={{ color: isOpen ? 'var(--gold)' : 'var(--text)' }}>{isOpen ? '▼ ' : '▸ '}{t.label}</span>
                           <span style={{ fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
-                            {t.qty.toLocaleString()} · <span style={{ color: 'var(--gold)' }}>${t.value.toFixed(0)}</span>
+                            {t.copies.toLocaleString()} · <span style={{ color: 'var(--gold)' }}>${t.market_value.toFixed(0)}</span>
                           </span>
                         </div>
-                        <div className="progress-bar"><div style={{ width: `${(t.qty / maxT) * 100}%`, background: 'linear-gradient(90deg, var(--gold), var(--copper))' }}></div></div>
+                        <div className="progress-bar"><div style={{ width: `${(t.copies / maxT) * 100}%`, background: 'linear-gradient(90deg, var(--gold), var(--copper))' }}></div></div>
                       </button>
                       {isOpen && (
                         <div style={{ padding: '10px 0 4px 14px', borderLeft: '1px solid var(--border)', marginTop: 6, marginLeft: 4 }}>
-                          {withData
-                            .filter(c => ((c.scry.type_line || '').split(' — ')[0].split(' ').pop() || 'Other') === t.type)
-                            .sort((a, b) => b.mk - a.mk)
-                            .slice(0, 8)
-                            .map((c, i) => (
-                              <button key={i} onClick={() => openCard(c)} style={{ display: 'flex', justifyContent: 'space-between', width: '100%', padding: '4px 0', borderBottom: '1px solid oklch(0.36 0.014 65 / 0.4)', fontSize: 12, textAlign: 'left' }}>
-                                <span><span className="muted" style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>{c.s}</span> {c.n}</span>
-                                <span style={{ fontFamily: 'var(--mono)', color: 'var(--gold)' }}>${c.mk.toFixed(2)}</span>
+                          {/* the server's most valuable names of this type */}
+                          {(typeCards ? typeCards.items : []).map((c) => (
+                              <button key={c.name} onClick={() => openName(c.name)} style={{ display: 'flex', justifyContent: 'space-between', width: '100%', padding: '4px 0', borderBottom: '1px solid oklch(0.36 0.014 65 / 0.4)', fontSize: 12, textAlign: 'left' }}>
+                                <span><span className="muted" style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>{c.sets.length === 1 ? c.sets[0] : `${c.sets.length} sets`}</span> {c.name}</span>
+                                <span style={{ fontFamily: 'var(--mono)', color: 'var(--gold)' }}>${c.unit_price.toFixed(2)}</span>
                               </button>
                             ))}
                         </div>
@@ -338,15 +256,13 @@ function Lab({ data, openCard }) {
                 <p className="eyebrow">Mana curve</p>
                 <h2 className="h2" style={{ marginTop: 4, fontSize: 22, marginBottom: 14 }}>Mana value distribution</h2>
                 <div style={{ display: 'flex', alignItems: 'end', gap: 6, height: 220 }}>
-                  {[0,1,2,3,4,5,6,7,8].map(n => {
-                    const total = Object.values(byCmc).reduce((a, b) => a + b, 0) || 1;
-                    const v = byCmc[n] || 0;
-                    const max = Math.max(...Object.values(byCmc), 1);
+                  {LAB_MANA.map((n, i) => {
+                    const v = manaCopies[i];
                     return (
                       <div key={n} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)' }}>{((v / total) * 100).toFixed(0)}%</div>
-                        <div style={{ width: '100%', height: `${(v / max) * 160}px`, background: 'linear-gradient(180deg, var(--gold), var(--copper))', borderRadius: '2px 2px 0 0', minHeight: 2 }}></div>
-                        <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text)' }}>{n === 8 ? '8+' : n}</div>
+                        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)' }}>{((v / manaTotal) * 100).toFixed(0)}%</div>
+                        <div style={{ width: '100%', height: `${(v / manaMax) * 160}px`, background: 'linear-gradient(180deg, var(--gold), var(--copper))', borderRadius: '2px 2px 0 0', minHeight: 2 }}></div>
+                        <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text)' }}>{n}</div>
                       </div>
                     );
                   })}
