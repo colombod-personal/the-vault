@@ -24,7 +24,9 @@ function artUrl(scry) {
   return scry.img_art || (scry.img_normal ? scry.img_normal.replace('/normal/', '/art_crop/') : null);
 }
 
-const SAME = { set: 'same set', type: 'same type', color: 'same colors', rarity: 'same rarity', cmc: 'similar mana value', price: 'similar price' };
+const MAX_LINKS_SHOWN = 6; // a popular card can be picked by many peers: list the strongest
+const ART_MODES = new Set(['color', 'affinity', 'scatter', 'deck']); // the modes drawn as a network
+const SAME = { set: 'same set', type: 'same type', color: 'same color group', rarity: 'same rarity', cmc: 'similar mana value', price: 'similar price' };
 
 function GraphView({ data, openCard }) {
   const containerRef = useRefG(null);
@@ -410,15 +412,15 @@ function GraphView({ data, openCard }) {
       },
       {
         selector: 'node[inDeck = "yes"]',
-        style: { 'border-color': '#f4d35e', 'border-width': 3 }
+        style: { 'outline-color': '#f4d35e', 'outline-width': 3, 'outline-offset': 1 }
       },
       {
         selector: 'node[inDeck = "missing"]',
-        style: { 'border-color': '#d04d35', 'border-width': 3, 'border-style': 'dashed' }
+        style: { 'outline-color': '#d04d35', 'outline-width': 3, 'outline-offset': 1, 'outline-style': 'dashed' }
       },
       {
         selector: 'node[inDeck = "owned"]',
-        style: { 'border-color': '#3f8a5b', 'border-width': 2 }
+        style: { 'outline-color': '#3f8a5b', 'outline-width': 2, 'outline-offset': 1 }
       },
       {
         selector: 'node[?isAnchor]',
@@ -566,8 +568,10 @@ function GraphView({ data, openCard }) {
             <button className={`chip ${mode === 'scatter' ? 'active' : ''}`} onClick={() => setMode('scatter')}>Mana / price</button>
             {deck && <button className={`chip ${mode === 'deck' ? 'active' : ''}`} onClick={() => setMode('deck')}>Deck map</button>}
           </div>
+          {ART_MODES.has(mode) ?
           <button className={`chip ${showArt ? 'active' : ''}`} onClick={() => setShowArt((v) => !v)}
-            title="Show each card's art inside its circle" style={{ marginLeft: 'auto' }}>Card art</button>
+          title="Show each card's art inside its circle" style={{ marginLeft: 'auto' }}>Card art</button> :
+          <span style={{ marginLeft: 'auto' }} />}
           <div className="row" style={{ gap: 6 }}>
             <span className="label-mono" style={{ marginRight: 4 }}>Colors</span>
             {['W', 'U', 'B', 'R', 'G', 'M', 'C'].map((c) =>
@@ -673,17 +677,25 @@ function GraphView({ data, openCard }) {
                 <span>×{hover.d.card?.qty ?? hover.d.deckQty ?? '?'}</span>
                 <span style={{ color: 'var(--gold)' }}>${(hover.d.card?.value ?? 0).toFixed(2)}</span>
               </div>
+              {hover.d.card?.scry?.artist &&
+            <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 4 }}>Art by {hover.d.card.scry.artist}</div>
+            }
               {hover.links &&
             <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 6 }}>
                   <div className="label-mono" style={{ fontSize: 9, marginBottom: 4 }}>
                     {hover.links.length ? `Linked to ${hover.links.length}` : 'No links: nothing shares enough with it'}
                   </div>
-                  {hover.links.map((l) =>
+                  {hover.links.slice(0, MAX_LINKS_SHOWN).map((l) =>
               <div key={l.name} style={{ fontSize: 11, lineHeight: 1.35, marginBottom: 3 }}>
                       <span style={{ fontWeight: 600 }}>{l.name}</span>
                       <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--muted)', display: 'block' }}>{l.why}</span>
                     </div>
               )}
+                  {hover.links.length > MAX_LINKS_SHOWN &&
+              <div className="muted" style={{ fontFamily: 'var(--mono)', fontSize: 9.5 }}>
+                      and {hover.links.length - MAX_LINKS_SHOWN} more (the lit lines show them all)
+                    </div>
+              }
                 </div>
             }
             </div>
@@ -731,6 +743,7 @@ function GraphView({ data, openCard }) {
             mode === 'hierarchy' ? 'Compound rings = color · Node shape = type · Size = total value' :
             mode === 'scatter' ? 'Position fixed: x = mana, y = log price · Jitter for legibility' :
             'Size = total value · Hover for image · Click for details'}
+            {showArt && ART_MODES.has(mode) && ' · Card art by the credited artists (hover a card for its artist)'}
           </span>
         </div>
       </div>
