@@ -42,3 +42,14 @@ test('each finish is priced by its own Scryfall price, etched included', () => {
   assert.equal(scry.priceFor(prices, { p: 'Etched' }), 5, 'older saved copies have only the printing');
   assert.equal(scry.priceFor({ usd: '1.00' }, { fin: 'etched' }), null, 'no etched price: keep the stored one');
 });
+
+test('the cropped art is kept for the graph, for double-faced cards too', async () => {
+  const uris = (id) => ({ normal: `https://cards.scryfall.io/normal/front/${id}.jpg`, art_crop: `https://cards.scryfall.io/art_crop/front/${id}.jpg` });
+  const solRing = { id: 's1', name: 'Sol Ring', set: 'c21', collector_number: '263', prices: {}, image_uris: uris('s1') };
+  const delver = { id: 'd1', name: 'Delver of Secrets // Insectile Aberration', set: 'isd', collector_number: '51', prices: {},
+    card_faces: [{ image_uris: uris('d1-front') }, { image_uris: uris('d1-back') }] };
+  const scry = load({ data: [solRing, delver], not_found: [] });
+  const [ring, flip] = await scry.collection([{ name: 'Sol Ring' }, { name: 'Delver of Secrets' }]);
+  assert.equal(ring.img_art, 'https://cards.scryfall.io/art_crop/front/s1.jpg');
+  assert.equal(flip.img_art, 'https://cards.scryfall.io/art_crop/front/d1-front.jpg');
+});
