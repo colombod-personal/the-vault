@@ -163,6 +163,9 @@ class CollectionView:
             "condition": g.condition, "language": g.language, "quantity": g.quantity,
             "paid": None if self.hide_costs else round(g.paid, 2),
             "paid_quantity": None if self.hide_costs else g.paid_quantity,
+            # P&L of the copies with a known cost, as vault.analytics.pnl counts them; null when unknown
+            "gain": None if self.hide_costs or not (g.paid > 0 and g.paid_quantity)
+            else round(g.price * g.paid_quantity - g.paid, 2),
             "price": {"market": g.price, "low": g.low, "mid": g.mid, "currency": "USD", "source": g.price_source},
             "value": g.value, "acquired": {"first": g.first_acquired, "last": g.last_acquired},
             "scryfall_id": g.scryfall_id,

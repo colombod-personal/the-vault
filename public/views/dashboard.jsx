@@ -1,27 +1,27 @@
 // Dashboard view — Vault overview
-const { useMemo, useState } = React;
+const { useState } = React;
 
 function Dashboard({ data, gotoBrowse, gotoSets, gotoSet, gotoValuation, openCard, onRefresh, refreshing, refreshProgress, refreshError }) {
   const m = data.meta;
-  // P&L counts only cards with a known cost (see vaultPnL): no full-value "profit" on unrecorded prices.
-  const pnlAll = useMemo(() => window.vaultPnL(data.cards, m.costsHidden), [data]);
-  const pnl = pnlAll.pnl || 0;
-  const pnlPct = pnlAll.pct || 0;
+  const api = data.api;
+  // P&L from the server's summary: only copies with a known cost count, no full-value "profit"
+  // on unrecorded prices.
+  const pnlKnown = m.pnl != null;
+  const pnl = m.pnl || 0;
+  const pnlPct = m.pnlPct || 0;
   const fresh = window.vaultFreshness(m.generatedAt);
   // Nothing priced yet (e.g. a Moxfield file, which carries no market prices): don't show a fake loss.
   const unpriced = m.totalQty > 0 && !m.totalMarket;
 
-  const topCards = useMemo(() => {
-    return data.cards.slice()
-      .sort((a, b) => (b.mk * b.q) - (a.mk * a.q))
-      .slice(0, 12);
-  }, [data]);
-
-  const topSets = useMemo(() => data.sets.slice(0, 10), [data]);
+  // Everything below is the server's: the most valuable and newest printings, the top sets, the
+  // acquisition timeline. They are asked again when the collection's version changes.
+  const at = [api.base, m.version];
+  const topCards = (window.useVaultQuery(() => api.cards({ sort: '-value', limit: 12 }), at).data || { items: [] }).items;
+  const recent = (window.useVaultQuery(() => api.cards({ sort: '-acquired', limit: 6 }), at).data || { items: [] }).items;
+  const topSets = (window.useVaultQuery(() => api.sets(), at).data || { items: [] }).items.slice(0, 10);
   const maxSetVal = topSets[0]?.value || 1;
-
-  // Timeline
-  const timeline = data.timeline;
+  const timeline = (window.useVaultQuery(() => api.timeline(), at).data || [])
+    .map((t) => ({ month: t.month, qty: t.copies, market: t.market, paid: t.paid }));
 
   // Printing donut data
   const totalPrintings = Object.values(m.printings).reduce((a, b) => a + b, 0);
@@ -29,12 +29,6 @@ function Dashboard({ data, gotoBrowse, gotoSets, gotoSet, gotoValuation, openCar
     .filter(([k]) => k)
     .sort((a, b) => b[1] - a[1])
     .map(([k, v]) => ({ label: k, qty: v, pct: (v / totalPrintings) * 100 }));
-
-  const recent = useMemo(() => {
-    return data.cards.slice()
-      .sort((a, b) => (b.ld || '').localeCompare(a.ld || ''))
-      .slice(0, 6);
-  }, [data]);
 
   return (
     <div data-screen-label="01 Vault">
@@ -107,9 +101,9 @@ function Dashboard({ data, gotoBrowse, gotoSets, gotoSet, gotoValuation, openCar
             </>
           )}
         </div>
-        <div className={`stat ${unpriced || !pnlAll.known ? '' : pnl >= 0 ? 'good' : 'bad'}`} style={{ display: window.__vault?.showPnL === false || m.costsHidden ? 'none' : undefined }}>
+        <div className={`stat ${unpriced || !pnlKnown ? '' : pnl >= 0 ? 'good' : 'bad'}`} style={{ display: window.__vault?.showPnL === false || m.costsHidden ? 'none' : undefined }}>
           <div className="label">Unrealised P&amp;L</div>
-          {unpriced || !pnlAll.known ? (
+          {unpriced || !pnlKnown ? (
             <>
               <div className="value">—</div>
               <div className="delta">{unpriced ? 'waiting for market prices' : 'no prices paid recorded'}</div>
@@ -120,9 +114,9 @@ function Dashboard({ data, gotoBrowse, gotoSets, gotoSet, gotoValuation, openCar
                 <span className="currency">$</span>{pnl >= 0 ? '+' : '−'}{Math.abs(pnl).toLocaleString(undefined, { maximumFractionDigits: 0 })}
               </div>
               <div className={`delta ${pnl >= 0 ? 'up' : 'down'}`}>{pnl >= 0 ? '▲' : '▼'} {Math.abs(pnlPct).toFixed(1)}% on cost basis</div>
-              {pnlAll.unknown > 0 && (
+              {m.unknownCostCopies > 0 && (
                 <div className="delta" style={{ fontSize: 10 }}>
-                  {pnlAll.known.toLocaleString()} of {(pnlAll.known + pnlAll.unknown).toLocaleString()} printings with a price paid
+                  {m.knownCostCopies.toLocaleString()} of {(m.knownCostCopies + m.unknownCostCopies).toLocaleString()} cards with a price paid
                 </div>
               )}
             </>
@@ -131,7 +125,7 @@ function Dashboard({ data, gotoBrowse, gotoSets, gotoSet, gotoValuation, openCar
         <div className="stat">
           <div className="label">Breadth</div>
           <div className="value">{m.uniqueSets}<span style={{ fontSize: 18, color: 'var(--muted)', marginLeft: 6 }}>sets</span></div>
-          <div className="delta">{data.cards.length.toLocaleString()} unique printings</div>
+          <div className="delta">{m.uniqueEntries.toLocaleString()} unique printings</div>
         </div>
       </div>
 
@@ -246,13 +240,14 @@ function Timeline({ data }) {
 function CardGrid({ cards, onClick }) {
   return (
     <div className="card-grid">
-      {cards.map((c, i) => <CardTile key={i} c={c} onClick={() => onClick(c)} />)}
+      {cards.map((c, i) => <CardTile key={c.key || i} c={c} onClick={() => onClick(c)} />)}
     </div>
   );
 }
 
 function CardTile({ c, onClick }) {
-  const [enriched, setEnriched] = useState(() => window.Scryfall.cached(c.n, c.s, c.cn));
+  // printings from the server carry their card data; deck cards and older answers ask the Vault
+  const [enriched, setEnriched] = useState(() => c.scry || window.Scryfall.cached(c.n, c.s, c.cn));
   React.useEffect(() => {
     if (enriched) return;
     let stop = false;
@@ -263,7 +258,7 @@ function CardTile({ c, onClick }) {
     return () => { stop = true; };
   }, [c.n, c.s, c.cn]);
 
-  const totalVal = (c.mk * c.q).toFixed(2);
+  const totalVal = (c.v != null ? c.v : c.mk * c.q).toFixed(2);
   return (
     <div className="card-tile" {...window.vaultPressable(onClick, c.n)}>
       <div className="img-wrap">

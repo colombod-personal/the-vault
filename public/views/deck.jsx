@@ -1,7 +1,19 @@
-// Deck view — paste Archidekt/Moxfield URL or list, get coverage report
+// Deck view — paste Archidekt/Moxfield URL or list, get coverage report. What you own of it and
+// what the missing cards cost come from the server (POST /decks/coverage), against your collection.
 const { useState: useStateD, useMemo: useMemoD, useRef: useRefD, useEffect: useEffectD } = React;
 
 const SAMPLE_URL = 'https://archidekt.com/decks/5292775/the_dragon_in_the_night';
+
+// A deck's cards as a decklist the server parses ("4 Name (SET) 123" per line).
+const deckListText = (cards) => cards.map(c => `${c.qty} ${c.name}` + (c.set && c.collector_number ? ` (${c.set.toUpperCase()}) ${c.collector_number}` : '')).join('\n');
+
+// The server's coverage line for each deck card: in order when it answers line for line, else by name.
+function coverageFor(cards, lines) {
+  const byName = {};
+  for (const l of lines) (byName[l.name.toLowerCase().trim()] = byName[l.name.toLowerCase().trim()] || []).push(l);
+  const inOrder = lines.length === cards.length && lines.every((l, i) => l.name.toLowerCase().trim() === cards[i].name.toLowerCase().trim());
+  return cards.map((c, i) => (inOrder ? lines[i] : (byName[c.name.toLowerCase().trim()] || []).shift() || null));
+}
 
 function DeckView({ data, openCard, initialText }) {
   const [src, setSrc] = useStateD(initialText || SAMPLE_URL);
@@ -9,23 +21,11 @@ function DeckView({ data, openCard, initialText }) {
   const [saved, setSaved] = useStateD(null);
   const [deck, setDeck] = useStateD(null);
   const [enriched, setEnriched] = useStateD(null); // [{...deckCard, scry, owned, ownEntries}]
+  const [coverage, setCoverage] = useStateD(null); // the server's deck totals
   const [loading, setLoading] = useStateD(false);
   const [error, setError] = useStateD('');
   const [progress, setProgress] = useStateD({ done: 0, total: 0 });
   const [filter, setFilter] = useStateD('all'); // 'all'|'missing'|'partial'|'owned'
-
-  // Index of owned cards by lowercase name, plus by front face for double-faced cards
-  const byName = data.byName;
-  const frontFace = (name) => name.split(' // ')[0].trim();
-  const byFront = useMemoD(() => {
-    const out = {};
-    for (const [k, v] of Object.entries(byName)) {
-      const f = frontFace(k);
-      if (!out[f]) out[f] = { ...v, entries: [...v.entries] };
-      else if (out[f] !== v) { out[f] = { ...out[f], total: out[f].total + v.total, entries: out[f].entries.concat(v.entries) }; }
-    }
-    return out;
-  }, [byName]);
 
   async function loadFromUrl() {
     setError(''); setDeck(null); setEnriched(null); setLoading(true);
@@ -50,7 +50,7 @@ function DeckView({ data, openCard, initialText }) {
   }
 
   async function saveDeck() {
-    const text = deck.cards.map(c => `${c.qty} ${c.name}` + (c.set && c.collector_number ? ` (${c.set.toUpperCase()}) ${c.collector_number}` : '')).join('\n');
+    const text = deckListText(deck.cards);
     const name = deck.title === 'Pasted decklist' ? (prompt('Name this deck', 'My deck') || 'My deck') : deck.title;
     try { setSaved(await window.VaultApi.saveDeck(name, text, deck.url || null)); }
     catch (e) { setError('Saving failed: ' + e.message); }
@@ -61,65 +61,55 @@ function DeckView({ data, openCard, initialText }) {
 
   async function processDeck(d) {
     setDeck(d);
-    // Resolve each card via Scryfall (for image + price + colors)
+    // What you own and what the rest costs: the server's coverage, priced in Postgres.
+    const cov = await window.VaultApi.deckCoverage(deckListText(d.cards));
+    const lines = coverageFor(d.cards, cov.cards);
+    // Card data (image, colours, type) for display, from the Vault's card table.
     const ids = d.cards.map(c => ({ name: c.name, set: c.set, collector_number: c.collector_number }));
     setProgress({ done: 0, total: ids.length });
     const scry = await window.Scryfall.collection(ids, (p) => setProgress({ done: p.done, total: p.total }));
     const rows = d.cards.map((c, i) => {
-      // Match on the full name, then on the front face: Dragon Shield stores double-faced cards as
-      // "Front // Back" while Arena-style lists often name only the front face.
-      const key = c.name.toLowerCase().trim();
-      const own = byName[key] || byFront[frontFace(key)];
-      let owned = 0, ownEntries = [];
-      if (own) {
-        owned = own.total;
-        ownEntries = own.entries;
-      }
-      const s = scry[i];
-      // No Scryfall price (or no match): unknown, not $0.
-      const price = s?.prices ? (parseFloat(s.prices.usd) || parseFloat(s.prices.usd_foil) || null) : null;
-      const need = Math.max(0, c.qty - owned);
+      const line = lines[i];
+      const owned = line ? line.have : 0;
+      const need = line ? line.missing : c.qty;
+      const unitPrice = line ? line.unit_price : null;  // no price known: unknown, not $0
       return {
         ...c,
-        scry: s,
+        scry: scry[i],
         owned,
-        ownEntries,
+        ownEntries: (line ? line.owned_printings : []).map(o => ({ s: o.set, sn: '', cn: o.collector_number, p: o.printing, q: o.quantity, mk: o.unit_price })),
         need,
-        unitPrice: price,
-        priced: price != null,
-        rowCost: need * (price || 0),
+        status: line ? line.status : 'missing',
+        unitPrice,
+        priced: unitPrice != null,
+        rowCost: line && line.missing_cost != null ? line.missing_cost : 0,
       };
     });
+    setCoverage(cov);
     setEnriched(rows);
     setLoading(false);
   }
 
   const summary = useMemoD(() => {
-    if (!enriched) return null;
-    let total = 0, ownedQty = 0, missingQty = 0, missingCost = 0, unpricedQty = 0;
+    if (!enriched || !coverage) return null;
+    // Tallies of the server's lines; the cost to complete is the server's.
+    let total = 0, ownedQty = 0, missingQty = 0;
     let ownedFully = 0, ownedPartial = 0, missingAll = 0;
     for (const r of enriched) {
       total += r.qty;
-      const have = Math.min(r.owned, r.qty);
-      ownedQty += have;
+      ownedQty += Math.min(r.owned, r.qty);
       missingQty += r.need;
-      missingCost += r.rowCost;
-      if (r.need > 0 && !r.priced) unpricedQty += r.need;
-      if (r.owned >= r.qty) ownedFully++;
-      else if (r.owned > 0) ownedPartial++;
+      if (r.status === 'owned') ownedFully++;
+      else if (r.status === 'partial') ownedPartial++;
       else missingAll++;
     }
-    return { total, ownedQty, missingQty, missingCost, unpricedQty, ownedFully, ownedPartial, missingAll };
-  }, [enriched]);
+    return { total, ownedQty, missingQty, missingCost: coverage.missing_cost || 0, unpricedQty: coverage.missing_unpriced || 0,
+      ownedFully, ownedPartial, missingAll };
+  }, [enriched, coverage]);
 
   const rowsFiltered = useMemoD(() => {
     if (!enriched) return [];
-    return enriched.filter(r => {
-      if (filter === 'all') return true;
-      if (filter === 'missing') return r.owned === 0;
-      if (filter === 'partial') return r.owned > 0 && r.owned < r.qty;
-      if (filter === 'owned') return r.owned >= r.qty;
-    });
+    return enriched.filter(r => filter === 'all' || r.status === filter);
   }, [enriched, filter]);
 
   return (
@@ -182,7 +172,7 @@ function DeckView({ data, openCard, initialText }) {
               <div style={{ marginTop: 12 }}>
                 <div className="progress-bar"><div style={{ width: `${(progress.done / progress.total) * 100}%` }}></div></div>
                 <p className="muted" style={{ fontSize: 10, fontFamily: 'var(--mono)', marginTop: 6, letterSpacing: '0.12em' }}>
-                  Fetching {progress.done}/{progress.total} from Scryfall…
+                  Fetching card data {progress.done}/{progress.total}…
                 </p>
               </div>
             )}
@@ -230,7 +220,7 @@ function DeckView({ data, openCard, initialText }) {
                   {summary.missingCost.toFixed(2)}
                 </p>
                 <p className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', marginTop: 6 }}>
-                  at current Scryfall USD prices
+                  at current Scryfall USD prices, checked against your collection
                 </p>
                 {summary.unpricedQty > 0 && (
                   <p className="muted deck-unpriced-note" style={{ fontSize: 11, fontFamily: 'var(--mono)', marginTop: 4 }}>
@@ -278,7 +268,7 @@ function DeckView({ data, openCard, initialText }) {
                 <div className="num">Cost</div>
               </div>
               {rowsFiltered.map((r, i) => {
-                const status = r.owned >= r.qty ? 'owned' : (r.owned > 0 ? 'partial' : 'missing');
+                const status = r.status;
                 return (
                   <div className={`deck-row ${status}`} key={i} {...(r.scry ? window.vaultPressable(() => openCard({ n: r.name, s: r.scry.set, cn: r.scry.collector_number, p: 'Normal', c: 'Mint', l: 'English', q: r.owned, mk: r.unitPrice || 0, lo: 0, mi: 0, pd: 0, fd: '', ld: '', _scry: r.scry, _ownEntries: r.ownEntries, _deckRow: r }), r.name) : {})} style={{ cursor: r.scry ? 'pointer' : 'default' }}>
                     <div className="qty">{r.qty}×</div>

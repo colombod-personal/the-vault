@@ -40,8 +40,9 @@
       set information, card images and daily prices. Scryfall's free API and daily bulk data files
       are the foundation of the Vault.</p>
     <p class="how">How we use it: the server downloads Scryfall's daily bulk file once a day to match your
-      cards and record prices. When you press "Update now", your browser asks the Vault, and only the
-      Vault's server contacts Scryfall's API for current prices of the cards on screen. Your browser
+      cards and record prices. After an import, when prices are older than today, or when you press
+      "Update now", the Vault's server asks Scryfall's API for current prices and card data of your
+      cards; your browser never contacts Scryfall's API. Your browser
       loads card images and set icons from Scryfall's image servers, so Scryfall sees your IP address
       for those images, but never your name or account.</p>
     <p class="thanks">Thank you, Scryfall. If the Vault is useful to you, please consider

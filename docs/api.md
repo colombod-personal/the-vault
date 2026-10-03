@@ -21,8 +21,8 @@ One API for the web app and native apps (the planned iOS app), under `/api/v1`.
   `409` with the token's id (in `Location`) instead of making a second one: revoke it and create
   a new one.
 - **A version to cache by.** `GET /api/v1/collection` has a `version` that changes whenever the
-  collection or its prices change. The web app keeps a copy in IndexedDB and refetches the
-  pages only when the version moves.
+  collection or its prices change. The web app keeps the answers it got in IndexedDB and asks
+  again only when the version moves.
 - **For agents.** There are personal access tokens (read, or read and write) and an MCP server at
   `/api/mcp`; `/llms.txt` explains both to an agent. See [`agents.md`](agents.md).
 - **Errors are `application/problem+json`** (RFC 9457): `{"type", "title", "status", "detail"}`.
@@ -167,7 +167,7 @@ ignored and the connection's address is used.
 | GET / DELETE | `/api/v1/me/sessions[/{id}]` | signed-in apps |
 | POST / GET / DELETE | `/api/v1/me/tokens[/{id}]` | personal access tokens for agents and scripts (shown once) |
 | GET | `/api/v1/collection` | summary: copies, printings, value, cost, dates, links. P&L over the copies with a known cost only (a non-zero price paid recorded): `pnl` (`known_cost_market - known_cost_paid`, null when no cost is known), `pnl_pct`, `known_cost_paid`, `known_cost_market`, `known_cost_copies`, `unknown_cost_copies` (all null when costs are hidden) |
-| GET | `/api/v1/collection/cards` | printings, paged. Filters: `q`, `set`, `name`, `finish`, `condition`. `printing` (the printing label: `Normal`, `Foil`, `Etched`, …, any case). `sort`: `name`, `-name`, `-value`, `value`, `-quantity`, `set`, `-acquired`, `acquired` (first bought first; undated last). `value_total` is the market value of every printing matching the filters, across all pages. Each printing has `paid` (total paid) and `paid_quantity` (how many copies that covers; copies with no price recorded are left out), both `null` when costs are hidden. Each printing also carries `card`: Scryfall's data for it (type line, colours, mana cost, mana value, rarity, layout, power/toughness/loyalty, oracle text, image with artist credit, every finish's latest price), kept in the Vault's card table by the daily sync and read for the whole page in one query; `null` until the printing is matched and synced |
+| GET | `/api/v1/collection/cards` | printings, paged. Filters: `q`, `set`, `name`, `finish`, `condition`. `printing` (the printing label: `Normal`, `Foil`, `Etched`, …, any case). `sort`: `name`, `-name`, `-value`, `value`, `-quantity`, `set`, `-acquired`, `acquired` (first bought first; undated last). `value_total` is the market value of every printing matching the filters, across all pages. Each printing has `paid` (total paid), `paid_quantity` (how many copies that covers; copies with no price recorded are left out) and `gain` (today's value of those copies minus `paid`; `null` when no cost is known), all `null` when costs are hidden. Each printing also carries `card`: Scryfall's data for it (type line, colours, mana cost, mana value, rarity, layout, power/toughness/loyalty, oracle text, image with artist credit, every finish's latest price), kept in the Vault's card table by the daily sync and read for the whole page in one query; `null` until the printing is matched and synced |
 | GET | `/api/v1/collection/cards/{id}` | one printing: the rows it came from (the first 500; `copies_total` counts all), card data, image with artist credit, 90-day price history |
 | GET | `/api/v1/collection/sets` | value by set, paged. `q` (text in the code or name); `sort`: `-value` (default), `value`, `-quantity`, `quantity`, `-unique`, `unique` (distinct printings), `name`, `code`, `release`, `-release` (by Scryfall's release date; unknown dates last; may answer 503 while Scryfall's set list is unavailable). Each set has `colors` (copies by colour identity: `W` `U` `B` `R` `G`, `M` multicolour, `C` colourless, `unknown`) and `released_at` when the Vault has the set list |
 | GET | `/api/v1/collection/timeline` | per month: copies acquired, their market value today, and what was paid (null when costs are hidden) |
@@ -202,6 +202,12 @@ Outside v1: `POST /api/mcp` (the MCP server for agents, [`agents.md`](agents.md)
 ## Analytics
 
 The owner's decision: analytics are computed by the server, in Postgres, and clients only render them. `vault/analytics.py` prices every row in SQL exactly as the collection view does (the latest Scryfall price for the row's finish, else the file's own market price), joins it to the card table, and aggregates. Rows whose printing isn't in the card table yet are counted as `unknown`. These endpoints carry an ETag from the same version as the rest of the collection.
+
+The web app follows this: every number it shows comes from these endpoints (and `/collection`,
+`/cards`, `/sets`, `/stats`, `/history`, `/decks/coverage`); it only lays them out. It starts
+`POST /collection/refresh` itself, chunk by chunk until `remaining` is 0 and waiting out `503` and
+`429` as `Retry-After` says: after an import, and once per visit when `prices_as_of` is older than
+today or some printings have no card data yet. "Update now" runs the same loop.
 
 - **Known cost**: a copy's cost is known when a non-zero price paid was recorded for it. P&L compares what was paid against today's value of those same copies; the other copies are counted (`unknown_cost_copies`), never treated as free. Hidden costs (shared collections) make every cost field null.
 - **Colour**: the colour identity: one colour is that colour, two or more `M`, none `C`.
