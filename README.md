@@ -181,7 +181,8 @@ with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic
 
 **Costs:**
 - Vercel Hobby: $0.
-- Neon: free for 0.5 GB and 100 compute-hours a month. The daily price history grows about
+- Neon: free for 1 GB of storage per project and 100 compute-hours a month (checked 2026-10-04;
+  see `docs/catalog-design.md` → Neon budget). The daily price history grows about
   0.5 GB a year for a ~10k-printing collection, so after that Neon's pay-as-you-go plan costs
   about $0.35 per GB-month plus compute while in use (a few dollars a month).
 - GitHub Actions: $0.

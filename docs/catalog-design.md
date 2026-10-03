@@ -14,6 +14,11 @@ and there are no rulings, rules, legalities, tags or prices for other cards. Thi
 The catalog holds no personal data: no `user_id`, nothing to erase or export, no tenancy rules, and
 no change to `public/privacy.html` beyond crediting the new sources.
 
+**Compliance gate.** Nothing in this catalog is ingested or served until the source terms have been
+checked and the provenance rules in [`compliance.md`](compliance.md) are implemented. Every datum we
+return carries its source, and nothing is ever presented as the Vault's own. Wizards' text (rules,
+rulings, card text) needs particular care; see the compliance document.
+
 ## What Scryfall gives us (2026-10-04)
 
 | Bulk file | Compressed | Content |
@@ -61,19 +66,79 @@ Real data, Postgres 16, `VACUUM ANALYZE` done. Totals include indexes.
 | `rules` (CR) | about 2 to 3 MB per version | estimate, not measured; about 3k rules plus glossary |
 | **Total, one CR version** | **about 110 to 125 MB** | |
 
-The README states Neon's free tier as 0.5 GB, so the catalog is about a quarter of it.
-**Open item:** confirm Neon's current free-tier limit before accepting this budget.
+Neon's free plan (checked 2026-10-04 against [Neon's FAQ](https://neon.com/faqs/free-plan-limits-and-quotas))
+gives **1 GB of storage per project** (the README said 0.5 GB; corrected), so the catalog is about an eighth
+of it. See [Neon budget](#neon-budget) for everything we must track.
 
 ### What would blow the budget
 
 - **Daily price history for every card.** 32.7k cards x 365 days is about 12 million rows a year,
-  roughly 0.5 GB. Keep daily history only for owned printings (the existing `price_snapshots`) and
-  store only today's price in `oracle_prices`. If history for all cards is ever wanted, keep weekly
-  points.
+  roughly 0.5 GB. Keep history only for owned printings (the existing `price_snapshots`) and store
+  only today's price in `oracle_prices`.
 - **All 235k tag links.** Store a curated subset (below).
-- **Existing growth.** The README already estimates `price_snapshots` at about 0.5 GB a year for one
-  10k-printing collection. That is the real pressure on the free tier, with or without the catalog.
-  Separate decision: a retention rule (for example daily for 90 days, then weekly).
+- **Existing price history.** This is the real pressure on the free tier; see
+  [Price history](#price-history).
+
+## Neon budget
+
+Limits that matter on the free plan (source: Neon's FAQ above):
+
+| Limit | Value | Why it matters to us | What we track |
+|---|---|---|---|
+| Storage | 1 GB per project, continuous (does not reset). When exceeded, inserts, updates and deletes that grow storage **fail**; data is not deleted | The daily jobs would start failing, and so would imports | Database size and the size of each large table, at the end of every job run |
+| Compute | 100 CU-hours per project per month; scale to zero after 5 minutes idle (cannot be turned off); autoscale up to 2 CU. When used up, connections drop and new ones are refused until the next period | Daily jobs, first-request wake-ups, heavy tool queries (full-text search) and agents calling the MCP server all burn compute | CU-hours used this month (Neon console or API), alert at 70% |
+| Network transfer | 5 GB per project per month (public egress) | Large MCP responses and exports | Keep responses small and paged (already a rule); watch monthly total |
+| Restore history | 6 hours, capped at 1 GB of change data | Daily jobs that rewrite whole tables create a lot of change data. **Unverified:** whether this counts toward storage; treat as a risk | Prefer upserts that touch only changed rows; check after the first real run |
+| Branches / projects | 10 branches, 100 projects | Not a constraint today | Nothing |
+
+Proposed guardrails, enforced by a small `jobs/db_budget.py` that every job calls first and last:
+
+- Log database size and the 8 largest tables on every run.
+- **Warn at 70% (700 MB):** the job fails with a clear message and opens or updates a GitHub issue.
+- **Refuse ingestion at 85% (850 MB)** so imports and sign-ins keep working with headroom.
+- A planned budget: catalog about 120 MB, user data (entries, decks, tokens, passkeys) a small
+  amount that grows with users, price history at most about 400 MB, and at least 25% kept free.
+
+## Price history
+
+### The problem
+
+`price_snapshots` has one row for every owned printing, for every day, for everyone. Rows are
+shared across users (key: printing and day), so growth is:
+
+`distinct printings owned by anyone` x `days kept` x `bytes per row`
+
+The current row is wide (a 36-character key, a date and six double-precision prices), about 137
+bytes with its index; this matches the README's own estimate of 0.5 GB a year for one 10,000-printing
+collection. Two things make it dangerous on a free database:
+
+1. **It never stops growing.** There is no retention rule today.
+2. **It scales with users.** Every new user who owns cards nobody else owns adds printings, and each
+   one adds a row every day, forever.
+
+Estimates (not measured; row sizes as above, "compact" assumes integer cents and a 16-byte key at
+about 60 bytes per row):
+
+| Distinct printings | Daily, 365 days (137 B) | Tiered (129 points, 137 B) | Tiered, compact (60 B) |
+|---|---|---|---|
+| 10,000 | about 500 MB | about 177 MB | about 77 MB |
+| 30,000 | about 1.5 GB | about 530 MB | about 230 MB |
+| 100,000 | about 5 GB | about 1.8 GB | about 770 MB |
+
+### Proposal: keep at most one year, and thin it
+
+Agreed: **nothing older than 365 days is kept.** That also suits a free, privacy-minded app (no
+indefinite accumulation). But the table shows one year of *daily* points still does not fit, so:
+
+1. **Cap:** delete price rows older than 365 days (daily job).
+2. **Thin:** keep daily points for the last 90 days, then one point per week up to 365 days.
+3. **Compact** the row in a later migration (integer cents, shorter key, drop columns nobody reads).
+4. **Per-user value history** (`collection_values`, one row per user per day, a few bytes) keeps the
+   same one-year cap for consistency; the chart still works.
+5. Cap the number of printings priced from the union of everyone's collections only if the budget
+   guardrail trips; do not decide that now.
+
+This is a separate migration and job (tracked as its own issue) and does not block the catalog.
 
 ## Tags (role tags)
 
@@ -133,8 +198,10 @@ Commander Spellbook results or query on demand is decided in
   `vercel-production` environment). It does not run on Vercel, so function limits do not apply.
 - Downloads about 34 MB a day (oracle cards, rulings, tags). Skips a source when its bulk
   `updated_at` equals the stored stamp in `catalog_sources`.
-- Each table is replaced inside one transaction using `COPY` into a staging table and a swap or
-  upsert, so readers never see a half-loaded catalog. The job is idempotent and safe to re-run.
+- Each table is updated inside one transaction by loading into a staging table and **upserting only
+  rows whose content hash changed**, then deleting rows that disappeared. No whole-table rewrites:
+  that keeps Neon's change history small and readers never see a half-loaded catalog. The job is
+  idempotent and safe to re-run.
 - Writes `catalog_sources` last. `whoami` and every cited answer read the stamps from it.
 - Schema changes come through Alembic migrations as usual (`vault/migrations`).
 
@@ -144,19 +211,24 @@ Commander Spellbook results or query on demand is decided in
   `tests/conformance` ([#21](https://github.com/colombod-personal/the-vault/issues/21)).
 - Tests use the twin universe only; none reaches real services.
 
-## Open items
+## Decisions
 
-1. Confirm Neon's current free-tier storage and compute limits.
-2. Scryfall terms for redistributing oracle tags in answers.
-3. Wizards' terms for the Comprehensive Rules text.
-4. Retention rule for `price_snapshots` (existing growth).
-5. Final list of root tags to link (start from the ones named above).
-6. Whether to keep tokens in `oracle_cards` (922 rows, 2 MB) or flag and filter them.
+Settled:
 
-## Decisions requested in review
+- Keys stay `varchar(36)` for consistency with `cards.oracle_id` (decided by the owner).
+- Price history is capped at one year (decided by the owner); thinning and compaction as above.
+- Compliance and provenance come first: see [`compliance.md`](compliance.md).
 
-- Keys stay `varchar(36)` for consistency with `cards.oracle_id` (costs a few MB; mixing `uuid` and
-  `varchar(36)` would force casts on joins).
+Proposed, still to confirm:
+
 - Curated tag links, not all 235k.
 - Current-only prices for non-owned cards.
 - Expression full-text indexes, not stored `tsvector` columns.
+
+## Open items
+
+1. Compliance checks listed in [`compliance.md`](compliance.md) (Scryfall terms, Wizards' terms for the
+   Comprehensive Rules and rulings, Moxfield). These gate ingestion of the affected data.
+2. Whether Neon's restore history counts toward storage (check after the first real job run).
+3. Final list of root tags to link (start from the ones named above).
+4. Whether to keep tokens in `oracle_cards` (922 rows, 2 MB) or flag and filter them.
