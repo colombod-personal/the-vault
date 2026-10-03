@@ -1,47 +1,41 @@
 """jobs.vercel_setup against a stand-in for Vercel's REST API (projects, env, domains)."""
 
-import json
-
 import httpx
 import pytest
 
 from jobs import vercel_setup
+from twins import Universe
 
 
 class FakeVercel:
-    def __init__(self, domains=(), envs=None):
-        self.domains = [{"name": d, "verified": True, "redirect": None} for d in domains]
-        self.envs = [{"id": f"env{i}", **e} for i, e in enumerate(envs or [])]
-        self.transport = httpx.MockTransport(self.handle)
+    """A Vercel project on the Vercel twin, with a production deployment once it has domains."""
 
-    def handle(self, req: httpx.Request) -> httpx.Response:
-        assert req.headers["authorization"] == "Bearer tok"
-        path = req.url.path
-        if path == "/v10/projects/the-vault/env" and req.method == "GET":
-            return httpx.Response(200, json={"envs": self.envs})
-        if path == "/v10/projects/the-vault/env" and req.method == "POST":
-            new = json.loads(req.content)
-            clash = [e for e in self.envs if e["key"] == new["key"] and set(e["target"]) & set(new["target"])]
-            if clash and req.url.params.get("upsert") != "true":
-                return httpx.Response(400, json={"error": {"code": "ENV_ALREADY_EXISTS"}})
-            self.envs = [e for e in self.envs if e not in clash]
-            self.envs.append({"id": f"env{len(self.envs)}", **new})
-            return httpx.Response(201, json={"created": self.envs[-1]})
-        if path.startswith("/v9/projects/the-vault/env/") and req.method == "PATCH":
-            env = next(e for e in self.envs if e["id"] == path.rsplit("/", 1)[1])
-            env.update(json.loads(req.content))
-            return httpx.Response(200, json=env)
-        if path == "/v9/projects/the-vault/domains":
-            return httpx.Response(200, json={"domains": self.domains})
-        return httpx.Response(404, json={"error": {"code": "not_found"}})
+    def __init__(self, domains=(), envs=None, deployed=None):
+        self.universe = Universe()
+        self.twin = self.universe.vercel
+        self.twin.add_project("the-vault", domains, envs or [])
+        self.live = self.twin.deploy("the-vault") if (domains if deployed is None else deployed) else None
+        self.transport = self.universe.transport
+
+    @property
+    def envs(self):
+        return self.twin.projects["the-vault"]["envs"]
+
+    @property
+    def redeploys(self):
+        return self.twin.redeploys()
 
     def value(self, key, target="production"):
-        return next(e["value"] for e in self.envs if e["key"] == key and target in e["target"])
+        env = self.twin.env("the-vault", key, target)
+        return env and env["value"]
+
+    def serving(self, domain="the-vault.vercel.app"):
+        return self.twin.deployments[self.twin.aliases[domain]]
 
 
 @pytest.fixture(autouse=True)
 def token(monkeypatch, tmp_path):
-    monkeypatch.setenv("VERCEL_TOKEN", "tok")
+    monkeypatch.setenv("VERCEL_TOKEN", "twin-vercel-token")
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "summary.md"))
     return tmp_path / "summary.md"
 
@@ -112,3 +106,93 @@ def test_provider_credentials_are_asked_for_and_stored_in_production_only(capsys
     out = capsys.readouterr()
     assert "s3cret" not in out.out + out.err  # names only, never values
     assert "https://the-vault.vercel.app/api/auth/callback/google" in out.err
+
+
+def test_redeploy_applies_what_changed_and_only_then(token):
+    """Vercel reads variables when it builds: after setting SESSION_SECRET or BASE_URL the live
+    deployment is redeployed so it uses them. Once built from the current ones, it isn't."""
+    fake = FakeVercel(domains=["the-vault.vercel.app"])
+    state = vercel_setup.main(["--redeploy"], fake.transport)
+    assert state["redeployed"] == f"https://{fake.serving()['url']}" and fake.serving()["id"] != fake.live["id"]
+    assert len(fake.redeploys) == 1
+    again = vercel_setup.main(["--redeploy"], fake.transport)
+    assert again["changed"] == [] and again["redeployed"] is None and len(fake.redeploys) == 1
+    assert "Redeployed" in token.read_text(encoding="utf-8")
+
+
+def test_a_merge_deploy_is_stamped_once():
+    """A deployment made by a merge carries no fingerprint, so the next run redeploys it once."""
+    fake = FakeVercel(domains=["the-vault.vercel.app"])
+    vercel_setup.main(["--redeploy"], fake.transport)
+    fake.twin.deploy("the-vault")  # the next merge to main
+    assert vercel_setup.main(["--redeploy"], fake.transport)["redeployed"]
+    assert vercel_setup.main(["--redeploy"], fake.transport)["redeployed"] is None
+
+
+def test_redeploys_what_serves_the_domain_after_a_rollback():
+    fake = FakeVercel(domains=["the-vault.vercel.app"])
+    fake.twin.deploy("the-vault")  # a newer release, rolled back from:
+    fake.twin.promote("the-vault", fake.live["id"])
+    vercel_setup.main(["--redeploy"], fake.transport)
+    assert fake.redeploys == [fake.live["id"]]  # the release that serves the domain, not the newest
+
+
+def test_a_redeploy_never_puts_older_code_back():
+    """Rebuilding the live deployment takes main's latest commit, not the one it was built from."""
+    fake = FakeVercel(domains=["the-vault.vercel.app"])
+    fake.twin.head = "c2"  # merged, its build still running
+    vercel_setup.main(["--redeploy"], fake.transport)
+    assert fake.twin.commits[fake.serving()["id"]] == "c2"
+
+
+def test_a_release_going_live_meanwhile_is_left_alone():
+    fake = FakeVercel(domains=["the-vault.vercel.app"])
+    vercel_setup.main(["--redeploy"], fake.transport)  # stamped
+    fake.twin.store_env("the-vault", "EXAMPLE", "x", ["production"])  # something to apply
+    lookups = []
+
+    def merge_lands():
+        lookups.append(1)
+        if len(lookups) == 1:
+            fake.twin.head = "c2"
+            fake.twin.deploy("the-vault")
+    fake.twin.on_lookup = merge_lands
+    state = vercel_setup.main(["--redeploy"], fake.transport)
+    assert state["redeployed"] is None and len(fake.redeploys) == 1  # the merge's release stays
+    assert fake.twin.commits[fake.serving()["id"]] == "c2"
+    fake.twin.on_lookup = None
+    assert vercel_setup.main(["--redeploy"], fake.transport)["redeployed"]  # and is stamped next run
+
+
+def test_a_failed_redeploy_is_retried_by_the_next_run():
+    fake = FakeVercel(domains=["the-vault.vercel.app"])
+    fake.twin.fail_next("/v13/deployments", 500)
+    with pytest.raises(httpx.HTTPStatusError):
+        vercel_setup.main(["--redeploy"], fake.transport)
+    state = vercel_setup.main(["--redeploy"], fake.transport)
+    assert state["changed"] == [] and state["redeployed"] and len(fake.redeploys) == 1
+
+
+@pytest.mark.parametrize("change", ["deleted", "no longer in production"])
+def test_removing_a_production_variable_redeploys(change):
+    """Deleting DEV_LOGIN (as the checklist asks) must reach the live site, though nothing is newer."""
+    fake = FakeVercel(domains=["the-vault.vercel.app"], envs=[{"key": "DEV_LOGIN", "value": "1", "target": ["production"]}])
+    vercel_setup.main(["--redeploy"], fake.transport)
+    env = fake.twin.env("the-vault", "DEV_LOGIN")
+    if change == "deleted":
+        fake.envs.remove(env)
+    else:
+        env["target"] = ["development"]  # a direct edit that leaves updatedAt alone
+    state = vercel_setup.main(["--redeploy"], fake.transport)
+    assert state["changed"] == [] and state["redeployed"] and len(fake.redeploys) == 2
+
+
+def test_settings_saved_before_the_first_deploy_is_live_are_applied_later():
+    fake = FakeVercel()
+    first = vercel_setup.main(["--redeploy"], fake.transport)
+    assert first["changed"] and first["redeployed"] is None and fake.redeploys == []
+    fake.twin.add_domain("the-vault", "the-vault.vercel.app")
+    fake.twin.deploy("the-vault")  # the first deployment goes live
+    state = vercel_setup.main(["--redeploy"], fake.transport)
+    assert state["redeployed"] and len(fake.redeploys) == 1
+    assert vercel_setup.main(["--redeploy"], fake.transport)["redeployed"] is None

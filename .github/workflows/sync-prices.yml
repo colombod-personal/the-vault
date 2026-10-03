@@ -1,15 +1,17 @@
 name: sync-prices
-# Daily: download Scryfall's bulk card file, match every collection, store prices and each
-# user's collection value. Runs only from main, in the "vercel-production" environment
-# (README → Security). Uses that environment's DATABASE_URL secret if set; otherwise it reads the
-# database address from the Vercel project (Neon integration) with VERCEL_TOKEN.
+# Daily: configure the Vercel project (jobs/vercel_setup.py: SESSION_SECRET, BASE_URL, checklist;
+# redeploys production unless it was built from the current variables), then download
+# Scryfall's bulk card file, match every collection, store prices and each user's collection
+# value. Runs only from main, in the "vercel-production" environment (README → Security).
+# Uses that environment's DATABASE_URL secret if set; otherwise it reads the database address
+# from the Vercel project (Neon integration) with VERCEL_TOKEN.
 on:
   schedule:
     - cron: "17 10 * * *"   # Scryfall regenerates bulk files around 09:00 UTC
   workflow_dispatch: {}
 permissions:
   contents: read
-concurrency: sync-prices
+concurrency: vercel-production  # one at a time with the manual deploy
 jobs:
   sync:
     if: github.ref == 'refs/heads/main'
@@ -27,6 +29,17 @@ jobs:
           pip install --require-hashes --no-deps -r requirements-lock.txt  # exact versions, hash-checked
           pip install --no-build-isolation --no-deps -r requirements-vcs.txt  # mtg-toolkits at a pinned commit
       - run: npm install --global vercel@60.1.3  # before any secret is in the environment
+      - name: Configure the Vercel project
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE || 'wintermute2' }}
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::warning::VERCEL_TOKEN is not set: add it to the vercel-production environment (Settings → Environments)"
+            echo "⚠️ VERCEL_TOKEN is not set in the vercel-production environment, so the project wasn't configured." >> "$GITHUB_STEP_SUMMARY"
+          else
+            python -m jobs.vercel_setup --redeploy
+          fi
       - name: Database address
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

@@ -17,12 +17,16 @@ Store a sign-in provider's credentials in Production, typed at a hidden prompt s
 land in a file, the shell history or a chat:
 
     VERCEL_TOKEN=... python -m jobs.vercel_setup --scope TEAM --provider google
+
+Variables only reach new deployments: ``--redeploy`` rebuilds production unless it was built from
+the current ones (each redeploy is stamped with a fingerprint of them).
 """
 
 from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
 import json
 import os
 import secrets
@@ -32,6 +36,7 @@ from pathlib import Path
 import httpx
 
 API = "https://api.vercel.com"
+FINGERPRINT = "vaultEnvFingerprint"  # deployment meta: the production variables it was built with
 PROVIDERS = {
     "google": ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"),
     "microsoft": ("MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_SECRET"),
@@ -57,7 +62,8 @@ class Vercel:
         out = []
         for env in self._get(f"/v10/projects/{self.project}/env").get("envs", []):
             target = env.get("target") or []
-            out.append({"id": env.get("id"), "key": env["key"], "target": [target] if isinstance(target, str) else target})
+            out.append({"id": env.get("id"), "key": env["key"], "target": [target] if isinstance(target, str) else target,
+                        "updated": env.get("updatedAt") or env.get("createdAt") or 0})
         return out
 
     def env_keys(self) -> dict[str, set[str]]:
@@ -83,6 +89,49 @@ class Vercel:
         custom = [d["name"] for d in domains if not d["name"].endswith(".vercel.app")]
         default = [d["name"] for d in domains if d["name"].endswith(".vercel.app")]
         return (sorted(custom, key=len) or sorted(default, key=len) or [None])[0]
+
+    def live_production(self) -> dict | None:
+        """The deployment serving the production domain now (after a rollback, not the newest
+        one), or None before the first production deploy."""
+        domain = self.production_domain()
+        if not domain:
+            return None
+        res = self.http.get(f"/v13/deployments/{domain}", params=self.params)
+        if res.status_code == 404:
+            return None
+        res.raise_for_status()
+        return res.json()
+
+    def production_fingerprint(self) -> str:
+        """Which production variables exist, and when each last changed. Adding, editing, deleting
+        or un-targeting one changes it; values are never read."""
+        rows = sorted(f"{e['id']}:{e['key']}:{e['updated']}" for e in self.envs() if "production" in e["target"])
+        return hashlib.sha256("\n".join(rows).encode()).hexdigest()[:32]
+
+    def redeploy_production(self) -> str | None:
+        """Rebuild production unless the live deployment was built from the current production
+        variables (variables only reach new deployments). Each redeploy is stamped with their
+        fingerprint, so a deleted variable counts as a change and a failed redeploy is retried on
+        the next run. A deployment made by a merge carries no stamp, so it is redeployed once.
+
+        It never puts older code back: the rebuild takes main's latest commit
+        (``withLatestCommit``), and it is skipped if another release went live meanwhile (the
+        next run stamps that one). Returns the new address, or None when it is up to date,
+        nothing is deployed yet, or a newer release took over."""
+        live = self.live_production()
+        if not live:
+            return None
+        fingerprint = self.production_fingerprint()
+        if (live.get("meta") or {}).get(FINGERPRINT) == fingerprint:
+            return None
+        current = self.live_production()
+        if not current or current["id"] != live["id"]:
+            return None
+        res = self.http.post("/v13/deployments", params={**self.params, "forceNew": "1"},
+                             json={"name": self.project, "deploymentId": live["id"], "target": "production",
+                                   "withLatestCommit": True, "meta": {FINGERPRINT: fingerprint}})
+        res.raise_for_status()
+        return f"https://{res.json()['url']}"
 
 
 def _session_secrets(v: Vercel) -> list[str]:
@@ -167,6 +216,8 @@ def checklist(state: dict) -> str:
     if state["redirect_uris"]:
         lines += ["", "Redirect URIs to register with each provider:", ""]
         lines += [f"- {p}: `{uri}`" for p, uri in state["redirect_uris"].items()]
+    if state.get("redeployed"):
+        lines += ["", f"Redeployed production so the new settings apply: {state['redeployed']}"]
     if state["dev_login_set"]:
         lines += ["", "⚠️ DEV_LOGIN is set in Vercel: remove it (the app refuses to start with it on https)."]
     return "\n".join(lines) + "\n"
@@ -178,6 +229,8 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
     parser.add_argument("--scope", default=os.environ.get("VERCEL_SCOPE") or None)
     parser.add_argument("--provider", choices=sorted(PROVIDERS),
                         help="store this sign-in provider's credentials in Production (asks for them)")
+    parser.add_argument("--redeploy", action="store_true",
+                        help="redeploy production unless it was built from the current variables (they only reach new deployments)")
     args = parser.parse_args(argv)
     token = os.environ.get("VERCEL_TOKEN")
     if not token:
@@ -186,6 +239,7 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
     stored = set_provider(vercel, args.provider, prompt) if args.provider else []
     state = configure(vercel)
     state["changed"] += stored
+    state["redeployed"] = vercel.redeploy_production() if args.redeploy else None
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as fh:

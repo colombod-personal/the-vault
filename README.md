@@ -112,11 +112,14 @@ with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic
 - **Only merges to `main` deploy.** Vercel's GitHub integration runs `vercel.json` →
   `ignoreCommand` before each deployment, which skips every branch but `main`. Branches get
   no preview; test them locally with the twins (`docs/twins.md`).
-- The **vercel-check** workflow runs when a deployment succeeds (`deployment_status`):
-  - for production deployments of `main`, configures the project with `jobs/vercel_setup.py`,
-    setting `SESSION_SECRET` and `BASE_URL` and writing a checklist of what's missing, with the
-    OAuth redirect URIs;
-  - smoke-tests that exact deployment from outside with `jobs/smoke_test.py`, without secrets.
+- The **vercel-check** workflow runs when a deployment succeeds (`deployment_status`) and
+  smoke-tests that exact deployment from outside with `jobs/smoke_test.py`, without secrets.
+- The **sync-prices** workflow (daily, or Actions → sync-prices → *Run workflow*) first
+  configures the project with `jobs/vercel_setup.py --redeploy`: it sets `SESSION_SECRET` and
+  `BASE_URL`, redeploys production unless it was built from the current production variables
+  (variables only reach new deployments, so a merge's deployment is redeployed once; the rebuild
+  takes main's latest commit and steps aside if another release just went live), and writes a checklist of what's missing with the OAuth redirect URIs. Then it
+  syncs prices.
 - **deploy (manual fallback)** is a Vercel CLI deploy of `main`, for when the integration isn't
   connected.
 
@@ -135,14 +138,17 @@ with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic
 3. **Database:** Vercel → project → Storage → *Create Database* → **Neon**, region
    **Frankfurt**, connected to Production and Preview. This sets `DATABASE_URL`.
 4. **Sign-in:** passkeys work as soon as the site is up. Google, Microsoft, Apple and
-   Facebook are optional (next section); the vercel-check summary lists the redirect URIs to
+   Facebook are optional (next section); the sync-prices summary lists the redirect URIs to
    register.
-5. **Go live:** merge to `main`. Environment changes apply from the next deployment.
-6. **Prices:** the *sync-prices* workflow runs daily from `main`; run it once by hand after the
-   first deploy. It reads the database address from Vercel through `VERCEL_TOKEN`. A
+5. **Go live:** merge to `main`, then Actions → *sync-prices* → *Run workflow* once: it
+   configures the project, redeploys and loads prices. Until then the site answers 503.
+6. **Prices:** the *sync-prices* workflow runs daily from `main`. It reads the database address from Vercel through `VERCEL_TOKEN`. A
    `DATABASE_URL` secret in the `vercel-production` environment overrides that.
-7. **Optional:** your own domain, under project → Settings → Domains. Update `BASE_URL` and each
-   provider's redirect URI afterwards.
+7. **Optional:** your own domain, under project → Settings → Domains. Then delete `BASE_URL` in
+   Vercel and run *sync-prices* again: it sets the custom domain and redeploys. Update each
+   provider's redirect URI.
+8. **Public access:** project → Settings → Deployment Protection → Vercel Authentication →
+   *Standard Protection* (protects previews only) so visitors aren't sent to a Vercel login.
 
 ### Security
 
@@ -152,8 +158,8 @@ with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic
   `DATABASE_URL` under Settings → Secrets and variables → Actions → *Repository secrets* once
   the environment has them.
 - **Jobs that hold a secret** run only for `main`, never on `push` or `pull_request`, and don't
-  install or run branch code next to the token (vercel-check's configure step runs the default
-  branch's code with only `httpx` installed).
+  install or run branch code next to the token (sync-prices runs only from `main`, with
+  hash-checked dependencies installed before any secret is in the environment).
 - **Least privilege:** every workflow's `GITHUB_TOKEN` is read-only, checkouts don't keep the
   token, the Vercel CLI version is pinned, and values reach scripts through `env`, never
   `${{ }}` inside the script.

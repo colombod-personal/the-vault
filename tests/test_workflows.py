@@ -21,7 +21,8 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
 ENVIRONMENT = "vercel-production"
-MAIN_ONLY = ("github.ref == 'refs/heads/main'", "github.event.deployment.ref == github.event.repository.default_branch")
+# Not github.event.deployment.ref: Vercel deploys a commit SHA, so that never names a branch.
+MAIN_ONLY = ("github.ref == 'refs/heads/main'",)
 
 
 def load(path):
