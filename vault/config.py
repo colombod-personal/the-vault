@@ -37,6 +37,9 @@ class Settings:
     facebook_client_id: str = field(default_factory=lambda: _env("FACEBOOK_CLIENT_ID"))
     facebook_client_secret: str = field(default_factory=lambda: _env("FACEBOOK_CLIENT_SECRET"))
     facebook_graph_version: str = field(default_factory=lambda: _env("FACEBOOK_GRAPH_VERSION", "v23.0"))
+    # configured providers left off the sign-in screen; their sign-in and linking still work
+    hidden_providers: tuple[str, ...] = field(default_factory=lambda: tuple(
+        p.strip().lower() for p in _env("AUTH_HIDDEN_PROVIDERS").split(",") if p.strip()))
     apple_client_id: str = field(default_factory=lambda: _env("APPLE_CLIENT_ID"))
     apple_team_id: str = field(default_factory=lambda: _env("APPLE_TEAM_ID"))
     apple_key_id: str = field(default_factory=lambda: _env("APPLE_KEY_ID"))

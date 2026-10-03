@@ -200,7 +200,9 @@ key. People can create an account with a passkey alone, or add one to an account
 provider. The OAuth providers below are optional extras.
 
 Each redirect URI is `{BASE_URL}/api/auth/callback/{provider}`. A provider appears
-on the sign-in screen only when its client id is set.
+on the sign-in screen only when its client id is set. To keep a configured provider off the
+sign-in screen (say, a Meta app still in Development mode), list it in `AUTH_HIDDEN_PROVIDERS`
+(comma-separated, e.g. `facebook`); its sign-in URL and account linking keep working.
 
 Store a provider's credentials in Vercel (Production) from your terminal. It asks for each value
 at a hidden prompt and prints only names, then redeploy (or merge) for them to apply:
