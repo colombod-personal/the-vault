@@ -130,6 +130,8 @@ window.VaultApi = (() => {
   };
 
   // Load a collection: from the local copy when its version is current, else page by page.
+  // FORMAT changes when the items' shape does (2: items carry card data), so older copies are refetched.
+  const FORMAT = 2;
   async function loadCollection(base, onProgress) {
     let summary;
     try {
@@ -146,7 +148,7 @@ window.VaultApi = (() => {
     if (!who) return assemble(await fetchCollection(summary, onProgress), {});  // nowhere safe to keep a copy
     const key = `collection:${who}:${base}`;
     const saved = await localStore.get(key);
-    if (saved && saved.version && saved.version === summary.version) {
+    if (saved && saved.version && saved.version === summary.version && saved.format === FORMAT) {
       return assemble({ ...saved, summary }, { fromCache: true, savedAt: saved.savedAt });
     }
     const fresh = await fetchCollection(summary, onProgress);
@@ -162,7 +164,25 @@ window.VaultApi = (() => {
       call(L.timeline.href),
       all(withLimit(L.history.href)),
     ]);
-    return { version: summary.version, savedAt: new Date().toISOString(), summary, items, sets, timeline, history };
+    return { format: FORMAT, version: summary.version, savedAt: new Date().toISOString(), summary, items, sets, timeline, history };
+  }
+
+  // A collection item's `card` (Scryfall's data, kept in Postgres by the daily sync) in the shape
+  // the views use for card data (Scryfall.slimCard's). Null until the sync has the printing.
+  const money = (v) => (v == null ? null : v.toFixed(2));  // Scryfall writes prices as strings
+  function slimCard(d) {
+    if (!d) return null;
+    const p = d.prices || {};
+    return {
+      id: d.scryfall_id, name: d.name, set: d.set_code, set_name: d.set_name, collector_number: d.collector_number,
+      colors: d.colors || [], color_identity: d.color_identity || [], type_line: d.type_line || '',
+      mana_cost: d.mana_cost || '', cmc: d.cmc, rarity: d.rarity,
+      img_small: d.image.small || null, img_normal: d.image.normal || null,
+      prices: { usd: money(p.usd), usd_foil: money(p.usd_foil), usd_etched: money(p.usd_etched),
+        eur: money(p.eur), eur_foil: money(p.eur_foil), eur_etched: money(p.eur_etched) },
+      scryfall_uri: d.scryfall_uri, artist: d.image.artist || null, oracle_text: d.oracle_text || '',
+      power: d.power, toughness: d.toughness, loyalty: d.loyalty, layout: d.layout,
+    };
   }
 
   // Assemble the shape the views were designed around from the paginated resources.
@@ -172,8 +192,9 @@ window.VaultApi = (() => {
       c: CONDITION[c.condition] || c.condition, l: LANGUAGE[c.language] || c.language, q: c.quantity,
       pd: c.paid || 0, pq: c.paid_quantity, lo: c.price.low, mi: c.price.mid, mk: c.price.market,
       fd: c.acquired.first || '', ld: c.acquired.last || '', id: c.scryfall_id, fin: c.finish, src: c.price.source,
-      href: c._links.self.href,
+      href: c._links.self.href, scry: slimCard(c.card),
     }));
+    if (window.Scryfall) window.Scryfall.own(cards);  // owned cards' data answers without lookups
     const byName = {};
     for (const c of cards) {
       const k = c.n.toLowerCase();
