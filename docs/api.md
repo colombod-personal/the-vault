@@ -84,8 +84,10 @@ The server stores only SHA-256 hashes of tokens.
    ```
 
    Sent with the app's own bearer token, a new Apple or Google sign-in is linked to that
-   account. One already used by another account answers `409`. Personal access tokens can't
-   link sign-ins.
+   account. One that already has its own account moves over if that account is empty (no
+   collection, imports, decks, shares, unexpired access tokens or value history), and that account
+   is deleted once it has no sign-in left; one whose account holds data answers `409` and nothing
+   changes (README → "Sign-in providers"). Personal access tokens can't link sign-ins.
 
 Audiences: `APPLE_APP_BUNDLE_ID` for Apple and `GOOGLE_IOS_CLIENT_ID` for Google. Tokens from the
 web sign-in are refused. Google Sign-In for iOS configured with the server (web) client id is
@@ -99,7 +101,8 @@ accepted: its tokens carry the web client id as `aud` and the iOS client as `azp
    `/api/auth/app-handoff`), so a sign-in link someone else started can't hand their code to
    another app. Then the browser is sent to `vault://auth?code=...`, or to `?error=...` if it failed
    or they declined (`access_denied`)
-   (`identity_in_use` when a signed-in person tries to link a sign-in owned by another account).
+   (`identity_in_use` when a signed-in person tries to link a sign-in owned by another account
+   that holds data; one from an empty account is moved, as in Option A).
    `app_redirect_uri` must be listed in `APP_REDIRECT_URIS`.
 3. `POST /api/v1/auth/token`:
 

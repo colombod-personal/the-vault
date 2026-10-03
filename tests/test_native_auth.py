@@ -276,9 +276,13 @@ def test_racing_refreshes_rotate_once(app, client, idp, monkeypatch):
     assert refresh_with(client, winner).status_code == 200
 
 
+DECK = {"name": "Mono blue", "text": "4 Island"}
+
+
 def test_linking_never_switches_accounts(client, idp):
-    with TestClient(client.app) as other:  # a-4 belongs to someone else's account
-        assert apple_sign_in(other, idp, sub="a-4").status_code == 200
+    with TestClient(client.app) as other:  # a-4 belongs to someone else's account, which holds data
+        theirs = apple_sign_in(other, idp, sub="a-4").json()
+        assert other.post(f"{V1}/decks", json=DECK, headers=bearer(theirs)).status_code == 201
     res = client.get("/api/auth/login/google", follow_redirects=False)
     web_callback(client, idp.google.approve(res.headers["location"], "g-4"))
     mine = client.get(f"{V1}/me").json()["id"]
@@ -287,9 +291,10 @@ def test_linking_never_switches_accounts(client, idp):
     with TestClient(client.app) as other:  # g-5 belongs to someone else's account
         res = other.get("/api/auth/login/google", follow_redirects=False)
         web_callback(other, idp.google.approve(res.headers["location"], "g-5"))
+        assert other.post(f"{V1}/decks", json=DECK).status_code == 201
     res = client.get("/api/auth/login/google", follow_redirects=False)  # "Link Google" with g-5
     back = web_callback(client, idp.google.approve(res.headers["location"], "g-5"))
-    assert back.headers["location"] == "/?link_error=identity_in_use"
+    assert back.headers["location"] == "/?link_error=identity_in_use&provider=google"
     me = client.get(f"{V1}/me").json()
     assert me["id"] == mine and me["providers"] == ["google"]
 
@@ -536,3 +541,52 @@ def test_the_hand_off_page_escapes_the_account_name(client, idp):
     client.get(cb.url.replace("http://testserver", ""), follow_redirects=False)
     page = client.get("/api/auth/app-handoff").text
     assert "<script>alert" not in page and "&lt;script&gt;" in page
+
+
+def test_native_link_moves_a_sign_in_from_an_empty_account(client, idp):
+    with TestClient(client.app) as phone:  # an earlier Sign in with Apple made an empty account
+        empty = apple_sign_in(phone, idp, sub="a-empty").json()
+    res = client.get("/api/auth/login/google", follow_redirects=False)
+    web_callback(client, idp.google.approve(res.headers["location"], "g-own"))
+    mine = client.get(f"{V1}/me").json()["id"]
+    tokens = apple_sign_in(client, idp, sub="a-empty").json()  # native, while signed in: links it
+    me = client.get(f"{V1}/me", headers=bearer(tokens)).json()
+    assert me["id"] == mine and me["providers"] == ["apple", "google"]
+    assert client.get(f"{V1}/me", headers=bearer(empty)).status_code == 401  # its app session ended with it
+
+
+def test_app_handoff_link_moves_a_sign_in_from_an_empty_account(client, idp):
+    with TestClient(client.app) as other:  # g-empty made its own account once
+        res = other.get("/api/auth/login/google", follow_redirects=False)
+        web_callback(other, idp.google.approve(res.headers["location"], "g-empty"))
+    res = client.get("/api/auth/login/google", follow_redirects=False)  # this browser: another account
+    web_callback(client, idp.google.approve(res.headers["location"], "g-own2"))
+    web = client.get(f"{V1}/me").json()["id"]
+    verifier = secrets.token_urlsafe(48)
+    res = client.get("/api/auth/login/google", params={"app_redirect_uri": "vault://auth", "code_challenge": s256(verifier)},
+                     follow_redirects=False)
+    back = web_callback(client, idp.google.approve(res.headers["location"], "g-empty"))
+    code = parse_qs(urlsplit(back.headers["location"]).query)["code"][0]
+    tokens = client.post(f"{V1}/auth/token", json={"grant_type": "authorization_code", "code": code,
+                                                   "code_verifier": verifier, "redirect_uri": "vault://auth"}).json()
+    me = client.get(f"{V1}/me", headers=bearer(tokens)).json()
+    assert me["id"] == web
+    from vault.models import Identity, User
+
+    with client.app.state.db.sessions() as db:  # g-empty moved here and its account is gone
+        assert db.query(Identity).filter_by(subject="g-empty").one().user_id == web
+        assert db.query(User).count() == 1
+
+
+def test_app_handoff_link_from_an_account_with_data_is_refused(client, idp):
+    with TestClient(client.app) as other:
+        res = other.get("/api/auth/login/google", follow_redirects=False)
+        web_callback(other, idp.google.approve(res.headers["location"], "g-full"))
+        assert other.post(f"{V1}/decks", json=DECK).status_code == 201
+    res = client.get("/api/auth/login/google", follow_redirects=False)
+    web_callback(client, idp.google.approve(res.headers["location"], "g-mine"))
+    res = client.get("/api/auth/login/google", params={"app_redirect_uri": "vault://auth", "code_challenge": s256("v" * 50)},
+                     follow_redirects=False)
+    back = web_callback(client, idp.google.approve(res.headers["location"], "g-full"))
+    assert back.headers["location"] == "vault://auth?error=identity_in_use"
+    assert client.get(f"{V1}/me").json()["providers"] == ["google"]
