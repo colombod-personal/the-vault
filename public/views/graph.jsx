@@ -44,13 +44,11 @@ function GraphView({ data, openCard }) {
     tip.style.top = Math.max(8, Math.min(hover.y + 16, box.offsetHeight - tip.offsetHeight - 8)) + 'px';
   }
   useLayoutEffectG(placeTip, [hover]);
-  const [enriching, setEnriching] = useStateG(false);
-  const [progress, setProgress] = useStateG({ done: 0, total: 0 });
   const [deck, setDeck] = useStateG(null); // {title, rows}
   const [deckUrl, setDeckUrl] = useStateG('https://archidekt.com/decks/5292775/the_dragon_in_the_night');
-  const [tick, setTick] = useStateG(0);
 
-  // Aggregate by unique card name (using byName index) and join with Scryfall cache
+  // Aggregate by unique card name (using byName index) and join with the card data the
+  // collection came with (kept in Postgres by the daily sync)
   const nodes = useMemoG(() => {
     const out = [];
     for (const [k, agg] of Object.entries(data.byName)) {
@@ -78,10 +76,9 @@ function GraphView({ data, openCard }) {
       });
     }
     return out;
-  }, [data, tick]);
+  }, [data]);
 
-  const enrichedCount = nodes.length;
-  const targetMin = 400; // recommend enriching to at least 400 cards for graph to be interesting
+  const withData = nodes.length; // unique names whose card data the server has
 
   // Filtered nodes
   const filteredNodes = useMemoG(() => {
@@ -118,19 +115,6 @@ function GraphView({ data, openCard }) {
     for (const r of deck.rows) s.add(r.name.toLowerCase().trim());
     return s;
   }, [deck]);
-
-  async function enrichTop(n) {
-    setEnriching(true);
-    const todo = data.cards.
-    filter((c) => !window.Scryfall.cached(c.n, c.s, c.cn)).
-    sort((a, b) => b.mk * b.q - a.mk * a.q).
-    slice(0, n).
-    map((c) => ({ name: c.n, set: c.s, collector_number: c.cn }));
-    setProgress({ done: 0, total: todo.length });
-    await window.Scryfall.collection(todo, (p) => setProgress(p));
-    setTick((t) => t + 1);
-    setEnriching(false);
-  }
 
   async function loadDeck() {
     try {
@@ -361,7 +345,7 @@ function GraphView({ data, openCard }) {
         const owned = ownAgg?.total || 0;
         return { ...r, node, owned, missing: Math.max(0, r.qty - owned) };
       });
-      // Group by color of node (if enriched) else by 'unknown'
+      // Group by color of node (if it has card data) else by 'unknown'
       const groups = { W: [], U: [], B: [], R: [], G: [], M: [], C: [], '?': [] };
       for (const r of deckRows) {
         const c = r.node?.color || '?';
@@ -561,38 +545,13 @@ function GraphView({ data, openCard }) {
           <h1 className="h1" style={{ marginTop: 6 }}>Your collection as a network.</h1>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <p className="label-mono">Enriched & in graph</p>
+          <p className="label-mono">Cards with data</p>
           <p style={{ fontFamily: 'var(--mono)', fontSize: 13, marginTop: 4 }}>
-            <span style={{ color: 'var(--gold)' }}>{enrichedCount.toLocaleString()}</span>
+            <span style={{ color: 'var(--gold)' }}>{withData.toLocaleString()}</span>
             <span className="muted"> / {Object.keys(data.byName).length.toLocaleString()} unique names</span>
           </p>
         </div>
       </div>
-
-      {enrichedCount < targetMin &&
-      <div className="panel" style={{ padding: 16, marginBottom: 16, borderColor: 'var(--gold)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <div style={{ flex: 1 }}>
-              <p className="h-display" style={{ fontSize: 18, marginBottom: 4 }}>
-                Network needs more enriched cards
-              </p>
-              <p className="muted" style={{ fontSize: 12 }}>
-                Currently {enrichedCount} of your unique cards have Scryfall data. We recommend at least {targetMin} for a useful graph. Fetching happens once and is cached.
-              </p>
-              {enriching &&
-            <div style={{ marginTop: 8 }}>
-                  <div className="progress-bar"><div style={{ width: `${progress.done / Math.max(progress.total, 1) * 100}%` }}></div></div>
-                  <p className="label-mono" style={{ marginTop: 6 }}>{progress.done}/{progress.total}</p>
-                </div>
-            }
-            </div>
-            <div className="row">
-              <button className="btn" onClick={() => enrichTop(1000)} disabled={enriching}>{enriching ? <span className="spinner"></span> : null} Enrich 1000</button>
-              <button className="btn primary" onClick={() => enrichTop(3000)} disabled={enriching}>Enrich 3000 →</button>
-            </div>
-          </div>
-        </div>
-      }
 
       {/* Controls */}
       <div className="panel" style={{ padding: 14, marginBottom: 12 }}>
@@ -680,16 +639,17 @@ function GraphView({ data, openCard }) {
         <div ref={containerRef} style={{ width: '100%', height: '100%', background: 'oklch(0.14 0.012 60)' }}></div>
         }
 
-        {filteredNodes.length === 0 && enrichedCount > 0 &&
+        {filteredNodes.length === 0 && withData > 0 &&
         <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--muted)' }}>
             <p>No nodes match your filters.</p>
           </div>
         }
-        {enrichedCount === 0 &&
+        {withData === 0 &&
         <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center' }}>
             <div>
               <div style={{ fontFamily: 'var(--display)', fontSize: 36, color: 'var(--muted)', marginBottom: 12 }}>◇</div>
-              <p className="h-display" style={{ fontSize: 20 }}>Enrich some cards to draw the network.</p>
+              <p className="h-display" style={{ fontSize: 20 }}>No card details yet.</p>
+              <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>Card details arrive with the daily sync; the network draws itself once they do.</p>
             </div>
           </div>
         }
@@ -783,7 +743,7 @@ function SetConstellation({ data, nodes, filteredNodes, openCard }) {
   const [hover, setHover] = useStateG(null);
   const [valueMode, setValueMode] = useStateG('total'); // 'total' | 'unit'
 
-  // Build per-set color distribution from enriched nodes
+  // Build per-set color distribution from nodes with card data
   const setColorMix = useMemoG(() => {
     const out = {};
     for (const n of nodes) {
@@ -817,7 +777,7 @@ function SetConstellation({ data, nodes, filteredNodes, openCard }) {
 
   function dominantColor(code) {
     const mix = setColorMix[code];
-    if (!mix) return '#7a7770'; // unknown / not enriched
+    if (!mix) return '#7a7770'; // unknown / no card data yet
     let best = 'M',bestV = -1;
     for (const k of Object.keys(mix)) {
       if (mix[k] > bestV) {best = k;bestV = mix[k];}
@@ -1093,7 +1053,7 @@ function TypeRoster({ data, filteredNodes, openCard }) {
               <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', width: 22 }}>—</span>
               <TypeGlyph type={r.type} size={22} />
               <div style={{ fontFamily: 'var(--display)', fontSize: 18, fontWeight: 600 }}>{r.type}</div>
-              <div className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', marginLeft: 'auto' }}>not in current filter</div>
+              <div className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', marginLeft: 'auto' }}>none in this view — widen depth, price tier or colors</div>
             </div>
           );
           const pct = totalValue > 0 ? (r.value / totalValue) * 100 : 0;

@@ -35,6 +35,9 @@ def _printing(row: Entry) -> str:
     return {"foil": "Foil", "etched": "Etched"}.get(row.finish, "Normal")
 
 
+PRICE_KEYS = ("usd", "usd_foil", "usd_etched", "eur", "eur_foil", "eur_etched")
+
+
 def group_id(name: str, set_code: str, number: str, printing: str, condition: str, language: str) -> str:
     raw = "\x1f".join([name, set_code, number, printing, condition, language])
     return hashlib.sha1(raw.encode()).hexdigest()[:16]
@@ -97,7 +100,7 @@ class CollectionView:
                 _CACHE[key] = cached
                 while len(_CACHE) > _CACHE_SIZE:
                     _CACHE.popitem(last=False)
-        self.groups, self.months, self.imported_at, self.source = cached
+        self.groups, self.months, self.imported_at, self.source, self.snapshots = cached
         self.by_id = {g.id: g for g in self.groups}
 
     def _build(self) -> tuple:
@@ -144,10 +147,13 @@ class CollectionView:
                 worth[day[:7]] += price * r.quantity
                 spend[day[:7]] += (paid or 0.0) * r.quantity
         ordered = sorted(groups.values(), key=lambda g: (g.name.lower(), g.set_code, g.number, g.id))
+        # every finish's latest price, as plain data (the view outlives this session), for card data
+        snapshots = {i: {**{k: plausible_price(getattr(p, k)) for k in PRICE_KEYS}, "day": p.day.isoformat()}
+                     for i, p in prices.items()}
         timeline = [(m, months[m], round(spend[m], 2), round(worth[m], 2)) for m in sorted(months)]
         latest = db.execute(select(Import.created_at, Import.source).where(Import.user_id == user.id)
                             .order_by(Import.id.desc()).limit(1)).first()
-        return ordered, timeline, latest[0] if latest else None, latest[1] if latest else None
+        return ordered, timeline, latest[0] if latest else None, latest[1] if latest else None, snapshots
 
     # -- shapes ------------------------------------------------------------------------------
     def item(self, g: Group) -> dict:
@@ -163,18 +169,25 @@ class CollectionView:
         }
 
     def card_data(self, g: Group) -> dict | None:
-        card = self.db.get(Card, g.scryfall_id) if g.scryfall_id else None
-        if card is None:
-            return None
-        return {
-            "scryfall_id": card.scryfall_id, "oracle_id": card.oracle_id, "name": card.name,
-            "type_line": card.type_line, "mana_cost": card.mana_cost, "cmc": card.cmc,
-            "colors": card.colors, "color_identity": card.color_identity, "oracle_text": card.oracle_text,
-            "rarity": card.rarity, "finishes": card.finishes,
-            "image": {"small": card.image_small, "normal": card.image_normal, "artist": card.artist,
+        return self.cards([g]).get(g.scryfall_id) if g.scryfall_id else None
+
+    def cards(self, groups: list[Group]) -> dict[str, dict]:
+        """Scryfall's data for these groups' printings, by Scryfall id: one query for a whole page.
+        Printings the daily sync hasn't stored yet are left out."""
+        ids = {g.scryfall_id for g in groups if g.scryfall_id}
+        if not ids:
+            return {}
+        return {c.scryfall_id: {
+            "scryfall_id": c.scryfall_id, "oracle_id": c.oracle_id, "name": c.name, "set_code": c.set_code,
+            "set_name": c.set_name, "collector_number": c.collector_number,
+            "type_line": c.type_line, "mana_cost": c.mana_cost, "cmc": c.cmc,
+            "colors": c.colors, "color_identity": c.color_identity, "oracle_text": c.oracle_text,
+            "power": c.power, "toughness": c.toughness, "loyalty": c.loyalty,
+            "rarity": c.rarity, "layout": c.layout, "finishes": c.finishes,
+            "image": {"small": c.image_small, "normal": c.image_normal, "artist": c.artist,
                       "credit": "Image via Scryfall · © Wizards of the Coast"},
-            "scryfall_uri": card.scryfall_uri,
-        }
+            "scryfall_uri": c.scryfall_uri, "prices": self.snapshots.get(c.scryfall_id),
+        } for c in self.db.scalars(select(Card).where(Card.scryfall_id.in_(ids)))}
 
     def price_history(self, g: Group, days: int = 90) -> list[dict]:
         if not g.scryfall_id:

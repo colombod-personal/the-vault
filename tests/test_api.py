@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from mtg_toolkits.scryfall import Card
 
-from sqlalchemy import select
+from sqlalchemy import event, select
 from vault.sync import sync, wanted_cards
 
 CSV = (Path(__file__).parent / "fixtures" / "collection.csv").read_bytes()
@@ -166,6 +166,34 @@ def test_daily_sync_card_data_history_and_stats(app, signed_in):
     assert st["most_valuable"][0]["name"] == "Sol Ring" and st["biggest_gains"][0]["name"] == "Sol Ring"
     months = signed_in.get(f"{V1}/collection/timeline").json()["months"]
     assert [m["month"] for m in months] == ["2022-11", "2023-01", "2024-02", "2024-03", "2024-06"]
+
+
+def test_collection_items_carry_card_data_without_a_query_per_card(app, signed_in):
+    upload(signed_in)
+    assert [c["card"] for c in all_cards(signed_in)] == [None] * 4  # not synced yet: no card data, never a lookup
+    with app.state.db.sessions() as db:
+        sync(db, BULK, day=date(2026, 9, 27))
+
+    cards = {c["name"]: c for c in all_cards(signed_in)}
+    sol = cards["Sol Ring"]["card"]
+    assert (sol["scryfall_id"], sol["set_code"], sol["collector_number"], sol["type_line"]) == ("sol", "c21", "263", "Artifact")
+    assert sol["image"]["normal"] == "https://img.test/sol.jpg" and sol["image"]["artist"] == "Mark Tedin"
+    assert (sol["prices"]["usd"], sol["prices"]["usd_foil"], sol["prices"]["day"]) == (1.0, 3.0, "2026-09-27")
+    assert all(c["card"] for c in cards.values())
+
+    statements = []
+    listen = lambda *args: statements.append(args[2])  # noqa: E731
+    engine = app.state.db.engine
+    event.listen(engine, "before_cursor_execute", listen)
+    try:
+        counts = []
+        for limit in (1, 4):  # the view is cached by now: a page costs the same however many cards it has
+            statements.clear()
+            assert signed_in.get(f"{V1}/collection/cards", params={"limit": limit}).json()["count"] == limit
+            counts.append(len(statements))
+    finally:
+        event.remove(engine, "before_cursor_execute", listen)
+    assert counts[0] == counts[1], counts
 
 
 def test_sync_keeps_imported_finish_and_does_not_lock_in_name_guesses(app, signed_in):
@@ -517,7 +545,7 @@ def test_the_card_schema_documents_paid_quantity(client):
     # /collection/cards answers with its own Response (for ETags), so the model never filters it;
     # the published contract has to list the field the front end relies on.
     item = client.get("/api/openapi.json").json()["components"]["schemas"]["CardItem"]["properties"]
-    assert {"paid", "paid_quantity"} <= set(item)
+    assert {"paid", "paid_quantity", "card"} <= set(item)
 
 
 def test_daily_values_ignore_prices_no_import_would_accept(app, signed_in):

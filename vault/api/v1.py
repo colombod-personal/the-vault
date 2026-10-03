@@ -302,6 +302,12 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         def card_links(ctx: Ctx, g) -> dict:
             return {"self": link(f"{ctx.base}/cards/{g.id}")}
 
+        def card_out(data: dict | None) -> dict | None:
+            if data and settings.twins_url:  # local development: images come from the Scryfall twin
+                data = {**data, "image": {k: outbound.browser_url(settings, v) if k in ("small", "normal") and v else v
+                                          for k, v in data["image"].items()}}
+            return data
+
         @r.get("", response_model=S.CollectionSummary, summary="Collection summary and links")
         def summary(request: Request, ctx: Ctx = Depends(ctx_dep)):
             view = ctx.view()
@@ -332,7 +338,9 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             def body():
                 items = filtered(view, q=q, set_code=set, finish=finish, condition=condition, name=name)
                 page, nxt = paginate(items, SORTS[sort], lambda g: g.id, cursor=cursor, limit=limit)
-                out = [{**view.item(g), "_links": card_links(ctx, g)} for g in page]
+                cards = view.cards(page)  # card data for the whole page in one query
+                out = [{**view.item(g), "card": card_out(cards.get(g.scryfall_id)), "_links": card_links(ctx, g)}
+                       for g in page]
                 return page_body(request, out, nxt, len(items), q=q, set=set, name=name, finish=finish,
                                  condition=condition, sort=None if sort == "name" else sort, limit=limit)
 
@@ -350,10 +358,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 copies = [dict(c, purchase_price=None if ctx.hide_costs else c["purchase_price"]) for c in g.copies[:MAX_COPY_ROWS]]
                 links = card_links(ctx, g) | {"collection": link(ctx.base),
                                               "same_card": link(f"{ctx.base}/cards?{urlencode({'name': g.name.split(' // ')[0]})}")}
-                card_data = view.card_data(g)
-                if card_data and settings.twins_url:  # local development: images come from the Scryfall twin
-                    card_data["image"] = {k: outbound.browser_url(settings, v) if k in ("small", "normal") and v else v
-                                          for k, v in card_data["image"].items()}
+                card_data = card_out(view.card_data(g))
                 if card_data and card_data.get("scryfall_uri"):
                     links["scryfall"] = link(card_data["scryfall_uri"], title="View on Scryfall")
                 return {**view.item(g), "card": card_data, "price_history": view.price_history(g),
