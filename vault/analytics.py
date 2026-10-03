@@ -296,7 +296,8 @@ def names(db: Session, user_id: int, *, sort: str = "-value", colors: list[str] 
         return f"{table}{column} {'DESC' if desc else 'ASC'}" + (f", {table}key ASC" if column != "key" else "")
     rows = db.execute(text(_priced() + f""",
 named AS (
-  SELECT lower(name) AS key, (array_agg(name ORDER BY has_card DESC, price DESC, id))[1] AS name,
+  -- byte order (COLLATE "C"), so pages come in the same order on every database, whatever its locale
+  SELECT lower(name) COLLATE "C" AS key, (array_agg(name ORDER BY has_card DESC, price DESC, id))[1] AS name,
          sum(quantity)::bigint AS copies, round(sum(price * quantity)::numeric, 2) AS market,
          count(DISTINCT gkey) AS printings, array_agg(DISTINCT set_code) AS sets,
          (array_agg(scryfall_id ORDER BY has_card DESC, price DESC, id))[1] AS top_id
