@@ -154,12 +154,37 @@ def test_scryfall_collection_and_errors(real, twin):
     assert r404.json()["object"] == t404.json()["object"] == "error" and invented(t404.json(), r404.json()) == []
 
 
-def test_scryfall_bulk_data(real, twin):
-    r = next(b for b in real.get("https://api.scryfall.com/bulk-data").json()["data"] if b["type"] == "default_cards")
-    t = next(b for b in twin.get("https://api.scryfall.com/bulk-data").json()["data"] if b["type"] == "default_cards")
-    # mtg_toolkits downloads jsonl_download_uri when present, else download_uri
-    assert missing(r, ["download_uri", "updated_at", "type"]) == [] and invented(t, r) == []
-    assert r["download_uri"].startswith("https://data.scryfall.io/default-cards/")
+@pytest.mark.parametrize("kind", ["default_cards", "oracle_cards", "rulings", "oracle_tags"])
+def test_scryfall_bulk_data(real, twin, kind):
+    r = next(b for b in real.get("https://api.scryfall.com/bulk-data").json()["data"] if b["type"] == kind)
+    t = next(b for b in twin.get("https://api.scryfall.com/bulk-data").json()["data"] if b["type"] == kind)
+    # mtg_toolkits downloads jsonl_download_uri (Scryfall no longer sends download_uri)
+    assert missing(r, ["jsonl_download_uri", "compressed_size", "updated_at", "type"]) == [] and invented(t, r) == []
+    assert r["jsonl_download_uri"].startswith(f"https://data.scryfall.io/{kind.replace('_', '-')}/")
+
+
+def test_scryfall_ruling_and_tag_shapes(real, twin):
+    """The first line of the real rulings and oracle-tags files, against the twin's."""
+    import gzip, json
+
+    def first(client, kind):
+        entry = next(b for b in client.get("https://api.scryfall.com/bulk-data").json()["data"] if b["type"] == kind)
+        raw = client.get(entry["jsonl_download_uri"]).content
+        return json.loads(gzip.decompress(raw).splitlines()[0])
+
+    universe = twin.universe
+    oracle = next(iter(universe.scryfall.cards.values()))["oracle_id"]
+    universe.scryfall.add_ruling(oracle, "A twin ruling.")
+    universe.scryfall.add_tag("twin-tag", cards={oracle: "median"})
+    real_rule = real.get(next(b for b in real.get("https://api.scryfall.com/bulk-data").json()["data"] if b["type"] == "rulings")["jsonl_download_uri"])
+    r_rule = json.loads(gzip.decompress(real_rule.content).splitlines()[0])
+    assert missing(r_rule, ["oracle_id", "source", "published_at", "comment"]) == []
+    assert invented(first(twin, "rulings"), r_rule) == []
+    r_tag = first(real, "oracle_tags")
+    assert missing(r_tag, ["id", "slug", "label", "description", "parent_ids", "child_ids", "taggings"]) == []
+    t_tag = first(twin, "oracle_tags")
+    assert invented({k: v for k, v in t_tag.items() if k != "taggings"}, r_tag) == []
+    assert missing(r_tag["taggings"][0], ["oracle_id", "weight"]) == []
 
 
 def test_scryfall_requires_headers(real, twin):

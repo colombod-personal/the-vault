@@ -1,13 +1,12 @@
-name: sync-prices
-# Daily: configure the Vercel project (jobs/vercel_setup.py: SESSION_SECRET, BASE_URL, checklist;
-# redeploys production unless it was built from the current variables), then download
-# Scryfall's bulk card file, match every collection, store prices and each user's collection
-# value. Runs only from main, in the "vercel-production" environment (README → Security).
-# Uses that environment's DATABASE_URL secret if set; otherwise it reads the database address
-# from the Vercel project (Neon integration) with VERCEL_TOKEN.
+name: sync-catalog
+# Daily: load the catalog (oracle cards, rulings, oracle tags) from Scryfall's bulk files into
+# Postgres (jobs/sync_catalog.py, docs/catalog-design.md). Nothing loads unless the repository
+# variable CATALOG_SOURCES names sources (comma-separated: oracle_cards, rulings, oracle_tags);
+# each is enabled only after its terms are checked (docs/compliance.md). Runs only from main, in the
+# "vercel-production" environment (README → Security). Same database address logic as sync-prices.
 on:
   schedule:
-    - cron: "17 10 * * *"   # Scryfall regenerates bulk files around 09:00 UTC
+    - cron: "47 10 * * *"   # after sync-prices (10:17); Scryfall regenerates bulk files around 09:00 UTC
   workflow_dispatch: {}
 permissions:
   contents: read
@@ -16,7 +15,7 @@ jobs:
   sync:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     environment: vercel-production
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -28,18 +27,7 @@ jobs:
       - run: |
           pip install --require-hashes --no-deps -r requirements-lock.txt  # exact versions, hash-checked
           pip install --no-build-isolation --no-deps -r requirements-vcs.txt  # mtg-toolkits at a pinned commit
-      - run: npm install --global vercel@60.1.3  # before any secret is in the environment
-      - name: Configure the Vercel project
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE || 'wintermute2' }}
-        run: |
-          if [ -z "$VERCEL_TOKEN" ]; then
-            echo "::warning::VERCEL_TOKEN is not set: add it to the vercel-production environment (Settings → Environments)"
-            echo "⚠️ VERCEL_TOKEN is not set in the vercel-production environment, so the project wasn't configured." >> "$GITHUB_STEP_SUMMARY"
-          else
-            python -m jobs.vercel_setup --redeploy
-          fi
+      - run: npm install --global vercel@60.1.3  # before any secret is in the environment (used to read the database address)
       - name: Database address
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -57,7 +45,8 @@ jobs:
           fi
           echo "::add-mask::$DATABASE_URL"
           echo "DATABASE_URL=$DATABASE_URL" >> "$GITHUB_ENV"
-      - name: Sync prices
+      - name: Load the catalog
         env:
-          CATALOG_SOURCES: ${{ vars.CATALOG_SOURCES }}  # "oracle_prices" also stores each card's cheapest price
-        run: python -m jobs.sync_prices
+          CATALOG_SOURCES: ${{ vars.CATALOG_SOURCES }}
+        run: python -m jobs.sync_catalog
+

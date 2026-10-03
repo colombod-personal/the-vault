@@ -44,6 +44,8 @@ class ScryfallTwin(Twin):
     def __init__(self, seed: bool = True, *, enforce_rate_limits: bool = False, clock=time.monotonic):
         super().__init__()
         self.cards: dict[str, dict] = {}
+        self.rulings: list[dict] = []
+        self.oracle_tags: list[dict] = []
         self.enforce_rate_limits = enforce_rate_limits
         self.require_headers = True
         self.clock = clock
@@ -100,6 +102,21 @@ class ScryfallTwin(Twin):
         self.cards[cid] = card
         return card
 
+    def add_ruling(self, oracle_id: str, comment: str, *, source: str = "wotc", published_at: str = "2020-01-01") -> dict:
+        ruling = {"object": "ruling", "oracle_id": oracle_id, "source": source, "published_at": published_at, "comment": comment}
+        self.rulings.append(ruling)
+        return ruling
+
+    def add_tag(self, slug: str, *, cards: dict[str, str] | None = None, children: list[str] | None = None,
+                parents: list[str] | None = None, label: str | None = None) -> dict:
+        """Add a Tagger tag. `cards` maps an Oracle id to a weight; `children`/`parents` are tag ids."""
+        tag = {"object": "tag", "id": str(uuid.uuid5(uuid.NAMESPACE_DNS, "tag:" + slug)), "label": label or slug, "slug": slug,
+               "type": "oracle", "uri": f"https://tagger.scryfall.com/tags/card/{slug}", "description": "", "aliases": [],
+               "parent_ids": list(parents or []), "child_ids": list(children or []),
+               "taggings": [{"oracle_id": o, "weight": w} for o, w in (cards or {}).items()]}
+        self.oracle_tags.append(tag)
+        return tag
+
     def set_price(self, card_id: str, **prices: float | None) -> None:
         for k, v in prices.items():
             self.cards[card_id]["prices"][k] = None if v is None else f"{float(v):.2f}"
@@ -121,9 +138,11 @@ class ScryfallTwin(Twin):
         super().reset()
         self._last.clear()
         self._locked_until = 0.0
+        self.rulings.clear()
+        self.oracle_tags.clear()
 
     def state(self) -> dict:
-        return super().state() | {"cards": len(self.cards), "enforce_rate_limits": self.enforce_rate_limits}
+        return super().state() | {"cards": len(self.cards), "rulings": len(self.rulings), "oracle_tags": len(self.oracle_tags), "enforce_rate_limits": self.enforce_rate_limits}
 
     # -- rules ---------------------------------------------------------------------------
     def error(self, status, code, details):
@@ -265,38 +284,49 @@ class ScryfallTwin(Twin):
                 "uri": f"https://api.scryfall.com/sets/{code}", "scryfall_uri": f"https://scryfall.com/sets/{code}"}
 
     # -- bulk data -----------------------------------------------------------------------
+    BULK_TYPES = ("oracle_cards", "unique_artwork", "default_cards", "all_cards", "rulings", "art_tags", "oracle_tags")
+
+    def _bulk_objects(self, kind: str) -> list[dict]:
+        """What each bulk file holds: one card per Oracle id for ``oracle_cards``, every printing
+        for the others, and the rulings and tags the twin was given."""
+        if kind == "rulings":
+            return list(self.rulings)
+        if kind == "oracle_tags":
+            return list(self.oracle_tags)
+        if kind == "art_tags":
+            return []
+        if kind == "oracle_cards":
+            return list({c["oracle_id"]: c for c in reversed(list(self.cards.values()))}.values())
+        return list(self.cards.values())
+
+    def _bulk_gz(self, kind: str) -> bytes:
+        return gzip.compress("".join(json.dumps(o) + "\n" for o in self._bulk_objects(kind)).encode())
+
     def _bulk_entry_obj(self, kind: str) -> dict:
+        # The shape Scryfall serves today: only the .jsonl.gz link and its compressed size.
         stamp = self.bulk_updated_at.strftime("%Y%m%d%H%M%S")
         slug = kind.replace("_", "-")
         return {
             "object": "bulk_data", "id": str(uuid.uuid5(uuid.NAMESPACE_DNS, kind)), "type": kind,
             "updated_at": self.bulk_updated_at.isoformat(), "uri": f"https://api.scryfall.com/bulk-data/{slug}",
             "name": kind.replace("_", " ").title(), "description": "A twin bulk file.",
-            "size": len(self._bulk_json()), "download_uri": f"https://data.scryfall.io/{slug}/{slug}-{stamp}.json",
             "jsonl_download_uri": f"https://data.scryfall.io/{slug}/{slug}-{stamp}.jsonl.gz",
-            "content_type": "application/json", "content_encoding": "gzip",
+            "compressed_size": len(self._bulk_gz(kind)),
         }
 
     def _bulk_list(self, req: Request) -> httpx.Response:
-        return self._ok({"object": "list", "has_more": False,
-                         "data": [self._bulk_entry_obj(k) for k in ("oracle_cards", "unique_artwork", "default_cards", "all_cards")]})
+        return self._ok({"object": "list", "has_more": False, "data": [self._bulk_entry_obj(k) for k in self.BULK_TYPES]})
 
     def _bulk_entry(self, req: Request) -> httpx.Response:
         kind = req.params["type"].replace("-", "_")
-        if kind not in ("oracle_cards", "unique_artwork", "default_cards", "all_cards"):
+        if kind not in self.BULK_TYPES:
             return self.error(404, "not_found", "No bulk data found.")
         return self._ok(self._bulk_entry_obj(kind))
 
-    def _bulk_json(self) -> bytes:
-        return json.dumps(list(self.cards.values())).encode()
-
     def _bulk_file(self, req: Request) -> httpx.Response:
-        name = req.params["file"]
-        if name.endswith(".jsonl.gz"):
-            body = gzip.compress("".join(json.dumps(c) + "\n" for c in self.cards.values()).encode())
-            return httpx.Response(200, content=body, headers={"content-type": "application/gzip"})
-        if name.endswith(".json"):
-            return httpx.Response(200, content=self._bulk_json(), headers={"content-type": "application/json"})
+        kind = req.params["type"].replace("-", "_")
+        if kind in self.BULK_TYPES and req.params["file"].endswith(".jsonl.gz"):
+            return httpx.Response(200, content=self._bulk_gz(kind), headers={"content-type": "application/gzip"})
         return httpx.Response(404, content=b"Not Found")
 
     # -- images --------------------------------------------------------------------------

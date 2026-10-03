@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import tempfile
 from pathlib import Path
 
 import httpx
 from mtg_toolkits.scryfall import ScryfallClient
 
-from vault import outbound
+from vault import catalog_sync, outbound
 from vault.config import Settings
 from vault.db import Database
 from vault.sync import sync_from_file
@@ -39,7 +40,11 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
             with ScryfallClient(user_agent=USER_AGENT, client=http) as sf:
                 path = sf.download_bulk("default_cards", Path(tmp) / "default-cards.jsonl.gz")
         with db.sessions() as session:
-            print(json.dumps(sync_from_file(session, path), indent=2))
+            report = sync_from_file(session, path)
+            # Cheapest price of every card, only once that source is enabled (docs/compliance.md).
+            if "oracle_prices" in os.environ.get("CATALOG_SOURCES", "").split(","):
+                report["oracle_prices"] = catalog_sync.sync_cheapest_from_file(session, path)
+            print(json.dumps(report, indent=2))
 
 
 if __name__ == "__main__":
