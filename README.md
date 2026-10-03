@@ -101,8 +101,11 @@ out with Scryfall's set codes, so other apps recognise them.
 
 **Agents.** People can connect their own AI agents: personal access tokens (read, or read and
 write), an MCP server at `/api/mcp`, and `/llms.txt`. See [`docs/agents.md`](docs/agents.md).
-The web app keeps collections in IndexedDB, keyed by version, and retries failed pages. It
-reopens with one small request and works offline.
+The web app computes nothing about a collection: each view asks the server for what it shows
+(totals, P&L, breakdowns, the value over time, pages of printings; see `docs/api.md` →
+Analytics). It keeps the server's answers in IndexedDB, keyed by the collection's version, so it
+reopens with one small request and works offline. It has the server refresh prices and card data
+by itself (`POST /api/v1/collection/refresh`) after an import and when prices are older than today.
 
 ## Deploying on Vercel
 

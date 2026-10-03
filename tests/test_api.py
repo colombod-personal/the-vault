@@ -536,7 +536,7 @@ def test_pnl_counts_only_copies_with_a_known_cost(signed_in):
             "a,3,0,Sol Ring,C21,Commander 2021,263,Mint,Normal,English,,2024-01-02,1,2,2.00\n")
     assert upload(signed_in, rows.encode()).status_code in (200, 201)
     [sol] = all_cards(signed_in)
-    assert (sol["quantity"], sol["paid"], sol["paid_quantity"]) == (4, 1.0, 1)
+    assert (sol["quantity"], sol["paid"], sol["paid_quantity"], sol["gain"]) == (4, 1.0, 1, 1.0)
     st = signed_in.get(f"{V1}/collection/stats").json()
     assert st["biggest_gains"][0]["gain"] == 1.0  # 1 copy × $2 − $1, not 4 copies × $2 − $1
 
@@ -545,7 +545,7 @@ def test_the_card_schema_documents_paid_quantity(client):
     # /collection/cards answers with its own Response (for ETags), so the model never filters it;
     # the published contract has to list the field the front end relies on.
     item = client.get("/api/openapi.json").json()["components"]["schemas"]["CardItem"]["properties"]
-    assert {"paid", "paid_quantity", "card"} <= set(item)
+    assert {"paid", "paid_quantity", "gain", "card"} <= set(item)
 
 
 def test_daily_values_ignore_prices_no_import_would_accept(app, signed_in):

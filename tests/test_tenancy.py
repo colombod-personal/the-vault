@@ -58,7 +58,7 @@ def test_collection_share_lifecycle(client):
     # prices paid are hidden unless the owner opted in
     assert data["costs_hidden"] and data["paid"] is None and "imports" not in data["_links"]
     cards = client.get(data["_links"]["cards"]["href"]).json()["items"]
-    assert len(cards) == 4 and all(c["paid"] is None for c in cards)
+    assert len(cards) == 4 and all(c["paid"] is None and c["gain"] is None for c in cards)
     detail = client.get(cards[0]["_links"]["self"]["href"]).json()
     assert all(c["purchase_price"] is None for c in detail["copies"])
     assert all(m["paid"] is None for m in client.get(data["_links"]["timeline"]["href"]).json()["months"])

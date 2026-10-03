@@ -351,7 +351,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                               "refresh": link(f"{V1}/collection/refresh", title="POST: refresh card data and today's "
                                               "prices from Scryfall, a chunk per call")}
                 version = hashlib.sha256(view.version.encode()).hexdigest()[:16]  # changes whenever the data does
-                # P&L in SQL, over the copies with a known cost only (vault.analytics; public/lib/pnl.js)
+                # P&L in SQL, over the copies with a known cost only (vault.analytics)
                 pnl = analytics.HIDDEN_PNL if ctx.hide_costs else analytics.pnl(ctx.db, ctx.owner.id)
                 return {**view.summary(), **pnl, "owner": ctx.owner_name, "version": version, "_links": links}
 

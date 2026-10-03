@@ -29,7 +29,8 @@ window.VaultApi = (() => {
   const V1 = '/api/v1';
 
   class ApiError extends Error {
-    constructor(status, message) { super(message); this.status = status; }
+    // retryAfter: seconds from the answer's Retry-After header (429, 503), else null
+    constructor(status, message, retryAfter = null) { super(message); this.status = status; this.retryAfter = retryAfter; }
   }
 
   // Retries: GETs, and POSTs carrying an Idempotency-Key, are retried on network errors and on
@@ -65,7 +66,7 @@ window.VaultApi = (() => {
         if (retryable && RETRYABLE.has(resp.status) && attempt < MAX_RETRIES) { await sleep(backoff(attempt, resp)); continue; }
         let msg = 'HTTP ' + resp.status;
         try { const p = await resp.json(); msg = p.detail || p.title || msg; } catch {}
-        throw new ApiError(resp.status, msg);
+        throw new ApiError(resp.status, msg, Number(resp.headers.get('retry-after')) || null);
       }
       const type = resp.headers.get('content-type') || '';
       return type.includes('json') ? resp.json() : resp.text();
@@ -74,9 +75,11 @@ window.VaultApi = (() => {
   // Creating things: safe to retry because the server replays the first answer for the same key.
   const create = (path, opts) => call(path, { method: 'POST', ...opts, headers: { ...(opts.headers || {}), 'Idempotency-Key': newKey() } });
 
-  // Local copy of collections in IndexedDB, keyed by the collection's `version`: while the
-  // version is unchanged, opening the vault costs one small request. Offline, the last copy is
-  // shown. Cleared on sign-out and account deletion.
+  // Local copy in IndexedDB of the collection resources this browser has read (the summary, and
+  // each page of cards, sets, names, stats, breakdowns, valuation, history it asked for), stored
+  // by URL with the collection's `version`. While the version is unchanged, a resource is answered
+  // from here without a request; offline, the last copy is shown. Everything is computed by the
+  // server: this is only a cache of its answers. Cleared on sign-out and account deletion.
   const localStore = (() => {
     let dbp = null;
     const open = () => dbp || (dbp = new Promise((resolve, reject) => {
@@ -114,7 +117,6 @@ window.VaultApi = (() => {
     }
     return items;
   }
-  const withLimit = (href, n = 500) => href + (href.includes('?') ? '&' : '?') + 'limit=' + n;
 
   const CONDITION = { mint: 'Mint', near_mint: 'NearMint', excellent: 'Excellent', good: 'Good',
     light_played: 'LightPlayed', played: 'Played', poor: 'Poor' };
@@ -129,42 +131,61 @@ window.VaultApi = (() => {
     return m ? m[1] : null;
   };
 
-  // Load a collection: from the local copy when its version is current, else page by page.
-  // FORMAT changes when the items' shape does (2: items carry card data), so older copies are refetched.
-  const FORMAT = 2;
-  async function loadCollection(base, onProgress) {
-    let summary;
+  // FORMAT changes when what is stored does (3: server answers by URL; 2 held the whole
+  // collection's items under `collection:…`), so older copies are dropped and refetched.
+  const FORMAT = 3;
+  const versions = {};  // collection base URL -> the version of its latest summary
+
+  // GET one collection resource: from the local copy while the collection's version is unchanged,
+  // else from the server (then stored). Offline, the last copy. Searches (`q=`) aren't stored.
+  async function cachedGet(base, href) {
+    const who = account();
+    const version = versions[base];
+    const key = who && version && !/[?&]q=/.test(href) ? `res:${who}:${href}` : null;
+    if (key) {
+      const saved = await localStore.get(key);
+      if (saved && saved.format === FORMAT && saved.version === version) return saved.body;
+    }
+    try {
+      const body = await call(href);
+      if (key) localStore.set(key, { format: FORMAT, version, body });
+      return body;
+    } catch (e) {
+      const saved = e.status === 0 && who ? await localStore.get(`res:${who}:${href}`) : null;
+      if (saved && saved.format === FORMAT) return saved.body;
+      throw e;
+    }
+  }
+
+  const query = (params) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(params || {})) if (v != null && v !== '') q.set(k, String(v));
+    const s = q.toString();
+    return s ? '?' + s : '';
+  };
+
+  // Open a collection (yours, or one shared with you): its summary, and a client for everything
+  // else about it. Views ask the server for what they show (P&L, breakdowns, valuation, pages of
+  // printings, …); nothing is computed in the browser.
+  async function loadCollection(base) {
+    const who = account();
+    let summary, origin = {};
     try {
       summary = await call(base);
     } catch (e) {
       if (e.status === 401) await localStore.clear();
-      const who = account();
-      const saved = e.status === 0 && who ? await localStore.get(`collection:${who}:${base}`) : null; // offline: last copy
-      if (saved) return assemble(saved, { offline: true, savedAt: saved.savedAt });
-      throw e;
+      const saved = e.status === 0 && who ? await localStore.get(`summary:${who}:${base}`) : null; // offline: last copy
+      if (!saved || saved.format !== FORMAT) throw e;
+      summary = saved.body;
+      origin = { offline: true, savedAt: saved.savedAt };
     }
-    localStore.del('collection:' + base);  // a copy saved by an older version, under no account
-    const who = account();
-    if (!who) return assemble(await fetchCollection(summary, onProgress), {});  // nowhere safe to keep a copy
-    const key = `collection:${who}:${base}`;
-    const saved = await localStore.get(key);
-    if (saved && saved.version && saved.version === summary.version && saved.format === FORMAT) {
-      return assemble({ ...saved, summary }, { fromCache: true, savedAt: saved.savedAt });
+    localStore.del('collection:' + base);  // copies saved by older versions (formats 1 and 2)
+    if (who && !origin.offline) {
+      localStore.del(`collection:${who}:${base}`);
+      localStore.set(`summary:${who}:${base}`, { format: FORMAT, savedAt: new Date().toISOString(), body: summary });
     }
-    const fresh = await fetchCollection(summary, onProgress);
-    localStore.set(key, fresh);
-    return assemble(fresh, {});
-  }
-
-  async function fetchCollection(summary, onProgress) {
-    const L = summary._links;
-    const [items, sets, timeline, history] = await Promise.all([
-      all(withLimit(L.cards.href), onProgress),
-      all(withLimit(L.sets.href)),
-      call(L.timeline.href),
-      all(withLimit(L.history.href)),
-    ]);
-    return { format: FORMAT, version: summary.version, savedAt: new Date().toISOString(), summary, items, sets, timeline, history };
+    versions[base] = summary.version;
+    return assemble(summary, base, origin);
   }
 
   // A collection item's `card` (Scryfall's data, kept in Postgres by the daily sync) in the shape
@@ -185,38 +206,119 @@ window.VaultApi = (() => {
     };
   }
 
-  // Assemble the shape the views were designed around from the paginated resources.
-  function assemble({ summary, items, sets, timeline, history }, origin) {
-    const cards = items.map((c) => ({
+  // One printing (a /cards item, or a /stats one) in the shape the views were designed around.
+  // `v` is the server's value (copies × price), `gain` its P&L over the copies with a known cost.
+  function cardItem(c) {
+    return {
       key: c.id, n: c.name, s: c.set.code, sn: c.set.name, cn: c.collector_number, p: c.printing,
       c: CONDITION[c.condition] || c.condition, l: LANGUAGE[c.language] || c.language, q: c.quantity,
-      pd: c.paid || 0, pq: c.paid_quantity, lo: c.price.low, mi: c.price.mid, mk: c.price.market,
-      fd: c.acquired.first || '', ld: c.acquired.last || '', id: c.scryfall_id, fin: c.finish, src: c.price.source,
-      href: c._links.self.href, scry: slimCard(c.card),
-    }));
-    if (window.Scryfall) window.Scryfall.own(cards);  // owned cards' data answers without lookups
-    const byName = {};
-    for (const c of cards) {
-      const k = c.n.toLowerCase();
-      const b = byName[k] || (byName[k] = { name: c.n, total: 0, value: 0, entries: [] });
-      b.total += c.q;
-      b.value += c.mk * c.q;
-      b.entries.push({ s: c.s, sn: c.sn, cn: c.cn, p: c.p, c: c.c, q: c.q, mk: c.mk });
+      pd: c.paid, pq: c.paid_quantity, gain: c.gain ?? null, lo: c.price.low, mi: c.price.mid, mk: c.price.market,
+      v: c.value, fd: (c.acquired && c.acquired.first) || '', ld: (c.acquired && c.acquired.last) || '',
+      id: c.scryfall_id, fin: c.finish, src: c.price.source, href: c._links && c._links.self ? c._links.self.href : null,
+      scry: slimCard(c.card),
+    };
+  }
+  const setItem = (s) => ({ code: s.code, name: s.name, qty: s.copies, value: s.market_value, unique: s.printings,
+    colors: s.colors || {}, released: s.released_at || null });
+
+  // A page of a list, with `more()` for the next page (null on the last).
+  function pager(base, mapItem) {
+    const wrap = (page) => ({
+      ...page, items: page.items.map(mapItem),
+      more: page._links.next ? () => cachedGet(base, page._links.next.href).then(wrap) : null,
+    });
+    return (href) => cachedGet(base, href).then(wrap);
+  }
+  // Up to `n` items of a list (every item when n is Infinity), following `next` links.
+  async function upTo(first, n) {
+    let page = await first;
+    const items = [...page.items];
+    while (items.length < n && page.more) {
+      page = await page.more();
+      items.push(...page.items);
     }
+    return { ...page, items: items.slice(0, n) };
+  }
+
+  // Everything a view can ask about one collection; `base` is /api/v1/collection or
+  // /api/v1/shared/{id}/collection. Each call is one server resource (docs/api.md).
+  function collectionApi(base) {
+    const cardsPage = pager(base, cardItem);
+    const setsPage = pager(base, setItem);
+    const plainPage = pager(base, (x) => x);
+    return {
+      base,
+      // printings, one page: q, set, name, printing, finish, condition, limit; sort: name, -name,
+      // -value, value, -quantity, set, -acquired, acquired. The page has `total` and `value_total`.
+      cards: (params) => cardsPage(base + '/cards' + query(params)),
+      // the most valuable printing of a card name (to open a card from a per-name list)
+      topPrinting: (name) => cardsPage(base + '/cards' + query({ name: name.split(' // ')[0], sort: '-value', limit: 1 }))
+        .then((p) => p.items[0] || null),
+      // every set: q; sort: -value, value, -quantity, quantity, -unique, unique, name, code, release, -release
+      sets: (params) => upTo(setsPage(base + '/sets' + query({ ...params, limit: 500 })), Infinity),
+      // one row per card name, `n` rows at most: sort, colors (array of W U B R G M C), type, min_value
+      names: (params = {}, n = 100) => upTo(plainPage(base + '/names' + query({
+        ...params, colors: params.colors && params.colors.length ? params.colors.join(',') : null,
+        limit: Math.min(500, n) })), n),
+      stats: (limit = 8) => cachedGet(base, base + '/stats' + query({ limit })).then((s) => ({
+        ...s,
+        most_valuable: (s.most_valuable || []).map(cardItem),
+        biggest_gains: (s.biggest_gains || []).map(cardItem),
+        biggest_losses: (s.biggest_losses || []).map(cardItem),
+      })),
+      breakdowns: () => cachedGet(base, base + '/breakdowns'),
+      valuation: () => cachedGet(base, base + '/valuation'),
+      timeline: () => cachedGet(base, base + '/timeline').then((t) => t.months),
+      history: () => upTo(plainPage(base + '/history' + query({ limit: 500 })), Infinity).then((p) => p.items),
+    };
+  }
+
+  // The summary in the shape the views use (`meta`), plus the client for the rest (`api`).
+  function assemble(summary, base, origin) {
     const conditions = {};
     for (const [k, v] of Object.entries(summary.by_condition)) conditions[CONDITION[k] || k] = v;
     return {
       meta: {
         totalQty: summary.copies, totalPaid: summary.paid || 0, totalMarket: summary.market_value,
-        uniqueEntries: summary.printings, uniqueSets: summary.sets, printings: summary.by_printing, conditions,
-        generatedAt: summary.prices_as_of || summary.imported_at, importedAt: summary.imported_at,
+        uniqueEntries: summary.printings, uniqueSets: summary.sets, uniqueNames: summary.cards,
+        printings: summary.by_printing, conditions,
+        generatedAt: summary.prices_as_of || summary.imported_at, pricesAsOf: summary.prices_as_of || null,
+        importedAt: summary.imported_at,
         pricedFromScryfall: summary.priced_by_scryfall, costsHidden: summary.costs_hidden, sharedBy: summary.owner,
-        version: summary.version, source: summary.source, offline: !!origin.offline, fromCache: !!origin.fromCache, savedAt: origin.savedAt,
+        version: summary.version, source: summary.source, offline: !!origin.offline, savedAt: origin.savedAt,
+        // P&L over the copies with a known cost, computed by the server (null when costs are hidden)
+        pnl: summary.pnl ?? null, pnlPct: summary.pnl_pct ?? null, knownCostPaid: summary.known_cost_paid ?? null,
+        knownCostMarket: summary.known_cost_market ?? null, knownCostCopies: summary.known_cost_copies ?? null,
+        unknownCostCopies: summary.unknown_cost_copies ?? null,
       },
-      sets: sets.map((s) => ({ code: s.code, name: s.name, qty: s.copies, value: s.market_value, unique: s.printings })),
-      timeline: timeline.months.map((m) => ({ month: m.month, qty: m.copies, market: m.market, paid: m.paid })),
-      cards, byName, history,
+      api: collectionApi(base),
     };
+  }
+
+  // Refresh your collection's card data and today's prices on the server, one chunk per call,
+  // until nothing remains (POST /collection/refresh). The server talks to Scryfall; the browser
+  // only reports progress. 503 (Scryfall down) and 429 (too many calls) are waited out as
+  // Retry-After says, at most `maxWaits` times in a row; then the error is thrown. Stores nothing.
+  async function refreshCollection({ force = false, onProgress, wait = sleep, maxWaits = 5 } = {}) {
+    let cursor = null, waits = 0;
+    for (;;) {
+      let r;
+      try {
+        r = await call(V1 + '/collection/refresh', { method: 'POST', json: cursor ? { cursor, force } : { force } });
+      } catch (e) {
+        if ((e.status === 503 || e.status === 429) && waits < maxWaits) {
+          waits++;
+          await wait(Math.min(e.retryAfter || 30, 120) * 1000);
+          continue;
+        }
+        throw e;
+      }
+      waits = 0;
+      if (onProgress) onProgress({ done: r.done, total: r.total, remaining: r.remaining });
+      // Finished, or (defensively) a call that moved nothing forward: stop rather than spin.
+      if (r.remaining === 0 || !r.cursor || (!r.processed && !r.unavailable)) return r;
+      cursor = r.cursor;
+    }
   }
 
   // -- passkeys (WebAuthn) ------------------------------------------------------------------
@@ -290,7 +392,9 @@ window.VaultApi = (() => {
     ApiError, all, passkeys,
     providers: () => call('/api/auth/providers'),
     me: () => call(V1 + '/me'),
-    collection: (onProgress) => loadCollection(V1 + '/collection', onProgress),
+    collection: () => loadCollection(V1 + '/collection'),
+    // server-side refresh of your printings' card data and prices: {onProgress, force}
+    refreshCollection,
     imports: () => all(V1 + '/imports'),
     importCsv: (file) => {
       const body = new FormData();
@@ -316,6 +420,8 @@ window.VaultApi = (() => {
 
     // decks
     parseDeck: (text) => call(V1 + '/decks/parse', { method: 'POST', json: { text } }),
+    // a decklist checked against your collection, priced by the server (missing cost, owned printings)
+    deckCoverage: (text) => call(V1 + '/decks/coverage', { method: 'POST', json: { text } }),
     decks: () => all(V1 + '/decks'),
     deck: (id) => call(V1 + '/decks/' + id),
     saveDeck: (name, text, source_url) => create(V1 + '/decks', { json: { name, text, source_url } }),
@@ -327,7 +433,7 @@ window.VaultApi = (() => {
     removeShare: (id) => call(V1 + '/shares/' + id, { method: 'DELETE' }),
     acceptInvite: (token) => create(V1 + '/shares/accept', { json: { token } }),  // keyed: a lost answer can be retried
     sharedWithMe: () => all(V1 + '/shared'),
-    sharedCollection: (id, onProgress) => loadCollection(V1 + '/shared/' + id + '/collection', onProgress),
+    sharedCollection: (id) => loadCollection(V1 + '/shared/' + id + '/collection'),
     sharedDeck: (id) => call(V1 + '/shared/' + id + '/deck'),
   };
 })();

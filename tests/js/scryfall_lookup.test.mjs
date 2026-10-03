@@ -35,29 +35,6 @@ test('the full name still works, and so does the back face', async () => {
   assert.ok(results[0] && results[1]);
 });
 
-test('each finish is priced by its own Scryfall price, etched included', () => {
-  const scry = load({ data: [], not_found: [] });
-  const prices = { usd: '1.00', usd_foil: '3.00', usd_etched: '5.00' };
-  assert.equal(scry.priceFor(prices, { fin: 'nonfoil', p: '' }), 1);
-  assert.equal(scry.priceFor(prices, { fin: 'foil', p: 'Foil' }), 3);
-  assert.equal(scry.priceFor(prices, { fin: 'etched', p: 'Etched' }), 5);
-  assert.equal(scry.priceFor(prices, { p: 'Etched' }), 5, 'older saved copies have only the printing');
-  assert.equal(scry.priceFor({ usd: '1.00' }, { fin: 'etched' }), null, 'no etched price: keep the stored one');
-});
-
-test('owned cards answer from the collection, with no lookup', async () => {
-  const calls = [];
-  const scry = load({ data: [fireIce], not_found: [] }, new Map(), calls);
-  const sol = { name: 'Sol Ring', type_line: 'Artifact', prices: { usd: '1.00' } };
-  scry.own([{ n: 'Sol Ring', s: 'C21', cn: '263', scry: sol }, { n: 'Unsynced', s: 'X', cn: '1', scry: null }]);
-  assert.equal(scry.cached('Sol Ring', 'C21', '263'), sol);
-  assert.equal(scry.cached('Sol Ring'), sol, 'by name too, for views that aggregate by name');
-  assert.equal(scry.cached('Unsynced', 'X', '1'), null);
-  const [card] = await scry.collection([{ name: 'Sol Ring', set: 'C21', collector_number: '263' }]);
-  assert.equal(card, sol);
-  assert.equal(calls.length, 0);
-});
-
 test('lookups stay in memory, and the old localStorage card caches are removed', async () => {
   const store = new Map([['scry_cache_v3', '{}'], ['scry_cache_v2', '{}'], ['vault_tweaks', 'keep']]);
   const scry = load({ data: [fireIce], not_found: [] }, store);
@@ -66,14 +43,4 @@ test('lookups stay in memory, and the old localStorage card caches are removed',
   await new Promise((r) => setTimeout(r, 300));
   assert.deepEqual([...store.keys()], ['vault_tweaks']);
   assert.equal(scry.cached('Fire').name, 'Fire // Ice');
-});
-
-test('a forced refresh asks the Vault even for owned cards, and its answer wins', async () => {
-  const calls = [];
-  const fresh = { ...fireIce, prices: { usd: '0.75' } };
-  const scry = load({ data: [fresh], not_found: [] }, new Map(), calls);
-  scry.own([{ n: 'Fire // Ice', s: 'MH2', cn: '290', scry: { name: 'Fire // Ice', prices: { usd: '0.50' } } }]);
-  await scry.collection([{ name: 'Fire // Ice', set: 'MH2', collector_number: '290' }], null, { force: true });
-  assert.equal(calls.length, 1);
-  assert.equal(scry.cached('Fire // Ice', 'MH2', '290').prices.usd, '0.75');
 });

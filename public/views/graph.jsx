@@ -17,7 +17,35 @@ const TYPE_SHAPE = {
   Battle: 'star'
 };
 
+// Every colour the server knows: asking for all of them leaves out names with no card data yet.
+const GRAPH_COLORS = ['W', 'U', 'B', 'R', 'G', 'M', 'C'];
+
+// A /collection/names row as a graph node. Positions and edges are drawn here; the numbers
+// (copies, value, unit price, colour, type, mana value) are the server's.
+function graphNode(x, i) {
+  return {
+    id: 'c_' + i + '_' + x.name.toLowerCase().replace(/[^a-z0-9]/gi, '_'),
+    name: x.name,
+    qty: x.copies,
+    value: x.market_value,
+    unit: x.unit_price,
+    color: x.color,
+    ci: x.color_identity || [],
+    cmc: x.cmc ?? 0,
+    type: x.type,
+    rarity: x.rarity,
+    sets: x.sets || [],
+    set: (x.sets || [])[0] || '',
+    scry: x.image ? { img_normal: x.image.normal, img_small: x.image.small, artist: x.image.artist } : null,
+  };
+}
+
+// The colour key of a card's colour identity (W, U, B, R, G; M multicolour; C colourless), for
+// placing deck cards that aren't among the nodes.
+const graphColorKey = (ci) => (!ci || !ci.length ? 'C' : ci.length === 1 ? ci[0] : 'M');
+
 function GraphView({ data, openCard }) {
+  const api = data.api;
   const containerRef = useRefG(null);
   const cyRef = useRefG(null);
   const [mode, setMode] = useStateG('color'); // color | set | type | scatter | affinity | hierarchy | deck
@@ -28,66 +56,25 @@ function GraphView({ data, openCard }) {
   const [deck, setDeck] = useStateG(null); // {title, rows}
   const [deckUrl, setDeckUrl] = useStateG('https://archidekt.com/decks/5292775/the_dragon_in_the_night');
 
-  // Aggregate by unique card name (using byName index) and join with the card data the
-  // collection came with (kept in Postgres by the daily sync)
-  const nodes = useMemoG(() => {
-    const out = [];
-    for (const [k, agg] of Object.entries(data.byName)) {
-      const e = agg.entries[0];
-      const scry = window.Scryfall.cached(agg.name, e.s, e.cn) || window.Scryfall.cached(agg.name);
-      if (!scry) continue;
-      const ci = scry.color_identity || [];
-      const colorKey = ci.length === 0 ? 'C' : ci.length === 1 ? ci[0] : 'M';
-      const mainType = (scry.type_line || '').split(' — ')[0].split(' ').pop() || 'Other';
-      out.push({
-        id: 'c_' + k.replace(/[^a-z0-9]/gi, '_'),
-        name: agg.name,
-        qty: agg.total,
-        value: agg.value,
-        unit: agg.entries.reduce((s, e) => s + e.q * e.mk, 0) / Math.max(1, agg.total),
-        color: colorKey,
-        ci,
-        cmc: scry.cmc ?? 0,
-        type: mainType,
-        rarity: scry.rarity,
-        set: e.s,
-        scry,
-        entries: agg.entries,
-        firstCardObj: { n: agg.name, s: e.s, cn: e.cn, sn: e.sn, p: e.p, c: e.c, l: 'English', q: agg.total, mk: e.mk, lo: 0, mi: 0, pd: 0, fd: '', ld: '' }
-      });
-    }
-    return out;
-  }, [data]);
+  // The nodes: the server's top names by value, filtered there by colour and price (min value),
+  // as many as the depth asks for (GET /collection/names).
+  const at = [api.base, data.meta.version];
+  const colors = colorFilter.size ? GRAPH_COLORS.filter((c) => colorFilter.has(c)) : GRAPH_COLORS;
+  const filters = { colors, min_value: minValue || null };
+  const filtersKey = colors.join(',') + '|' + minValue;
+  const res = window.useVaultQuery(() => api.names({ ...filters, sort: '-value' }, topN), [...at, filtersKey, topN]);
+  const filteredNodes = useMemoG(() => (res.data ? res.data.items.map(graphNode) : []), [res.data]);
+  // How many names match the colour + price filter before the top-N depth cap (the server's total)
+  const matchCount = res.data ? res.data.total : 0;
+  // Names with card data / every name (names without card data have type "unknown")
+  const counts = window.useVaultQuery(async () => {
+    const [every, unknown] = await Promise.all([api.names({}, 1), api.names({ type: 'unknown' }, 1)]);
+    return { names: every.total, withData: every.total - unknown.total };
+  }, at).data || { names: 0, withData: 0 };
+  const withData = counts.withData; // unique names whose card data the server has
 
-  const withData = nodes.length; // unique names whose card data the server has
-
-  // Filtered nodes
-  const filteredNodes = useMemoG(() => {
-    let out = nodes;
-    if (colorFilter.size > 0) {
-      out = out.filter((n) => {
-        if (n.color === 'C') return colorFilter.has('C');
-        if (n.color === 'M') return n.ci.some((c) => colorFilter.has(c)) || colorFilter.has('M');
-        return colorFilter.has(n.color);
-      });
-    }
-    out = out.filter((n) => n.value >= minValue);
-    out = out.slice().sort((a, b) => b.value - a.value).slice(0, topN);
-    return out;
-  }, [nodes, topN, minValue, colorFilter]);
-
-  // How many cards match the color + price filter BEFORE the top-N depth cap
-  const matchCount = useMemoG(() => {
-    let out = nodes;
-    if (colorFilter.size > 0) {
-      out = out.filter((n) => {
-        if (n.color === 'C') return colorFilter.has('C');
-        if (n.color === 'M') return n.ci.some((c) => colorFilter.has(c)) || colorFilter.has('M');
-        return colorFilter.has(n.color);
-      });
-    }
-    return out.filter((n) => n.value >= minValue).length;
-  }, [nodes, minValue, colorFilter]);
+  // Open a card name's most valuable printing (nodes are names, not printings).
+  const openName = (name) => api.topPrinting(name).then((c) => c && openCard(c)).catch(() => {});
 
   // Deck overlay: which nodes are in the loaded deck?
   const deckSet = useMemoG(() => {
@@ -100,7 +87,15 @@ function GraphView({ data, openCard }) {
   async function loadDeck() {
     try {
       const d = await window.DeckSrc.fetchUrl(deckUrl.trim());
-      setDeck({ title: d.title, rows: d.cards });
+      // What you own of it comes from the server's coverage; colours from the cards' data.
+      const [cov, scry] = await Promise.all([
+        window.VaultApi.deckCoverage(deckListText(d.cards)),
+        window.Scryfall.collection(d.cards.map((c) => ({ name: c.name, set: c.set, collector_number: c.collector_number }))),
+      ]);
+      const lines = coverageFor(d.cards, cov.cards);
+      const rows = d.cards.map((c, i) => ({ ...c, scry: scry[i], owned: lines[i] ? lines[i].have : 0,
+        missing: lines[i] ? lines[i].missing : c.qty, unit: lines[i] ? lines[i].unit_price : null }));
+      setDeck({ title: d.title, rows });
       setMode('deck');
     } catch (e) {
       alert('Could not load deck: ' + e.message);
@@ -212,31 +207,6 @@ function GraphView({ data, openCard }) {
           elements.push({ ...nodeStyle(n), position: { x: px, y: py } });
         });
       }
-    } else if (mode === 'type') {
-      const groups = {};
-      for (const n of filteredNodes) (groups[n.type] = groups[n.type] || []).push(n);
-      for (const t of Object.keys(groups)) {
-        if (groups[t].length === 0) continue;
-        const pid = 'p_' + t.replace(/[^a-z0-9]/gi, '_');
-        parents.add(pid);
-        elements.push({ data: { id: pid, label: t, isParent: true } });
-        for (const n of groups[t]) elements.push(nodeStyle({ ...n, _parent: pid }));
-      }
-    } else if (mode === 'set') {
-      const groups = {};
-      for (const n of filteredNodes) (groups[n.set] = groups[n.set] || []).push(n);
-      // Sort sets by total value, take top 15 to avoid overcrowding
-      const sortedSets = Object.entries(groups).sort((a, b) => {
-        const va = a[1].reduce((s, n) => s + n.value, 0);
-        const vb = b[1].reduce((s, n) => s + n.value, 0);
-        return vb - va;
-      }).slice(0, 15);
-      for (const [s, list] of sortedSets) {
-        const pid = 'p_' + s;
-        parents.add(pid);
-        elements.push({ data: { id: pid, label: s, isParent: true } });
-        for (const n of list) elements.push(nodeStyle({ ...n, _parent: pid }));
-      }
     } else if (mode === 'scatter') {
       // Mana value × log(price). Add deterministic horizontal jitter so cards spread out.
       const W = (containerRef.current?.clientWidth || 1200) - 80;
@@ -258,13 +228,13 @@ function GraphView({ data, openCard }) {
       const nlist = filteredNodes;
       const setIdx = {},typeIdx = {},colorIdx = {};
       nlist.forEach((n, i) => {
-        (setIdx[n.set] = setIdx[n.set] || []).push(i);
+        for (const code of n.sets) (setIdx[code] = setIdx[code] || []).push(i);
         (typeIdx[n.type] = typeIdx[n.type] || []).push(i);
         (colorIdx[n.color] = colorIdx[n.color] || []).push(i);
       });
       function sim(a, b) {
         let s = 0;
-        if (a.set === b.set) s += 3.0;
+        if (a.sets.some((code) => b.sets.includes(code))) s += 3.0;
         if (a.type === b.type) s += 2.0;
         if (a.color === b.color) s += 1.5;
         if (a.rarity && a.rarity === b.rarity) s += 0.5;
@@ -278,7 +248,7 @@ function GraphView({ data, openCard }) {
       for (let i = 0; i < nlist.length; i++) {
         const a = nlist[i];
         const cand = new Set([
-        ...(setIdx[a.set] || []),
+        ...a.sets.flatMap((code) => setIdx[code] || []),
         ...(typeIdx[a.type] || []),
         ...(colorIdx[a.color] || [])]
         );
@@ -304,30 +274,17 @@ function GraphView({ data, openCard }) {
           });
         });
       }
-    } else if (mode === 'hierarchy') {
-      // One-level compound nesting by color; type encoded via node shape (legible without nested grey rects).
-      const byColor = {};
-      for (const n of filteredNodes) (byColor[n.color] = byColor[n.color] || []).push(n);
-      for (const c of Object.keys(byColor)) {
-        const cp = 'p_color_' + c;
-        elements.push({ data: { id: cp, label: COLOR_NAME[c], isParent: true } });
-        for (const n of byColor[c]) elements.push(nodeStyle({ ...n, _parent: cp }));
-      }
     } else if (mode === 'deck' && deck) {
-      // Show only deck cards. Use byName for owned check.
+      // Show only deck cards; what you own of each is the server's coverage (loadDeck).
       const deckRows = deck.rows.map((r) => {
         const key = r.name.toLowerCase().trim();
-        const node = nodes.find((n) => n.name.toLowerCase().trim() === key);
-        const ownAgg = data.byName[key];
-        const owned = ownAgg?.total || 0;
-        return { ...r, node, owned, missing: Math.max(0, r.qty - owned) };
+        const node = filteredNodes.find((n) => n.name.toLowerCase().trim() === key);
+        const color = node ? node.color : r.scry ? graphColorKey(r.scry.color_identity) : '?';
+        return { ...r, node, color };
       });
-      // Group by color of node (if it has card data) else by 'unknown'
+      // Group by color (from the card data) else by 'unknown'
       const groups = { W: [], U: [], B: [], R: [], G: [], M: [], C: [], '?': [] };
-      for (const r of deckRows) {
-        const c = r.node?.color || '?';
-        groups[c].push(r);
-      }
+      for (const r of deckRows) groups[r.color in groups ? r.color : '?'].push(r);
       for (const k of Object.keys(groups)) {
         if (groups[k].length === 0) continue;
         const pid = 'p_' + k;
@@ -335,14 +292,14 @@ function GraphView({ data, openCard }) {
         elements.push({ data: { id: pid, label: COLOR_NAME[k] || 'Unknown', isParent: true } });
         for (const r of groups[k]) {
           const id = 'dk_' + r.name.replace(/[^a-z0-9]/gi, '_');
-          const radius = Math.max(8, Math.min(60, Math.sqrt(r.node?.unit || 1) * 5 + 8));
+          const radius = Math.max(8, Math.min(60, Math.sqrt(r.unit || 1) * 5 + 8));
           elements.push({
             data: {
               id, label: r.name, parent: pid,
               radius,
-              color: r.node ? COLOR_FILL[r.node.color] : '#444',
+              color: COLOR_FILL[r.color] || '#444',
               inDeck: r.missing > 0 ? 'missing' : 'owned',
-              card: r.node || { firstCardObj: { n: r.name, s: r.set || '?', cn: r.collector_number || '', sn: '', p: 'Normal', c: 'Mint', q: r.owned, mk: 0, l: 'English' } },
+              card: r.node || { name: r.name, scry: r.scry, qty: r.owned, value: null },
               deckQty: r.qty,
               owned: r.owned
             }
@@ -459,7 +416,7 @@ function GraphView({ data, openCard }) {
     cy.on('tap', 'node', (evt) => {
       const d = evt.target.data();
       if (d.isParent || d.isAnchor) return;
-      if (d.card?.firstCardObj) openCard(d.card.firstCardObj);
+      if (d.card?.name) openName(d.card.name);
     });
     cy.on('mouseover', 'node', (evt) => {
       const d = evt.target.data();
@@ -493,7 +450,7 @@ function GraphView({ data, openCard }) {
           <p className="label-mono">Cards with data</p>
           <p style={{ fontFamily: 'var(--mono)', fontSize: 13, marginTop: 4 }}>
             <span style={{ color: 'var(--gold)' }}>{withData.toLocaleString()}</span>
-            <span className="muted"> / {Object.keys(data.byName).length.toLocaleString()} unique names</span>
+            <span className="muted"> / {counts.names.toLocaleString()} unique names</span>
           </p>
         </div>
       </div>
@@ -573,11 +530,11 @@ function GraphView({ data, openCard }) {
       {/* Canvas + hover */}
       <div className="panel panel-flush" style={{ height: 'calc(100vh - 420px)', minHeight: 520, position: 'relative', overflow: mode === 'hierarchy' || mode === 'set' || mode === 'type' ? 'auto' : 'hidden' }}>
         {mode === 'hierarchy' ?
-        <HierarchyMatrix nodes={filteredNodes} openCard={openCard} /> :
+        <HierarchyMatrix data={data} nodes={filteredNodes} openName={openName} /> :
         mode === 'set' ?
-        <SetConstellation data={data} nodes={nodes} filteredNodes={filteredNodes} openCard={openCard} /> :
+        <SetConstellation data={data} filteredNodes={filteredNodes} openCard={openCard} /> :
         mode === 'type' ?
-        <TypeRoster data={data} filteredNodes={filteredNodes} openCard={openCard} /> :
+        <TypeRoster data={data} filters={filters} filtersKey={filtersKey} openName={openName} /> :
 
         <div ref={containerRef} style={{ width: '100%', height: '100%', background: 'oklch(0.14 0.012 60)' }}></div>
         }
@@ -614,7 +571,7 @@ function GraphView({ data, openCard }) {
               <div style={{ fontFamily: 'var(--display)', fontSize: 14, fontWeight: 600 }}>{hover.d.label}</div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
                 <span>×{hover.d.card?.qty ?? hover.d.deckQty ?? '?'}</span>
-                <span style={{ color: 'var(--gold)' }}>${(hover.d.card?.value ?? 0).toFixed(2)}</span>
+                <span style={{ color: 'var(--gold)' }}>{hover.d.card?.value != null ? `$${hover.d.card.value.toFixed(2)}` : ''}</span>
               </div>
             </div>
           </div>
@@ -668,92 +625,40 @@ function GraphView({ data, openCard }) {
 
 }
 
-function SetConstellation({ data, nodes, filteredNodes, openCard }) {
-  const [selected, setSelected] = useStateG(data.sets[0]?.code || null);
+function SetConstellation({ data, filteredNodes, openCard }) {
+  const api = data.api;
+  const [selected, setSelected] = useStateG(null);
   const [hover, setHover] = useStateG(null);
   const [valueMode, setValueMode] = useStateG('total'); // 'total' | 'unit'
 
-  // Build per-set color distribution from nodes with card data
-  const setColorMix = useMemoG(() => {
-    const out = {};
-    for (const n of nodes) {
-      if (!out[n.set]) out[n.set] = { W: 0, U: 0, B: 0, R: 0, G: 0, M: 0, C: 0 };
-      out[n.set][n.color] += n.value;
-    }
-    return out;
-  }, [nodes]);
+  // Every set with its value, copies and colour mix, from the server (most valuable first).
+  const all = (window.useVaultQuery(() => api.sets(), [api.base, data.meta.version]).data || { items: [] }).items;
+  // Sets holding a name in the current filter (colour, price tier, depth) come first, lit up.
+  const matching = useMemoG(() => new Set(filteredNodes.flatMap((n) => n.sets)), [filteredNodes]);
+  const sets = useMemoG(() => [...all.filter((s) => matching.has(s.code)), ...all.filter((s) => !matching.has(s.code))],
+    [all, matching]);
+  const maxV = all[0]?.value || 1;
 
-  // Per-set stats LIMITED to the active filter (min value / top N / color).
-  // Walks the per-printing `entries` of each filtered unique-card node so a card
-  // that lives in many sets contributes to each set it actually appears in.
-  const filteredSetStats = useMemoG(() => {
-    const out = {};
-    const unique = {};
-    for (const n of filteredNodes) {
-      for (const e of (n.entries || [])) {
-        const k = e.s;
-        if (!out[k]) { out[k] = { qty: 0, value: 0 }; unique[k] = new Set(); }
-        out[k].qty += e.q;
-        out[k].value += e.q * e.mk;
-        unique[k].add(n.name);
-      }
+  // The colour with the most copies in a set (the server's per-set colour mix)
+  function dominantColor(s) {
+    let best = null, bestV = 0;
+    for (const k of Object.keys(COLOR_FILL)) {
+      if ((s.colors[k] || 0) > bestV) { best = k; bestV = s.colors[k]; }
     }
-    const result = {};
-    for (const k of Object.keys(out)) {
-      result[k] = { qty: out[k].qty, value: out[k].value, unique: unique[k].size };
-    }
-    return result;
-  }, [filteredNodes]);
-
-  function dominantColor(code) {
-    const mix = setColorMix[code];
-    if (!mix) return '#7a7770'; // unknown / no card data yet
-    let best = 'M',bestV = -1;
-    for (const k of Object.keys(mix)) {
-      if (mix[k] > bestV) {best = k;bestV = mix[k];}
-    }
-    return COLOR_FILL[best] || '#7a7770';
+    return best ? COLOR_FILL[best] : '#7a7770'; // unknown / no card data yet
   }
 
-  // Sort all sets by FILTERED value; sets not in filter sink to bottom
-  const sets = useMemoG(() => {
-    return data.sets.slice().sort((a, b) => {
-      const va = filteredSetStats[a.code]?.value || 0;
-      const vb = filteredSetStats[b.code]?.value || 0;
-      return vb - va;
-    });
-  }, [data, filteredSetStats]);
-  const maxV = filteredSetStats[sets[0]?.code]?.value || sets[0]?.value || 1;
-
   const selectedSet = sets.find((s) => s.code === selected) || sets[0];
-  const selectedStats = selectedSet ? (filteredSetStats[selectedSet.code] || { qty: 0, value: 0, unique: 0 }) : null;
 
-  // Top cards for selected set (filtered to the active filter via filteredNodes)
-  const filteredNamesInSet = useMemoG(() => {
-    if (!selectedSet) return new Set();
-    const out = new Set();
-    for (const n of filteredNodes) {
-      for (const e of (n.entries || [])) {
-        if (e.s === selectedSet.code) { out.add(n.name); break; }
-      }
-    }
-    return out;
-  }, [filteredNodes, selectedSet]);
+  // Top printings of the selected set: the server's most valuable; "Unit value" orders the
+  // set's 60 most valuable printings by their price each.
+  const top = window.useVaultQuery(() => (selectedSet ? api.cards({ set: selectedSet.code, sort: '-value', limit: valueMode === 'unit' ? 60 : 6 }) : null),
+    [api.base, data.meta.version, selectedSet?.code, valueMode]).data;
+  const topCards = top ? (valueMode === 'unit' ? top.items.slice().sort((a, b) => b.mk - a.mk) : top.items).slice(0, 6) : [];
 
-  const topCards = useMemoG(() => {
-    if (!selectedSet) return [];
-    const sortKey = valueMode === 'unit'
-      ? (a, b) => b.mk - a.mk
-      : (a, b) => b.mk * b.q - a.mk * a.q;
-    return data.cards
-      .filter((c) => c.s === selectedSet.code && filteredNamesInSet.has(c.n))
-      .sort(sortKey)
-      .slice(0, 6);
-  }, [data, selectedSet, filteredNamesInSet, valueMode]);
-
-  // Color breakdown for selected set
-  const selectedMix = selectedSet ? setColorMix[selectedSet.code] : null;
-  const mixTotal = selectedMix ? Object.values(selectedMix).reduce((a, b) => a + b, 0) : 0;
+  // Color breakdown for selected set: copies by colour identity
+  const selectedMix = selectedSet ? selectedSet.colors : null;
+  const mixTotal = selectedMix ? Object.keys(COLOR_FILL).reduce((a, k) => a + (selectedMix[k] || 0), 0) : 0;
 
   return (
     <div style={{ padding: 18 }}>
@@ -769,25 +674,25 @@ function SetConstellation({ data, nodes, filteredNodes, openCard }) {
               <div style={{ fontFamily: 'var(--display)', fontSize: 24, fontWeight: 600, marginTop: 6 }}>{selectedSet.name}</div>
             </div>
             <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
-              <Stat2 label={`Value (filtered)`} v={`$${selectedStats.value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} color="var(--gold)" />
-              <Stat2 label="Cards" v={selectedStats.qty.toLocaleString()} />
-              <Stat2 label="Unique" v={selectedStats.unique.toLocaleString()} />
+              <Stat2 label="Value" v={`$${selectedSet.value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} color="var(--gold)" />
+              <Stat2 label="Cards" v={selectedSet.qty.toLocaleString()} />
+              <Stat2 label="Unique" v={selectedSet.unique.toLocaleString()} />
             </div>
           </div>
 
           {/* Color mix bar */}
           {selectedMix && mixTotal > 0 &&
         <div style={{ marginBottom: 18 }}>
-              <p className="label-mono" style={{ marginBottom: 6 }}>Color identity by value</p>
+              <p className="label-mono" style={{ marginBottom: 6 }}>Color identity by cards</p>
               <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', border: '1px solid var(--border)' }}>
                 {['W', 'U', 'B', 'R', 'G', 'M', 'C'].map((k) => {
-              const pct = mixTotal > 0 ? selectedMix[k] / mixTotal * 100 : 0;
+              const pct = mixTotal > 0 ? (selectedMix[k] || 0) / mixTotal * 100 : 0;
               if (pct < 0.1) return null;
               return (
                 <div
                   key={k}
                   style={{ width: `${pct}%`, background: COLOR_FILL[k] }}
-                  title={`${COLOR_NAME[k]} — $${selectedMix[k].toFixed(2)}`} />);
+                  title={`${COLOR_NAME[k]} — ${selectedMix[k].toLocaleString()} cards`} />);
 
 
             })}
@@ -804,7 +709,7 @@ function SetConstellation({ data, nodes, filteredNodes, openCard }) {
             </div>
           </div>
           {topCards.length === 0 ?
-        <p className="muted" style={{ fontSize: 13 }}>No cards from this set in the current filter.</p> :
+        <p className="muted" style={{ fontSize: 13 }}>No cards from this set.</p> :
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10 }}>
               {topCards.map((c) =>
@@ -817,7 +722,7 @@ function SetConstellation({ data, nodes, filteredNodes, openCard }) {
 
       {/* Bubble cloud BELOW */}
       <p className="label-mono" style={{ marginBottom: 8 }}>
-        Pick a set ({sets.filter((s) => (filteredSetStats[s.code]?.value || 0) > 0).length} match filter / {sets.length} total)
+        Pick a set ({matching.size} match filter / {sets.length} total)
       </p>
       <div style={{
         padding: '14px 8px',
@@ -827,19 +732,19 @@ function SetConstellation({ data, nodes, filteredNodes, openCard }) {
         border: '1px solid var(--border)'
       }}>
         {sets.map((s) => {
-          const fStats = filteredSetStats[s.code] || { qty: 0, value: 0, unique: 0 };
-          const r = fStats.value > 0
-            ? Math.max(28, Math.min(80, Math.sqrt(fStats.value / maxV) * 80 + 22))
+          const r = s.value > 0
+            ? Math.max(28, Math.min(80, Math.sqrt(s.value / maxV) * 80 + 22))
             : 22;
-          const isSel = selected === s.code;
-          const dColor = dominantColor(s.code);
-          const dimmed = fStats.value === 0;
+          const isSel = selectedSet && selectedSet.code === s.code;
+          const dColor = dominantColor(s);
+          const dimmed = !matching.has(s.code);
           return (
             <button
               key={s.code}
               onClick={() => setSelected(s.code)}
-              onMouseEnter={(e) => setHover({ s, stats: fStats, x: e.clientX, y: e.clientY })}
-              onMouseMove={(e) => setHover({ s, stats: fStats, x: e.clientX, y: e.clientY })}
+              aria-pressed={!!isSel}
+              onMouseEnter={(e) => setHover({ s, x: e.clientX, y: e.clientY })}
+              onMouseMove={(e) => setHover({ s, x: e.clientX, y: e.clientY })}
               onMouseLeave={() => setHover(null)}
               style={{
                 width: r, height: r, borderRadius: '50%',
@@ -862,7 +767,7 @@ function SetConstellation({ data, nodes, filteredNodes, openCard }) {
               </div>
               {r > 44 &&
               <div style={{ fontFamily: 'var(--mono)', fontSize: r > 60 ? 10 : 8, opacity: 0.85, marginTop: 1 }}>
-                  ${fStats.value.toFixed(0)}
+                  ${s.value.toFixed(0)}
                 </div>
               }
             </button>);
@@ -883,7 +788,7 @@ function SetConstellation({ data, nodes, filteredNodes, openCard }) {
           <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--gold)', letterSpacing: '0.06em' }}>{hover.s.code}</div>
           <div style={{ fontFamily: 'var(--display)', fontSize: 14, fontWeight: 600, marginTop: 2 }}>{hover.s.name}</div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-            {(hover.stats?.qty ?? hover.s.qty)} cards · {(hover.stats?.unique ?? hover.s.unique)} unique · <span style={{ color: 'var(--gold)' }}>${(hover.stats?.value ?? hover.s.value).toFixed(0)}</span>
+            {hover.s.qty} cards · {hover.s.unique} unique · <span style={{ color: 'var(--gold)' }}>${hover.s.value.toFixed(0)}</span>
           </div>
         </div>
       }
@@ -901,17 +806,18 @@ function Stat2({ label, v, color }) {
 }
 
 function SetCardThumb({ c, onClick, valueMode = 'total' }) {
-  const [scry, setScry] = useStateG(() => window.Scryfall.cached(c.n, c.s, c.cn));
+  const [scry, setScry] = useStateG(() => c.scry || window.Scryfall.cached(c.n, c.s, c.cn));
   useEffectG(() => {
     // Reset state when card identity changes so the wrong image isn't shown for a different set/printing
-    setScry(window.Scryfall.cached(c.n, c.s, c.cn));
+    setScry(c.scry || window.Scryfall.cached(c.n, c.s, c.cn));
+    if (c.scry) return;
     let dead = false;
     window.Scryfall.collection([{ name: c.n, set: c.s, collector_number: c.cn }]).then((arr) => {
       if (!dead && arr[0]) setScry(arr[0]);
     });
     return () => {dead = true;};
   }, [c.n, c.s, c.cn]);
-  const total = (c.mk * c.q).toFixed(2);
+  const total = (c.v != null ? c.v : c.mk * c.q).toFixed(2);
   const unit = c.mk.toFixed(2);
   return (
     <button onClick={onClick} style={{ padding: 0, background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
@@ -936,35 +842,30 @@ function SetCardThumb({ c, onClick, valueMode = 'total' }) {
 
 }
 
-function TypeRoster({ data, filteredNodes, openCard }) {
+function TypeRoster({ data, filters, filtersKey, openName }) {
+  const api = data.api;
   const TYPES = ['Creature', 'Land', 'Artifact', 'Enchantment', 'Instant', 'Sorcery', 'Planeswalker', 'Battle'];
-  const stats = useMemoG(() => {
-    const out = {};
-    for (const t of TYPES) out[t] = { qty: 0, value: 0, unique: 0, colors: { W: 0, U: 0, B: 0, R: 0, G: 0, M: 0, C: 0 }, candidates: [] };
-    for (const n of filteredNodes) {
-      const t = TYPES.includes(n.type) ? n.type : null;
-      if (!t) continue;
-      out[t].qty += n.qty;
-      out[t].value += n.value;
-      out[t].unique += 1;
-      out[t].colors[n.color] += n.value;
-      const bestEntry = (n.entries || []).slice().sort((a, b) => b.q * b.mk - a.q * a.mk)[0];
-      if (bestEntry) {
-        out[t].candidates.push({
-          n: n.name, s: bestEntry.s, sn: bestEntry.sn, cn: bestEntry.cn,
-          p: bestEntry.p, c: bestEntry.c, l: 'English',
-          q: bestEntry.q, mk: bestEntry.mk, lo: 0, mi: 0, pd: 0, fd: '', ld: '',
-          total: bestEntry.q * bestEntry.mk
-        });
-      }
-    }
-    return out;
-  }, [filteredNodes]);
+  const at = [api.base, data.meta.version];
+  // Copies and value per type, and each type's colour mix (colour × type), from the server.
+  const breakdowns = window.useVaultQuery(() => api.breakdowns(), at).data;
+  // Each type's most valuable names in the current colour and price filter, and how many there are.
+  const tops = window.useVaultQuery(() => Promise.all(TYPES.map((t) => api.names({ ...filters, type: t, sort: '-value' }, 4))),
+    [...at, filtersKey]).data;
 
-  const totalValue = TYPES.reduce((s, t) => s + stats[t].value, 0);
-  const rows = TYPES.
-  map((t) => ({ type: t, ...stats[t], top: stats[t].candidates.sort((a, b) => b.total - a.total).slice(0, 4) })).
-  sort((a, b) => b.value - a.value);
+  const totalValue = breakdowns ? breakdowns.totals.market_value : 0;
+  const rows = TYPES.map((t, i) => {
+    const b = (breakdowns?.types || []).find((x) => x.key === t) || { copies: 0, market_value: 0 };
+    const colors = {};
+    for (const cell of breakdowns?.matrix || []) if (cell.type === t) colors[cell.color] = cell.market_value;
+    const names = tops ? tops[i] : null;
+    return {
+      type: t, qty: b.copies, value: b.market_value, colors, unique: names ? names.total : 0,
+      top: (names ? names.items : []).map((x) => ({
+        n: x.name, s: x.sets.length === 1 ? x.sets[0] : '', cn: '', q: x.copies, mk: x.unit_price, v: x.market_value,
+        scry: x.image ? { img_normal: x.image.normal, img_small: x.image.small, artist: x.image.artist } : null,
+      })),
+    };
+  }).sort((a, b) => b.value - a.value);
   const maxValue = rows[0]?.value || 1;
 
   return (
@@ -983,12 +884,12 @@ function TypeRoster({ data, filteredNodes, openCard }) {
               <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', width: 22 }}>—</span>
               <TypeGlyph type={r.type} size={22} />
               <div style={{ fontFamily: 'var(--display)', fontSize: 18, fontWeight: 600 }}>{r.type}</div>
-              <div className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', marginLeft: 'auto' }}>none in this view — widen depth, price tier or colors</div>
+              <div className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', marginLeft: 'auto' }}>none in your collection</div>
             </div>
           );
           const pct = totalValue > 0 ? (r.value / totalValue) * 100 : 0;
           const barPct = (r.value / maxValue) * 100;
-          const colorTotal = Object.values(r.colors).reduce((a, b) => a + b, 0) || 1;
+          const colorTotal = Object.keys(COLOR_FILL).reduce((a, k) => a + (r.colors[k] || 0), 0) || 1;
           return (
             <div key={r.type} style={{
               background: 'var(--surface)',
@@ -1028,7 +929,7 @@ function TypeRoster({ data, filteredNodes, openCard }) {
                     ${r.value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                   </span>
                   <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)' }}>
-                    {pct.toFixed(1)}% of filtered value
+                    {pct.toFixed(1)}% of collection value
                   </span>
                 </div>
                 <div style={{ position: 'relative', height: 6, background: 'oklch(0.30 0.014 65)', borderRadius: 3, overflow: 'hidden', marginBottom: 8 }}>
@@ -1036,7 +937,7 @@ function TypeRoster({ data, filteredNodes, openCard }) {
                 </div>
                 <div style={{ display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', border: '1px solid var(--border)' }}>
                   {['W','U','B','R','G','M','C'].map(k => {
-                    const cp = (r.colors[k] / colorTotal) * 100;
+                    const cp = ((r.colors[k] || 0) / colorTotal) * 100;
                     if (cp < 0.5) return null;
                     return <div key={k} style={{ width: `${cp}%`, background: COLOR_FILL[k] }} title={`${COLOR_NAME[k]} — $${r.colors[k].toFixed(0)} (${cp.toFixed(1)}%)`} />;
                   })}
@@ -1046,7 +947,7 @@ function TypeRoster({ data, filteredNodes, openCard }) {
               {/* Right: top thumbnails */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
                 {r.top.map((c, i) => (
-                  <SetCardThumb key={`${r.type}-${c.s}-${c.cn}-${i}`} c={c} valueMode="unit" onClick={() => openCard(c)} />
+                  <SetCardThumb key={`${r.type}-${c.n}-${i}`} c={c} valueMode="unit" onClick={() => openName(c.n)} />
                 ))}
                 {Array.from({ length: 4 - r.top.length }).map((_, i) => (
                   <div key={`empty-${i}`} style={{ aspectRatio: '488 / 680', background: 'var(--bg-2)', border: '1px dashed var(--border)', borderRadius: 4, opacity: 0.4 }}></div>
@@ -1085,45 +986,28 @@ function TypeGlyph({ type, size = 24 }) {
 
 window.GraphView = GraphView;
 
-function HierarchyMatrix({ nodes, openCard }) {
+function HierarchyMatrix({ data, nodes, openName }) {
+  const api = data.api;
   const COLORS = ['W', 'U', 'B', 'R', 'G', 'M', 'C'];
   const TYPES = ['Creature', 'Land', 'Artifact', 'Enchantment', 'Instant', 'Sorcery', 'Planeswalker', 'Battle'];
   const [hover, setHover] = useStateG(null);
+  // Copies and value per colour × type, per colour and per type: the server's (whole collection)
+  const breakdowns = window.useVaultQuery(() => api.breakdowns(), [api.base, data.meta.version]).data;
+  const zero = { copies: 0, market_value: 0 };
+  const cellOf = (c, t) => (breakdowns?.matrix || []).find((x) => x.color === c && x.type === t) || zero;
+  const rowTotals = {}, colTotals = {};
+  for (const c of COLORS) rowTotals[c] = (breakdowns?.colors || []).find((x) => x.key === c) || zero;
+  for (const t of TYPES) colTotals[t] = (breakdowns?.types || []).find((x) => x.key === t) || zero;
+  const grand = breakdowns ? breakdowns.totals.market_value : 0;
 
-  // Bucket cards into matrix
+  // The dots: the nodes in view (top names by value, in the current filter), placed in their cell
   const matrix = {};
-  const colTotals = {};
-  const rowTotals = {};
-  let grand = 0;
-  for (const c of COLORS) {matrix[c] = {};rowTotals[c] = { qty: 0, value: 0 };}
-  for (const t of TYPES) colTotals[t] = { qty: 0, value: 0 };
-  for (const c of COLORS) for (const t of TYPES) matrix[c][t] = [];
-
-  for (const n of nodes) {
-    if (!matrix[n.color]) continue;
-    const bucket = TYPES.includes(n.type) ? n.type : null;
-    if (!bucket) continue;
-    matrix[n.color][bucket].push(n);
-  }
-
-  for (const c of COLORS) {
-    for (const t of TYPES) {
-      const list = matrix[c][t];
-      const sum = list.reduce((s, n) => s + n.value, 0);
-      rowTotals[c].qty += list.length;
-      rowTotals[c].value += sum;
-      colTotals[t].qty += list.length;
-      colTotals[t].value += sum;
-      grand += sum;
-    }
-  }
+  for (const c of COLORS) { matrix[c] = {}; for (const t of TYPES) matrix[c][t] = []; }
+  for (const n of nodes) if (matrix[n.color] && matrix[n.color][n.type]) matrix[n.color][n.type].push(n);
 
   // Max cell value, for normalizing background heat
   let maxCellValue = 0;
-  for (const c of COLORS) for (const t of TYPES) {
-    const v = matrix[c][t].reduce((s, n) => s + n.value, 0);
-    if (v > maxCellValue) maxCellValue = v;
-  }
+  for (const c of COLORS) for (const t of TYPES) maxCellValue = Math.max(maxCellValue, cellOf(c, t).market_value);
 
   return (
     <div style={{ padding: 14, position: 'relative' }}>
@@ -1138,7 +1022,7 @@ function HierarchyMatrix({ nodes, openCard }) {
         <div key={t} style={{ textAlign: 'center', padding: 6, borderBottom: '1px solid var(--border)' }}>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{t}</div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
-              {colTotals[t].qty} · ${colTotals[t].value.toFixed(0)}
+              {colTotals[t].copies} · ${colTotals[t].market_value.toFixed(0)}
             </div>
           </div>
         )}
@@ -1151,7 +1035,7 @@ function HierarchyMatrix({ nodes, openCard }) {
         <React.Fragment key={c}>
             <div style={{ padding: 6, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', borderRight: '1px solid var(--border)' }}>
               <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)' }}>
-                {rowTotals[c].qty} · <span style={{ color: 'var(--gold)' }}>${rowTotals[c].value.toFixed(0)}</span>
+                {rowTotals[c].copies} · <span style={{ color: 'var(--gold)' }}>${rowTotals[c].market_value.toFixed(0)}</span>
               </span>
               <span className={`pip ${c}`} style={{ width: 22, height: 22, fontSize: 11 }}>{c}</span>
             </div>
@@ -1159,14 +1043,15 @@ function HierarchyMatrix({ nodes, openCard }) {
           <MatrixCell
             key={t}
             cards={matrix[c][t]}
+            cell={cellOf(c, t)}
             color={c}
             heat={maxCellValue}
             onHover={setHover}
-            onClick={(n) => openCard(n.firstCardObj)} />
+            onClick={(n) => openName(n.name)} />
 
           )}
             <div style={{ padding: 6, fontFamily: 'var(--mono)', fontSize: 11, textAlign: 'left', color: 'var(--gold)', borderLeft: '1px solid var(--gold)', alignSelf: 'center' }}>
-              ${rowTotals[c].value.toFixed(0)}
+              ${rowTotals[c].market_value.toFixed(0)}
             </div>
           </React.Fragment>
         )}
@@ -1175,7 +1060,7 @@ function HierarchyMatrix({ nodes, openCard }) {
         <div style={{ textAlign: 'right', padding: 6, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--gold)', alignSelf: 'start' }}>Col total →</div>
         {TYPES.map((t) =>
         <div key={t} style={{ textAlign: 'center', padding: 6, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--gold)', borderTop: '1px solid var(--gold)' }}>
-            ${colTotals[t].value.toFixed(0)}
+            ${colTotals[t].market_value.toFixed(0)}
           </div>
         )}
         <div style={{ textAlign: 'center', padding: 6, fontFamily: 'var(--display)', fontSize: 14, color: 'var(--gold)', borderTop: '1px solid var(--gold)', borderLeft: '1px solid var(--gold)' }}>
@@ -1209,12 +1094,13 @@ function HierarchyMatrix({ nodes, openCard }) {
 
 }
 
-function MatrixCell({ cards, color, heat, onHover, onClick }) {
-  const cellValue = cards.reduce((s, c) => s + c.value, 0);
+// One colour × type cell: the server's copies and value for it, and the nodes in view as dots
+// (they come most valuable first).
+function MatrixCell({ cards, cell, color, heat, onHover, onClick }) {
+  const cellValue = cell.market_value;
   const intensity = heat > 0 ? Math.min(1, cellValue / heat) : 0;
-  const sorted = cards.slice().sort((a, b) => b.value - a.value);
-  const display = sorted.slice(0, 30);
-  const hidden = sorted.length - display.length;
+  const display = cards.slice(0, 30);
+  const hidden = cards.length - display.length;
 
   const bg = COLOR_FILL[color];
   const alpha = 0.06 + intensity * 0.18;
@@ -1231,7 +1117,7 @@ function MatrixCell({ cards, color, heat, onHover, onClick }) {
       flexDirection: 'column'
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--muted)', marginBottom: 4 }}>
-        <span>{cards.length || '—'}</span>
+        <span>{cell.copies || '—'}</span>
         <span style={{ color: cellValue > 0 ? 'var(--gold)' : 'var(--muted)' }}>
           {cellValue > 0 ? `$${cellValue.toFixed(0)}` : ''}
         </span>

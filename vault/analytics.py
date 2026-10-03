@@ -7,7 +7,7 @@ else the file's own market price, else 0, with prices no import would accept (no
 above ``MAX_PRICE``) treated as missing. Rows are joined to ``cards`` for type, colours, mana value
 and rarity; rows whose printing isn't in ``cards`` yet count as ``unknown``.
 
-Known-cost semantics (``public/lib/pnl.js``): a copy's cost is known when a non-zero price paid was
+Known-cost semantics: a copy's cost is known when a non-zero price paid was
 recorded for its row. P&L compares what was paid against today's market value of those same
 copies only; copies without a price paid are counted, never valued at zero cost.
 

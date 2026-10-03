@@ -15,7 +15,8 @@ React prototype as the front end (`public/`). Read `README.md` first.
 - One API for web and native apps: `/api/v1` (`docs/api.md`). Every list is paged with a cursor
   (`vault.api.hal.paginate`, max 500); never add an endpoint whose response grows with the
   collection. Add `_links`, a response model (OpenAPI drives the Swift client) and a test.
-  `public/lib/api.js` rebuilds the prototype's `collection.json` shape from the pages.
+  Analytics are computed server-side from Postgres (`vault/analytics.py`); the front end only
+  renders API answers (`public/lib/api.js`) and never computes values or fetches prices itself.
 - Agents are first-class users (`docs/agents.md`): an endpoint an agent could use also gets an
   MCP tool in `vault/api/mcp.py` and a line in `public/llms.txt`. POSTs that create things take
   `Idempotency-Key` (`vault.api.idempotency`). Personal access tokens never get account-level

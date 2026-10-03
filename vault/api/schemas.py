@@ -108,6 +108,8 @@ class CardItem(Hal):
     paid: float | None = Field(None, description="Total paid for these copies; null when the owner hides it")
     paid_quantity: int | None = Field(None, description="How many of these copies `paid` covers (copies with no "
                                       "price paid recorded are left out of P&L); null when the owner hides it")
+    gain: float | None = Field(None, description="Unrealised gain or loss on the copies `paid` covers: their market "
+                               "value today minus `paid`. Null when no cost is known or the owner hides costs")
     price: Price
     value: float
     acquired: Acquired
