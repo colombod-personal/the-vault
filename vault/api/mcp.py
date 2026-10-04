@@ -288,8 +288,8 @@ TOOLS = [
          dict(PAGING), path=lambda a: f"{V1}/shares", query=("limit", "cursor")),
     Tool("accept_share", "Accept an invite link someone sent this person (the token after ?invite= in the link), so "
          "their collection or deck appears under list_shared_with_me.",
-         {"token": {"type": "string", "minLength": 8, "maxLength": 200, "description": "The invite token"}}, ["token"],
-         method="POST", path=lambda a: f"{V1}/shares/accept", body=lambda a: {"token": a["token"]}, write=True),
+         {"invite_token": {"type": "string", "minLength": 8, "maxLength": 200, "description": "The invite token"}}, ["invite_token"],
+         method="POST", path=lambda a: f"{V1}/shares/accept", body=lambda a: {"token": a["invite_token"]}, write=True),
     Tool("stop_sharing", "Stop a share: as the owner, revoke it; as the recipient, leave it. Without confirm it only "
          "lists the person's shares: show the one that would end and call again with confirm true after they say yes.",
          {"share_id": ID, "confirm": CONFIRM}, ["share_id"],

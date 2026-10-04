@@ -3,11 +3,12 @@ ending a share, both only after a confirm, and accepting an invite. Creating a s
 
 from fastapi.testclient import TestClient
 
-from test_agents import V1, agent, bot, call_tool, make_token, rpc  # noqa: F401 - fixtures
+from test_agents import V1, agent, bot, call_tool, make_token  # noqa: F401 - fixtures
 
 
-def tools(bot, token):
-    return {t["name"]: t for t in rpc(bot, "tools/list", token=token).json()["result"]["tools"]}
+def tools():
+    from vault.api import mcp
+    return {name: tool.schema() for name, tool in mcp.BY_NAME.items()}
 
 
 def test_one_imports_changes(agent, bot):
@@ -39,7 +40,7 @@ def test_accept_list_and_stop_a_share(agent, bot):
     with TestClient(agent.app) as bob:
         bob.post("/api/auth/dev-login", params={"email": "bob@example.com"})
         bob_write = make_token(bob, scopes=["read", "write"])
-        accepted = call_tool(bot, bob_write, "accept_share", token=invite["url"].split("invite=")[1])
+        accepted = call_tool(bot, bob_write, "accept_share", invite_token=invite["url"].split("invite=")[1])
         assert not accepted.get("isError")
         assert call_tool(bot, bob_write, "list_shared_with_me")["structuredContent"]["items"]
     owner = make_token(agent, scopes=["read", "write"])
@@ -51,8 +52,8 @@ def test_accept_list_and_stop_a_share(agent, bot):
     assert agent.get(f"{V1}/shares").json()["total"] == 0
 
 
-def test_hosts_are_told_which_tools_destroy_and_no_tool_creates_a_share(agent, bot):
-    listed = tools(bot, make_token(agent))
+def test_hosts_are_told_which_tools_destroy_and_no_tool_creates_a_share():
+    listed = tools()
     assert listed["delete_deck"]["annotations"]["destructiveHint"] is True
     assert listed["stop_sharing"]["annotations"]["destructiveHint"] is True
     assert listed["get_import"]["annotations"]["readOnlyHint"] is True
