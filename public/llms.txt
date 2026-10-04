@@ -25,11 +25,12 @@ be revoked (Account → Connected apps for OAuth).
   - collection: `get_collection_summary`, `search_cards`, `get_card`, `list_sets`,
     `get_collection_stats`, `get_value_history`, `get_acquisition_timeline`
   - decks: `check_decklist`, `parse_decklist`, `list_decks`, `get_deck`, `save_deck`,
-    `update_deck`, `get_archidekt_deck`
+    `update_deck`, `delete_deck` (asks first), `get_archidekt_deck`
   - any card, owned or not: `lookup_cards`
-  - imports, exports and sharing: `list_imports`, `import_collection_csv`
+  - imports, exports and sharing: `list_imports`, `get_import`, `import_collection_csv` (preview first),
+    big files: `start_collection_upload`, `get_staged_upload`, `confirm_staged_upload`,
     (Dragon Shield, Moxfield or generic CSV), `list_export_formats`, `list_shared_with_me`,
-    `get_shared_deck`
+    `get_shared_deck`, `list_my_shares`, `accept_share`, `stop_sharing` (asks first)
   - connection check: `whoami` (who you are, your scopes, and which data versions the Vault holds)
   - rules and cards, from the Comprehensive Rules and Oracle data: `get_card_oracle`, `get_rulings`,
     `search_rules`, `get_rule`, `verify_citation`, `present_steps`

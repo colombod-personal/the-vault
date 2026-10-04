@@ -64,11 +64,12 @@ class Tool:
     description: str
     properties: dict = field(default_factory=dict)
     required: list[str] = field(default_factory=list)
-    method: str = "GET"
+    method: str | Callable[[dict], str] = "GET"  # a function for preview-then-confirm tools
     path: Callable[[dict], str] = lambda a: V1
     query: tuple[str, ...] = ()
     body: Callable[[dict], Any] | None = None
     write: bool = False
+    destructive: bool = False  # deletes or revokes something: hosts should ask the person first
     title: str = ""
     # Where third-party data in the answer comes from: "scryfall" / "archidekt" (the server adds a provenance
     # block), "catalog" / "computed" (the API already includes one), or () for the person's own data only.
@@ -81,7 +82,7 @@ class Tool:
             "description": self.description,
             "inputSchema": {"type": "object", "properties": self.properties, "required": self.required,
                             "additionalProperties": False},
-            "annotations": {"readOnlyHint": not self.write, "destructiveHint": False, "openWorldHint": False},
+            "annotations": {"readOnlyHint": not self.write, "destructiveHint": self.destructive, "openWorldHint": False},
         }
         if self.ui:  # MCP Apps: hosts that support it show the view; others ignore this and show the text answer
             out["_meta"] = {"ui": {"resourceUri": mcp_ui.uri(self.ui), "visibility": ["model", "app"]}}
@@ -153,6 +154,7 @@ def _base(args: dict) -> str:
 ID = {"type": "integer", "minimum": 1, "maximum": MAX_ID}
 SHARE = {"share_id": {**ID, "description": "Read a collection someone shared with you (from list_shared_with_me) instead of your own"}}
 DECKLIST = {"type": "string", "maxLength": 50_000}  # as the API's TextIn and DeckIn
+CONFIRM = {"type": "boolean", "description": "true only after the person agreed to this exact change"}
 SOURCE_URL = {"type": "string", "maxLength": 500, "description": "Where the deck came from (an http or https link)"}
 SET_SORTS = ["-value", "value", "-quantity", "quantity", "-unique", "unique", "name", "code", "release", "-release"]
 PAGING = {
@@ -255,15 +257,32 @@ TOOLS = [
          ["deck_id", "name", "text"], method="PUT", path=lambda a: f"{V1}/decks/{int(a['deck_id'])}",
          body=lambda a: {"name": a["name"], "text": a["text"],
                          **({"source_url": a["source_url"]} if "source_url" in a else {})}, write=True),
-    Tool("get_archidekt_deck", "A public deck from Archidekt by its id (the number in archidekt.com/decks/<id>).",
+    Tool("get_archidekt_deck", "A public deck from Archidekt by its id (the number in archidekt.com/decks/<id>). "
+         "One deck per request, only the one the person gave you. Check list_decks first: the deck may be saved. "
+         "The deck is Archidekt's: credit Archidekt and link the deck when you use it.",
          {"deck_id": ID}, ["deck_id"], path=lambda a: f"{V1}/archidekt/decks/{int(a['deck_id'])}"),
     Tool("list_imports", "Past collection imports, newest first, with what changed each time.", dict(PAGING),
          path=lambda a: f"{V1}/imports", query=("limit", "cursor")),
     Tool("import_collection_csv", "Replace the collection with a collection file and record what changed. Dragon "
-         "Shield, Moxfield and generic CSV exports are detected automatically.",
+         "Shield, Moxfield and generic CSV exports are detected automatically. Without confirm it only shows what "
+         "would change (added, removed, changed): show that to the person and call again with confirm true only "
+         "after they say yes.",
          {"csv": {"type": "string", "description": "The CSV file's content"},
-          "filename": {"type": "string", "default": "agent-import.csv"}}, ["csv"],
-         method="POST", path=lambda a: f"{V1}/imports", write=True),
+          "filename": {"type": "string", "default": "agent-import.csv"}, "confirm": CONFIRM}, ["csv"],
+         method="POST", path=lambda a: f"{V1}/imports" if a.get("confirm") is True else f"{V1}/imports/preview",
+         write=True, destructive=True),
+    Tool("start_collection_upload", "For a collection file too big to paste: a one-time link (one hour) for the "
+         "person to upload the file. Nothing is imported: the file waits until they confirm. Give them the link, then "
+         "call get_staged_upload when they say it is uploaded.", method="POST", path=lambda a: f"{V1}/uploads", write=True),
+    Tool("get_staged_upload", "A file the person uploaded through start_collection_upload: still waiting, or what "
+         "importing it would change and which rows match no known printing (fix those in the file and upload again).",
+         {"upload_id": ID}, ["upload_id"], path=lambda a: f"{V1}/uploads/{int(a['upload_id'])}"),
+    Tool("confirm_staged_upload", "Import an uploaded file, replacing the collection. Without confirm it only shows "
+         "the preview: show it to the person and call again with confirm true only after they say yes.",
+         {"upload_id": ID, "confirm": CONFIRM}, ["upload_id"],
+         method=lambda a: "POST" if a.get("confirm") is True else "GET",
+         path=lambda a: f"{V1}/uploads/{int(a['upload_id'])}" + ("/apply" if a.get("confirm") is True else ""),
+         write=True, destructive=True),
     Tool("list_export_formats", "Formats the collection can be exported in to move it to another app (Dragon "
          "Shield, Moxfield, Archidekt, generic CSV, text list), each with a download link. The files can be "
          "large; give the person the link rather than reading the whole file.",
@@ -272,6 +291,26 @@ TOOLS = [
          path=lambda a: f"{V1}/shared"),
     Tool("get_shared_deck", "A deck someone shared, checked against this person's collection.",
          {"share_id": ID}, ["share_id"], path=lambda a: f"{V1}/shared/{int(a['share_id'])}/deck"),
+    Tool("get_import", "One collection import: when it ran, the file, and what it added, removed and changed.",
+         {"import_id": ID}, ["import_id"], path=lambda a: f"{V1}/imports/{int(a['import_id'])}"),
+    Tool("delete_deck", "Delete one of the person's saved decks. Without confirm it only shows the deck that would be "
+         "deleted: show it to the person and call again with confirm true only after they say yes.",
+         {"deck_id": ID, "confirm": CONFIRM}, ["deck_id"],
+         method=lambda a: "DELETE" if a.get("confirm") is True else "GET",
+         path=lambda a: f"{V1}/decks/{int(a['deck_id'])}", write=True, destructive=True),
+    Tool("list_my_shares", "What this person has shared (their collection or a deck), with whom, and whether the "
+         "invite was accepted. Creating a share is done by the person in the Vault, not by an assistant.",
+         dict(PAGING), path=lambda a: f"{V1}/shares", query=("limit", "cursor")),
+    Tool("accept_share", "Accept an invite link someone sent this person (the token after ?invite= in the link), so "
+         "their collection or deck appears under list_shared_with_me.",
+         {"invite_token": {"type": "string", "minLength": 8, "maxLength": 200, "description": "The invite token"}}, ["invite_token"],
+         method="POST", path=lambda a: f"{V1}/shares/accept", body=lambda a: {"token": a["invite_token"]}, write=True),
+    Tool("stop_sharing", "Stop a share: as the owner, revoke it; as the recipient, leave it. Without confirm it only "
+         "lists the person's shares: show the one that would end and call again with confirm true after they say yes.",
+         {"share_id": ID, "confirm": CONFIRM}, ["share_id"],
+         method=lambda a: "DELETE" if a.get("confirm") is True else "GET",
+         path=lambda a: f"{V1}/shares/{int(a['share_id'])}" if a.get("confirm") is True else f"{V1}/shares",
+         write=True, destructive=True),
 ]
 TOOLS.extend(catalog_tools(Tool, ID, PAGING))
 INSTRUCTIONS += "\n" + GROUNDING
@@ -282,7 +321,9 @@ SCRYFALL_DATA = {"get_collection_summary", "search_cards", "get_card", "list_set
                  "get_collection_breakdowns", "get_valuation", "get_value_history", "list_card_names", "refresh_prices",
                  "check_decklist", "lookup_cards", "get_deck", "get_shared_deck"}
 OWN_DATA_ONLY = {"get_acquisition_timeline", "parse_decklist", "list_decks", "save_deck", "update_deck", "list_imports",
-                 "import_collection_csv", "list_export_formats", "list_shared_with_me"}
+                 "import_collection_csv", "list_export_formats", "list_shared_with_me", "get_import", "delete_deck",
+                 "list_my_shares", "accept_share", "stop_sharing", "start_collection_upload",
+                 "get_staged_upload", "confirm_staged_upload"}
 for _tool in TOOLS:
     if not _tool.provenance:
         _tool.provenance = ("scryfall",) if _tool.name in SCRYFALL_DATA else ("archidekt",) if _tool.name == "get_archidekt_deck" else ()
@@ -336,7 +377,8 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
         transport = httpx.ASGITransport(app=_marked_as_mcp(request.app))
         try:
             async with httpx.AsyncClient(transport=transport, base_url=str(request.base_url).rstrip("/")) as client:
-                res = await client.request(tool.method, tool.path(args), **kwargs)
+                method = tool.method(args) if callable(tool.method) else tool.method
+                res = await client.request(method, tool.path(args), **kwargs)
         except Exception:  # the API failed: this tool call failed, not the whole MCP request (or its batch)
             log.exception("MCP tool %s failed", tool.name)
             return 500, {"type": "about:blank", "title": "Internal server error", "status": 500,

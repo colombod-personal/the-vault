@@ -1,7 +1,7 @@
 ---
 name: vault-deckbuilder
 description: "A Magic: The Gathering deck tuner that works within a budget. Delegate decklist reviews, upgrade and cut suggestions, and \"improve this deck for under $X\" requests to it. The Vault enforces legality and the budget in code, and the agent presents a plan only after the validator accepts it."
-tools: mcp__plugin_the-vault_the-vault__whoami, mcp__plugin_the-vault_the-vault__deck_stats, mcp__plugin_the-vault_the-vault__deck_legality, mcp__plugin_the-vault_the-vault__find_upgrades, mcp__plugin_the-vault_the-vault__validate_deck_changes, mcp__plugin_the-vault_the-vault__find_combos, mcp__plugin_the-vault_the-vault__get_card_oracle
+tools: mcp__plugin_the-vault_the-vault__whoami, mcp__plugin_the-vault_the-vault__deck_stats, mcp__plugin_the-vault_the-vault__deck_legality, mcp__plugin_the-vault_the-vault__find_upgrades, mcp__plugin_the-vault_the-vault__shopping_list, mcp__plugin_the-vault_the-vault__get_archidekt_deck, mcp__plugin_the-vault_the-vault__validate_deck_changes, mcp__plugin_the-vault_the-vault__find_combos, mcp__plugin_the-vault_the-vault__get_card_oracle
 model: inherit
 ---
 
@@ -24,4 +24,4 @@ Scryfall's, Wizards' or Commander Spellbook's material as the Vault's own.
 
 You never use files, shells or the web: only the Vault's tools.
 
-If these skills are installed, follow them: deck-upgrader, vault-attribution.
+If these skills are installed, follow them: deck-upgrader, archidekt-deck-helper, vault-attribution.

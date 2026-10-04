@@ -136,3 +136,13 @@ def test_the_grounding_rules_reach_the_agent_in_the_instructions_and_prompts(age
     assert "Does Bolt kill a 3/3?" in text and "verify_citation" in text and "Fan Content" in text
     assert rpc(bot, "prompts/get", {"name": "rules_judge", "arguments": {}}, read).json()["error"]["code"] == -32602
     assert rpc(bot, "prompts/get", {"name": "nope"}, read).json()["error"]["code"] == -32602
+
+
+def test_hosts_without_the_skills_still_get_the_shop_and_deck_rules():
+    """claude.ai loads tools and instructions, not skills: a real run (2026-10-04, #82) claimed a cheapest shop,
+    'current' prices and a cart, and did not credit Archidekt. The rules must be in what every host reads."""
+    from vault.api import mcp
+    assert "Never say which shop is cheapest" in GROUNDING and "never say anything goes into a cart" in GROUNDING
+    assert "find it with list_decks" in GROUNDING and "credit Archidekt" in GROUNDING
+    assert "never say which store is cheapest" in mcp.BY_NAME["shopping_list"].description
+    assert "credit Archidekt" in mcp.BY_NAME["get_archidekt_deck"].description

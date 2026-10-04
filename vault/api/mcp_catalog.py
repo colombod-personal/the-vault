@@ -27,6 +27,11 @@ Rules, cards and prices - how to answer:
   is not power. Prices are dated and come from Scryfall; they are not a store's price today.
 - Budgets and legality are enforced by the Vault: before you present a list of changes, call
   validate_deck_changes and only present it if valid is true. The Vault never fills a store cart.
+- Shops: you have no shop's price, stock or shipping. Never say which shop is cheapest, never call a
+  price "current", never say anything goes into a cart. Give the dated Scryfall price and let the person
+  compare shops themselves (a shop's own search link is fine).
+- Decks: a person names a deck ("my sliver deck"); find it with list_decks before asking for a link.
+  A deck read from Archidekt is Archidekt's: credit Archidekt and give the deck's link back.
 """
 
 
@@ -115,7 +120,8 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              {"text": deck}, ["text"], method="POST", path=lambda a: f"{V1}/decks/combos", body=lambda a: {"text": a["text"]},
              provenance=("computed",)),
         Tool("shopping_list", "The cards of a decklist the person does not own, with the cheapest known price of each (dated, from Scryfall) "
-             "and a paste-ready list to put into a store's own list or deck tool. The Vault never contacts stores or fills carts.",
+             "and a paste-ready list to put into a store's own list or deck tool. The Vault never contacts stores or fills carts, "
+             "and knows no store's price: never say which store is cheapest.",
              {"text": deck}, ["text"], method="POST", path=lambda a: f"{V1}/decks/shopping-list",
              body=lambda a: {"text": a["text"]}, provenance=("computed",), ui="shopping"),
     ]

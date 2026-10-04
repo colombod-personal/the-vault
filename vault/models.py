@@ -612,3 +612,19 @@ class CatalogSource(Base):
     rows: Mapped[int] = mapped_column(Integer, default=0)
     checksum: Mapped[str | None] = mapped_column(String(64))
     url: Mapped[str | None] = mapped_column(String(500))
+
+
+class StagedUpload(Base):
+    """A collection file an assistant asked the person to upload (``start_collection_upload``): too big to pass
+    through a chat. The link holds a random ticket (only its hash is stored), works for one hour, and the file
+    waits here, not imported, until the person confirms through their assistant. Deleted when applied or expired."""
+
+    __tablename__ = "staged_uploads"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    ticket_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    filename: Mapped[str | None] = mapped_column(String(255))
+    content: Mapped[bytes | None] = mapped_column(LargeBinary)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
