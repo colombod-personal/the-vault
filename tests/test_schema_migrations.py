@@ -83,7 +83,7 @@ def test_a_full_create_all_database_of_the_current_models_is_adopted(database):
     # create_all of today's models: every table and column already there, no alembic_version
     Base.metadata.create_all(database.engine)
     database.migrate()
-    assert _revision(database) == "0007" and _diff(database) == []
+    assert _revision(database) == "0101" and _diff(database) == []
 
 
 def test_duplicate_grants_from_before_are_merged_when_the_unique_index_arrives(database):

@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from .importer import export_collection
 from .sharing import display_name
-from .models import AccessToken, ApiSession, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionValue, Deck, Entry, Identity, Import, Share, User
+from .models import AccessToken, ApiSession, OAuthClient, OAuthCode, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionValue, Deck, Entry, Identity, Import, Share, User
 from .prices import history
 from .collection_view import CollectionView
 
@@ -43,6 +43,7 @@ shares.json          who you have given access to, and what others have shared w
 app_sessions.json    apps signed in to your account (tokens are never exported)
 passkeys.json        passkeys that can sign in to your account (names and dates; keys stay on your devices)
 access_tokens.json   personal access tokens you created for agents and scripts (names and dates only)
+connected_apps.json  apps you connected with OAuth, such as ChatGPT or Claude (name, what you allowed, dates; never tokens)
 
 Card data, images and prices come from Scryfall (https://scryfall.com), which sources prices
 from TCGplayer and Cardmarket. They are not personal data. Thank you, Scryfall.
@@ -131,12 +132,23 @@ def export_archive(db: Session, user: User) -> bytes:
              "expires_at": t.expires_at.isoformat(), "last_used_at": t.last_used_at and t.last_used_at.isoformat()}
             for t in db.scalars(select(AccessToken).where(AccessToken.user_id == user.id))
         ]))
+        z.writestr("connected_apps.json", _json(_connected_apps(db, user)))
         z.writestr("app_sessions.json", _json([
             {"client": a.client, "device_name": a.device_name, "created_at": a.created_at.isoformat(),
              "last_used_at": a.last_used_at and a.last_used_at.isoformat()}
             for a in db.scalars(select(ApiSession).where(ApiSession.user_id == user.id))
         ]))
     return buf.getvalue()
+
+
+def _connected_apps(db: Session, user: User) -> list[dict]:
+    names = {c.client_id: c.name for c in db.scalars(select(OAuthClient))}
+    return [
+        {"app": names.get(g.client_id, g.client_id), "client_id": g.client_id, "allowed": g.scopes.split(),
+         "resource": g.resource, "connected_at": g.created_at.isoformat(),
+         "last_used_at": g.last_used_at and g.last_used_at.isoformat()}
+        for g in db.scalars(select(OAuthGrant).where(OAuthGrant.user_id == user.id).order_by(OAuthGrant.id))
+    ]
 
 
 def personal_data(user_id: int) -> dict:
@@ -147,6 +159,9 @@ def personal_data(user_id: int) -> dict:
     """
     return {
         "retired_refresh_tokens": delete(RetiredRefreshToken).where(RetiredRefreshToken.user_id == user_id),
+        "oauth_retired_refresh_tokens": delete(OAuthRetiredRefresh).where(OAuthRetiredRefresh.user_id == user_id),
+        "oauth_codes": delete(OAuthCode).where(OAuthCode.user_id == user_id),
+        "oauth_grants": delete(OAuthGrant).where(OAuthGrant.user_id == user_id),
         "api_sessions": delete(ApiSession).where(ApiSession.user_id == user_id),
         "access_tokens": delete(AccessToken).where(AccessToken.user_id == user_id),
         "passkeys": delete(Passkey).where(Passkey.user_id == user_id),

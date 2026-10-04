@@ -271,3 +271,30 @@ def test_shared_analytics_answer_only_the_grantee(client):
     assert client.get("/api/v1/collection/names").json()["total"] == 0  # Carol's own, empty
     # the refresh is for one's own collection only: there is no shared variant
     assert client.post(f"/api/v1/shared/{share_id}/collection/refresh").status_code in (404, 405)
+
+
+def test_connected_apps_are_private(client):
+    """OAuth grants (connected apps) are listed and revoked only by their owner: 404 for anyone else's."""
+    from datetime import datetime, timedelta, timezone
+
+    from vault.models import OAuthGrant
+
+    login(client, "alice@example.com")
+    alice = client.get("/api/v1/me").json()["id"]
+    now = datetime.now(timezone.utc)
+    with client.app.state.db.sessions() as db:
+        grant = OAuthGrant(user_id=alice, client_id="https://app.example/c.json", scopes="read", access_scopes="read",
+                           resource="http://testserver/api/mcp", access_hash="a" * 64, access_expires=now + timedelta(hours=1),
+                           refresh_hash="b" * 64, refresh_expires=now + timedelta(days=1))
+        db.add(grant)
+        db.commit()
+        grant_id = grant.id
+    assert [a["id"] for a in client.get("/api/v1/me/apps").json()["items"]] == [grant_id]
+
+    login(client, "bob@example.com")
+    assert client.get("/api/v1/me/apps").json()["items"] == []
+    assert client.delete(f"/api/v1/me/apps/{grant_id}").status_code == 404
+    assert client.delete("/api/v1/me/apps/999999").status_code == 404  # same answer for ids that don't exist
+
+    login(client, "alice@example.com")
+    assert client.delete(f"/api/v1/me/apps/{grant_id}").json() == {"deleted": True}
