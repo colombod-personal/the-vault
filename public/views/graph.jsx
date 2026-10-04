@@ -455,9 +455,16 @@ function GraphView({ data, openCard }) {
       maxZoom: 3
     });
 
-    // Touch screens have no hover: the first tap on a card shows what hovering shows (its image,
-    // and in the affinity web its links), a second tap on the same card opens it.
-    const touch = TOUCH;
+    // Touch has no hover: the first tap on a card shows what hovering shows (its image, and in the
+    // affinity web its links), a second tap on the same card opens it. Decided by the input that
+    // was used (a finger on a touch laptop too), falling back to the screen's primary pointer.
+    let pointer = TOUCH ? 'touch' : 'mouse';
+    const notePointer = (e) => { pointer = e.type === 'touchstart' || e.pointerType === 'touch' ? 'touch' : 'mouse'; };
+    const host = cy.container();
+    host.addEventListener('pointerdown', notePointer, true);
+    host.addEventListener('pointermove', notePointer, true);
+    host.addEventListener('touchstart', notePointer, { capture: true, passive: true });
+    const isTouch = () => pointer === 'touch';
     let previewed = null;
     const clearPreview = () => {
       cy.elements().removeClass('faded linked');
@@ -483,7 +490,7 @@ function GraphView({ data, openCard }) {
     cy.on('tap', 'node', (evt) => {
       const d = evt.target.data();
       if (d.isParent || d.isAnchor) return;
-      if (touch && previewed !== evt.target.id()) {
+      if (isTouch() && previewed !== evt.target.id()) {
         previewed = evt.target.id();
         showPreview(evt.target);
         return;
@@ -496,11 +503,11 @@ function GraphView({ data, openCard }) {
     });
     cy.on('mouseover', 'node', (evt) => {
       const d = evt.target.data();
-      if (d.isParent || d.isAnchor || touch) return;
+      if (d.isParent || d.isAnchor || isTouch()) return;
       showPreview(evt.target);
     });
     cy.on('mouseout', 'node', () => {
-      if (!touch) clearPreview();
+      if (!isTouch()) clearPreview();
     });
     cy.on('viewport', () => {
       previewed = null;
@@ -513,11 +520,16 @@ function GraphView({ data, openCard }) {
     });
 
     cyRef.current = cy;
-    return () => {cy.destroy();cyRef.current = null;};
+    return () => {
+      host.removeEventListener('pointerdown', notePointer, true);
+      host.removeEventListener('pointermove', notePointer, true);
+      host.removeEventListener('touchstart', notePointer, { capture: true });
+      cy.destroy();cyRef.current = null;
+    };
   }, [filteredNodes, mode, deck, showArt]);
 
-  // Reset hover on mode change
-  useEffectG(() => setHover(null), [mode]);
+  // A rebuilt graph starts with no card previewed (a tap preview otherwise stays up).
+  useEffectG(() => setHover(null), [filteredNodes, mode, deck, showArt]);
 
   return (
     <div data-screen-label="06 Graph">
