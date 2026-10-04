@@ -116,8 +116,14 @@ function GraphView({ data, openCard }) {
   // From the URL box, or a saved deck: its link when it has one (the deck as it is now), else its saved list.
   async function loadDeck(saved) {
     try {
-      let d = saved && !saved.source_url ? await window.DeckSrc.parseText(saved.text)
-        : await window.DeckSrc.fetchUrl((saved ? saved.source_url : deckUrl).trim());
+      let d;
+      if (saved && !saved.source_url) d = await window.DeckSrc.parseText(saved.text);
+      else if (!saved) d = await window.DeckSrc.fetchUrl(deckUrl.trim());
+      else {
+        // The deck as it is now on its site; your saved copy when the site can't be reached (or is Moxfield).
+        try { d = await window.DeckSrc.fetchUrl(saved.source_url.trim()); }
+        catch (e) { d = { ...(await window.DeckSrc.parseText(saved.text)), title: saved.name }; }
+      }
       d.cards = mergeDeckCards(d.cards); // one line per card, as on the Decks page
       // What you own of it comes from the server's coverage; colours from the cards' data.
       const [cov, scry] = await Promise.all([

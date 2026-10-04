@@ -229,6 +229,12 @@ def test_deck_coverage_and_parsing(signed_in):
     assert near["a-Sol-Ring"][1] == [{"name": "Sol Ring", "quantity": near_qty(signed_in, "Sol Ring")}]
     assert near["a killer among üs"][1] == [{"name": "A Killer Among Us", "quantity": near_qty(signed_in, "A Killer Among Us")}]
     assert near["Rhystic Study"] == ("missing", [])
+    # Two printings of one card: one line, all its copies counted once, priced by name.
+    cards = signed_in.post(f"{V1}/decks/coverage", json={"text": "1 Sol Ring (c21) 263\n2 Sol Ring (cmm) 400"}).json()["cards"]
+    assert len(cards) == 1 and cards[0]["need"] == 3 and (cards[0]["set"], cards[0]["number"]) == (None, None)
+    assert cards[0]["have"] == min(3, near_qty(signed_in, "Sol Ring"))
+    same = signed_in.post(f"{V1}/decks/coverage", json={"text": "1 Sol Ring (c21) 263\n1 Sol Ring (C21) 263"}).json()["cards"]
+    assert len(same) == 1 and (same[0]["set"], same[0]["number"]) == ("c21", "263")
     text = "1x Sol Ring (c21) 263 [Ramp]\n1x Duress [Sideboard]\n1 Kenrith, the Returned King (CMM) 1 *F*"
     cards = signed_in.post(f"{V1}/decks/parse", json={"text": text}).json()["cards"]
     assert [(c["name"], c["set"], c["collector_number"], c["section"]) for c in cards] == [
