@@ -20,6 +20,7 @@ from pathlib import Path
 import httpx
 from mtg_toolkits.scryfall import ScryfallClient, iter_bulk_file
 
+from jobs import db_budget
 from vault import catalog_sync as cs
 from vault import outbound
 from vault.config import Settings
@@ -99,6 +100,8 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
     settings = Settings()
     db = Database(settings.database_url)
     db.migrate()
+    with db.sessions() as session:
+        db_budget.check(session, refuse=True, stage="before the catalog load")
     report: dict = {}
     with tempfile.TemporaryDirectory() as tmp:
         http = httpx.Client(transport=transport or outbound.transport(settings), timeout=120, follow_redirects=True)
@@ -118,6 +121,8 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
                         continue
                     path = Path(files[name]) if name in files else sf.download_bulk(name, Path(tmp) / f"{name}.jsonl.gz")
                     report[name] = {"version": version, **load(session, name, path, version, entry)}
+    with db.sessions() as session:
+        db_budget.check(session, stage="after the catalog load")
     print(json.dumps(report, indent=2, default=str))
     return report
 

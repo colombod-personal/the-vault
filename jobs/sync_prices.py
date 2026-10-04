@@ -17,7 +17,8 @@ from pathlib import Path
 import httpx
 from mtg_toolkits.scryfall import ScryfallClient
 
-from vault import catalog_sync, outbound
+from jobs import db_budget
+from vault import catalog_sync, outbound, retention
 from vault.config import Settings
 from vault.db import Database
 from vault.sync import sync_from_file
@@ -33,6 +34,8 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
     settings = Settings()
     db = Database(settings.database_url)
     db.migrate()
+    with db.sessions() as session:
+        db_budget.check(session, stage="before the price sync")  # warns only: prices keep syncing
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(args.file) if args.file else None
         if path is None:
@@ -44,7 +47,10 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
             # Cheapest price of every card, only once that source is enabled (docs/compliance.md).
             if "oracle_prices" in os.environ.get("CATALOG_SOURCES", "").split(","):
                 report["oracle_prices"] = catalog_sync.sync_cheapest_from_file(session, path)
+            report["retention"] = retention.apply(session)  # one year at most, thinned (docs/catalog-design.md)
             print(json.dumps(report, indent=2))
+        with db.sessions() as session:
+            db_budget.check(session, stage="after the price sync")
 
 
 if __name__ == "__main__":

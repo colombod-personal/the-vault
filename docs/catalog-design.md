@@ -108,22 +108,28 @@ shared across users (key: printing and day), so growth is:
 
 `distinct printings owned by anyone` x `days kept` x `bytes per row`
 
-The current row is wide (a 36-character key, a date and six double-precision prices), about 137
-bytes with its index; this matches the README's own estimate of 0.5 GB a year for one 10,000-printing
-collection. Two things make it dangerous on a free database:
+The current row is wide (a 36-character key, a date and six double-precision prices). **Measured**
+(300,000 rows, Postgres 16, `VACUUM ANALYZE`): **237 bytes a row**, 126 in the table and 110 in the
+primary-key index. That is more than the README's earlier estimate (about 0.5 GB a year for 10,000
+printings; measured, it is about 0.86 GB). Two things make it dangerous on a free database:
 
 1. **It never stops growing.** There is no retention rule today.
 2. **It scales with users.** Every new user who owns cards nobody else owns adds printings, and each
    one adds a row every day, forever.
 
-Estimates (not measured; row sizes as above, "compact" assumes integer cents and a 16-byte key at
-about 60 bytes per row):
+Computed from the measured 237 bytes a row ("compact" is an estimate of about 96 bytes: a 4-byte
+integer key, a date and integer cents, with a narrower index):
 
-| Distinct printings | Daily, 365 days (137 B) | Tiered (122 points, 137 B) | Tiered, compact (60 B) |
+| Distinct printings | Daily, 365 days (237 B) | Tiered (122 points, 237 B) | Tiered, compact (about 96 B) |
 |---|---|---|---|
-| 10,000 | about 500 MB | about 167 MB | about 73 MB |
-| 30,000 | about 1.5 GB | about 500 MB | about 220 MB |
-| 100,000 | about 5 GB | about 1.7 GB | about 730 MB |
+| 10,000 | about 860 MB | about 290 MB | about 120 MB |
+| 30,000 | about 2.6 GB | about 870 MB | about 350 MB |
+| 100,000 | about 8.6 GB | about 2.9 GB | about 1.2 GB |
+
+**Consequence:** retention alone keeps 10,000 printings comfortable (290 MB of 1 GB), but past about
+20,000 distinct printings across all users even the tiered table is too big for the free tier. The
+compact row (and storing a row only when a price changed) is therefore needed before the Vault has many
+users; the budget guard (#64) is what tells us when.
 
 "Tiered" is 90 daily points, then 26 weekly points (the next 6 months), then 2 points a month for
 the last 3 months (6 points): 122 points a year.
