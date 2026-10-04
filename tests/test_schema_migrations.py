@@ -28,6 +28,19 @@ def _drop_everything(db):
         conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
 
 
+def _head():
+    from pathlib import Path
+
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    import vault.db
+
+    config = Config()
+    config.set_main_option("script_location", str(Path(vault.db.__file__).parent / "migrations"))
+    return ScriptDirectory.from_config(config).get_current_head()
+
+
 def _revision(db):
     with db.engine.connect() as conn:
         return MigrationContext.configure(conn).get_current_revision()
@@ -83,7 +96,7 @@ def test_a_full_create_all_database_of_the_current_models_is_adopted(database):
     # create_all of today's models: every table and column already there, no alembic_version
     Base.metadata.create_all(database.engine)
     database.migrate()
-    assert _revision(database) == "0102" and _diff(database) == []
+    assert _revision(database) == _head() and _diff(database) == []
 
 
 def test_duplicate_grants_from_before_are_merged_when_the_unique_index_arrives(database):

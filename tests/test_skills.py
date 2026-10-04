@@ -1,0 +1,72 @@
+"""The skills (skills/*/SKILL.md): valid in the Agent Skills format (with a real YAML parse, which is what
+`npx skills add` does), tied to tools that exist, and faithful to the attribution rules."""
+
+import re
+from pathlib import Path
+
+import pytest
+import yaml
+
+from vault.api import mcp
+
+SKILLS = Path(__file__).parent.parent / "skills"
+FOLDERS = sorted(p for p in SKILLS.iterdir() if p.is_dir())
+TOOLS = set(mcp.BY_NAME)
+# Words in backticks that are fields of tool answers or arguments, not tools.
+FIELDS = {"oracle_id", "source_text", "budget_usd", "added_cost_usd", "known_card", "next_cursor", "share_id", "total_usd",
+          "not_checked", "include_sideboard"}
+
+
+def parse(folder: Path):
+    text = (folder / "SKILL.md").read_text(encoding="utf-8")
+    assert text.startswith("---\n"), "SKILL.md must start with YAML frontmatter"
+    front, body = text[4:].split("\n---\n", 1)
+    return yaml.safe_load(front), body
+
+
+def test_the_expected_skills_exist():
+    assert {p.name for p in FOLDERS} == {"rules-judge", "interaction-explainer", "deck-upgrader", "shopping-assistant",
+                                         "collection-analyst", "vault-attribution"}
+
+
+@pytest.mark.parametrize("folder", FOLDERS, ids=lambda p: p.name)
+def test_frontmatter_follows_the_agent_skills_format(folder):
+    meta, body = parse(folder)
+    assert meta["name"] == folder.name and re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", meta["name"]) and len(meta["name"]) <= 64
+    assert isinstance(meta["description"], str) and 40 < len(meta["description"]) <= 1024
+    assert re.search(r"\bUse (when|for|whenever)\b", meta["description"]), "say when to use it"
+    assert meta["license"] == "MIT" and body.strip().startswith("# ")
+    assert all(isinstance(v, str) for v in meta["metadata"].values())  # the spec's metadata values are strings
+    assert set(meta) <= {"name", "description", "license", "metadata", "compatibility", "allowed-tools"}
+
+
+@pytest.mark.parametrize("folder", FOLDERS, ids=lambda p: p.name)
+def test_declared_tools_exist_and_are_the_only_real_tools_the_body_names(folder):
+    meta, body = parse(folder)
+    declared = set(meta["metadata"]["vault-tools"].split())
+    assert declared <= TOOLS, f"unknown tools: {declared - TOOLS}"
+    mentioned = set(re.findall(r"`([a-z]+(?:_[a-z0-9]+)+)`", body))
+    assert mentioned & TOOLS <= declared, f"names tools it does not declare: {(mentioned & TOOLS) - declared}"
+    assert declared <= mentioned | {"whoami"}, f"declares tools it never mentions: {declared - mentioned}"
+    invented = {m for m in mentioned if m not in TOOLS and m not in FIELDS}
+    assert not invented, f"unknown tool-like names: {invented}"
+
+
+@pytest.mark.parametrize("folder", [f for f in FOLDERS if f.name != "vault-attribution"], ids=lambda p: p.name)
+def test_skills_that_show_data_point_at_the_attribution_skill(folder):
+    _, body = parse(folder)
+    assert "vault-attribution" in body
+
+
+def test_the_attribution_skill_keeps_the_hard_rules():
+    _, body = parse(SKILLS / "vault-attribution")
+    for phrase in ("Repeat the provenance", "Never present Wizards", "Fan Content", "never cropped", "Invent a rule number"):
+        assert phrase in body or phrase.lower() in body.lower(), phrase
+    assert "computed" in body and "source" in body
+
+
+def test_no_skill_contains_rules_or_card_text():
+    """Skills point at the tools, which return current text with its source. Nothing is pasted."""
+    for folder in FOLDERS:
+        _, body = parse(folder)
+        assert not re.search(r"^\s*\d{3}\.\d+[a-z]?\.? [A-Z]", body, re.M), f"{folder.name} looks like it pastes rule text"

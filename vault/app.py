@@ -19,7 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import auth as auth_module
 from . import oauth_clients, oauth_routes, oauth_server, outbound, passkeys, tokens
-from .api import mcp, meta, v1
+from .api import catalog_api, deck_api, mcp, meta, v1
 from .api.hal import problem
 from .config import Settings
 from .db import Database
@@ -36,7 +36,10 @@ ACCOUNT_COOKIE = "vault_account"  # see account_marker
 CROSS_SITE_ALLOWED = ("/api/auth/callback/", "/api/facebook/data-deletion", "/oauth/token", "/oauth/register",
                       "/oauth/revoke")
 # POSTs a read-only token may call: they only compute an answer, or revoke the token itself.
-READ_ONLY_POSTS = {"/api/v1/decks/parse", "/api/v1/decks/coverage", "/api/v1/auth/revoke", "/api/v1/cards/lookup"}
+READ_ONLY_POSTS = {"/api/v1/decks/parse", "/api/v1/decks/coverage", "/api/v1/auth/revoke", "/api/v1/cards/lookup",
+                   # computations on a decklist the caller sends: nothing is stored
+                   "/api/v1/decks/stats", "/api/v1/decks/legality", "/api/v1/decks/upgrades",
+                   "/api/v1/decks/validate-changes", "/api/v1/decks/shopping-list", "/api/v1/decks/combos"}
 
 
 def _origin(url: str) -> str:
@@ -190,6 +193,8 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
     app.include_router(auth_module.build_router(auth, get_db))
     app.include_router(v1.build_router(get_db, current_user, optional_user, settings, verifier,
                                        lambda: auth.offered, transport, account_user))
+    app.include_router(catalog_api.build_router(get_db, optional_user, current_user, settings))
+    app.include_router(deck_api.build_router(get_db, current_user, settings, transport))
     app.include_router(passkeys.build_router(settings, get_db, auth_module.sign_in, account_user))
     app.include_router(mcp.build_router(optional_user, resource_metadata))
     app.include_router(oauth_routes.build_router(get_db, settings, fetcher, auth))

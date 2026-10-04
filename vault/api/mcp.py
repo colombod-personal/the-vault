@@ -26,6 +26,8 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 
 from ..models import User
+from . import mcp_ui
+from .mcp_catalog import GROUNDING, PROMPTS, catalog_tools, provenance_blocks, render_prompt
 from .schemas import MAX_ID
 
 log = logging.getLogger(__name__)
@@ -68,15 +70,22 @@ class Tool:
     body: Callable[[dict], Any] | None = None
     write: bool = False
     title: str = ""
+    # Where third-party data in the answer comes from: "scryfall" / "archidekt" (the server adds a provenance
+    # block), "catalog" / "computed" (the API already includes one), or () for the person's own data only.
+    provenance: tuple[str, ...] = ()
+    ui: str = ""  # the MCP Apps view (vault/api/mcp_ui.py) a host may show next to this tool's result
 
     def schema(self) -> dict:
-        return {
+        out = {
             "name": self.name, "title": self.title or self.name.replace("_", " ").capitalize(),
             "description": self.description,
             "inputSchema": {"type": "object", "properties": self.properties, "required": self.required,
                             "additionalProperties": False},
             "annotations": {"readOnlyHint": not self.write, "destructiveHint": False, "openWorldHint": False},
         }
+        if self.ui:  # MCP Apps: hosts that support it show the view; others ignore this and show the text answer
+            out["_meta"] = {"ui": {"resourceUri": mcp_ui.uri(self.ui), "visibility": ["model", "app"]}}
+        return out
 
 
 JSON_TYPES = {"string": (str,), "integer": (int,), "number": (int, float), "boolean": (bool,),
@@ -264,6 +273,19 @@ TOOLS = [
     Tool("get_shared_deck", "A deck someone shared, checked against this person's collection.",
          {"share_id": ID}, ["share_id"], path=lambda a: f"{V1}/shared/{int(a['share_id'])}/deck"),
 ]
+TOOLS.extend(catalog_tools(Tool, ID, PAGING))
+INSTRUCTIONS += "\n" + GROUNDING
+
+# Every tool is classified: either its answer carries Scryfall or Archidekt data (so it gets provenance),
+# or it holds only the person's own data (tests/test_agents.py fails for a tool that is in neither group).
+SCRYFALL_DATA = {"get_collection_summary", "search_cards", "get_card", "list_sets", "get_collection_stats",
+                 "get_collection_breakdowns", "get_valuation", "get_value_history", "list_card_names", "refresh_prices",
+                 "check_decklist", "lookup_cards", "get_deck", "get_shared_deck"}
+OWN_DATA_ONLY = {"get_acquisition_timeline", "parse_decklist", "list_decks", "save_deck", "update_deck", "list_imports",
+                 "import_collection_csv", "list_export_formats", "list_shared_with_me"}
+for _tool in TOOLS:
+    if not _tool.provenance:
+        _tool.provenance = ("scryfall",) if _tool.name in SCRYFALL_DATA else ("archidekt",) if _tool.name == "get_archidekt_deck" else ()
 BY_NAME = {t.name: t for t in TOOLS}
 
 
@@ -369,7 +391,8 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
             asked = params.get("protocolVersion")
             return _result(id_, {
                 "protocolVersion": asked if asked in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
-                "capabilities": {"tools": {"listChanged": False}},
+                "capabilities": {"tools": {"listChanged": False}, "prompts": {"listChanged": False},
+                                 "resources": {"listChanged": False, "subscribe": False}},
                 "serverInfo": {"name": "the-vault", "title": "The Vault", "version": "1"},
                 "instructions": INSTRUCTIONS,
             })
@@ -377,6 +400,27 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
             return _result(id_, {})
         if method == "tools/list":
             return _result(id_, {"tools": [t.schema() for t in TOOLS if not t.write or "write" in scopes]})
+        if method == "resources/list":  # the MCP Apps views (ui:// pages); there is nothing else to read
+            return _result(id_, {"resources": mcp_ui.resources()})
+        if method == "resources/templates/list":
+            return _result(id_, {"resourceTemplates": []})
+        if method == "resources/read":
+            found = mcp_ui.read(params.get("uri")) if isinstance(params.get("uri"), str) else None
+            return _result(id_, found) if found else _rpc_error(id_, -32002, f"Resource not found: {params.get('uri')}")
+        if method == "prompts/list":
+            return _result(id_, {"prompts": [{k: p[k] for k in ("name", "title", "description", "arguments")} for p in PROMPTS]})
+        if method == "prompts/get":
+            prompt = next((p for p in PROMPTS if p["name"] == params.get("name")), None)
+            if prompt is None:
+                return _rpc_error(id_, -32602, f"Unknown prompt: {params.get('name')}")
+            given = params.get("arguments") or {}
+            if not isinstance(given, dict):
+                return _rpc_error(id_, -32602, "Invalid arguments: must be an object")
+            missing = [a["name"] for a in prompt["arguments"] if a["required"] and not given.get(a["name"])]
+            if missing:
+                return _rpc_error(id_, -32602, f"Missing argument(s): {', '.join(missing)}")
+            return _result(id_, {"description": prompt["description"], "messages": [
+                {"role": "user", "content": {"type": "text", "text": render_prompt(prompt, given)}}]})
         if method == "tools/call":
             name = params.get("name")
             if not isinstance(name, str):
@@ -394,6 +438,9 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
                 return _rpc_error(id_, -32602, f"Invalid arguments: {why}")
             status, body = await call_api(request, tool, args, part)
             body = _with_cursor(body)
+            kinds = tuple(k for k in tool.provenance if k in ("scryfall", "archidekt"))
+            if kinds and status < 400 and isinstance(body, dict) and "provenance" not in body:
+                body = {**body, "provenance": provenance_blocks(kinds, body)}  # third-party data is always attributed
             text = json.dumps(body, separators=(",", ":"), default=str)
             result = {"content": [{"type": "text", "text": text}], "isError": status >= 400}
             if isinstance(body, dict):

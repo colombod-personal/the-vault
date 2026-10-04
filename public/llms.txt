@@ -30,7 +30,28 @@ be revoked (Account → Connected apps for OAuth).
   - imports, exports and sharing: `list_imports`, `import_collection_csv`
     (Dragon Shield, Moxfield or generic CSV), `list_export_formats`, `list_shared_with_me`,
     `get_shared_deck`
-- A read-only token doesn't list the write tools.
+  - connection check: `whoami` (who you are, your scopes, and which data versions the Vault holds)
+  - rules and cards, from the Comprehensive Rules and Oracle data: `get_card_oracle`, `get_rulings`,
+    `search_rules`, `get_rule`, `verify_citation`, `present_steps`
+  - deck analysis, computed by the Vault: `deck_stats`, `deck_legality`, `find_upgrades`,
+    `validate_deck_changes`, `find_combos`, `shopping_list`
+- MCP prompts (`prompts/list`): `rules_judge`, `explain_interaction`, `upgrade_deck`, `shopping_help`.
+- A read-only token doesn't list the write tools; all of the above are read-only.
+
+## How to answer (rules, cards, decks)
+
+- Never answer a rules or card question from memory: call `get_card_oracle` and `get_rulings`, then
+  `search_rules` / `get_rule`, and say which rule number and rules edition (`version`) you used.
+- Quote only what a tool returned, and check a quote with `verify_citation` before presenting it as an
+  official rule, ruling or card text. If the sources don't settle a question, say so.
+- Every result has `provenance`. Repeat it: Scryfall's and Wizards' material is theirs, never the
+  Vault's; `computed` results were worked out by the Vault from the sources listed in `inputs`.
+  Show the Fan Content notice (below) with rules and card text.
+- Roles ("ramp", "removal") are Scryfall Tagger tags, a community's opinion. Popularity (EDHREC rank) is
+  not power. Prices are dated and come from Scryfall, not from a store.
+- Budgets and legality are enforced by the Vault: call `validate_deck_changes` before presenting a list of
+  swaps and present it only if `valid` is true. The Vault never contacts stores or fills carts;
+  `shopping_list` gives a list to paste into a store's own tool.
 
 ## Or use the HTTP API directly
 
@@ -77,3 +98,5 @@ property of Wizards of the Coast. ©Wizards of the Coast LLC.
 - `POST /api/v1/collection/refresh` (write scope): today's prices from Scryfall, 300 printings per call;
   repeat with the returned `cursor` until `remaining` is 0.
 - MCP tools: `get_collection_breakdowns`, `get_valuation`, `list_card_names`, `refresh_prices`.
+- [Connect an assistant, step by step](/connect.html)
+- [Skills and the plugin](https://github.com/colombod-personal/the-vault/blob/main/docs/skills.md)

@@ -57,4 +57,7 @@ jobs:
           fi
           echo "::add-mask::$DATABASE_URL"
           echo "DATABASE_URL=$DATABASE_URL" >> "$GITHUB_ENV"
-      - run: python -m jobs.sync_prices
+      - name: Sync prices
+        env:
+          CATALOG_SOURCES: ${{ vars.CATALOG_SOURCES }}  # "oracle_prices" also stores each card's cheapest price
+        run: python -m jobs.sync_prices
