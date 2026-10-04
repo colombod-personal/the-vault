@@ -114,8 +114,8 @@ The app runs on Vercel's free Hobby plan (fine while the Vault is free and non-c
 with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic.
 
 **How deploys work**
-- **Only `main` and `staging` deploy.** Vercel's GitHub integration runs `vercel.json` →
-  `ignoreCommand` before each deployment, which skips every other branch. `staging` is the pre-production copy (`docs/staging.md`); other branches get
+- **Only merges to `main` deploy.** Vercel's GitHub integration runs `vercel.json` →
+  `ignoreCommand` before each deployment, which skips every branch but `main`. Branches get
   no preview; test them locally with the twins (`docs/twins.md`).
 - The **vercel-check** workflow runs when a deployment succeeds (`deployment_status`) and
   smoke-tests that exact deployment from outside with `jobs/smoke_test.py`, without secrets.
