@@ -1,6 +1,8 @@
 """The catalog API (/api/v1/catalog): lookups by the card or rule asked about, with provenance on every
 answer, verbatim-quote checks, caps, rate limits, and no way to dump the catalog."""
 
+from datetime import date
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -36,7 +38,8 @@ def load(app):
                                   "taggings": [{"oracle_id": BOLT, "weight": "strong"}]},
                                  {"id": "t-0", "slug": "removal", "label": "removal", "parent_ids": [], "child_ids": ["t-1"], "taggings": []}])
         cs.sync_rules(db, rules_parser.parse(SAMPLE), "https://example.test/cr.txt")
-        for name in ("oracle_cards", "rulings", "oracle_tags"):
+        cs.sync_oracle_prices(db, [{"oracle_id": BOLT, "scryfall_id": "p-1111", "usd": 0.69, "usd_foil": 2.5, "eur": 0.5, "day": date(2026, 10, 4), "source": "scryfall"}])
+        for name in ("oracle_cards", "rulings", "oracle_tags", "oracle_prices"):
             cs.record_source(db, name, version=name + "-1", rows=1)
         db.commit()
 
@@ -72,10 +75,30 @@ def test_a_card_by_name_carries_its_text_tags_and_provenance(loaded):
     body = loaded.get(f"{V1}/cards", params={"name": "lightning bolt"}).json()
     assert body["card"]["oracle_text"].startswith("Lightning Bolt deals 3") and body["card"]["legalities"]["modern"] == "legal"
     assert body["rulings_total"] == 30 and body["tags"] == [{"tag": "removal-burn", "label": "removal-burn", "weight": "strong"}]
-    sources = {b["source"]: b for b in blocks(body)}
-    assert sources["Scryfall"]["kind"] == "source" and "Wizards" in sources["Scryfall"]["origin"]
-    assert sources["Scryfall"]["notice"] == prov.FAN_CONTENT_NOTICE and sources["Scryfall"]["version"] == "oracle_cards-1"
-    assert "opinions" in sources["Scryfall Tagger"]["origin"]  # tags never pass as rules
+    sources = {b["origin"]: b for b in blocks(body)}  # Scryfall appears twice: card text and prices
+    text = sources["Wizards of the Coast (card text)"]
+    assert text["source"] == "Scryfall" and text["kind"] == "source"
+    assert text["notice"] == prov.FAN_CONTENT_NOTICE and text["version"] == "oracle_cards-1"
+    assert "opinions" in sources["community tags, opinions rather than rules"]["origin"]  # tags never pass as rules
+
+
+def test_the_price_is_in_the_answer_dated_and_credited(loaded):
+    """Found by driving the tools against real data: the response model dropped `price`, so the card view never had one."""
+    body = loaded.get(f"{V1}/cards", params={"name": "Lightning Bolt"}).json()
+    assert body["price"] == {"usd": 0.69, "usd_foil": 2.5, "eur": 0.5, "as_of": "2026-10-04", "source": "scryfall",
+                             "printing": "the cheapest priced paper printing"}
+    assert "Scryfall" in {b["source"] for b in body["provenance"]} and any("TCGplayer" in (b["origin"] or "") for b in body["provenance"])
+    assert loaded.get(f"{V1}/cards", params={"name": "Fire"}).json()["price"] is None  # no price known: none claimed
+
+
+def test_a_plain_language_search_falls_back_to_any_word_and_says_so(loaded):
+    """Found with real data: 'protection from red damage prevented' matched no rule because every word was required."""
+    all_words = loaded.get(f"{V1}/rules/search", params={"q": "sample rule"}).json()
+    assert all_words["matched"] == "all words" and {r["number"] for r in all_words["results"]} >= {"100.1", "100.2"}
+    some = loaded.get(f"{V1}/rules/search", params={"q": "sample subrule wraps unrelated words"}).json()
+    assert some["matched"] == "any word" and "100.1a" in {r["number"] for r in some["results"]}
+    nothing = loaded.get(f"{V1}/rules/search", params={"q": "zzzzqq xxxxyy"}).json()
+    assert nothing["results"] == [] and nothing["matched"] in ("all words", "any word")
 
 
 def test_either_face_of_a_double_faced_card_finds_it(loaded):

@@ -27,6 +27,20 @@ def _norm_name(name: str) -> str:
     return re.sub(r"\s+", " ", name.strip().lower())
 
 
+NON_PLAYABLE_LAYOUTS = {"token", "double_faced_token", "emblem", "vanguard", "scheme", "planar", "augment", "host", "art_series",
+                        "reversible_card"}
+
+
+def card_priority(card: OracleCard) -> tuple:
+    """Which of several cards with the same name a person means: the playable paper card, never its token
+    (found with real data: 'Llanowar Elves' is also a token, which is not legal anywhere), then the most played."""
+    return (card.layout in NON_PLAYABLE_LAYOUTS, bool(card.digital), card.edhrec_rank is None, card.edhrec_rank or 0, card.oracle_id)
+
+
+def best_card(cards: list[OracleCard]) -> OracleCard | None:
+    return min(cards, key=card_priority) if cards else None
+
+
 def find_card(db: Session, *, name: str | None = None, oracle_id: str | None = None) -> tuple[OracleCard | None, list[OracleCard]]:
     """The card for an exact name (front or back face of a double-faced card) or an Oracle id, or
     close names to offer instead. Never guesses: a misspelling returns suggestions, not a card."""
@@ -35,13 +49,12 @@ def find_card(db: Session, *, name: str | None = None, oracle_id: str | None = N
     if not name or not name.strip():
         return None, []
     wanted = _norm_name(name)
-    exact = db.scalars(select(OracleCard).where(
-        func.lower(OracleCard.name) == wanted)).first()
+    exact = best_card(db.scalars(select(OracleCard).where(func.lower(OracleCard.name) == wanted)).all())
     if exact is None:  # "Fire" for "Fire // Ice"
-        exact = db.scalars(select(OracleCard).where(
+        exact = best_card(db.scalars(select(OracleCard).where(
             func.lower(OracleCard.name).like(wanted.replace("%", r"\%").replace("_", r"\_") + " // %", escape="\\")
             | func.lower(OracleCard.name).like("% // " + wanted.replace("%", r"\%").replace("_", r"\_"), escape="\\")
-        ).order_by(OracleCard.digital, OracleCard.name)).first()
+        )).all())
     if exact is not None:
         return exact, []
     db.execute(text("SELECT set_config('pg_trgm.similarity_threshold', :s, true)"), {"s": str(SIMILARITY)})  # this transaction only
@@ -107,17 +120,29 @@ def get_rule(db: Session, number: str, version: str | None = None) -> tuple[dict
     return rule_body(rule), [rule_body(c) for c in children], version
 
 
-def search_rules(db: Session, query: str, version: str | None = None, limit: int = MAX_RULE_RESULTS) -> tuple[list[dict], str | None]:
-    """Full-text search of the rules, best matches first, capped. Headings are not returned."""
+def search_rules(db: Session, query: str, version: str | None = None, limit: int = MAX_RULE_RESULTS) -> tuple[list[dict], str | None, str]:
+    """Full-text search of the rules, best matches first, capped. Headings are not returned.
+
+    A plain-language question rarely has every word in one rule ("protection from red damage prevented"),
+    so when no rule has all the words the search falls back to rules with any of them, best first. The
+    third value says which happened: ``"all words"`` or ``"any word"``."""
     version = version or latest_rules_version(db)
     if version is None or not query.strip():
-        return [], version
+        return [], version, "all words"
     limit = max(1, min(limit, MAX_RULE_RESULTS))
-    tsq = func.websearch_to_tsquery("english", query)
     vector = func.to_tsvector("english", Rule.text)
-    rows = db.scalars(select(Rule).where(Rule.version == version, Rule.kind != "heading", vector.op("@@")(tsq))
-                      .order_by(func.ts_rank(vector, tsq).desc(), Rule.number).limit(limit)).all()
-    return [rule_body(r) for r in rows], version
+
+    def run(tsq):
+        return db.scalars(select(Rule).where(Rule.version == version, Rule.kind != "heading", vector.op("@@")(tsq))
+                          .order_by(func.ts_rank(vector, tsq).desc(), Rule.number).limit(limit)).all()
+
+    rows = run(func.websearch_to_tsquery("english", query))
+    mode = "all words"
+    words = list(dict.fromkeys(re.findall(r"[A-Za-z0-9]{2,}", query.lower())))[:12]
+    if not rows and len(words) > 1:
+        rows = run(func.to_tsquery("english", " | ".join(words)))
+        mode = "any word"
+    return [rule_body(r) for r in rows], version, mode
 
 
 # -- citations ----------------------------------------------------------------------------------
