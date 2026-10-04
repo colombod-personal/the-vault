@@ -45,4 +45,4 @@ jobs:
           TWINS_LIVE: "1"
           VERCEL_CONFORMANCE_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_CONFORMANCE_PROJECT: ${{ vars.VERCEL_CONFORMANCE_PROJECT }}
-          VERCEL_CONFORMANCE_SCOPE: ${{ vars.VERCEL_SCOPE || 'wintermute2' }}
+          VERCEL_CONFORMANCE_SCOPE: ${{ vars.VERCEL_SCOPE || 'wintermute-team' }}
