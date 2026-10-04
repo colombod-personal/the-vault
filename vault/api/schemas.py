@@ -368,6 +368,14 @@ class Coverage(BaseModel):
     missing_unpriced: int | None = Field(None, description="Lines with missing copies and no known price")
 
 
+class DeckSummary(BaseModel):
+    need: int = Field(description="Copies the deck needs")
+    have: int = Field(description="Of those, copies you own (at most what each line needs)")
+    missing: int = Field(description="Copies missing")
+    missing_cost: float | None = Field(None, description="What the missing copies cost at the cheapest known prices")
+    missing_unpriced: int | None = Field(None, description="Lines with missing copies and no known price")
+
+
 class Deck(Hal):
     id: int
     name: str
@@ -376,6 +384,7 @@ class Deck(Hal):
     created_at: str
     updated_at: str
     coverage: Coverage | None = None
+    summary: DeckSummary | None = Field(None, description="With ?summary=true on the list: owned, missing and cost to finish, against your collection")
     from_: str | None = Field(None, alias="from", description="Who shared it (shared decks only)")
 
 

@@ -446,7 +446,7 @@ window.VaultApi = (() => {
     parseDeck: (text) => call(V1 + '/decks/parse', { method: 'POST', json: { text } }),
     // a decklist checked against your collection, priced by the server (missing cost, owned printings)
     deckCoverage: (text) => call(V1 + '/decks/coverage', { method: 'POST', json: { text } }),
-    decks: () => all(V1 + '/decks'),
+    decks: (summary) => all(V1 + '/decks' + (summary ? '?summary=true' : '')), // summary: owned / missing / cost to finish of each
     deck: (id) => call(V1 + '/decks/' + id),
     saveDeck: (name, text, source_url) => create(V1 + '/decks', { json: { name, text, source_url } }),
     updateDeck: (id, name, text, source_url) => call(V1 + '/decks/' + id, { method: 'PUT', json: { name, text, source_url } }),
@@ -454,7 +454,7 @@ window.VaultApi = (() => {
     // deck analysis, computed by the server from the card catalog (each answer is { result, provenance })
     deckStats: (text) => call(V1 + '/decks/stats', { method: 'POST', json: { text } }),
     deckLegality: (text, format) => call(V1 + '/decks/legality', { method: 'POST', json: { text, format } }),
-    deckUpgrades: (text, format, budget_usd) => call(V1 + '/decks/upgrades', { method: 'POST', json: { text, format, budget_usd } }),
+    deckUpgrades: (text, format, budget_usd) => call(V1 + '/decks/upgrades', { method: 'POST', json: { text, format, budget_usd, use_collection: true } }),
     deckCombos: (text) => call(V1 + '/decks/combos', { method: 'POST', json: { text } }),
     deckShopping: (text) => call(V1 + '/decks/shopping-list', { method: 'POST', json: { text } }),
 

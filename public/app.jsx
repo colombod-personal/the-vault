@@ -75,10 +75,13 @@ const VAULT_VIEWS = ['dashboard', 'browse', 'sets', 'decks', 'lab', 'graph', 'va
 function vaultRouteFromHash(fallback) {
   const [view, arg] = location.hash.replace(/^#\/?/, '').split('/').map((p) => decodeURIComponent(p || ''));
   if (view === 'sets' && arg) return { view: 'setdetail', code: arg };
+  if (view === 'decks' && arg) return { view: 'decks', deckId: arg };
   return { view: VAULT_VIEWS.includes(view) ? view : fallback };
 }
 function vaultHashFor(route) {
-  return route.view === 'setdetail' ? `#/sets/${encodeURIComponent(route.code)}` : `#/${route.view}`;
+  if (route.view === 'setdetail') return `#/sets/${encodeURIComponent(route.code)}`;
+  if (route.view === 'decks' && route.deckId) return `#/decks/${encodeURIComponent(route.deckId)}`;
+  return `#/${route.view}`;
 }
 const vaultUrlFor = (route) => location.pathname + location.search + vaultHashFor(route);
 
@@ -244,9 +247,11 @@ function App() {
     setData(null);
     await loadCollection();
   };
-  const openDeck = (text) => {
+  // A deck from Account: your own saved deck opens at its address (#/decks/{id}); a shared one by its list.
+  const openDeck = (deck) => {
     setAccountOpen(false);
-    setDeckText(text);
+    if (deck && typeof deck === 'object') { setDeckText(null); setRoute({ view: 'decks', deckId: String(deck.id) }); return; }
+    setDeckText(deck);
     setRoute({ view: 'decks' });
   };
   const noticeBanner = notice && (
@@ -452,7 +457,8 @@ function App() {
             <SetDetail data={data} code={route.code} onBack={() => nav('sets')} openCard={openCard} />
           )}
           {route.view === 'decks' && (
-            <DeckView key={deckText || 'deck'} data={data} openCard={openCard} initialText={deckText} />
+            <DeckView key={deckText || 'deck'} data={data} openCard={openCard} initialText={deckText}
+              deckId={route.deckId} onOpenDeckId={(id) => nav('decks', id ? { deckId: String(id) } : {})} />
           )}
           {route.view === 'lab' && (
             <Lab data={data} openCard={openCard} />

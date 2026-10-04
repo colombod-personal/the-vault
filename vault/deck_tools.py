@@ -14,7 +14,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 from mtg_toolkits import decklist
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, false, func, or_, select
 from sqlalchemy.orm import Session
 
 from .catalog_queries import card_priority
@@ -271,7 +271,7 @@ def _price_fields(p: OraclePrice | None) -> dict:
 
 
 def find_upgrades(db: Session, resolved: Resolved, fmt: str, budget_usd: float, roles: list[str] | None = None,
-                  limit: int = 10, targets: dict[str, int] | None = None) -> dict:
+                  limit: int = 10, targets: dict[str, int] | None = None, owned: dict[str, int] | None = None) -> dict:
     """Candidates to add for the roles the deck is short of, all legal, in the deck's colors, not
     already in it, and each priced within the budget. Ordered by popularity (EDHREC rank), which is
     popularity and not power. Also lists the deck's least popular untagged cards as cut candidates."""
@@ -301,15 +301,20 @@ def find_upgrades(db: Session, resolved: Resolved, fmt: str, budget_usd: float, 
         not_in_identity = [c for c in COLORS if c not in ident]
         query = (select(OracleCard, OraclePrice, func.count(OracleTagLink.tag_id))
                  .join(OracleTagLink, OracleTagLink.oracle_id == OracleCard.oracle_id)
-                 .join(OraclePrice, OraclePrice.oracle_id == OracleCard.oracle_id)
+                 .outerjoin(OraclePrice, OraclePrice.oracle_id == OracleCard.oracle_id)
                  .where(OracleTagLink.tag_id.in_(list(tag_ids[role])), OracleCard.digital.is_(False),
-                        OracleCard.legalities[fmt].astext.in_(LEGAL), OraclePrice.usd.is_not(None), OraclePrice.usd <= budget_usd,
+                        OracleCard.legalities[fmt].astext.in_(LEGAL),
+                        # within the budget, or already in your collection (free, whatever its price)
+                        or_(and_(OraclePrice.usd.is_not(None), OraclePrice.usd <= budget_usd),
+                            OracleCard.oracle_id.in_(list(owned)) if owned else false()),
                         OracleCard.oracle_id.not_in(in_deck or [""]),
                         *[~OracleCard.color_identity.contains([c]) for c in not_in_identity])
                  .group_by(OracleCard.oracle_id, OraclePrice.oracle_id)
-                 .order_by(OracleCard.edhrec_rank.asc().nulls_last(), OraclePrice.usd, OracleCard.name).limit(limit))
+                 .order_by(*([OracleCard.oracle_id.in_(list(owned)).desc()] if owned else []),
+                           OracleCard.edhrec_rank.asc().nulls_last(), OraclePrice.usd, OracleCard.name).limit(limit))
         candidates[role] = [{"name": c.name, "oracle_id": c.oracle_id, "type_line": c.type_line, "mana_cost": c.mana_cost,
                              "edhrec_rank": c.edhrec_rank, **_price_fields(p),
+                             **({"owned_copies": owned.get(c.oracle_id, 0)} if owned is not None else {}),
                              "why": f"tagged {role} by Scryfall Tagger; legal in {fmt}; within the deck's colors; priced within the budget"}
                             for c, p, _ in db.execute(query).all()]
     oids = [e.card.oracle_id for e in played if e.card and not is_land(e.card)]

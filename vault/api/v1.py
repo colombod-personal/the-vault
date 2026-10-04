@@ -661,11 +661,23 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return analytics.price_coverage(db, user.id, _coverage(body.text, user_entries(db, user)))
 
     @router.get("/decks", tags=["decks"], response_model=S.DeckPage)
-    def list_decks(request: Request, cursor: str | None = None, limit: int | None = None,
+    def list_decks(request: Request, cursor: str | None = None, limit: int | None = None, summary: bool = False,
                    user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         rows = list(db.scalars(select(Deck).where(Deck.user_id == user.id)))
         page, nxt = paginate(rows, lambda d: (d.name.lower(),), lambda d: d.id, cursor=cursor, limit=limit)
-        return page_body(request, [_deck(d) for d in page], nxt, len(rows), limit=limit)
+        items = [_deck(d) for d in page]
+        if summary and page:  # each deck against your collection, read once for the page
+            owned = user_entries(db, user)
+            for item, d in zip(items, page):
+                try:
+                    cov = analytics.price_coverage(db, user.id, _coverage(d.text, owned))
+                except HTTPException:  # a saved list the parser can no longer read
+                    continue
+                need = sum(c["need"] for c in cov["cards"])
+                have = sum(min(c["have"], c["need"]) for c in cov["cards"])
+                item["summary"] = {"need": need, "have": have, "missing": need - have,
+                                   "missing_cost": cov.get("missing_cost"), "missing_unpriced": cov.get("missing_unpriced")}
+        return page_body(request, items, nxt, len(rows), limit=limit)
 
     @router.post("/decks", tags=["decks"], response_model=S.Deck, status_code=201)
     def create_deck(request: Request, body: S.DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)):

@@ -38,17 +38,11 @@ function mergeDeckCards(cards) {
   return merged;
 }
 
-// How much of a deck you own, from the server's coverage lines.
-function coverageSummary(cov) {
-  let need = 0, have = 0, missingCards = 0;
-  for (const l of cov.cards || []) { need += l.need; have += Math.min(l.have, l.need); if (l.missing) missingCards += l.missing; }
-  return { need, have, missingCards, pct: need ? have / need : 0, cost: cov.missing_cost || 0, unpriced: cov.missing_unpriced || 0 };
-}
-
 const money = (v) => (v == null ? '?' : '$' + Number(v).toFixed(2));
 const scryfallLink = (name) => 'https://scryfall.com/search?q=' + encodeURIComponent(`!"${name}"`);
-const FORMAT_CHOICES = ['commander', 'standard', 'pioneer', 'modern', 'legacy', 'vintage', 'pauper', 'brawl', 'historic',
-  'oathbreaker', 'paupercommander', 'premodern', 'penny'];
+// Every format the server's analysis supports (vault/deck_tools.py FORMATS).
+const FORMAT_CHOICES = ['commander', 'standard', 'pioneer', 'modern', 'legacy', 'vintage', 'pauper', 'brawl', 'standardbrawl',
+  'historic', 'timeless', 'oathbreaker', 'paupercommander', 'premodern', 'penny', 'duel', 'predh', 'oldschool', 'gladiator', 'alchemy'];
 const TYPE_ORDER = ['Commander', 'Creature', 'Planeswalker', 'Battle', 'Instant', 'Sorcery', 'Artifact', 'Enchantment', 'Land', 'Other'];
 const primaryType = (r) => {
   if (isCommander(r)) return 'Commander';
@@ -56,45 +50,39 @@ const primaryType = (r) => {
   return TYPE_ORDER.find((k) => k !== 'Commander' && k !== 'Other' && t.includes(k)) || 'Other';
 };
 
-function DeckView({ data, openCard, initialText }) {
-  const [myDecks, setMyDecks] = useStateD(null); // your saved decks (null while loading)
-  const [open, setOpenRaw] = useStateD(initialText ? { text: initialText, key: 1 } : null); // the deck on screen
-  const setOpen = (o) => setOpenRaw(o && { ...o, key: Date.now() }); // a new key per deck opened, kept when it's saved
-  const refreshDecks = () => window.VaultApi.decks().then(setMyDecks).catch(() => setMyDecks([]));
+// A saved deck has its own address (#/decks/{id}), so refresh, bookmarks and Back work; a deck
+// opened from a link or a pasted list lives on screen until it's saved.
+function DeckView({ data, openCard, initialText, deckId, onOpenDeckId }) {
+  const [myDecks, setMyDecks] = useStateD(null); // your saved decks, with summaries (null while loading)
+  const [local, setLocalRaw] = useStateD(initialText ? { text: initialText, key: 1 } : null);
+  const setLocal = (o) => setLocalRaw(o && { ...o, key: Date.now() });
+  const refreshDecks = () => window.VaultApi.decks(true).then((d) => { setMyDecks(d); return d; }).catch(() => { setMyDecks([]); return []; });
   useEffectD(() => { refreshDecks(); }, []);
 
-  if (open) {
-    return <DeckPage key={open.key} source={open} myDecks={myDecks}
-      refreshDecks={refreshDecks} openCard={openCard} onBack={() => { setOpen(null); refreshDecks(); }}
-      onSaved={(d) => setOpenRaw((o) => ({ ...o, saved: d }))} />;
+  if (deckId) {
+    if (myDecks === null) return <p className="muted label-mono">Loading your deck…</p>;
+    const saved = myDecks.find((d) => String(d.id) === String(deckId));
+    if (!saved) return <DeckLibrary myDecks={myDecks} onOpen={(o) => o.saved ? onOpenDeckId(o.saved.id) : setLocal(o)} notice="That deck isn't in your decks any more." />;
+    return <DeckPage key={'saved' + saved.id} source={{ saved, url: saved.source_url || null, text: saved.source_url ? null : saved.text }}
+      myDecks={myDecks} refreshDecks={refreshDecks} openCard={openCard} onBack={() => onOpenDeckId(null)} onSaved={() => refreshDecks()} />;
   }
-  return <DeckLibrary myDecks={myDecks} onOpen={setOpen} />;
+  if (local) {
+    return <DeckPage key={local.key} source={local} myDecks={myDecks} refreshDecks={refreshDecks} openCard={openCard}
+      onBack={() => { setLocal(null); refreshDecks(); }}
+      onSaved={(d) => refreshDecks().then(() => { setLocal(null); onOpenDeckId(d.id); })} />;
+  }
+  return <DeckLibrary myDecks={myDecks} onOpen={(o) => o.saved ? onOpenDeckId(o.saved.id) : setLocal(o)} />;
 }
 
 // -- the library ----------------------------------------------------------------------------------
 
-function DeckLibrary({ myDecks, onOpen }) {
+function DeckLibrary({ myDecks, onOpen, notice }) {
   const [tab, setTab] = useStateD('url');
   const [src, setSrc] = useStateD('');
-  const [covers, setCovers] = useStateD({}); // deck id -> coverage summary (or 'error')
-
-  // Each saved deck checked against your collection, a few at a time.
-  useEffectD(() => {
-    if (!myDecks) return;
-    let stop = false;
-    const queue = myDecks.filter((d) => !(d.id in covers));
-    const worker = async () => {
-      while (!stop && queue.length) {
-        const d = queue.shift();
-        try {
-          const full = await window.VaultApi.deck(d.id);
-          if (!stop) setCovers((c) => ({ ...c, [d.id]: coverageSummary(full.coverage || {}) }));
-        } catch (e) { if (!stop) setCovers((c) => ({ ...c, [d.id]: 'error' })); }
-      }
-    };
-    Promise.all([worker(), worker(), worker()]);
-    return () => { stop = true; };
-  }, [myDecks]);
+  // Each deck against your collection, from the list's summaries (one request for the library).
+  const covers = useMemoD(() => Object.fromEntries((myDecks || []).map((d) => [d.id, d.summary ? {
+    need: d.summary.need, have: d.summary.have, missingCards: d.summary.missing, pct: d.summary.need ? d.summary.have / d.summary.need : 0,
+    cost: d.summary.missing_cost || 0, unpriced: d.summary.missing_unpriced || 0 } : 'error'])), [myDecks]);
 
   const sorted = useMemoD(() => (myDecks || []).slice().sort((a, b) => {
     const ca = covers[a.id], cb = covers[b.id];
@@ -121,6 +109,7 @@ function DeckLibrary({ myDecks, onOpen }) {
         </div>
       </div>
 
+      {notice && <div className="panel" style={{ marginBottom: 16, color: 'var(--gold)' }}>{notice}</div>}
       <div className="panel" style={{ marginBottom: 20 }}>
         <p className="eyebrow" style={{ marginBottom: 10 }}>Add a deck</p>
         <div className="row" style={{ gap: 4, marginBottom: 10 }}>
@@ -260,7 +249,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
   }
   async function remove() {
     if (!saved || !confirm(`Remove “${saved.name}” from your decks?`)) return;
-    try { await window.VaultApi.deleteDeck(saved.id); onBack(); }
+    try { await window.VaultApi.deleteDeck(saved.id); await refreshDecks(); onBack(); }
     catch (e) { setError('Removing failed: ' + e.message); }
   }
 
@@ -493,15 +482,6 @@ function DeckUpgrades({ text, format, setFormat }) {
   const [budget, setBudget] = useStateD(5);
   const [asked, setAsked] = useStateD(5);
   const s = useDeckAnswer(() => window.VaultApi.deckUpgrades(text, format, Number(asked) || 0), text + '|' + format + '|' + asked);
-  const [owned, setOwned] = useStateD({}); // name -> copies you own
-  useEffectD(() => {
-    if (!s.result) return;
-    const names = [...new Set(Object.values(s.result.candidates).flat().map((c) => c.name))];
-    if (!names.length) return;
-    window.VaultApi.deckCoverage(names.map((n) => `1 ${n}`).join('\n'))
-      .then((cov) => setOwned(Object.fromEntries(cov.cards.map((l) => [nameKey(l.name), l.have]))))
-      .catch(() => {});
-  }, [s.result]);
   return (
     <div className="panel">
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -519,7 +499,7 @@ function DeckUpgrades({ text, format, setFormat }) {
             <div key={role} style={{ marginTop: 16 }}>
               <p className="eyebrow">{role.replace(/_/g, ' ')} <span className="muted">· the deck has {s.result.gaps[role]?.have}{s.result.gaps[role]?.guideline ? `, about ${s.result.gaps[role].guideline} is usual` : ''}</span></p>
               {list.length === 0 ? <p className="muted" style={{ fontSize: 12 }}>Nothing within the budget.</p> : list.map((c) => {
-                const have = owned[nameKey(c.name)] || 0;
+                const have = c.owned_copies || 0; // yours already: free to add, suggested whatever the budget
                 return (
                   <div key={c.name} className="deck-kv">
                     <span><a href={scryfallLink(c.name)} target="_blank" rel="noopener noreferrer">{c.name}</a>

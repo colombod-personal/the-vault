@@ -137,6 +137,24 @@ def test_upgrade_candidates_respect_legality_colours_budget_and_the_deck(loaded)
     assert [c["name"] for c in r["cut_candidates"]][0] == "Dull Bear"  # the least-played card without a role comes first
 
 
+def test_upgrades_can_offer_cards_you_own_first_whatever_their_price(loaded, app):
+    """The web Decks page asks with use_collection: a card you own is free to add, so the budget
+    doesn't apply to it; it comes first, with the copies you have."""
+    from vault.models import Card, Entry, User
+    with app.state.db.sessions() as db:
+        uid = db.query(User.id).order_by(User.id.desc()).first()[0]
+        db.add(Card(scryfall_id="p8", oracle_id=oid(8), name="Pricey Ramp", set_code="tst", collector_number="8"))
+        db.add(Entry(user_id=uid, name="Pricey Ramp", scryfall_id="p8", quantity=2))
+        db.commit()
+    plain = computed(post(loaded, "upgrades", text=DECK, format="commander", budget_usd=5, roles=["ramp"]))
+    assert "Pricey Ramp" not in [c["name"] for c in plain["candidates"]["ramp"]]
+    assert "owned_copies" not in plain["candidates"]["ramp"][0]  # unchanged unless asked
+    mine = computed(post(loaded, "upgrades", text=DECK, format="commander", budget_usd=5, roles=["ramp"], use_collection=True))
+    ramp = mine["candidates"]["ramp"]
+    assert ramp[0]["name"] == "Pricey Ramp" and ramp[0]["owned_copies"] == 2  # over budget, but yours
+    assert [c["name"] for c in ramp[1:]] == ["Cheap Ramp", "Other Rock"] and ramp[1]["owned_copies"] == 0
+
+
 def test_upgrades_need_the_prices_and_tags_to_be_loaded(signed_in, app):
     with app.state.db.sessions() as db:
         cs.sync_oracle_cards(db, CARDS)

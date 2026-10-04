@@ -404,7 +404,7 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged }) {
           <div key={d.id} style={rowStyle}>
             <span>{d.name}</span>
             <span style={{ display: 'flex', gap: 6 }}>
-              <button className="btn xs" onClick={() => onOpenDeck(d.text)}>Open</button>
+              <button className="btn xs" onClick={() => onOpenDeck(d)}>Open</button>
               <button className="btn xs" onClick={() => share('deck', d.id)}>Share</button>
               <button className="btn xs ghost" onClick={() => removeDeck(d.id)}>Delete</button>
             </span>

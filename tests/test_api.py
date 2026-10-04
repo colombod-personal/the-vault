@@ -236,6 +236,18 @@ def test_deck_coverage_and_parsing(signed_in):
     ]
 
 
+def test_deck_list_can_carry_each_decks_summary(signed_in):
+    upload(signed_in)
+    assert signed_in.post(f"{V1}/decks", json={"name": "B", "text": "2 Sol Ring\n1 Rhystic Study"}).status_code == 201
+    plain = signed_in.get(f"{V1}/decks").json()["items"]
+    assert plain[0].get("summary") is None  # only when asked: it reads the collection
+    deck = signed_in.get(f"{V1}/decks?summary=true").json()["items"][0]
+    owned = near_qty(signed_in, "Sol Ring")
+    have = min(owned, 2)
+    assert deck["summary"]["need"] == 3 and deck["summary"]["have"] == have and deck["summary"]["missing"] == 3 - have
+    assert deck["summary"]["missing_unpriced"] >= 0
+
+
 def test_openapi_documents_the_api(client):
     spec = client.get("/api/openapi.json").json()
     paths = spec["paths"]

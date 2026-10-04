@@ -155,7 +155,7 @@ Nothing is dumped: a tool returns the card, rule or deck asked about, capped.
 | `search_rules`, `get_rule` | `GET /catalog/rules/search`, `/catalog/rules/{number}` | Comprehensive Rules with the edition; at most 10 results; glossary as `glossary:Term` |
 | `verify_citation` | `POST /catalog/verify-citation` | is a quote verbatim in the rule, Oracle text or ruling? Whitespace and typographic quotes are forgiven; nothing else; a failure returns the true text |
 | `deck_stats`, `deck_legality` | `POST /decks/stats`, `/decks/legality` | counts, curve, color identity, roles (Tagger tags), estimated cost; legality, copies, size, commander identity, and what was not checked |
-| `find_upgrades`, `validate_deck_changes` | `POST /decks/upgrades`, `/decks/validate-changes` | candidates are legal, in colors, not in the deck, within budget; the validator checks the final plan (legality, colors, resulting deck, total price) |
+| `find_upgrades`, `validate_deck_changes` | `POST /decks/upgrades`, `/decks/validate-changes` | candidates are legal, in colors, not in the deck, within budget (with `use_collection: true`, cards you own are suggested first whatever their price, each with `owned_copies`); the validator checks the final plan (legality, colors, resulting deck, total price) |
 | `find_combos` | `POST /decks/combos` | asked of Commander Spellbook on demand; nothing stored |
 | `shopping_list` | `POST /decks/shopping-list` | what you do not own, cheapest known price (dated), a list to paste into a store's own tool |
 
