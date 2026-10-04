@@ -50,6 +50,15 @@ def import_collection(db: Session, user: User, filename: str, content: bytes) ->
     - set + collector number is looked up among the cards the server already knows
     Everything else is resolved by the next daily sync.
     """
+    source, entries = read_file(content)
+    version = db.scalar(select(User.collection_version).where(User.id == user.id))
+    old_rows = user_entries(db, user)
+    changes = delta.diff([r.to_collection_entry() for r in old_rows], entries)
+    return _replace(db, user, filename, source, entries, version, old_rows, changes)
+
+
+def read_file(content: bytes):
+    """The file's format and entries, checked (size, encoding, limits). Raises ImportError_."""
     if len(content) > MAX_UPLOAD_BYTES:
         raise ImportError_("File is too large (20 MB max)")
     try:
@@ -66,11 +75,32 @@ def import_collection(db: Session, user: User, filename: str, content: bytes) ->
         _clean(e, row)
     if sum(e.quantity for e in entries) > MAX_COPIES:
         raise ImportError_("The file has more copies than a collection can hold.")
+    return source, entries
 
-    version = db.scalar(select(User.collection_version).where(User.id == user.id))
+
+def preview_import(db: Session, user: User, content: bytes) -> dict:
+    """What importing the file would change, without changing anything (an assistant shows it first)."""
+    source, entries = read_file(content)
     old_rows = user_entries(db, user)
     changes = delta.diff([r.to_collection_entry() for r in old_rows], entries)
+    matches = _match_printings(db, entries, old_rows)
+    unmatched = [{"row": i, "name": e.name, "set": e.set_code, "number": e.collector_number, "quantity": e.quantity}
+                 for i, (e, (sid, _, _)) in enumerate(zip(entries, matches), 1) if sid is None]
+    return {"source": source, "rows": len(entries), "copies": sum(e.quantity for e in entries),
+            "changes": changes.summary(), "matched_rows": len(entries) - len(unmatched),
+            "unmatched_rows": len(unmatched), "unmatched": unmatched[:PREVIEW_UNMATCHED],
+            "note": "row is the n-th card row of the file, not counting header lines. "
+                    "Unmatched rows have no printing the Vault can identify (missing or unknown set and number). "
+                    "They are kept and matched later by name, which can pick the wrong printing and price. "
+                    "Fix the set code and collector number in the file before importing if you can."}
 
+
+PREVIEW_UNMATCHED = 100
+
+
+def _match_printings(db: Session, entries, old_rows) -> list[tuple]:
+    """Each entry's (scryfall_id, match_method, price_finish): carried over from the previous import, the id in the
+    file, or set + collector number among the printings the server knows; (None, None, None) otherwise."""
     known = {}
     for row in old_rows:
         if row.scryfall_id and row.match_method in EXACT:
@@ -86,7 +116,19 @@ def import_collection(db: Session, user: User, filename: str, content: bytes) ->
             tuple_(Card.set_code, Card.collector_number).in_(wanted[i:i + 500]))
         for sid, set_code, number in db.execute(query):
             by_number[(set_code, normalize_collector_number(number))] = sid
+    out = []
+    for e in entries:
+        scryfall_id, method, price_finish = known.get(delta.key_of(e), (None, None, None))
+        if scryfall_id is None and e.scryfall_id:
+            scryfall_id, method = e.scryfall_id, "id"
+        elif scryfall_id is None and e.set_code and e.collector_number and printing(e) in by_number:
+            scryfall_id, method = by_number[printing(e)], "set_number"
+        out.append((scryfall_id, method, price_finish))
+    return out
 
+
+def _replace(db: Session, user: User, filename: str, source, entries, version, old_rows, changes) -> Import:
+    matches = _match_printings(db, entries, old_rows)
     imp = Import(
         user_id=user.id, filename=filename[:255], source=source, rows=len(entries),
         copies=sum(e.quantity for e in entries), summary=changes.summary(),
@@ -101,12 +143,7 @@ def import_collection(db: Session, user: User, filename: str, content: bytes) ->
     db.add(imp)
     db.flush()
     db.execute(delete(Entry).where(Entry.user_id == user.id))
-    for position, e in enumerate(entries):
-        scryfall_id, method, price_finish = known.get(delta.key_of(e), (None, None, None))
-        if scryfall_id is None and e.scryfall_id:
-            scryfall_id, method = e.scryfall_id, "id"
-        elif scryfall_id is None and printing(e) in by_number:
-            scryfall_id, method = by_number[printing(e)], "set_number"
+    for position, (e, (scryfall_id, method, price_finish)) in enumerate(zip(entries, matches)):
         e.scryfall_id = scryfall_id
         db.add(Entry.from_collection_entry(
             e, user_id=user.id, import_id=imp.id, position=position, match_method=method,

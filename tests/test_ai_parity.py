@@ -58,3 +58,36 @@ def test_hosts_are_told_which_tools_destroy_and_no_tool_creates_a_share():
     assert listed["stop_sharing"]["annotations"]["destructiveHint"] is True
     assert listed["get_import"]["annotations"]["readOnlyHint"] is True
     assert not [n for n in listed if "create" in n and "share" in n]  # sharing is started by the person
+
+
+def test_an_import_shows_what_would_change_before_replacing_the_collection(agent, bot):
+    from test_agents import CSV
+    write = make_token(agent, scopes=["read", "write"])
+    smaller = b"\n".join(CSV.splitlines()[:3]) + b"\n"  # sep line, header, one row: most cards would go
+    before = agent.get(f"{V1}/collection").json()["copies"]
+    preview = call_tool(bot, write, "import_collection_csv", csv=smaller.decode())
+    assert not preview.get("isError"), preview
+    assert "changes" in preview["structuredContent"] and preview["structuredContent"]["rows"] == 1
+    assert agent.get(f"{V1}/collection").json()["copies"] == before  # nothing changed yet
+    done = call_tool(bot, write, "import_collection_csv", csv=smaller.decode(), confirm=True)
+    assert not done.get("isError"), done
+    assert agent.get(f"{V1}/collection").json()["copies"] < before
+
+
+def test_the_preview_route_never_writes(agent):
+    from test_agents import CSV
+    imports = agent.get(f"{V1}/imports").json()["total"]
+    res = agent.post(f"{V1}/imports/preview", files={"file": ("c.csv", CSV, "text/csv")})
+    assert res.status_code == 200 and agent.get(f"{V1}/imports").json()["total"] == imports
+
+
+def test_the_preview_lists_rows_it_cannot_match_so_the_file_can_be_fixed_first(agent, bot):
+    from test_agents import CSV
+    lines = CSV.decode().splitlines()
+    bogus = "my cards,1,0,Not A Real Card,ZZZ,Nowhere,9999,Mint,Normal,English,0.10,2024-01-01,0.01,0.20,0.09"
+    file = "\n".join(lines + [bogus]) + "\n"
+    write = make_token(agent, scopes=["read", "write"])
+    preview = call_tool(bot, write, "import_collection_csv", csv=file)["structuredContent"]
+    assert preview["matched_rows"] + preview["unmatched_rows"] == preview["rows"]
+    assert {"row": preview["rows"], "name": "Not A Real Card", "set": "zzz", "number": "9999", "quantity": 1} in preview["unmatched"]
+    assert "Fix the set code and collector number" in preview["note"]

@@ -264,10 +264,13 @@ TOOLS = [
     Tool("list_imports", "Past collection imports, newest first, with what changed each time.", dict(PAGING),
          path=lambda a: f"{V1}/imports", query=("limit", "cursor")),
     Tool("import_collection_csv", "Replace the collection with a collection file and record what changed. Dragon "
-         "Shield, Moxfield and generic CSV exports are detected automatically.",
+         "Shield, Moxfield and generic CSV exports are detected automatically. Without confirm it only shows what "
+         "would change (added, removed, changed): show that to the person and call again with confirm true only "
+         "after they say yes.",
          {"csv": {"type": "string", "description": "The CSV file's content"},
-          "filename": {"type": "string", "default": "agent-import.csv"}}, ["csv"],
-         method="POST", path=lambda a: f"{V1}/imports", write=True),
+          "filename": {"type": "string", "default": "agent-import.csv"}, "confirm": CONFIRM}, ["csv"],
+         method="POST", path=lambda a: f"{V1}/imports" if a.get("confirm") is True else f"{V1}/imports/preview",
+         write=True, destructive=True),
     Tool("list_export_formats", "Formats the collection can be exported in to move it to another app (Dragon "
          "Shield, Moxfield, Archidekt, generic CSV, text list), each with a download link. The files can be "
          "large; give the person the link rather than reading the whole file.",
