@@ -280,3 +280,21 @@ def test_vercel_contract_used_by_the_setup_job(real, twin, vercel_project):
     r = real.post(f"{VERCEL}/v13/deployments", headers=headers, params=params, json=body)
     t = twin.post(f"{VERCEL}/v13/deployments", headers=tw, json={**body, "name": "scratch"})
     assert r.status_code == t.status_code and r.json()["error"]["code"] == t.json()["error"]["code"]
+
+
+def test_commander_spellbook_find_my_combos(real, twin):
+    """The same two-card deck, asked of the real service and of its twin: the twin may leave fields
+    out but must not invent any, and what vault.combos reads must be in the real answer."""
+    deck = {"main": [{"card": "Thassa's Oracle", "quantity": 1}, {"card": "Demonic Consultation", "quantity": 1}], "commanders": []}
+    r = real.post("https://backend.commanderspellbook.com/find-my-combos", params={"limit": 1}, json=deck)
+    t = twin.post("https://backend.commanderspellbook.com/find-my-combos", params={"limit": 1}, json=deck)
+    assert r.status_code == t.status_code == 200
+    real_results, twin_results = r.json()["results"], t.json()["results"]
+    for key in ("included", "almostIncluded"):
+        assert key in real_results
+    variant = (real_results["included"] or real_results["almostIncluded"])[0]
+    for key in ("id", "uses", "produces", "description", "manaNeeded", "easyPrerequisites", "notablePrerequisites", "identity", "popularity", "bracketTag"):
+        assert key in variant, key
+    assert "card" in variant["uses"][0] and "name" in variant["uses"][0]["card"] and "feature" in variant["produces"][0]
+    assert invented(t.json(), r.json()) == []
+    assert invented(twin_results["included"][0], variant) == []

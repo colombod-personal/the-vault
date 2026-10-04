@@ -109,8 +109,9 @@ Rules, rulings and Oracle text are Wizards' material. Serving them verbatim in b
 
 ## Provenance rules (implementation)
 
-Every MCP tool result, API response and UI element that carries third-party data includes a
-`provenance` block, with no exceptions:
+Every MCP tool result, API response and UI element that carries third-party data includes `provenance`,
+with no exceptions. It is a list of blocks (one per source, or one `computed` block listing its inputs); a
+block looks like this:
 
 ```json
 {
