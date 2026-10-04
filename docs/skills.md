@@ -73,3 +73,7 @@ parsed), and wrote them to `.claude/skills/` (Claude Code) and `.agents/skills/`
 shared folder) in about a second. `claude plugin validate` passes for `plugins/the-vault` and for the
 marketplace. Not yet checked on real installs of Codex, Cursor or Copilot beyond the files the CLI wrote; a
 person should run the first-question check on `connect.html` in each.
+
+## Agents
+
+Three ready-made agents (`vault-judge`, `vault-deckbuilder`, `vault-buyer`) live in `agents/` as one neutral source. `scripts/build_plugin.py` makes the Claude Code versions (inside the plugin, limited to the Vault's own tools) and Codex, Cursor and GitHub Copilot versions in `agent-definitions/` (copy instructions in its README). Edit `agents/`, never the generated files; `tests/test_agent_definitions.py` checks them against the real tools and skills. Listings and directories: `docs/listings.md`.
