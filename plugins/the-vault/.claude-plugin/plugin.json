@@ -1,0 +1,36 @@
+{
+  "name": "the-vault",
+  "displayName": "The Vault",
+  "version": "0.1.0",
+  "description": "Magic: The Gathering rules, cards, decks and collection tools for your AI assistant, grounded in Scryfall and the Comprehensive Rules, with sources shown. Free and unofficial.",
+  "author": {
+    "name": "The Vault",
+    "url": "https://github.com/colombod-personal/the-vault"
+  },
+  "homepage": "https://github.com/colombod-personal/the-vault",
+  "repository": "https://github.com/colombod-personal/the-vault",
+  "license": "MIT",
+  "keywords": [
+    "magic-the-gathering",
+    "mtg",
+    "rules",
+    "decks",
+    "scryfall",
+    "collection"
+  ],
+  "userConfig": {
+    "vault_url": {
+      "type": "string",
+      "title": "Vault address",
+      "default": "https://the-vault-puce-one.vercel.app",
+      "description": "Where The Vault runs (the default is the public one)"
+    },
+    "vault_token": {
+      "type": "string",
+      "title": "Personal access token",
+      "sensitive": true,
+      "required": true,
+      "description": "Create one in The Vault: Account, Agents & API. Read-only is enough for rules, cards and deck analysis."
+    }
+  }
+}
