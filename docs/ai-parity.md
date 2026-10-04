@@ -19,7 +19,7 @@ Scopes: **read**, **write** (changes the collection or decks; off by default on 
 | Sets view | `GET /collection/sets`, `/catalog/sets` | `list_sets` | read | no |
 | Refresh prices | `POST /collection/refresh` | `refresh_prices` | write | no |
 | **Upload a collection file (CSV)** | `POST /imports` (multipart) | `import_collection_csv` (CSV text in the argument) | write | **yes**: see G1, G2 |
-| See past imports and what changed | `GET /imports`, `GET /imports/{id}` | `list_imports` | read | **yes**: no tool for one import's changes (G3) |
+| See past imports and what changed | `GET /imports`, `GET /imports/{id}` | `list_imports`, `get_import` | read | no |
 | Export the collection to another app | `GET /collection/exports` | `list_export_formats` (download links) | read | no |
 | Graph view (clusters, deck map) | computed in the browser from the collection | none | read | **yes**: no AI equivalent (G4) |
 
@@ -33,7 +33,7 @@ All collection tools also read a collection someone shared with you (`share_id`,
 | Open a deck with coverage | `GET /decks/{id}` | `get_deck` | read | no |
 | Save a deck (text and its link) | `POST /decks` | `save_deck` (with `source_url`) | write | no |
 | Edit a deck | `PUT /decks/{id}` | `update_deck` | write | no |
-| **Delete a deck** | `DELETE /decks/{id}` | none | write | **yes** (G5) |
+| Delete a deck | `DELETE /decks/{id}` | `delete_deck` (shows the deck first; deletes only with `confirm`) | write | no |
 | Load a deck from an Archidekt link | `GET /archidekt/decks/{id}` | `get_archidekt_deck` | read | **partly**: saving it needs the model to convert JSON to text (#96 `import_deck_from_link`) |
 | Check a decklist against the collection | `POST /decks/coverage`, `/decks/parse` | `check_decklist`, `parse_decklist` | read | no |
 | Stats, legality, upgrades, validate, combos, shopping list | `POST /decks/stats` ... | `deck_stats`, `deck_legality`, `find_upgrades`, `validate_deck_changes`, `find_combos`, `shopping_list` | read | **partly**: text only, no `deck_id` (#96) |
@@ -43,9 +43,10 @@ All collection tools also read a collection someone shared with you (`share_id`,
 | Action | REST route | MCP tool | Scope | Gap |
 |---|---|---|---|---|
 | See what others shared with me, open a shared deck | `GET /shared`, `GET /shared/{id}/deck` | `list_shared_with_me`, `get_shared_deck` | read | no |
-| **Share my collection or a deck, list my shares** | `POST /shares`, `GET /shares` | none | write | **yes** (G6) |
-| **Accept an invitation** | `POST /shares/accept` | none | write | **yes** (G6) |
-| **Stop sharing** | `DELETE /shares/{id}` | none | write | **yes** (G6) |
+| List my shares | `GET /shares` | `list_my_shares` | read | no |
+| Share my collection or a deck | `POST /shares` | none, on purpose | account | kept with the person: an invite link hands your data to someone, so an injected instruction must not be able to create one |
+| Accept an invitation | `POST /shares/accept` | `accept_share` | write | no |
+| Stop sharing | `DELETE /shares/{id}` | `stop_sharing` (shows shares first; ends one only with `confirm`) | write | no |
 
 ## Cards and rules (catalog)
 
@@ -72,9 +73,9 @@ Shown on the consent screen as "It will never be able to". These stay web-only.
   opens to pick the file, or the host passes an attachment), then the import runs server-side.
 - **G2 Import replaces the whole collection with no preview.** Needed: preview what would change (added, removed, changed),
   then confirm, as the web app's import summary shows.
-- **G3 One import's changes.** Add `get_import` (`GET /imports/{id}`).
+- ~~G3 One import's changes~~: `get_import`.
 - **G4 Graph view.** No AI equivalent: decide whether a tool returning clusters/deck overlaps is useful (e.g. "which of my
   decks share cards"; the real claude.ai run worked this out by hand).
-- **G5 Delete a deck.** Add `delete_deck` with preview and confirm.
-- **G6 Sharing.** Add `share`, `list_my_shares`, `accept_share`, `stop_sharing`, with confirm on create and stop.
+- ~~G5 Delete a deck~~: `delete_deck`, preview then `confirm`.
+- ~~G6 Sharing~~: `list_my_shares`, `accept_share`, `stop_sharing` (confirm). Creating a share stays with the person (see the table).
 - Deck items (name search, import from link, `deck_id` analysis) are in #96, owned by the deck work (#88).
