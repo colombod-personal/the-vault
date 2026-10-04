@@ -4,7 +4,7 @@ The rules (README → Security):
 - Secrets live in the "vercel-production" GitHub environment, which only main may use. A job
   that reads a secret declares that environment and only runs for main.
 - Secret-bearing workflows never run on push or pull_request (a branch could change them).
-- Vercel deploys only merges to main (vercel.json → ignoreCommand).
+- Vercel deploys only main and staging (vercel.json → ignoreCommand).
 - Least privilege: read-only GITHUB_TOKEN, no persisted git credentials, pinned Vercel CLI,
   no ${{ }} expressions inside shell scripts, integrity hashes on CDN scripts.
 """
@@ -77,8 +77,8 @@ def test_no_secret_outside_its_job_env():
         assert "secrets." not in yaml.safe_dump({k: v for k, v in wf.items() if k != "jobs"}), path.name
 
 
-@pytest.mark.parametrize("ref,deploys", [("main", True), ("claude/feature", False), ("", False)])
-def test_vercel_deploys_only_main(ref, deploys):
+@pytest.mark.parametrize("ref,deploys", [("main", True), ("staging", True), ("claude/feature", False), ("", False)])
+def test_vercel_deploys_only_main_and_staging(ref, deploys):
     command = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))["ignoreCommand"]
     skipped = subprocess.run(["bash", "-c", command], env={"VERCEL_GIT_COMMIT_REF": ref}).returncode == 0
     assert skipped is not deploys
