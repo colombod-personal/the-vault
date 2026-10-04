@@ -55,3 +55,12 @@ React prototype as the front end (`public/`). Read `README.md` first.
   review the file, and commit it. The app applies migrations at
   startup (`Database.migrate`); `tests/test_schema_migrations.py` fails if models and migrations
   disagree. Never edit a migration that has shipped: add a new one.
+- Skills and the plugin: the skills live in `skills/` (Agent Skills format; `description: >-`, `metadata.vault-tools`
+  listing the MCP tools they use). `plugins/the-vault/`, `.claude-plugin/marketplace.json` and `public/connect.html`
+  are generated: after changing a skill or `scripts/build_plugin.py`, run `python scripts/build_plugin.py` and commit
+  (`tests/test_plugin.py` fails when stale; `tests/test_skills.py` checks the skills against the real tool list).
+  See `docs/skills.md`.
+- Provenance and compliance: every MCP tool answer that carries Scryfall, Wizards or other third-party data carries
+  `provenance` (`vault/provenance.py`, `docs/compliance.md`); never present source material as the Vault's own.
+  A new tool goes in `SCRYFALL_DATA` or `OWN_DATA_ONLY` (`vault/api/mcp.py`) or has its own `provenance=`.
+  New data sources stay off until their terms are checked (`CATALOG_SOURCES`, `docs/data-sources.md`).

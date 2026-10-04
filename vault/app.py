@@ -18,8 +18,8 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import auth as auth_module
-from . import outbound, passkeys, tokens
-from .api import mcp, meta, v1
+from . import oauth_clients, oauth_routes, oauth_server, outbound, passkeys, tokens
+from .api import catalog_api, deck_api, mcp, meta, v1
 from .api.hal import problem
 from .config import Settings
 from .db import Database
@@ -31,9 +31,15 @@ PUBLIC_DIR = Path(__file__).resolve().parent.parent / "public"
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 ACCOUNT_COOKIE = "vault_account"  # see account_marker
 # Called cross-site by design: OAuth providers (Apple POSTs) and Meta's deletion callback.
-CROSS_SITE_ALLOWED = ("/api/auth/callback/", "/api/facebook/data-deletion")
+# The OAuth token, registration and revocation endpoints take no cookies (a code or token is the credential),
+# so browser-based MCP clients may call them; the consent form (POST /oauth/authorize) stays same-origin only.
+CROSS_SITE_ALLOWED = ("/api/auth/callback/", "/api/facebook/data-deletion", "/oauth/token", "/oauth/register",
+                      "/oauth/revoke")
 # POSTs a read-only token may call: they only compute an answer, or revoke the token itself.
-READ_ONLY_POSTS = {"/api/v1/decks/parse", "/api/v1/decks/coverage", "/api/v1/auth/revoke", "/api/v1/cards/lookup"}
+READ_ONLY_POSTS = {"/api/v1/decks/parse", "/api/v1/decks/coverage", "/api/v1/auth/revoke", "/api/v1/cards/lookup",
+                   # computations on a decklist the caller sends: nothing is stored
+                   "/api/v1/decks/stats", "/api/v1/decks/legality", "/api/v1/decks/upgrades",
+                   "/api/v1/decks/validate-changes", "/api/v1/decks/shopping-list", "/api/v1/decks/combos"}
 
 
 def _origin(url: str) -> str:
@@ -41,10 +47,11 @@ def _origin(url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}".lower()
 
 
-def create_app(settings: Settings | None = None, *, serve_static: bool = True, transport=None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, serve_static: bool = True, transport=None, resolver=None) -> FastAPI:
     """``transport`` replaces the network for every outbound call: sign-in providers, Archidekt
     (tests pass the twin universe's). Without one, ``VAULT_TWINS_URL`` routes calls to the twin
-    server; otherwise they go to the real services."""
+    server; otherwise they go to the real services. ``resolver`` replaces DNS for fetching OAuth
+    client metadata documents (tests)."""
     settings = settings or Settings()
     settings.check()
     transport = transport or outbound.transport(settings)
@@ -52,6 +59,9 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
     db.migrate()
     auth = auth_module.Auth(settings, transport=transport)
     verifier = NativeVerifier(settings, transport=transport)
+    fetcher = oauth_clients.ClientFetcher(transport, resolver)
+    resource = oauth_server.resource_uri(settings.base_url)
+    resource_metadata = f"{settings.base_url}/.well-known/oauth-protected-resource{urlsplit(resource).path}"
 
     app = FastAPI(
         title="The Vault API", version="1",
@@ -61,6 +71,7 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
     )
     app.state.db = db
     app.state.settings = settings
+    app.state.client_fetcher = fetcher
 
     @app.exception_handler(StarletteHTTPException)
     async def http_problem(request: Request, exc: StarletteHTTPException):
@@ -137,7 +148,14 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
         request.state.scopes = {"read", "write", "account"}
         if header[:7].lower() == "bearer ":
             bearer = header[7:].strip()
-            if tokens.is_pat(bearer):
+            if oauth_server.is_access_token(bearer):
+                # An OAuth access token is for the MCP server only (RFC 8707): /api/mcp and the calls
+                # it makes in-process for its tools. Anywhere else it is as good as unknown.
+                mcp_request = request.url.path == mcp.PATH or (
+                    getattr(request.state, "via_mcp", False) and request.url.path.startswith(mcp.V1 + "/"))
+                found = oauth_server.authenticate(session, bearer, resource) if mcp_request else None
+                user, request.state.scopes = found if found else (None, set())
+            elif tokens.is_pat(bearer):
                 found = tokens.authenticate_pat(session, bearer)
                 user, request.state.scopes = found if found else (None, set())
             else:
@@ -151,29 +169,35 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
         if user is None:
             bearer = request.headers.get("authorization", "")[:7].lower() == "bearer "
             raise HTTPException(401, "Invalid or expired access token" if bearer else "Sign in required",
-                                headers={"WWW-Authenticate": 'Bearer error="invalid_token"' if bearer else "Bearer"})
+                                headers={"WWW-Authenticate": (
+                                    'Bearer error="invalid_token", ' if bearer else "Bearer ") + f'resource_metadata="{resource_metadata}"'})
         scopes = request.state.scopes
         writes = request.method in UNSAFE_METHODS and request.url.path not in READ_ONLY_POSTS
         if writes and "write" not in scopes:
             raise HTTPException(403, "This access token is read-only. Create one with the write scope to make changes.",
-                                headers={"WWW-Authenticate": 'Bearer error="insufficient_scope", scope="write"'})
+                                headers={"WWW-Authenticate": 'Bearer error="insufficient_scope", scope="write", '
+                                                         f'resource_metadata="{resource_metadata}"'})
         if not writes and "read" not in scopes:
             raise HTTPException(403, "This access token can't read. Create one with the read scope.",
-                                headers={"WWW-Authenticate": 'Bearer error="insufficient_scope", scope="read"'})
+                                headers={"WWW-Authenticate": 'Bearer error="insufficient_scope", scope="read", '
+                                                         f'resource_metadata="{resource_metadata}"'})
         return user
 
     def account_user(request: Request, user: User = Depends(current_user)) -> User:
         """Account-level actions (creating tokens, deleting the account) need the person, signed in
         on the web or in the app. Personal access tokens can't do them."""
         if "account" not in request.state.scopes:
-            raise HTTPException(403, "Personal access tokens can't manage the account. Use the web or iOS app.")
+            raise HTTPException(403, "Access tokens (personal tokens and connected apps) can't manage the account. Use the web or iOS app.")
         return user
 
     app.include_router(auth_module.build_router(auth, get_db))
     app.include_router(v1.build_router(get_db, current_user, optional_user, settings, verifier,
                                        lambda: auth.offered, transport, account_user))
+    app.include_router(catalog_api.build_router(get_db, optional_user, current_user, settings))
+    app.include_router(deck_api.build_router(get_db, current_user, settings, transport))
     app.include_router(passkeys.build_router(settings, get_db, auth_module.sign_in, account_user))
-    app.include_router(mcp.build_router(optional_user))
+    app.include_router(mcp.build_router(optional_user, resource_metadata))
+    app.include_router(oauth_routes.build_router(get_db, settings, fetcher, auth))
     app.include_router(meta.build_router(get_db, settings))
 
     @app.get("/api/health")

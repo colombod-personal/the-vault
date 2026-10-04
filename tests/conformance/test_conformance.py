@@ -154,12 +154,37 @@ def test_scryfall_collection_and_errors(real, twin):
     assert r404.json()["object"] == t404.json()["object"] == "error" and invented(t404.json(), r404.json()) == []
 
 
-def test_scryfall_bulk_data(real, twin):
-    r = next(b for b in real.get("https://api.scryfall.com/bulk-data").json()["data"] if b["type"] == "default_cards")
-    t = next(b for b in twin.get("https://api.scryfall.com/bulk-data").json()["data"] if b["type"] == "default_cards")
-    # mtg_toolkits downloads jsonl_download_uri when present, else download_uri
-    assert missing(r, ["download_uri", "updated_at", "type"]) == [] and invented(t, r) == []
-    assert r["download_uri"].startswith("https://data.scryfall.io/default-cards/")
+@pytest.mark.parametrize("kind", ["default_cards", "oracle_cards", "rulings", "oracle_tags"])
+def test_scryfall_bulk_data(real, twin, kind):
+    r = next(b for b in real.get("https://api.scryfall.com/bulk-data").json()["data"] if b["type"] == kind)
+    t = next(b for b in twin.get("https://api.scryfall.com/bulk-data").json()["data"] if b["type"] == kind)
+    # mtg_toolkits downloads jsonl_download_uri (Scryfall no longer sends download_uri)
+    assert missing(r, ["jsonl_download_uri", "compressed_size", "updated_at", "type"]) == [] and invented(t, r) == []
+    assert r["jsonl_download_uri"].startswith(f"https://data.scryfall.io/{kind.replace('_', '-')}/")
+
+
+def test_scryfall_ruling_and_tag_shapes(real, twin):
+    """The first line of the real rulings and oracle-tags files, against the twin's."""
+    import gzip, json
+
+    def first(client, kind):
+        entry = next(b for b in client.get("https://api.scryfall.com/bulk-data").json()["data"] if b["type"] == kind)
+        raw = client.get(entry["jsonl_download_uri"]).content
+        return json.loads(gzip.decompress(raw).splitlines()[0])
+
+    universe = twin.universe
+    oracle = next(iter(universe.scryfall.cards.values()))["oracle_id"]
+    universe.scryfall.add_ruling(oracle, "A twin ruling.")
+    universe.scryfall.add_tag("twin-tag", cards={oracle: "median"})
+    real_rule = real.get(next(b for b in real.get("https://api.scryfall.com/bulk-data").json()["data"] if b["type"] == "rulings")["jsonl_download_uri"])
+    r_rule = json.loads(gzip.decompress(real_rule.content).splitlines()[0])
+    assert missing(r_rule, ["oracle_id", "source", "published_at", "comment"]) == []
+    assert invented(first(twin, "rulings"), r_rule) == []
+    r_tag = first(real, "oracle_tags")
+    assert missing(r_tag, ["id", "slug", "label", "description", "parent_ids", "child_ids", "taggings"]) == []
+    t_tag = first(twin, "oracle_tags")
+    assert invented({k: v for k, v in t_tag.items() if k != "taggings"}, r_tag) == []
+    assert missing(r_tag["taggings"][0], ["oracle_id", "weight"]) == []
 
 
 def test_scryfall_requires_headers(real, twin):
@@ -255,3 +280,21 @@ def test_vercel_contract_used_by_the_setup_job(real, twin, vercel_project):
     r = real.post(f"{VERCEL}/v13/deployments", headers=headers, params=params, json=body)
     t = twin.post(f"{VERCEL}/v13/deployments", headers=tw, json={**body, "name": "scratch"})
     assert r.status_code == t.status_code and r.json()["error"]["code"] == t.json()["error"]["code"]
+
+
+def test_commander_spellbook_find_my_combos(real, twin):
+    """The same two-card deck, asked of the real service and of its twin: the twin may leave fields
+    out but must not invent any, and what vault.combos reads must be in the real answer."""
+    deck = {"main": [{"card": "Thassa's Oracle", "quantity": 1}, {"card": "Demonic Consultation", "quantity": 1}], "commanders": []}
+    r = real.post("https://backend.commanderspellbook.com/find-my-combos", params={"limit": 1}, json=deck)
+    t = twin.post("https://backend.commanderspellbook.com/find-my-combos", params={"limit": 1}, json=deck)
+    assert r.status_code == t.status_code == 200
+    real_results, twin_results = r.json()["results"], t.json()["results"]
+    for key in ("included", "almostIncluded"):
+        assert key in real_results
+    variant = (real_results["included"] or real_results["almostIncluded"])[0]
+    for key in ("id", "uses", "produces", "description", "manaNeeded", "easyPrerequisites", "notablePrerequisites", "identity", "popularity", "bracketTag"):
+        assert key in variant, key
+    assert "card" in variant["uses"][0] and "name" in variant["uses"][0]["card"] and "feature" in variant["produces"][0]
+    assert invented(t.json(), r.json()) == []
+    assert invented(twin_results["included"][0], variant) == []

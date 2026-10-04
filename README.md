@@ -99,8 +99,9 @@ import), Moxfield, Archidekt, generic CSV (lossless, with Scryfall ids) and a te
 are in Account → Move your collection and at `/api/v1/collection/exports`. Matched printings go
 out with Scryfall's set codes, so other apps recognise them.
 
-**Agents.** People can connect their own AI agents: personal access tokens (read, or read and
-write), an MCP server at `/api/mcp`, and `/llms.txt`. See [`docs/agents.md`](docs/agents.md).
+**Agents.** People can connect their own AI agents: OAuth for ChatGPT, Claude and other MCP clients
+(add the URL `/api/mcp`; the Vault is the authorization server, see `docs/mcp-oauth-threat-model.md`),
+personal access tokens (read, or read and write), an MCP server at `/api/mcp`, and `/llms.txt`. See [`docs/agents.md`](docs/agents.md).
 The web app computes nothing about a collection: each view asks the server for what it shows
 (totals, P&L, breakdowns, the value over time, pages of printings; see `docs/api.md` →
 Analytics). It keeps the server's answers in IndexedDB, keyed by the collection's version, so it
@@ -181,7 +182,11 @@ with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic
 
 **Costs:**
 - Vercel Hobby: $0.
-- Neon: free for 0.5 GB and 100 compute-hours a month. The daily price history grows about
+- Neon: free for 1 GB of storage per project and 100 compute-hours a month (checked 2026-10-04;
+  see `docs/catalog-design.md` → Neon budget). Every job logs the database size (`jobs/db_budget.py`),
+  warns at 70% and stops adding catalog data at 85%. **Once a month, check in the Neon console:**
+  compute hours used (limit 100 CU-hours), network transfer (5 GB) and storage (1 GB); the database
+  cannot see the first two. The daily price history grows about
   0.5 GB a year for a ~10k-printing collection, so after that Neon's pay-as-you-go plan costs
   about $0.35 per GB-month plus compute while in use (a few dollars a month).
 - GitHub Actions: $0.

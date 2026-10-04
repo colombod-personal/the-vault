@@ -1,0 +1,21 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "the-vault",
+  "version": "0.1.0",
+  "description": "Magic: The Gathering rules, cards, decks and collection tools for your AI assistant, grounded in Scryfall and the Comprehensive Rules, with sources shown. Free and unofficial.",
+  "author": {
+    "name": "The Vault",
+    "url": "https://github.com/colombod-personal/the-vault"
+  },
+  "homepage": "https://github.com/colombod-personal/the-vault",
+  "repository": "https://github.com/colombod-personal/the-vault",
+  "license": "MIT",
+  "keywords": [
+    "magic-the-gathering",
+    "mtg",
+    "rules",
+    "decks",
+    "scryfall",
+    "collection"
+  ]
+}

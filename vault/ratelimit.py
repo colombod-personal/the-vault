@@ -48,13 +48,15 @@ def hit(db: Session, key: str, minute: int) -> int:
 PROVIDERS = frozenset({"google", "microsoft", "apple", "facebook"})
 
 
-def limited(bucket: str, *, verify: bool = False) -> list:
+def limited(bucket: str, *, verify: bool = False, setting: str | None = None) -> list:
     """Route ``dependencies`` limiting ``bucket``: AUTH_VERIFY_RATE_LIMIT for steps that check
-    a credential or redeem a token (``verify``), else AUTH_RATE_LIMIT."""
+    a credential or redeem a token (``verify``), else AUTH_RATE_LIMIT; or the Settings field named
+    by ``setting`` (the OAuth endpoints have their own limits)."""
 
     def check(request: Request) -> None:
         settings: Settings = request.app.state.settings
-        allowed = settings.auth_verify_rate_limit if verify else settings.auth_rate_limit
+        allowed = getattr(settings, setting) if setting else (
+            settings.auth_verify_rate_limit if verify else settings.auth_rate_limit)
         now = time.time()
         minute = int(now // WINDOW)
         # One counter per provider, so heavy use of one sign-in doesn't block the others. Only known

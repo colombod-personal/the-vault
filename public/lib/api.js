@@ -439,6 +439,8 @@ window.VaultApi = (() => {
     tokens: () => all(V1 + '/me/tokens'),
     createToken: (name, scopes) => create(V1 + '/me/tokens', { json: { name, scopes } }),
     deleteToken: (id) => call(V1 + '/me/tokens/' + id, { method: 'DELETE' }),
+    apps: () => all(V1 + '/me/apps'),
+    disconnectApp: (id) => call(V1 + '/me/apps/' + id, { method: 'DELETE' }),
 
     // decks
     parseDeck: (text) => call(V1 + '/decks/parse', { method: 'POST', json: { text } }),

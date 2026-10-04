@@ -56,6 +56,14 @@ class Settings:
     # sign-in, and the steps that check a credential or redeem a token.
     auth_rate_limit: int = field(default_factory=lambda: int(_env("AUTH_RATE_LIMIT", "30")))
     auth_verify_rate_limit: int = field(default_factory=lambda: int(_env("AUTH_VERIFY_RATE_LIMIT", "10")))
+    # OAuth for MCP clients (vault.oauth_*): dynamic client registrations per minute per IP, and how many
+    # unexpired self-registered clients may exist at once (storage cap).
+    oauth_register_rate_limit: int = field(default_factory=lambda: int(_env("OAUTH_REGISTER_RATE_LIMIT", "20")))
+    oauth_rate_limit: int = field(default_factory=lambda: int(_env("OAUTH_RATE_LIMIT", "120")))  # authorize, token, revoke
+    oauth_client_cap: int = field(default_factory=lambda: int(_env("OAUTH_CLIENT_CAP", "2000")))
+    oauth_cimd_cap: int = field(default_factory=lambda: int(_env("OAUTH_CIMD_CAP", "5000")))  # cached client metadata documents
+    oauth_fetch_ip_limit: int = field(default_factory=lambda: int(_env("OAUTH_FETCH_IP_LIMIT", "10")))  # ... per caller
+    oauth_fetch_limit: int = field(default_factory=lambda: int(_env("OAUTH_FETCH_LIMIT", "60")))  # metadata fetches a minute, all callers
     passkey_challenge_cap: int = field(default_factory=lambda: int(_env("PASSKEY_CHALLENGE_CAP", "10000")))
     # Calls per minute per user to POST /api/v1/collection/refresh (each fetches up to 300
     # printings from Scryfall, so a whole collection takes a few calls).
@@ -65,6 +73,10 @@ class Settings:
 
     # Local development only: send every outbound call to the digital twin universe (python -m twins).
     twins_url: str = field(default_factory=lambda: _env("VAULT_TWINS_URL"))
+    # Catalog lookups (cards, rulings, rules) without an account. Off until the registration question in
+    # docs/compliance.md is decided: Wizards' Fan Content Policy says no registration to access its content.
+    public_catalog: bool = field(default_factory=lambda: _env("PUBLIC_CATALOG") in ("1", "true", "yes"))
+    catalog_rate_limit: int = field(default_factory=lambda: int(_env("CATALOG_RATE_LIMIT", "60")))  # a minute, per person or per IP
 
     @property
     def secure_cookies(self) -> bool:

@@ -252,7 +252,7 @@ function App() {
   const noticeBanner = notice && (
     <div className="panel panel-tight" style={{ margin: '12px 24px 0', display: 'flex', justifyContent: 'space-between' }}>
       <span className="label-mono">{notice}</span>
-      <button className="btn xs ghost" onClick={() => setNotice(null)}>✕</button>
+      <button className="btn xs ghost close-x" onClick={() => setNotice(null)} aria-label="Dismiss message" title="Dismiss">✕</button>
     </div>
   );
   const accountPanel = accountOpen && (
@@ -408,12 +408,12 @@ function App() {
             <span className="subtitle">MTG Collection</span>
           </button>
           <nav className="nav" aria-label="Sections">
-            <button className={route.view === 'dashboard' ? 'active' : ''} onClick={() => nav('dashboard')}>Vault</button>
-            <button className={route.view === 'browse' ? 'active' : ''} onClick={() => nav('browse')}>Browse</button>
-            <button className={route.view === 'sets' || route.view === 'setdetail' ? 'active' : ''} onClick={() => nav('sets')}>Sets</button>
-            <button className={route.view === 'decks' ? 'active' : ''} onClick={() => nav('decks')}>Decks</button>
-            <button className={route.view === 'lab' ? 'active' : ''} onClick={() => nav('lab')}>Lab</button>
-            <button className={route.view === 'graph' ? 'active' : ''} onClick={() => nav('graph')}>Graph</button>
+            <button aria-current={route.view === 'dashboard' ? 'page' : undefined} className={route.view === 'dashboard' ? 'active' : ''} onClick={() => nav('dashboard')}>Vault</button>
+            <button aria-current={route.view === 'browse' ? 'page' : undefined} className={route.view === 'browse' ? 'active' : ''} onClick={() => nav('browse')}>Browse</button>
+            <button aria-current={route.view === 'sets' || route.view === 'setdetail' ? 'page' : undefined} className={route.view === 'sets' || route.view === 'setdetail' ? 'active' : ''} onClick={() => nav('sets')}>Sets</button>
+            <button aria-current={route.view === 'decks' ? 'page' : undefined} className={route.view === 'decks' ? 'active' : ''} onClick={() => nav('decks')}>Decks</button>
+            <button aria-current={route.view === 'lab' ? 'page' : undefined} className={route.view === 'lab' ? 'active' : ''} onClick={() => nav('lab')}>Lab</button>
+            <button aria-current={route.view === 'graph' ? 'page' : undefined} className={route.view === 'graph' ? 'active' : ''} onClick={() => nav('graph')}>Graph</button>
           </nav>
           {refreshing && refreshProgress && refreshProgress.auto && (
             // the automatic refresh after an import or on a new day: a quiet note, no prompt
@@ -560,17 +560,26 @@ function CardDrawer({ card, onClose, costsHidden }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  const panel = useRefApp(null);
+  window.useDialogFocus(panel);  // focus into the panel, Tab stays inside, focus back to the row when it closes
+
   return (
     <>
       <div className="drawer-backdrop" onClick={onClose}></div>
-      <div className="drawer">
+      <div className="drawer" role="dialog" aria-modal="true" aria-label={card.n} ref={panel} tabIndex={-1} style={{ outline: 'none' }}>
         {/* Blurred set icon as ambient background */}
         {card.s && window.SetIcons?.get(card.s)?.icon && (
           <div className="drawer-bg">
             <img src={window.SetIcons.get(card.s).icon} alt="" style={{ filter: 'brightness(0) invert(1)' }} />
           </div>
         )}
-        <button className="close" onClick={onClose} aria-label="Close card details">×</button>
+        {/* Its own sticky row, so the close button never sits under the card header and stays in reach
+            while the panel scrolls. The whole 44px square is the button; Esc and a click outside also close. */}
+        <div className="drawer-bar">
+          <button className="close" data-autofocus onClick={onClose} aria-label="Close card details" title="Close (Esc)">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 20, marginBottom: 24 }}>
           <div style={{ aspectRatio: '488 / 680', background: 'var(--bg-2)', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border)' }}>
             {scry?.img_normal ? (

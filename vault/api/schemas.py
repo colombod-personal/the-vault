@@ -238,6 +238,20 @@ class SessionPage(Page):
     items: list[SessionItem]
 
 
+class ConnectedApp(Hal):
+    id: int
+    name: str = Field(description="The app's name as it described itself")
+    domain: str | None = Field(None, description="The web address that identifies the app (absent for self-registered apps)")
+    verified_by_address: bool = Field(description="False for an app that registered itself: the Vault can't confirm who made it")
+    scopes: list[str] = Field(description="What you allowed: read, and write if you chose it")
+    created_at: str
+    last_used_at: str | None = None
+
+
+class ConnectedAppPage(Page):
+    items: list[ConnectedApp]
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: Literal["Bearer"] = "Bearer"

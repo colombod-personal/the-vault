@@ -241,7 +241,31 @@ Object.assign(window, { SignIn, signOut, SESSION_ENDED_KEY, ImportButton, EmptyV
 
 // ---- Account panel: profile, sharing, shared with me, saved decks, GDPR export/delete ----
 
+// Keyboard handling shared by the dialogs (this panel and the card panel): focus moves into the dialog when it
+// opens, Tab stays inside it, and focus returns to whatever opened it when it closes.
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+function useDialogFocus(ref) {
+  useEffectAcc(() => {
+    const opener = document.activeElement;
+    const box = ref.current;
+    if (box) (box.querySelector('[data-autofocus]') || box).focus();
+    const onKey = (e) => {
+      if (e.key !== 'Tab' || !box) return;
+      const items = Array.from(box.querySelectorAll(FOCUSABLE)).filter(el => el.offsetParent !== null);
+      if (!items.length) { e.preventDefault(); return; }
+      const first = items[0], last = items[items.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === box)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      else if (!box.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('keydown', onKey); if (opener && opener.focus && document.contains(opener)) opener.focus(); };
+  }, []);
+}
+
 function Modal({ title, onClose, children }) {
+  const box = useRefAcc(null);
+  useDialogFocus(box);
   useEffectAcc(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
@@ -250,11 +274,11 @@ function Modal({ title, onClose, children }) {
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgb(0 0 0 / 0.55)', zIndex: 50,
       display: 'grid', placeItems: 'start center', overflowY: 'auto', padding: '48px 16px' }}>
-      <div className="panel" role="dialog" aria-label={title} onClick={(e) => e.stopPropagation()}
-        style={{ width: 'min(720px, 100%)' }}>
+      <div className="panel" role="dialog" aria-modal="true" aria-label={title} ref={box} tabIndex={-1}
+        onClick={(e) => e.stopPropagation()} style={{ width: 'min(720px, 100%)', outline: 'none' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <h2 className="h1" style={{ fontSize: 28, margin: 0 }}>{title}</h2>
-          <button className="btn xs ghost" onClick={onClose}>✕</button>
+          <button className="btn xs ghost close-x" data-autofocus onClick={onClose} aria-label={`Close ${title}`} title="Close (Esc)">✕</button>
         </div>
         {children}
       </div>
@@ -394,6 +418,8 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged }) {
 
       <AgentsSection />
 
+      <ConnectedAppsSection />
+
       <Section title="Shared with me">
         {incoming.length === 0 && <p className="label-mono">Nothing yet. When someone sends you an invite link, open it while signed in.</p>}
         {incoming.map((s) => (
@@ -471,7 +497,7 @@ function VaultFooter() {
   );
 }
 
-Object.assign(window, { AccountPanel, VaultFooter });
+Object.assign(window, { AccountPanel, VaultFooter, useDialogFocus });
 
 
 // Personal access tokens: let people connect their own AI agents and scripts (MCP or HTTP API).
@@ -531,6 +557,37 @@ function AgentsSection() {
             {t.last_used_at ? 'used ' + new Date(t.last_used_at).toLocaleDateString() : 'never used'}
           </span>
           <button className="btn xs ghost" onClick={() => remove(t.id)}>Revoke</button>
+        </div>
+      ))}
+    </Section>
+  );
+}
+
+
+// Apps connected with OAuth (ChatGPT, Claude, ...): what each may do, when it last acted, and a way to cut it off.
+function ConnectedAppsSection() {
+  const api = window.VaultApi;
+  const [apps, setApps] = useStateAcc(null);
+  const [error, setError] = useStateAcc(null);
+  const reload = () => { api.apps().then(setApps).catch((e) => setError(e.message)); };
+  useEffectAcc(reload, []);
+  const disconnect = async (id) => { setError(null); try { await api.disconnectApp(id); reload(); } catch (e) { setError(e.message); } };
+  return (
+    <Section title="Connected apps">
+      <p className="label-mono" style={{ marginBottom: 8 }}>
+        Apps you allowed to use your vault, such as ChatGPT or Claude. Disconnecting one stops it at once; it has to ask you again.
+        Add the address <code>{window.location.origin}/api/mcp</code> in the app to connect it.
+      </p>
+      {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
+      {apps && apps.length === 0 && <p className="label-mono">No apps connected.</p>}
+      {(apps || []).map((a) => (
+        <div key={a.id} style={rowStyle}>
+          <span className="label-mono">
+            <strong>{a.name}</strong>{a.domain ? ` (${a.domain})` : ' · unverified'} ·{' '}
+            {a.scopes.includes('write') ? 'read & write' : 'read-only'} · connected {new Date(a.created_at).toLocaleDateString()} ·{' '}
+            {a.last_used_at ? 'used ' + new Date(a.last_used_at).toLocaleDateString() : 'never used'}
+          </span>
+          <button className="btn xs ghost" onClick={() => disconnect(a.id)}>Disconnect</button>
         </div>
       ))}
     </Section>
