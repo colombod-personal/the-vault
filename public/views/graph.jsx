@@ -51,6 +51,7 @@ function artUrl(scry) {
   return scry.img_art || (scry.img_normal ? scry.img_normal.replace('/normal/', '/art_crop/') : null);
 }
 
+const MAX_ART_NODES = 60; // art for the most valuable cards only: a big graph would download hundreds of images
 const MAX_LINKS_SHOWN = 5; // a popular card can be picked by many peers: list the strongest
 // No hover on touch screens: the graph previews a card on the first tap (see the tap handler).
 const TOUCH = !!(window.matchMedia && window.matchMedia('(hover: none)').matches);
@@ -164,6 +165,7 @@ function GraphView({ data, openCard }) {
     // Build elements
     const elements = [];
     const parents = new Set();
+    const artIds = new Set(showArt ? [...filteredNodes].sort((a, b) => b.value - a.value).slice(0, MAX_ART_NODES).map((n) => n.id) : []);
 
     function nodeStyle(n) {
       const radius = Math.max(10, Math.min(80, Math.sqrt(n.value) * 4 + 8));
@@ -181,7 +183,7 @@ function GraphView({ data, openCard }) {
           shape,
           inDeck: inDeck === true ? 'yes' : inDeck === false ? 'no' : '',
           card: n,
-          ...(showArt && artUrl(n.scry) ? { art: artUrl(n.scry) } : {})
+          ...(artIds.has(n.id) && artUrl(n.scry) ? { art: artUrl(n.scry) } : {})
         }
       };
     }
@@ -315,6 +317,7 @@ function GraphView({ data, openCard }) {
       // Group by color (from the card data) else by 'unknown'
       const groups = { W: [], U: [], B: [], R: [], G: [], M: [], C: [], '?': [] };
       for (const r of deckRows) groups[r.color in groups ? r.color : '?'].push(r);
+      let deckArt = 0;
       for (const k of Object.keys(groups)) {
         if (groups[k].length === 0) continue;
         const pid = 'p_' + k;
@@ -323,6 +326,8 @@ function GraphView({ data, openCard }) {
         for (const r of groups[k]) {
           const id = 'dk_' + r.name.replace(/[^a-z0-9]/gi, '_');
           const radius = Math.max(8, Math.min(60, Math.sqrt(r.unit || 1) * 5 + 8));
+          const art = showArt && deckArt < MAX_ART_NODES ? artUrl(r.node?.scry || r.scry) : null;
+          if (art) deckArt++;
           elements.push({
             data: {
               id, label: r.name, parent: pid,
@@ -332,7 +337,7 @@ function GraphView({ data, openCard }) {
               card: r.node || { name: r.name, scry: r.scry, qty: r.owned, value: null },
               deckQty: r.qty,
               owned: r.owned,
-              ...(showArt && artUrl(r.node?.scry || r.scry) ? { art: artUrl(r.node?.scry || r.scry) } : {})
+              ...(art ? { art } : {})
             }
           });
         }
@@ -667,7 +672,7 @@ function GraphView({ data, openCard }) {
         }}>
             {hover.links && artUrl(hover.d.card?.scry) ?
           // With its links listed, the card shows its art crop (credited below) so it fits the graph.
-          <img src={artUrl(hover.d.card.scry)} onLoad={placeTip} style={{ width: '100%', aspectRatio: '626 / 457', objectFit: 'cover', display: 'block' }} alt="" /> :
+          <img src={artUrl(hover.d.card.scry)} onLoad={placeTip} style={{ width: '100%', aspectRatio: '626 / 457', objectFit: 'contain', display: 'block' }} alt="" /> :
           hover.d.card?.scry?.img_normal &&
           <img src={hover.d.card.scry.img_normal} onLoad={placeTip} style={{ width: '100%', aspectRatio: '488 / 680', display: 'block' }} alt="" />
           }
@@ -740,11 +745,11 @@ function GraphView({ data, openCard }) {
         {/* Legend */}
         <div className="graph-legend" style={{ position: 'absolute', bottom: 12, right: 12, padding: '8px 10px', background: 'oklch(0.18 0.012 60 / 0.8)', backdropFilter: 'blur(4px)', borderRadius: 4, border: '1px solid var(--border)', display: 'flex', gap: 12, alignItems: 'center' }}>
           <span className="label-mono" style={{ fontSize: 9 }}>
-            {mode === 'affinity' ? `Edges = shared set/type/color/cmc/price · ${touchUI ? 'Tap' : 'Hover'} a card to see why it is linked` :
+            {mode === 'affinity' ? `Edges = shared set/type/color/cmc/price/rarity · ${touchUI ? 'Tap' : 'Hover'} a card to see why it is linked` :
             mode === 'hierarchy' ? 'Compound rings = color · Node shape = type · Size = total value' :
             mode === 'scatter' ? 'Position fixed: x = mana, y = log price · Jitter for legibility' :
             touchUI ? 'Size = total value · Tap for image · Tap again for details' : 'Size = total value · Hover for image · Click for details'}
-            {showArt && ART_MODES.has(mode) && ` · Card art by the credited artists (${touchUI ? 'tap' : 'hover'} a card for its artist)`}
+            {showArt && ART_MODES.has(mode) && ` · Art by the credited artists (${touchUI ? 'tap' : 'hover'} a card for its artist)`}
           </span>
         </div>
       </div>
