@@ -1,7 +1,13 @@
 # Agents on the Vault
 
 People can connect their own AI agents to their own collection: Claude, ChatGPT, scripts,
-whatever they build. There are two doors:
+whatever they build. There are three ways in:
+
+0. **OAuth (connect by URL):** in ChatGPT or Claude, add the connector `https://<host>/api/mcp`.
+   The app sends you to the Vault to sign in and choose what it may do. No token to copy.
+   See "OAuth" below. Personal access tokens (below) stay for scripts and terminals.
+
+The two doors an agent then uses:
 
 1. **MCP server:** `POST /api/mcp`. Any MCP client (Claude Desktop and Code, IDEs, agent
    frameworks) gets typed tools with descriptions, and needs no code.
@@ -27,6 +33,51 @@ Created in Account → Agents & API, or with `POST /api/v1/me/tokens`
   Tokens are listed with their last use, erased with the account, and appear, without the
   secret, in the data export.
 
+## OAuth: connect ChatGPT, Claude and other MCP clients by URL
+
+The Vault is an OAuth 2.1 authorization server for its own MCP server, so a host only needs the
+URL. The threat model, with the tests that prove each mitigation, is in
+[`mcp-oauth-threat-model.md`](mcp-oauth-threat-model.md); the manual checks against the real hosts are in
+[`mcp-oauth-host-checklist.md`](mcp-oauth-host-checklist.md).
+
+**What a client does** (all standard, so a spec-following MCP client needs no Vault-specific code):
+
+1. `POST /api/mcp` without a token answers `401` with
+   `WWW-Authenticate: Bearer realm="the-vault", resource_metadata="https://<host>/.well-known/oauth-protected-resource/api/mcp"`
+   (RFC 9728; also served at `/.well-known/oauth-protected-resource`).
+2. The server metadata (RFC 8414) is at `/.well-known/oauth-authorization-server`: S256 only,
+   `client_id_metadata_document_supported: true`, a `registration_endpoint`, public clients only.
+3. **Identify**: use an https URL as `client_id` (a Client ID Metadata Document with `client_id`,
+   `client_name` and `redirect_uris`), or register with `POST /oauth/register` (RFC 7591). Metadata URLs
+   are fetched with SSRF protection (https on 443, public addresses only, no redirects, 32 KB, 5 s).
+4. Send the person to `GET /oauth/authorize` with `response_type=code`, `client_id`, `redirect_uri`,
+   `code_challenge` + `code_challenge_method=S256`, `resource=https://<host>/api/mcp`, `scope`
+   (`read` or `read write`) and `state`. The person signs in (provider or passkey), sees who is asking and
+   what it may do, and answers. The redirect carries `code`, `state` and `iss`.
+5. `POST /oauth/token` (form) with `grant_type=authorization_code`, `code`, `redirect_uri`, `client_id`,
+   `code_verifier`, `resource` returns `access_token` (1 hour), `refresh_token` (30 days, **rotated on every
+   use**) and the granted `scope`. Use `grant_type=refresh_token` to renew. `POST /oauth/revoke` (RFC 7009) revokes.
+
+**Rules that never bend**
+
+- Redirect URIs match exactly: https, or `http://127.0.0.1`, `[::1]` or `localhost` (any port) for apps on the
+  person's own computer. No custom schemes. A bad `client_id` or `redirect_uri` shows an error page, never a redirect.
+- Codes last 60 seconds, work once, and are bound to client, redirect URI, challenge, resource and person. Using one twice
+  revokes what the first use issued.
+- A rotated refresh token coming back (it was copied) revokes the whole grant. A refresh can narrow scopes, never widen them.
+  A grant lasts at most 90 days from the person's consent, however often it is refreshed; then the app asks again.
+- **read** is the default. **write** is offered only if the app asks for it, and it is an unticked box on the consent screen.
+- Tokens are for `https://<host>/api/mcp` only (RFC 8707). Used on `/api/v1` directly they are refused (401).
+  They never get account powers: no tokens, export, deletion, sign-in or app management (403 even on the tools' own calls).
+- Only SHA-256 hashes are stored. Rate limits: `OAUTH_RATE_LIMIT` (120 a minute per IP) for authorize, token and revoke,
+  `OAUTH_REGISTER_RATE_LIMIT` (20) for registration, `OAUTH_CLIENT_CAP` (2000) registered clients,
+  `OAUTH_CIMD_CAP` (5000) cached metadata documents, `OAUTH_FETCH_LIMIT` (60 a minute, all callers) metadata fetches.
+
+**Connected apps** (Account → Connected apps, or `GET /api/v1/me/apps`, `DELETE /api/v1/me/apps/{id}`): each app with its
+name, web address, what was allowed, when it connected and last acted. Disconnecting ends it at once. They are in the data
+export (`connected_apps.json`, no tokens) and erased with the account. These endpoints need the person (not a token) and
+have no MCP tool.
+
 ## MCP
 
 Stateless Streamable HTTP. Each JSON-RPC request gets one `application/json` answer, with no
@@ -36,6 +87,7 @@ batch (older protocol versions) holds 1 to 20 calls; an empty or larger one is r
 
 ```bash
 claude mcp add --transport http vault https://<host>/api/mcp --header "Authorization: Bearer vault_pat_..."
+claude mcp add --transport http vault https://<host>/api/mcp   # OAuth: then /mcp in Claude Code to sign in
 ```
 
 Tools (the `share_id` argument reads a collection someone shared with you):
@@ -59,7 +111,7 @@ Tools (the `share_id` argument reads a collection someone shared with you):
 
 \* write tools, listed only for tokens with the write scope.
 
-Each tool calls the API in-process with the caller's credentials, so the API enforces every
+Each tool calls the API in-process with the caller's credentials (an OAuth token is accepted on those calls and on `/api/mcp`, nowhere else), so the API enforces every
 rule: tenancy, sharing, scopes, validation and paging. Tool arguments are checked against the
 tool's schema first, with the API's limits (decklists up to 50,000 characters, ids, lookup
 identifiers); a failed check is a JSON-RPC error (`-32602`), and an API error is the tool

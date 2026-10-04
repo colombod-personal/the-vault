@@ -220,6 +220,93 @@ class AuthCode(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class OAuthClient(Base):
+    """An OAuth client of the Vault's MCP authorization server (vault.oauth_clients): an AI app
+    identified by an https URL whose metadata document the Vault fetched (``cimd``), or one that
+    registered itself (``dcr``, RFC 7591). Holds what the app said about itself (name, redirect
+    URIs), nothing about any person, so it is not personal data."""
+
+    __tablename__ = "oauth_clients"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    client_id: Mapped[str] = mapped_column(String(512), unique=True)
+    kind: Mapped[str] = mapped_column(String(8))  # "cimd" | "dcr"
+    name: Mapped[str] = mapped_column(String(80))
+    redirect_uris: Mapped[list] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # cimd: when the document was read
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)  # dcr: unused ones go
+
+
+class OAuthGrant(Base):
+    """One person's consent to one app (the "connected app"): the scopes they allowed, the
+    resource the tokens are for, and the current access and refresh token (hashes only).
+    Deleting the row revokes everything issued from it."""
+
+    __tablename__ = "oauth_grants"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[str] = mapped_column(String(512), index=True)
+    scopes: Mapped[str] = mapped_column(String(40))  # what the person allowed, space-separated
+    access_scopes: Mapped[str] = mapped_column(String(40))  # what the current access token carries (refresh may narrow)
+    resource: Mapped[str] = mapped_column(String(300))
+    access_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    access_expires: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    refresh_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    refresh_expires: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class OAuthRetiredRefresh(Base):
+    """A rotated OAuth refresh token (hash only). If one comes back it was copied, and the whole
+    grant is revoked. Kept until the token would have expired."""
+
+    __tablename__ = "oauth_retired_refresh_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    grant_id: Mapped[int] = mapped_column(ForeignKey("oauth_grants.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class OAuthCode(Base):
+    """An authorization code (60 seconds, single use), bound to the client, redirect URI, PKCE
+    challenge, resource and person it was issued for. Redeeming marks it used and records the
+    grant it made: a second redemption revokes that grant."""
+
+    __tablename__ = "oauth_codes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    code_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    client_id: Mapped[str] = mapped_column(String(512))
+    redirect_uri: Mapped[str] = mapped_column(String(2000))
+    code_challenge: Mapped[str] = mapped_column(String(128))
+    resource: Mapped[str] = mapped_column(String(300))
+    scopes: Mapped[str] = mapped_column(String(40))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    grant_id: Mapped[int | None] = mapped_column(Integer)  # the grant this code made (no FK: it may be revoked)
+
+
+class OAuthConsent(Base):
+    """A consent screen that was shown and not yet answered (10 minutes). The browser's session holds
+    only a random nonce; the answer must present it, and the row is consumed by one conditional DELETE,
+    so a copied cookie and form can not be replayed. ``query`` is the authorization request being
+    answered (no secrets)."""
+
+    __tablename__ = "oauth_consents"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    nonce_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    query: Mapped[str] = mapped_column(String(2000))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class NativeNonce(Base):
     """A one-time value already used, kept until it would expire anyway: a native sign-in's nonce
     (the same Apple / Google ID token can't sign in twice) or a Facebook data-deletion request
