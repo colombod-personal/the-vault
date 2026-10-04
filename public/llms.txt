@@ -89,3 +89,5 @@ property of Wizards of the Coast. ©Wizards of the Coast LLC.
 - `POST /api/v1/collection/refresh` (write scope): today's prices from Scryfall, 300 printings per call;
   repeat with the returned `cursor` until `remaining` is 0.
 - MCP tools: `get_collection_breakdowns`, `get_valuation`, `list_card_names`, `refresh_prices`.
+- [Connect an assistant, step by step](/connect.html)
+- [Skills and the plugin](https://github.com/colombod-personal/the-vault/blob/main/docs/skills.md)
