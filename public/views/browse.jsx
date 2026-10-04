@@ -65,7 +65,7 @@ function Browse({ data, openCard, initialQuery }) {
       </div>
 
       <div className="panel" style={{ marginBottom: 16, padding: 16 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr', gap: 12 }}>
+        <div className="filter-grid" style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr', gap: 12 }}>
           <input
             className="input"
             placeholder="Search by card name or set…"
