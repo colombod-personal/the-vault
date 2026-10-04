@@ -50,6 +50,15 @@ def import_collection(db: Session, user: User, filename: str, content: bytes) ->
     - set + collector number is looked up among the cards the server already knows
     Everything else is resolved by the next daily sync.
     """
+    source, entries = read_file(content)
+    version = db.scalar(select(User.collection_version).where(User.id == user.id))
+    old_rows = user_entries(db, user)
+    changes = delta.diff([r.to_collection_entry() for r in old_rows], entries)
+    return _replace(db, user, filename, source, entries, version, old_rows, changes)
+
+
+def read_file(content: bytes):
+    """The file's format and entries, checked (size, encoding, limits). Raises ImportError_."""
     if len(content) > MAX_UPLOAD_BYTES:
         raise ImportError_("File is too large (20 MB max)")
     try:
@@ -66,11 +75,18 @@ def import_collection(db: Session, user: User, filename: str, content: bytes) ->
         _clean(e, row)
     if sum(e.quantity for e in entries) > MAX_COPIES:
         raise ImportError_("The file has more copies than a collection can hold.")
+    return source, entries
 
-    version = db.scalar(select(User.collection_version).where(User.id == user.id))
-    old_rows = user_entries(db, user)
-    changes = delta.diff([r.to_collection_entry() for r in old_rows], entries)
 
+def preview_import(db: Session, user: User, content: bytes) -> dict:
+    """What importing the file would change, without changing anything (an assistant shows it first)."""
+    source, entries = read_file(content)
+    changes = delta.diff([r.to_collection_entry() for r in user_entries(db, user)], entries)
+    return {"source": source, "rows": len(entries), "copies": sum(e.quantity for e in entries),
+            "changes": changes.summary()}
+
+
+def _replace(db: Session, user: User, filename: str, source, entries, version, old_rows, changes) -> Import:
     known = {}
     for row in old_rows:
         if row.scryfall_id and row.match_method in EXACT:

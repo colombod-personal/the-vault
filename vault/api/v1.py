@@ -35,7 +35,8 @@ from .. import analytics, oauth_server, outbound, tokens
 from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, import_days, view_version
-from ..importer import MAX_UPLOAD_BYTES, ImportConflict, ImportError_, export_collection, import_collection, user_entries
+from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, export_collection, import_collection,
+                        preview_import as preview_collection_import, user_entries)
 from ..models import AccessToken, ApiSession, Deck, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
 from ..native import LEEWAY as NATIVE_LEEWAY, NativeTokenError, NativeVerifier, ProviderUnavailable
 from ..passkeys import remove_passkey
@@ -599,6 +600,15 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 raise HTTPException(400, str(exc)) from exc
 
         return idempotent(request, db, user, 201, run)
+
+    @router.post("/imports/preview", tags=["imports"],
+                 summary="What uploading this collection file would change, without changing anything")
+    async def preview_import(file: UploadFile, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        content = await file.read(MAX_UPLOAD_BYTES + 1)
+        try:
+            return preview_collection_import(db, user, content)
+        except ImportError_ as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     @router.get("/imports", tags=["imports"], response_model=S.ImportPage)
     def list_imports(request: Request, cursor: str | None = None, limit: int | None = None,
