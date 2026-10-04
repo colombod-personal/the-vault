@@ -124,7 +124,10 @@ class CollectionView:
             g = groups.get(gid)
             if g is None:
                 g = groups[gid] = Group(
-                    id=gid, name=r.name, set_code=set_code, set_name=r.set_name or set_names.get(r.scryfall_id) or "",
+                    # A file that names no set (a Moxfield export without an edition) matched by card name only:
+                    # the Vault picked some printing to price, so it must not claim that printing's set.
+                    id=gid, name=r.name, set_code=set_code,
+                    set_name=r.set_name or (set_names.get(r.scryfall_id) if set_code else "") or "",
                     number=r.collector_number or "", printing=printing, finish=r.price_finish or r.finish,
                     condition=r.condition, language=r.language, price=price,
                     price_source="scryfall" if from_scryfall else "file",
@@ -214,7 +217,7 @@ class CollectionView:
             "copies": total_qty,
             "printings": len(self.groups),
             "cards": len({g.name.split(" // ")[0].lower() for g in self.groups}),
-            "sets": len({g.set_code for g in self.groups}),
+            "sets": len({g.set_code for g in self.groups if g.set_code}),  # copies with no set named are not "a set"
             "market_value": round(sum(g.value for g in self.groups), 2),
             "paid": None if self.hide_costs else round(sum(g.paid for g in self.groups), 2),
             "costs_hidden": self.hide_costs,
@@ -229,8 +232,8 @@ class CollectionView:
     def sets(self) -> list[dict]:
         sets: dict[str, dict] = {}
         for g in self.groups:
-            s = sets.setdefault(g.set_code, {"code": g.set_code, "name": g.set_name, "copies": 0,
-                                             "printings": 0, "market_value": 0.0})
+            s = sets.setdefault(g.set_code, {"code": g.set_code, "name": g.set_name or ("" if g.set_code else "Printing not specified"),
+                                             "copies": 0, "printings": 0, "market_value": 0.0})
             s["copies"] += g.quantity
             s["printings"] += 1
             s["market_value"] += g.value
