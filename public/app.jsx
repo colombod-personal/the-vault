@@ -417,7 +417,7 @@ function App() {
           </nav>
           {refreshing && refreshProgress && refreshProgress.auto && (
             // the automatic refresh after an import or on a new day: a quiet note, no prompt
-            <span className="label-mono" role="status" style={{ fontSize: 10, whiteSpace: 'nowrap' }}>
+            <span className="label-mono auto-refresh" role="status" style={{ fontSize: 10, whiteSpace: 'nowrap' }}>
               Updating prices{refreshProgress.total ? ` ${Math.round((refreshProgress.done / refreshProgress.total) * 100)}%` : '…'}
             </span>
           )}

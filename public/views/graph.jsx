@@ -66,6 +66,9 @@ function GraphView({ data, openCard }) {
   const [minValue, setMinValue] = useStateG(1);
   const [colorFilter, setColorFilter] = useStateG(new Set()); // empty = all
   const [hover, setHover] = useStateG(null);
+  // The input last used on the graph (kept across rebuilds); the legend names its gesture.
+  const lastPointer = useRefG(TOUCH ? 'touch' : 'mouse');
+  const [touchUI, setTouchUI] = useStateG(TOUCH);
   const [showArt, setShowArt] = useStateG(true); // card art inside each circle
   const tipRef = useRefG(null);
   // Keep the whole hover card inside the graph, however tall it is (it grows with the links it lists).
@@ -458,13 +461,15 @@ function GraphView({ data, openCard }) {
     // Touch has no hover: the first tap on a card shows what hovering shows (its image, and in the
     // affinity web its links), a second tap on the same card opens it. Decided by the input that
     // was used (a finger on a touch laptop too), falling back to the screen's primary pointer.
-    let pointer = TOUCH ? 'touch' : 'mouse';
-    const notePointer = (e) => { pointer = e.type === 'touchstart' || e.pointerType === 'touch' ? 'touch' : 'mouse'; };
+    const notePointer = (e) => {
+      lastPointer.current = e.type === 'touchstart' || e.pointerType === 'touch' ? 'touch' : 'mouse';
+      setTouchUI(lastPointer.current === 'touch');
+    };
     const host = cy.container();
     host.addEventListener('pointerdown', notePointer, true);
     host.addEventListener('pointermove', notePointer, true);
     host.addEventListener('touchstart', notePointer, { capture: true, passive: true });
-    const isTouch = () => pointer === 'touch';
+    const isTouch = () => lastPointer.current === 'touch';
     let previewed = null;
     const clearPreview = () => {
       cy.elements().removeClass('faded linked');
@@ -735,11 +740,11 @@ function GraphView({ data, openCard }) {
         {/* Legend */}
         <div className="graph-legend" style={{ position: 'absolute', bottom: 12, right: 12, padding: '8px 10px', background: 'oklch(0.18 0.012 60 / 0.8)', backdropFilter: 'blur(4px)', borderRadius: 4, border: '1px solid var(--border)', display: 'flex', gap: 12, alignItems: 'center' }}>
           <span className="label-mono" style={{ fontSize: 9 }}>
-            {mode === 'affinity' ? `Edges = shared set/type/color/cmc/price · ${TOUCH ? 'Tap' : 'Hover'} a card to see why it is linked` :
+            {mode === 'affinity' ? `Edges = shared set/type/color/cmc/price · ${touchUI ? 'Tap' : 'Hover'} a card to see why it is linked` :
             mode === 'hierarchy' ? 'Compound rings = color · Node shape = type · Size = total value' :
             mode === 'scatter' ? 'Position fixed: x = mana, y = log price · Jitter for legibility' :
-            TOUCH ? 'Size = total value · Tap for image · Tap again for details' : 'Size = total value · Hover for image · Click for details'}
-            {showArt && ART_MODES.has(mode) && ` · Card art by the credited artists (${TOUCH ? 'tap' : 'hover'} a card for its artist)`}
+            touchUI ? 'Size = total value · Tap for image · Tap again for details' : 'Size = total value · Hover for image · Click for details'}
+            {showArt && ART_MODES.has(mode) && ` · Card art by the credited artists (${touchUI ? 'tap' : 'hover'} a card for its artist)`}
           </span>
         </div>
       </div>

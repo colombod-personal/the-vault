@@ -212,6 +212,12 @@ html, body { max-width: 100%; overflow-x: clip; }
   .acct-menu .btn { white-space: nowrap; }
   .acct-menu .acct-name { max-width: 110px; overflow: hidden; text-overflow: ellipsis; display: inline-block; }
   .acct-menu .acct-signout { display: none; }   /* in the Account panel instead */
+  /* The automatic price refresh note would push the account actions off the row: screen readers
+     still hear it, the dashboard shows the progress bar. */
+  .topbar .auto-refresh {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+    overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+  }
 
   /* ---- Headings and a view's title row ---- */
   .h1 { font-size: 30px; line-height: 1.08; }
