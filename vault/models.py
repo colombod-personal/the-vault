@@ -414,6 +414,8 @@ class OracleCard(Base):
     released_at: Mapped[date | None] = mapped_column(Date)
     scryfall_uri: Mapped[str | None] = mapped_column(String(500))
     representative_id: Mapped[str | None] = mapped_column(String(36))  # the printing Scryfall shows
+    artist: Mapped[str | None] = mapped_column(String(200))  # of that printing: credited wherever its image is shown
+    image_normal: Mapped[str | None] = mapped_column(String(500))  # Scryfall's own link to that printing's image
     digital: Mapped[bool] = mapped_column(Boolean, default=False)
     content_hash: Mapped[str] = mapped_column(String(40))  # lets the daily job skip unchanged rows
 

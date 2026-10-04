@@ -67,6 +67,16 @@ def _faces(obj: dict) -> list | None:
     return [{k: f[k] for k in keep if f.get(k) is not None} for f in faces]
 
 
+def _artist(obj: dict) -> str | None:
+    return obj.get("artist") or next((f["artist"] for f in obj.get("card_faces") or [] if f.get("artist")), None)
+
+
+def _image(obj: dict) -> str | None:
+    """Scryfall's own link to the front face's image, as given (never built by us)."""
+    uris = obj.get("image_uris") or next((f["image_uris"] for f in obj.get("card_faces") or [] if f.get("image_uris")), {})
+    return uris.get("normal")
+
+
 def oracle_card_row(obj: dict) -> dict:
     row = {
         "oracle_id": obj["oracle_id"], "name": obj["name"], "layout": obj.get("layout"),
@@ -78,6 +88,7 @@ def oracle_card_row(obj: dict) -> dict:
         "faces": _faces(obj), "game_changer": obj.get("game_changer"), "edhrec_rank": obj.get("edhrec_rank"),
         "released_at": _date(obj.get("released_at")), "scryfall_uri": obj.get("scryfall_uri"),
         "representative_id": obj.get("id"), "digital": bool(obj.get("digital")),
+        "artist": _artist(obj), "image_normal": _image(obj),
     }
     row["content_hash"] = digest(row)
     return row
