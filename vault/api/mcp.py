@@ -34,6 +34,7 @@ log = logging.getLogger(__name__)
 
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 V1 = "/api/v1"
+PATH = "/api/mcp"
 MAX_BATCH = 20  # calls in one JSON-RPC batch
 
 INSTRUCTIONS = """\
@@ -304,7 +305,18 @@ def _with_cursor(body: Any) -> Any:
     return body
 
 
-def build_router(optional_user) -> APIRouter:
+def _marked_as_mcp(app):
+    """The app, for the in-process calls a tool makes: they are marked, in the request's own scope
+    (which no client can write to), as coming from the MCP server. OAuth access tokens are accepted
+    only on such calls and on /api/mcp itself."""
+    async def marked(scope, receive, send):
+        scope.setdefault("state", {})["via_mcp"] = True
+        await app(scope, receive, send)
+
+    return marked
+
+
+def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
     router = APIRouter()
 
     async def call_api(request: Request, tool: Tool, args: dict, part: int | None) -> tuple[int, Any]:
@@ -321,7 +333,7 @@ def build_router(optional_user) -> APIRouter:
             kwargs["files"] = {"file": (args.get("filename") or "agent-import.csv", args["csv"].encode(), "text/csv")}
         elif tool.body is not None:
             kwargs["json"] = tool.body(args)
-        transport = httpx.ASGITransport(app=request.app)
+        transport = httpx.ASGITransport(app=_marked_as_mcp(request.app))
         try:
             async with httpx.AsyncClient(transport=transport, base_url=str(request.base_url).rstrip("/")) as client:
                 res = await client.request(tool.method, tool.path(args), **kwargs)
@@ -341,8 +353,11 @@ def build_router(optional_user) -> APIRouter:
             return JSONResponse(
                 {"jsonrpc": "2.0", "id": None, "error": {"code": -32001, "message":
                  "Authentication required: send Authorization: Bearer <personal access token> "
-                 "(create one in the Vault: Account → Agents & API)."}},
-                status_code=401, headers={"WWW-Authenticate": 'Bearer realm="the-vault"'})
+                 "(create one in the Vault: Account → Agents & API), or connect with OAuth: the server's "
+                 "metadata is linked in the WWW-Authenticate header."}},
+                status_code=401, headers={"WWW-Authenticate": 'Bearer realm="the-vault"' + (
+                    ', error="invalid_token"' if request.headers.get("authorization") else "") + (
+                    f', resource_metadata="{resource_metadata}"' if resource_metadata else "")})
         try:
             message = await request.json()
         except ValueError:

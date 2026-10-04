@@ -29,6 +29,11 @@ This is an engineering document, not legal advice: have the privacy notice
 | `api_sessions` | yes | signed-in apps: client, device name, dates, token hashes | `app_sessions.json` (no hashes) | `purge_user` |
 | `retired_refresh_tokens` | yes | hashes of already-rotated app refresh tokens, kept until they would expire, to detect a copied token | – (hashes only) | `purge_user`, and with their app session |
 | `passkeys` | yes | WebAuthn credentials: public key, name, dates (the private key never leaves the person's device) | `passkeys.json` (names and dates) | `purge_user` |
+| `oauth_grants` | yes | apps the person connected with OAuth (ChatGPT, Claude, ...): client id, scopes allowed, resource, dates, and hashes of the current access and refresh token | `connected_apps.json` (no hashes) | `purge_user`; revoking an app deletes the row |
+| `oauth_retired_refresh_tokens` | yes | hashes of already-rotated OAuth refresh tokens, kept until they would expire, to detect a copied token | – (hashes only) | `purge_user`, and with their grant |
+| `oauth_consents` | yes | a consent screen shown and not yet answered: hash of a one-time nonce, the authorization request (client, redirect URI, scopes), 10 minutes | – (expire in minutes) | `purge_user`; deleted when answered or expired |
+| `oauth_codes` | yes | one-time authorization codes (hash, client, redirect URI, challenge; 60 seconds) | – (expire in a minute) | `purge_user`; deleted when expired |
+| `oauth_clients` | no | what an AI app said about itself: its client id (a metadata URL or a registered id), name, redirect URIs. No person is named | – | deleted when unused and expired (a day for registrations and cached documents) |
 | `access_tokens` | yes | personal access tokens: name, prefix, scopes, dates, hash | `access_tokens.json` (no hashes) | `purge_user` |
 | `idempotent_requests` | yes | stored answers to retried POSTs (24 hours) | – (short-lived copies of answers already in the export) | `purge_user` |
 | `auth_codes` | yes | one-time sign-in codes for apps (2 minutes) | – (expire in minutes) | `purge_user` |
@@ -58,6 +63,9 @@ per-user table:
   Coverage for a shared deck is computed against the *viewer's* own collection.
 - `tests/test_tenancy.py` covers the cross-tenant cases. Extend it with every new
   endpoint that takes an id.
+
+- OAuth grants are listed and revoked by their owner only (`/api/v1/me/apps`, 404 otherwise) and, like personal access
+  tokens, never carry account-level powers (`docs/mcp-oauth-threat-model.md`).
 
 ## Rights, and where they're implemented
 

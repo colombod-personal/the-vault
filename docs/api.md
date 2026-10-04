@@ -23,8 +23,9 @@ One API for the web app and native apps (the planned iOS app), under `/api/v1`.
 - **A version to cache by.** `GET /api/v1/collection` has a `version` that changes whenever the
   collection or its prices change. The web app keeps the answers it got in IndexedDB and asks
   again only when the version moves.
-- **For agents.** There are personal access tokens (read, or read and write) and an MCP server at
-  `/api/mcp`; `/llms.txt` explains both to an agent. See [`agents.md`](agents.md).
+- **For agents.** There are personal access tokens (read, or read and write), OAuth for ChatGPT, Claude and other MCP
+  clients (`/oauth/*`, not under `/api/v1`), and an MCP server at `/api/mcp`; `/llms.txt` explains them to an agent.
+  See [`agents.md`](agents.md).
 - **Errors are `application/problem+json`** (RFC 9457): `{"type", "title", "status", "detail"}`.
   A missing or expired sign-in is `401` with `WWW-Authenticate: Bearer`. Another user's ids
   answer `404`, never `403`.
@@ -142,6 +143,8 @@ is stored). Over the limit they answer `429` (problem+json) with `Retry-After` i
 | `POST /api/auth/passkey/{signup,register,login}/options`, `GET /api/auth/login/{provider}`, `GET\|POST /api/auth/callback/{provider}`, `POST /api/facebook/data-deletion`, `GET /api/facebook/deletion-status` | 30 | `AUTH_RATE_LIMIT` |
 | `POST /api/auth/passkey/{signup,register,login}/verify`, `POST /api/v1/auth/native/{provider}`, `POST /api/v1/auth/token` | 10 | `AUTH_VERIFY_RATE_LIMIT` |
 | `POST /api/v1/collection/refresh` (per signed-in user, not per IP) | 20 | `REFRESH_RATE_LIMIT` |
+| `GET\|POST /oauth/authorize`, `POST /oauth/token`, `POST /oauth/revoke` | 120 | `OAUTH_RATE_LIMIT` |
+| `POST /oauth/register` | 20 | `OAUTH_REGISTER_RATE_LIMIT` |
 
 At most 10,000 passkey ceremonies may be pending at once (`PASSKEY_CHALLENGE_CAP`); beyond that
 `…/options` answers `429` until some expire. On Vercel the client IP is the first
@@ -168,6 +171,10 @@ ignored and the connection's address is used.
 | GET / PATCH / DELETE | `/api/v1/me` | profile / change display name / delete account (`{"confirm": "DELETE"}`) |
 | GET | `/api/v1/me/export` | everything held about you, as a ZIP (GDPR) |
 | GET / DELETE | `/api/v1/me/sessions[/{id}]` | signed-in apps |
+| GET / DELETE | `/api/v1/me/apps[/{id}]` | apps connected with OAuth (ChatGPT, Claude, ...): name, domain, scopes, created, last used; disconnect one. Account endpoints: not for tokens, no MCP tool |
+| GET | `/.well-known/oauth-protected-resource[/api/mcp]`, `/.well-known/oauth-authorization-server` | OAuth discovery (RFC 9728, RFC 8414) |
+| GET / POST | `/oauth/authorize` | OAuth authorization request (PKCE S256, `resource`) and the consent answer; HTML pages, see `agents.md` |
+| POST | `/oauth/token`, `/oauth/revoke`, `/oauth/register` | OAuth token endpoint (authorization_code, refresh_token), revocation, dynamic client registration |
 | POST / GET / DELETE | `/api/v1/me/tokens[/{id}]` | personal access tokens for agents and scripts (shown once) |
 | GET | `/api/v1/collection` | summary: copies, printings, value, cost, dates, links. P&L over the copies with a known cost only (a non-zero price paid recorded): `pnl` (`known_cost_market - known_cost_paid`, null when no cost is known), `pnl_pct`, `known_cost_paid`, `known_cost_market`, `known_cost_copies`, `unknown_cost_copies` (all null when costs are hidden) |
 | GET | `/api/v1/collection/cards` | printings, paged. Filters: `q`, `set`, `name`, `finish`, `condition`. `printing` (the printing label: `Normal`, `Foil`, `Etched`, …, any case). `sort`: `name`, `-name`, `-value`, `value`, `-quantity`, `set`, `-acquired`, `acquired` (first bought first; undated last). `value_total` is the market value of every printing matching the filters, across all pages. Each printing has `paid` (total paid), `paid_quantity` (how many copies that covers; copies with no price recorded are left out) and `gain` (today's value of those copies minus `paid`; `null` when no cost is known), all `null` when costs are hidden. Each printing also carries `card`: Scryfall's data for it (type line, colours, mana cost, mana value, rarity, layout, power/toughness/loyalty, oracle text, image with artist credit, every finish's latest price), kept in the Vault's card table by the daily sync and read for the whole page in one query; `null` until the printing is matched and synced |

@@ -14,6 +14,7 @@ import httpx
 
 from .archidekt import ArchidektTwin
 from .base import Twin
+from .mcp_client import ClientHostTwin
 from .identity import AppleTwin, FacebookTwin, GoogleTwin, IdentityTwin, MicrosoftTwin
 from .scryfall import ScryfallTwin
 from .spellbook import SpellbookTwin
@@ -30,8 +31,10 @@ class Universe:
         self.archidekt = ArchidektTwin(self.scryfall)
         self.vercel = VercelTwin()
         self.spellbook = SpellbookTwin(seed)
+        self.client_hosts = ClientHostTwin()  # where MCP clients publish their OAuth metadata documents
         self.twins: dict[str, Twin] = {t.name: t for t in (self.google, self.microsoft, self.apple, self.facebook,
-                                                           self.scryfall, self.archidekt, self.vercel, self.spellbook)}
+                                                           self.scryfall, self.archidekt, self.vercel, self.spellbook,
+                                                           self.client_hosts)}
         self.by_host: dict[str, Twin] = {h: t for t in self.twins.values() for h in t.hosts}
         self.escapes: list[str] = []
         self.transport = httpx.MockTransport(self.handle)
@@ -46,6 +49,10 @@ class Universe:
             self.escapes.append(str(request.url))
             raise httpx.ConnectError(f"{request.url.host} is outside the twin universe", request=request)
         return twin.handle(request)
+
+    def resolve(self, host: str) -> list[str]:
+        """DNS for the universe (the Vault's OAuth client-metadata fetcher uses it)."""
+        return self.client_hosts.resolve(host)
 
     def client(self, **kwargs) -> httpx.Client:
         return httpx.Client(transport=self.transport, follow_redirects=True, **kwargs)

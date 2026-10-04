@@ -310,12 +310,11 @@ def sign_in(db: Session, request: Request, profile: Profile, link: bool = True) 
     if not user.session_key:
         user.session_key = new_session_key()
         db.commit()
-    app_flow = request.session.get("app_flow")
+    carried = {k: request.session[k] for k in ("app_flow", "oauth_pending") if k in request.session}
     request.session.clear()
     request.session["uid"] = user.id
     request.session["sk"] = user.session_key
-    if app_flow:
-        request.session["app_flow"] = app_flow
+    request.session.update(carried)
     return user
 
 
@@ -330,6 +329,7 @@ def session_user(db: Session, request: Request) -> User | None:
 
 
 APP_FLOW_KEYS = ("app_redirect_uri", "code_challenge")
+OAUTH_PENDING_SECONDS = 600  # how long an MCP client's authorization request waits for sign-in
 
 HANDOFF_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in to the Vault app</title>
@@ -356,11 +356,14 @@ def build_router(auth: Auth, get_db) -> APIRouter:
 
     @router.get("/login/{provider}", dependencies=limited("oauth-login"))
     async def login(provider: str, request: Request, app_redirect_uri: str | None = None,
-                    code_challenge: str | None = None, code_challenge_method: str | None = None):
+                    code_challenge: str | None = None, code_challenge_method: str | None = None,
+                    continue_: str | None = Query(None, alias="continue")):
         """Browser sign-in. Native apps open this in ASWebAuthenticationSession with
         ``app_redirect_uri`` (one of APP_REDIRECT_URIS) and a PKCE ``code_challenge`` (S256);
         they get ``<app_redirect_uri>?code=...`` back and redeem it at POST /api/v1/auth/token."""
         request.session.pop("app_flow", None)
+        if continue_ != "oauth":  # only the OAuth consent page's sign-in resumes a pending request
+            request.session.pop("oauth_pending", None)
         if app_redirect_uri is not None:
             if app_redirect_uri not in auth.settings.app_redirect_uris:
                 raise HTTPException(400, "app_redirect_uri is not allowed")
@@ -426,6 +429,9 @@ def build_router(auth: Auth, get_db) -> APIRouter:
             request.session.pop("app_flow", None)
             request.session["app_handoff"] = {**app_flow, "uid": user.id}
             return RedirectResponse("/api/auth/app-handoff", status_code=303)
+        pending = request.session.pop("oauth_pending", None)
+        if isinstance(pending, dict) and time.time() - pending.get("t", 0) < OAUTH_PENDING_SECONDS:
+            return RedirectResponse("/oauth/authorize?" + str(pending.get("q", "")), status_code=303)
         return RedirectResponse(f"/?{urlencode(linked)}" if linked else "/", status_code=303)
 
     @router.get("/app-handoff", response_class=HTMLResponse)

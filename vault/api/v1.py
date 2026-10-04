@@ -17,7 +17,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import date
 from typing import Annotated
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, UploadFile
@@ -31,12 +31,12 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .. import analytics, outbound, tokens
+from .. import analytics, oauth_server, outbound, tokens
 from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, import_days, view_version
 from ..importer import MAX_UPLOAD_BYTES, ImportConflict, ImportError_, export_collection, import_collection, user_entries
-from ..models import AccessToken, ApiSession, Deck, Import, NativeNonce, Passkey, PriceSnapshot, Share, User
+from ..models import AccessToken, ApiSession, Deck, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
 from ..native import LEEWAY as NATIVE_LEEWAY, NativeTokenError, NativeVerifier, ProviderUnavailable
 from ..passkeys import remove_passkey
 from ..prices import compute_values
@@ -187,6 +187,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             "id": user.id, "name": user.name, "email": user.email,
             "providers": sorted({i.provider for i in user.identities}),
             "_links": {"self": link(f"{V1}/me"), "sessions": link(f"{V1}/me/sessions"),
+                       "apps": link(f"{V1}/me/apps", title="Apps connected with OAuth (ChatGPT, Claude, ...)"),
                        "tokens": link(f"{V1}/me/tokens", title="Personal access tokens for agents and scripts"),
                        "passkeys": link(f"{V1}/me/passkeys", title="Passkeys that can sign in to this account"),
                        "export": link(f"{V1}/me/export", title="Download all my data (ZIP)"),
@@ -237,6 +238,30 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             raise HTTPException(404, "Session not found")
         db.delete(s)
         db.commit()
+        return {"deleted": True}
+
+    # -- connected apps (OAuth grants to AI apps such as ChatGPT and Claude) ----------------------
+    def _app(grant: OAuthGrant, client: OAuthClient | None) -> dict:
+        domain = urlsplit(grant.client_id).hostname if grant.client_id.startswith("https://") else None
+        return {"id": grant.id, "name": client.name if client else (domain or "Unknown app"), "domain": domain,
+                "verified_by_address": domain is not None, "scopes": grant.scopes.split(),
+                "created_at": _iso(grant.created_at), "last_used_at": _iso(grant.last_used_at),
+                "_links": {"self": link(f"{V1}/me/apps/{grant.id}")}}
+
+    @router.get("/me/apps", tags=["account"], response_model=S.ConnectedAppPage,
+                summary="Apps connected to your account with OAuth (ChatGPT, Claude, ...), with their last use")
+    def list_apps(request: Request, cursor: str | None = None, limit: int | None = None,
+                  user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+        rows = oauth_server.user_grants(db, user.id)
+        names = {c.client_id: c for c in db.scalars(select(OAuthClient).where(
+            OAuthClient.client_id.in_({g.client_id for g in rows})))} if rows else {}
+        page, nxt = paginate(rows, lambda g: (-g.id,), lambda g: g.id, cursor=cursor, limit=limit)
+        return page_body(request, [_app(g, names.get(g.client_id)) for g in page], nxt, len(rows), limit=limit)
+
+    @router.delete("/me/apps/{app_id}", tags=["account"], summary="Disconnect an app: its tokens stop working at once")
+    def disconnect_app(app_id: Id, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+        if not oauth_server.revoke_user_grant(db, user.id, app_id):
+            raise HTTPException(404, "App not found")
         return {"deleted": True}
 
     # -- passkeys ------------------------------------------------------------------------------

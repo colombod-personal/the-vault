@@ -99,8 +99,9 @@ import), Moxfield, Archidekt, generic CSV (lossless, with Scryfall ids) and a te
 are in Account → Move your collection and at `/api/v1/collection/exports`. Matched printings go
 out with Scryfall's set codes, so other apps recognise them.
 
-**Agents.** People can connect their own AI agents: personal access tokens (read, or read and
-write), an MCP server at `/api/mcp`, and `/llms.txt`. See [`docs/agents.md`](docs/agents.md).
+**Agents.** People can connect their own AI agents: OAuth for ChatGPT, Claude and other MCP clients
+(add the URL `/api/mcp`; the Vault is the authorization server, see `docs/mcp-oauth-threat-model.md`),
+personal access tokens (read, or read and write), an MCP server at `/api/mcp`, and `/llms.txt`. See [`docs/agents.md`](docs/agents.md).
 The web app computes nothing about a collection: each view asks the server for what it shows
 (totals, P&L, breakdowns, the value over time, pages of printings; see `docs/api.md` →
 Analytics). It keeps the server's answers in IndexedDB, keyed by the collection's version, so it

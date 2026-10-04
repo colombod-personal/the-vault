@@ -394,6 +394,8 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged }) {
 
       <AgentsSection />
 
+      <ConnectedAppsSection />
+
       <Section title="Shared with me">
         {incoming.length === 0 && <p className="label-mono">Nothing yet. When someone sends you an invite link, open it while signed in.</p>}
         {incoming.map((s) => (
@@ -531,6 +533,37 @@ function AgentsSection() {
             {t.last_used_at ? 'used ' + new Date(t.last_used_at).toLocaleDateString() : 'never used'}
           </span>
           <button className="btn xs ghost" onClick={() => remove(t.id)}>Revoke</button>
+        </div>
+      ))}
+    </Section>
+  );
+}
+
+
+// Apps connected with OAuth (ChatGPT, Claude, ...): what each may do, when it last acted, and a way to cut it off.
+function ConnectedAppsSection() {
+  const api = window.VaultApi;
+  const [apps, setApps] = useStateAcc(null);
+  const [error, setError] = useStateAcc(null);
+  const reload = () => { api.apps().then(setApps).catch((e) => setError(e.message)); };
+  useEffectAcc(reload, []);
+  const disconnect = async (id) => { setError(null); try { await api.disconnectApp(id); reload(); } catch (e) { setError(e.message); } };
+  return (
+    <Section title="Connected apps">
+      <p className="label-mono" style={{ marginBottom: 8 }}>
+        Apps you allowed to use your vault, such as ChatGPT or Claude. Disconnecting one stops it at once; it has to ask you again.
+        Add the address <code>{window.location.origin}/api/mcp</code> in the app to connect it.
+      </p>
+      {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
+      {apps && apps.length === 0 && <p className="label-mono">No apps connected.</p>}
+      {(apps || []).map((a) => (
+        <div key={a.id} style={rowStyle}>
+          <span className="label-mono">
+            <strong>{a.name}</strong>{a.domain ? ` (${a.domain})` : ' · unverified'} ·{' '}
+            {a.scopes.includes('write') ? 'read & write' : 'read-only'} · connected {new Date(a.created_at).toLocaleDateString()} ·{' '}
+            {a.last_used_at ? 'used ' + new Date(a.last_used_at).toLocaleDateString() : 'never used'}
+          </span>
+          <button className="btn xs ghost" onClick={() => disconnect(a.id)}>Disconnect</button>
         </div>
       ))}
     </Section>
