@@ -9,11 +9,14 @@ vault-tools:
   - deck_stats
   - deck_legality
   - find_upgrades
+  - shopping_list
+  - get_archidekt_deck
   - validate_deck_changes
   - find_combos
   - get_card_oracle
 skills:
   - deck-upgrader
+  - archidekt-deck-helper
   - vault-attribution
 ---
 
