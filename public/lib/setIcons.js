@@ -31,14 +31,17 @@
         const sets = [];
         let names = {};
         let pre = [];
+        const seen = new Set();
         for (let url = '/api/v1/catalog/sets?limit=500'; url; ) {  // pages of at most 500
+          seen.add(url);
           const r = await fetch(url, { credentials: 'same-origin' });
           if (!r.ok) throw new Error('Set list ' + r.status);
           const j = await r.json();
           sets.push(...(j.items || []));
           if (j.aliases) names = j.aliases;
           if (j.alias_prefixes) pre = j.alias_prefixes;
-          url = j._links && j._links.next ? j._links.next.href : null;
+          const next = j._links && j._links.next ? j._links.next.href : null;
+          url = next && (j.items || []).length && !seen.has(next) ? next : null;  // a cycle ends the list
         }
         const out = {};
         for (const s of sets) {

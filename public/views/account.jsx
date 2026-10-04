@@ -577,23 +577,39 @@ function SignInMethods({ me, onChanged }) {
     try { await api.passkeys.remove(id); reload(); onChanged && onChanged(); } catch (e) { setError(e.message); }
   };
   const linked = new Set((me && me.providers) || []);
+  // Passkeys get their own rows below; every other sign-in is one row with its logo.
+  const providerRows = [...linked].filter((p) => p !== 'passkey');
   const linkable = info ? info.providers.filter((p) => !linked.has(p)) : [];
+  const providerName = (p) => (PROVIDERS[p] && PROVIDERS[p].name) || (p === 'dev' ? 'Local dev sign-in' : p);
   return (
     <Section title="Sign-in methods">
       <p className="label-mono" style={{ marginBottom: 8 }}>
-        Signed in with: {[...linked].join(', ') || '—'}. Add a passkey to sign in with Face ID, Touch ID, Windows Hello
-        or your phone. Linking another provider lets you use either.
+        Add a passkey to sign in with Face ID, Touch ID, Windows Hello or your phone. Linking another provider lets you
+        use either. A provider that already opened its own, empty Vault account moves here and that account is removed;
+        one whose account holds data is never merged.
       </p>
-      {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
-      {keys.map((k) => (
-        <div key={k.id} style={rowStyle}>
-          <span className="label-mono">
-            {k.name}{k.synced ? ' · synced' : ''} · added {new Date(k.created_at).toLocaleDateString()}
-            {k.last_used_at ? ' · used ' + new Date(k.last_used_at).toLocaleDateString() : ''}
-          </span>
-          <button className="btn xs ghost" onClick={() => remove(k.id)}>Remove</button>
-        </div>
-      ))}
+      {error && <p role="alert" style={{ color: 'var(--danger)' }}>{error}</p>}
+      <ul aria-label="Linked sign-in methods" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        {providerRows.map((p) => (
+          <li key={p} style={{ ...rowStyle, justifyContent: 'flex-start' }}>
+            <span className="provider-logo" aria-hidden="true">{PROVIDERS[p] ? PROVIDERS[p].logo : '⚿'}</span>
+            <span className="label-mono">{providerName(p)} · linked</span>
+          </li>
+        ))}
+        {keys.map((k) => (
+          <li key={'pk' + k.id} style={rowStyle}>
+            <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span className="provider-logo" aria-hidden="true">⚿</span>
+              <span className="label-mono">
+                Passkey: {k.name}{k.synced ? ' · synced' : ''} · added {new Date(k.created_at).toLocaleDateString()}
+                {k.last_used_at ? ' · used ' + new Date(k.last_used_at).toLocaleDateString() : ''}
+              </span>
+            </span>
+            <button className="btn xs ghost" aria-label={`Remove passkey ${k.name}`} onClick={() => remove(k.id)}>Remove</button>
+          </li>
+        ))}
+        {providerRows.length === 0 && keys.length === 0 && <li className="label-mono">—</li>}
+      </ul>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
         {info && info.passkeys && api.passkeys.supported() && <button className="btn sm" onClick={add}>Add a passkey</button>}
         {linkable.map((p) => <a key={p} className="btn sm ghost" href={`/api/auth/login/${p}`}>Link {p[0].toUpperCase() + p.slice(1)}</a>)}
