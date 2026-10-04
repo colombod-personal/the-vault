@@ -271,6 +271,18 @@ TOOLS = [
           "filename": {"type": "string", "default": "agent-import.csv"}, "confirm": CONFIRM}, ["csv"],
          method="POST", path=lambda a: f"{V1}/imports" if a.get("confirm") is True else f"{V1}/imports/preview",
          write=True, destructive=True),
+    Tool("start_collection_upload", "For a collection file too big to paste: a one-time link (one hour) for the "
+         "person to upload the file. Nothing is imported: the file waits until they confirm. Give them the link, then "
+         "call get_staged_upload when they say it is uploaded.", method="POST", path=lambda a: f"{V1}/uploads", write=True),
+    Tool("get_staged_upload", "A file the person uploaded through start_collection_upload: still waiting, or what "
+         "importing it would change and which rows match no known printing (fix those in the file and upload again).",
+         {"upload_id": ID}, ["upload_id"], path=lambda a: f"{V1}/uploads/{int(a['upload_id'])}"),
+    Tool("confirm_staged_upload", "Import an uploaded file, replacing the collection. Without confirm it only shows "
+         "the preview: show it to the person and call again with confirm true only after they say yes.",
+         {"upload_id": ID, "confirm": CONFIRM}, ["upload_id"],
+         method=lambda a: "POST" if a.get("confirm") is True else "GET",
+         path=lambda a: f"{V1}/uploads/{int(a['upload_id'])}" + ("/apply" if a.get("confirm") is True else ""),
+         write=True, destructive=True),
     Tool("list_export_formats", "Formats the collection can be exported in to move it to another app (Dragon "
          "Shield, Moxfield, Archidekt, generic CSV, text list), each with a download link. The files can be "
          "large; give the person the link rather than reading the whole file.",
@@ -310,7 +322,8 @@ SCRYFALL_DATA = {"get_collection_summary", "search_cards", "get_card", "list_set
                  "check_decklist", "lookup_cards", "get_deck", "get_shared_deck"}
 OWN_DATA_ONLY = {"get_acquisition_timeline", "parse_decklist", "list_decks", "save_deck", "update_deck", "list_imports",
                  "import_collection_csv", "list_export_formats", "list_shared_with_me", "get_import", "delete_deck",
-                 "list_my_shares", "accept_share", "stop_sharing"}
+                 "list_my_shares", "accept_share", "stop_sharing", "start_collection_upload",
+                 "get_staged_upload", "confirm_staged_upload"}
 for _tool in TOOLS:
     if not _tool.provenance:
         _tool.provenance = ("scryfall",) if _tool.name in SCRYFALL_DATA else ("archidekt",) if _tool.name == "get_archidekt_deck" else ()

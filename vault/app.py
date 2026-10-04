@@ -18,7 +18,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import auth as auth_module
-from . import oauth_clients, oauth_routes, oauth_server, outbound, passkeys, tokens
+from . import oauth_clients, oauth_routes, oauth_server, outbound, passkeys, tokens, uploads
 from .api import catalog_api, deck_api, mcp, meta, v1
 from .api.hal import problem
 from .config import Settings
@@ -198,6 +198,7 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
     app.include_router(passkeys.build_router(settings, get_db, auth_module.sign_in, account_user))
     app.include_router(mcp.build_router(optional_user, resource_metadata))
     app.include_router(oauth_routes.build_router(get_db, settings, fetcher, auth))
+    app.include_router(uploads.build_router(get_db, current_user, settings))
     app.include_router(meta.build_router(get_db, settings))
 
     @app.get("/api/health")

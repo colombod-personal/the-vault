@@ -18,7 +18,7 @@ Scopes: **read**, **write** (changes the collection or decks; off by default on 
 | Browse and filter cards | `GET /collection/cards`, `/collection/cards/{id}` | `search_cards`, `list_card_names`, `get_card` | read | no |
 | Sets view | `GET /collection/sets`, `/catalog/sets` | `list_sets` | read | no |
 | Refresh prices | `POST /collection/refresh` | `refresh_prices` | write | no |
-| **Upload a collection file (CSV)** | `POST /imports` (multipart) | `import_collection_csv` (shows what would change; replaces only with `confirm`) | write | **partly**: large files (G1) |
+| **Upload a collection file (CSV)** | `POST /imports` (multipart) | `import_collection_csv` (shows what would change; replaces only with `confirm`); big files: `start_collection_upload`, `get_staged_upload`, `confirm_staged_upload` | write | no |
 | See past imports and what changed | `GET /imports`, `GET /imports/{id}` | `list_imports`, `get_import` | read | no |
 | Export the collection to another app | `GET /collection/exports` | `list_export_formats` (download links) | read | no |
 | Graph view (clusters, deck map) | computed in the browser from the collection | none | read | **yes**: no AI equivalent (G4) |
@@ -68,9 +68,7 @@ Shown on the consent screen as "It will never be able to". These stay web-only.
 
 ## Gaps (to close in #101)
 
-- **G1 Large files.** `import_collection_csv` takes the file as text in a tool argument. A real collection
-  (21,950 copies) is far too big to pass that way. Needed: a one-time upload link (the tool returns a short-lived URL the person
-  opens to pick the file, or the host passes an attachment), then the import runs server-side.
+- ~~G1 Large files~~: a one-time upload link (`start_collection_upload`), the file staged and previewed (`get_staged_upload`), imported only with `confirm` (`confirm_staged_upload`); `vault/uploads.py`.
 - ~~G2 Import preview~~: `import_collection_csv` previews (`POST /imports/preview`, writes nothing) unless `confirm` is true.
 - ~~G3 One import's changes~~: `get_import`.
 - **G4 Graph view.** No AI equivalent: decide whether a tool returning clusters/deck overlaps is useful (e.g. "which of my
