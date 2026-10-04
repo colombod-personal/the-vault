@@ -677,7 +677,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 have = sum(min(c["have"], c["need"]) for c in cov["cards"])
                 item["summary"] = {"need": need, "have": have, "missing": need - have,
                                    "missing_cost": cov.get("missing_cost"), "missing_unpriced": cov.get("missing_unpriced")}
-        return page_body(request, items, nxt, len(rows), limit=limit)
+        return page_body(request, items, nxt, len(rows), limit=limit, summary="true" if summary else None)
 
     @router.post("/decks", tags=["decks"], response_model=S.Deck, status_code=201)
     def create_deck(request: Request, body: S.DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)):

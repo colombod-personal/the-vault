@@ -57,14 +57,22 @@ function DeckView({ data, openCard, initialText, deckId, onOpenDeckId }) {
   const [local, setLocalRaw] = useStateD(initialText ? { text: initialText, key: 1 } : null);
   const setLocal = (o) => setLocalRaw(o && { ...o, key: Date.now() });
   const refreshDecks = () => window.VaultApi.decks(true).then((d) => { setMyDecks(d); return d; }).catch(() => { setMyDecks([]); return []; });
-  useEffectD(() => { refreshDecks(); }, []);
+  // The deck at #/decks/{id}: fetched on its own (the library's summaries are only loaded for the library).
+  const [routed, setRouted] = useStateD(undefined); // undefined while loading, null when it isn't yours
+  useEffectD(() => {
+    if (!deckId) { refreshDecks(); return; }
+    let stop = false;
+    setRouted(undefined);
+    window.VaultApi.deck(deckId).then((d) => !stop && setRouted(d)).catch(() => { if (!stop) { setRouted(null); refreshDecks(); } });
+    return () => { stop = true; };
+  }, [deckId]);
 
   if (deckId) {
-    if (myDecks === null) return <p className="muted label-mono">Loading your deck…</p>;
-    const saved = myDecks.find((d) => String(d.id) === String(deckId));
-    if (!saved) return <DeckLibrary myDecks={myDecks} onOpen={(o) => o.saved ? onOpenDeckId(o.saved.id) : setLocal(o)} notice="That deck isn't in your decks any more." />;
-    return <DeckPage key={'saved' + saved.id} source={{ saved, url: saved.source_url || null, text: saved.source_url ? null : saved.text }}
-      myDecks={myDecks} refreshDecks={refreshDecks} openCard={openCard} onBack={() => onOpenDeckId(null)} onSaved={() => refreshDecks()} />;
+    if (routed === undefined) return <p className="muted label-mono">Loading your deck…</p>;
+    if (routed === null) return <DeckLibrary myDecks={myDecks} onOpen={(o) => o.saved ? onOpenDeckId(o.saved.id) : setLocal(o)} notice="That deck isn't in your decks any more." />;
+    return <DeckPage key={'saved' + routed.id} source={{ saved: routed, url: routed.source_url || null, text: routed.source_url ? null : routed.text }}
+      myDecks={myDecks} refreshDecks={refreshDecks} openCard={openCard} onBack={() => onOpenDeckId(null)}
+      onSaved={(d) => setRouted((r) => ({ ...r, ...d }))} />;
   }
   if (local) {
     return <DeckPage key={local.key} source={local} myDecks={myDecks} refreshDecks={refreshDecks} openCard={openCard}
@@ -157,7 +165,7 @@ function DeckLibrary({ myDecks, onOpen, notice }) {
                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 12 }}>
                        <span><strong>{Math.round(c.pct * 100)}%</strong> <span className="muted">owned · {c.have}/{c.need}</span></span>
                        <span style={{ color: c.missingCards ? 'var(--gold)' : 'var(--good)' }}>
-                         {c.missingCards ? `${c.missingCards} missing` + (c.cost ? ` · ${c.unpriced ? '≥ ' : ''}${money(c.cost)}` : '') : 'complete'}
+                         {c.missingCards ? `${c.missingCards} missing · ` + (c.cost ? `${c.unpriced ? '≥ ' : ''}${money(c.cost)}` : c.unpriced ? 'no price' : money(0)) : 'complete'}
                        </span>
                      </div>
                    </>
@@ -273,7 +281,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
         </div>
         {deck && (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <button className="btn sm primary" onClick={save} disabled={justSaved || myDecks === null || !rows}>
+            <button className="btn sm primary" onClick={save} disabled={justSaved || (myDecks === null && !source.saved) || !rows}>
               {justSaved ? 'Saved ✓' : saved ? 'Update saved copy' : 'Save to your decks'}
             </button>
             {deck.url && <button className="btn sm" onClick={() => { setJustSaved(false); setReload((n) => n + 1); }} disabled={loading}>Refresh</button>}

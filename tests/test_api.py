@@ -246,6 +246,12 @@ def test_deck_list_can_carry_each_decks_summary(signed_in):
     have = min(owned, 2)
     assert deck["summary"]["need"] == 3 and deck["summary"]["have"] == have and deck["summary"]["missing"] == 3 - have
     assert deck["summary"]["missing_unpriced"] >= 0
+    # Paged: the next link keeps the option, so every page carries summaries.
+    assert signed_in.post(f"{V1}/decks", json={"name": "C", "text": "1 Sol Ring"}).status_code == 201
+    first = signed_in.get(f"{V1}/decks?summary=true&limit=1").json()
+    nxt = first["_links"]["next"]["href"]
+    assert "summary=true" in nxt
+    assert signed_in.get(nxt).json()["items"][0]["summary"]["need"] == 1
 
 
 def test_openapi_documents_the_api(client):

@@ -315,7 +315,8 @@ def find_upgrades(db: Session, resolved: Resolved, fmt: str, budget_usd: float, 
         candidates[role] = [{"name": c.name, "oracle_id": c.oracle_id, "type_line": c.type_line, "mana_cost": c.mana_cost,
                              "edhrec_rank": c.edhrec_rank, **_price_fields(p),
                              **({"owned_copies": owned.get(c.oracle_id, 0)} if owned is not None else {}),
-                             "why": f"tagged {role} by Scryfall Tagger; legal in {fmt}; within the deck's colors; priced within the budget"}
+                             "why": f"tagged {role} by Scryfall Tagger; legal in {fmt}; within the deck's colors; "
+                                    + ("already in your collection" if owned and c.oracle_id in owned else "priced within the budget")}
                             for c, p, _ in db.execute(query).all()]
     oids = [e.card.oracle_id for e in played if e.card and not is_land(e.card)]
     roles_map = roles_of(db, oids)
