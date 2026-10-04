@@ -9,6 +9,7 @@ every answer (``not_checked``), and every answer carries ``provenance`` built by
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
@@ -69,6 +70,16 @@ class Resolved:
 
     def section(self, name: str) -> list[Entry]:
         return [e for e in self.entries if e.line.section == name]
+
+
+def loose_name(name: str) -> str:
+    """A card name with what differs between sources removed: the back face, an Alchemy "A-" prefix,
+    accents, case, punctuation and spaces ("Lim-Dûl's Vault" and "Lim-Dul's Vault" both become
+    "limdulsvault"). For pointing out near matches, never for counting a card as owned."""
+    front = name.split(" // ")[0].strip()
+    front = re.sub(r"^A-(?=\S)", "", front)
+    ascii_name = unicodedata.normalize("NFKD", front).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]", "", ascii_name.lower())
 
 
 def parse(text: str) -> decklist.Decklist:

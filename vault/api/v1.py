@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 from .. import analytics, oauth_server, outbound, tokens
 from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
+from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, import_days, view_version
 from ..importer import MAX_UPLOAD_BYTES, ImportConflict, ImportError_, export_collection, import_collection, user_entries
 from ..models import AccessToken, ApiSession, Deck, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
@@ -624,8 +625,17 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     def _coverage(text: str, owned_rows) -> dict:
         deck = _parse(text)
         lines = delta.coverage(deck.to_entries(), [r.to_collection_entry() for r in owned_rows])
+        # A card you own none of may still be in the collection under a name written a little
+        # differently (accents, punctuation, an Alchemy "A-" prefix): say so instead of only "missing".
+        similar: dict[str, Counter] = {}
+        if any(not c.have for c in lines):
+            for r in owned_rows:
+                similar.setdefault(loose_name(r.name), Counter())[r.name] += r.quantity
         return {"cards": [{"name": c.entry.name, "set": c.entry.set_code, "number": c.entry.collector_number,
-                           "need": c.need, "have": c.have, "missing": c.missing, "status": c.status} for c in lines],
+                           "need": c.need, "have": c.have, "missing": c.missing, "status": c.status,
+                           "maybe_owned": [] if c.have else [{"name": n, "quantity": q} for n, q in
+                                                             sorted(similar.get(loose_name(c.entry.name), {}).items())]}
+                          for c in lines],
                 "unparsed": deck.unparsed}
 
     def _deck(d: Deck, coverage: dict | None = None) -> dict:

@@ -71,7 +71,11 @@ function DeckView({ data, openCard, initialText }) {
   }
   async function removeSaved(d) {
     if (!confirm(`Remove “${d.name}” from your decks?`)) return;
-    try { await window.VaultApi.deleteDeck(d.id); refreshDecks(); }
+    try {
+      await window.VaultApi.deleteDeck(d.id);
+      if (saved && saved.id === d.id) setSaved(null); // the deck on screen can be saved again
+      refreshDecks();
+    }
     catch (e) { setError('Removing failed: ' + e.message); }
   }
 
@@ -79,6 +83,15 @@ function DeckView({ data, openCard, initialText }) {
   useEffectD(() => { if (initialText) loadFromText(); }, []);
 
   async function processDeck(d) {
+    // A card listed more than once (two printings of a land, say) is one line: the server counts
+    // what you own of it by name, so separate rows would show the later ones as missing.
+    const merged = [], at = {};
+    for (const c of d.cards) {
+      const k = c.name.split(' // ')[0].trim().toLowerCase();
+      if (k in at) merged[at[k]] = { ...merged[at[k]], qty: merged[at[k]].qty + c.qty };
+      else { at[k] = merged.length; merged.push({ ...c }); }
+    }
+    d = { ...d, cards: merged };
     setDeck(d);
     // What you own and what the rest costs: the server's coverage, priced in Postgres.
     const cov = await window.VaultApi.deckCoverage(deckListText(d.cards));
@@ -99,6 +112,7 @@ function DeckView({ data, openCard, initialText }) {
         ownEntries: (line ? line.owned_printings : []).map(o => ({ s: o.set, sn: '', cn: o.collector_number, p: o.printing, q: o.quantity, mk: o.unit_price })),
         need,
         status: line ? line.status : 'missing',
+        maybeOwned: line && line.maybe_owned ? line.maybe_owned : [], // owned under a name written differently
         unitPrice,
         priced: unitPrice != null,
         rowCost: line && line.missing_cost != null ? line.missing_cost : 0,
@@ -226,7 +240,7 @@ function DeckView({ data, openCard, initialText }) {
                   Deck list from <a href={deck.url} target="_blank" rel="noopener noreferrer">Archidekt</a>. Thanks to its author.
                 </p>
               )}
-              <button className="btn xs" style={{ marginTop: 8 }} disabled={!!saved} onClick={saveDeck}>
+              <button className="btn xs" style={{ marginTop: 8 }} disabled={!!saved || myDecks === null} onClick={saveDeck}>
                 {saved ? 'Saved to your decks ✓' : savedMatch ? 'Update in your decks' : 'Save to your decks'}
               </button>
 
@@ -291,7 +305,7 @@ function DeckView({ data, openCard, initialText }) {
               <div style={{ fontFamily: 'var(--display)', fontSize: 42, color: 'var(--muted)', marginBottom: 12, lineHeight: 1 }}>◇</div>
               <p className="h-display" style={{ fontSize: 22, marginBottom: 8 }}>Awaiting a decklist.</p>
               <p className="muted" style={{ fontSize: 13, maxWidth: 360, margin: '0 auto', lineHeight: 1.6 }}>
-                Paste an Archidekt or Moxfield URL on the left, or click <span className="kbd">Analyse deck</span> to load the sample.
+                Paste an Archidekt or Moxfield link on the left and press <span className="kbd">Analyse deck</span>, or open one of your decks.
               </p>
             </div>
           )}
@@ -312,6 +326,11 @@ function DeckView({ data, openCard, initialText }) {
                     <div className="qty">{r.qty}×</div>
                     <div>
                       <div style={{ fontWeight: 600 }}>{r.name}</div>
+                      {r.maybeOwned.length > 0 && (
+                        <div style={{ fontSize: 11, color: 'var(--gold)', marginTop: 2 }}>
+                          You may own {r.maybeOwned.map((m) => `${m.quantity} as “${m.name}”`).join(', ')}
+                        </div>
+                      )}
                       {r.scry && (
                         <div className="muted" style={{ fontSize: 10, fontFamily: 'var(--mono)', marginTop: 2, display: 'flex', gap: 6, alignItems: 'center' }}>
                           <ColorIdentity colors={r.scry.color_identity} />
@@ -322,6 +341,7 @@ function DeckView({ data, openCard, initialText }) {
                     </div>
                     <div className={`have ${status === 'owned' ? 'full' : status === 'partial' ? 'part' : 'none'}`}>
                       {r.owned > 0 ? `${Math.min(r.owned, r.qty)}/${r.qty}` : '0'}
+                      {r.owned > r.qty && <div className="muted" style={{ fontSize: 10, fontFamily: 'var(--mono)' }}>you own {r.owned}</div>}
                     </div>
                     <div className="cost muted">{r.need > 0 ? `${r.need} × ${r.priced ? '$' + r.unitPrice.toFixed(2) : '?'}` : '—'}</div>
                     <div className="cost" style={{ color: r.rowCost > 0 ? 'var(--gold)' : 'var(--muted)' }} title={r.need > 0 && !r.priced ? 'No price available' : undefined}>

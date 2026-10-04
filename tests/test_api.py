@@ -212,11 +212,23 @@ def test_sync_keeps_imported_finish_and_does_not_lock_in_name_guesses(app, signe
     assert sources["Sol Ring"] == "scryfall" and sources["A Killer Among Us"] == "file"
 
 
+def near_qty(client, name):
+    return sum(c["quantity"] for c in all_cards(client) if c["name"] == name)
+
+
 def test_deck_coverage_and_parsing(signed_in):
     upload(signed_in)
     res = signed_in.post(f"{V1}/decks/coverage", json={"text": "1 Sol Ring\n4 A Killer Among Us\n1 Rhystic Study"})
     status = {c["name"]: (c["status"], c["missing"]) for c in res.json()["cards"]}
     assert status == {"Sol Ring": ("owned", 0), "A Killer Among Us": ("owned", 0), "Rhystic Study": ("missing", 1)}
+    assert all(c["maybe_owned"] == [] for c in res.json()["cards"])
+    # Written a little differently in the deck (case, punctuation, accents, an Alchemy "A-"): still
+    # missing by name, but the near match is pointed out with the copies owned.
+    res = signed_in.post(f"{V1}/decks/coverage", json={"text": "1 A-Sol-Ring\n1 a killer among üs\n1 Rhystic Study"})
+    near = {c["name"]: (c["status"], c["maybe_owned"]) for c in res.json()["cards"]}
+    assert near["A-Sol-Ring"][1] == [{"name": "Sol Ring", "quantity": near_qty(signed_in, "Sol Ring")}]
+    assert near["a killer among üs"][1] == [{"name": "A Killer Among Us", "quantity": near_qty(signed_in, "A Killer Among Us")}]
+    assert near["Rhystic Study"] == ("missing", [])
     text = "1x Sol Ring (c21) 263 [Ramp]\n1x Duress [Sideboard]\n1 Kenrith, the Returned King (CMM) 1 *F*"
     cards = signed_in.post(f"{V1}/decks/parse", json={"text": text}).json()["cards"]
     assert [(c["name"], c["set"], c["collector_number"], c["section"]) for c in cards] == [

@@ -331,6 +331,11 @@ class ParsedDeck(BaseModel):
     unparsed: list[str]
 
 
+class NamedQuantity(BaseModel):
+    name: str
+    quantity: int
+
+
 class OwnedPrinting(BaseModel):
     set: str
     collector_number: str
@@ -352,6 +357,8 @@ class CoverageLine(BaseModel):
                                      "printing when it names one the Vault knows), any finish; null when unknown")
     missing_cost: float | None = Field(None, description="unit_price times missing; null when no price is known")
     owned_printings: list[OwnedPrinting] = Field([], description="The card's printings in the collection (first 50)")
+    maybe_owned: list[NamedQuantity] = Field([], description="On a line you own none of: cards in the collection whose "
+                                             "name differs only in accents, punctuation, case or an Alchemy 'A-' prefix")
 
 
 class Coverage(BaseModel):
