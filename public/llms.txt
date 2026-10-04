@@ -4,13 +4,22 @@
 > from Dragon Shield) is priced daily from Scryfall, with saved decks, deck coverage and
 > sharing. People can connect their own AI agents to their own data.
 
-Everything is private to its owner. Agents act for one person, with a personal access token
-that person created (Account → Agents & API in the app). The token can be read-only or
-read-write, and it expires.
+Everything is private to its owner. Agents act for one person: either through OAuth (the person
+signs in and approves the app, nothing to copy) or with a personal access token that person
+created (Account → Agents & API in the app). Both can be read-only or read-write, and both can
+be revoked (Account → Connected apps for OAuth).
 
 ## Connect an agent (MCP)
 
-- MCP server: `/api/mcp` (Streamable HTTP, stateless JSON). Header: `Authorization: Bearer vault_pat_...`
+- MCP server: `/api/mcp` (Streamable HTTP, stateless JSON).
+- OAuth (ChatGPT, Claude.ai, any MCP client): add the connector URL `https://<host>/api/mcp`. The
+  401 from `/api/mcp` points at `/.well-known/oauth-protected-resource/api/mcp`; the server
+  metadata is at `/.well-known/oauth-authorization-server`. PKCE S256, the `resource` parameter
+  (`https://<host>/api/mcp`), a Client ID Metadata Document URL or `POST /oauth/register` as
+  `client_id`, scopes `read` (default) and `write` (the person must tick it). Access tokens last
+  an hour; refresh tokens rotate, and a reused one revokes the connection. OAuth tokens work on
+  `/api/mcp` only, and can never manage the account.
+- Token: header `Authorization: Bearer vault_pat_...`
 - Claude Code: `claude mcp add --transport http vault https://<host>/api/mcp --header "Authorization: Bearer vault_pat_..."`
 - Tools:
   - collection: `get_collection_summary`, `search_cards`, `get_card`, `list_sets`,

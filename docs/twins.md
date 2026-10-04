@@ -24,6 +24,13 @@ Microsoft's `amplifier-bundle-digital-twin-universe`.
   - `set_price()` on Scryfall
   - `private` decks on Archidekt
   - `deploy()`, `promote()` (an Instant Rollback) and `add_domain()` on Vercel
+- **Clients too.** `twins/mcp_client.py` is the twin of an MCP client such as ChatGPT or Claude: it hosts
+  Client ID Metadata Documents (and hostile ones: documents about another client, redirects to the cloud metadata
+  address, oversized or slow answers, names that resolve to private addresses) and drives the whole OAuth flow
+  (discovery, PKCE, consent, tokens, refresh, MCP calls) so abuse cases are one-line overrides. See
+  `tests/test_mcp_oauth.py`, `tests/test_oauth_clients.py` and `docs/mcp-oauth-threat-model.md`. Its hosts end in
+  `.example` and resolve through `Universe.resolve`; there is no live conformance check because there is no single
+  real service to compare with (the real hosts are checked by hand: `docs/mcp-oauth-host-checklist.md`).
 - **Sealed.** A request to a host outside the universe fails as a network error and is recorded
   in `universe.escapes`. The tests assert that it stays empty.
 - **Checked against reality every night.** `tests/conformance` sends the same requests to each real
