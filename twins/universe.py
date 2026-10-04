@@ -16,6 +16,7 @@ from .archidekt import ArchidektTwin
 from .base import Twin
 from .identity import AppleTwin, FacebookTwin, GoogleTwin, IdentityTwin, MicrosoftTwin
 from .scryfall import ScryfallTwin
+from .spellbook import SpellbookTwin
 from .vercel import VercelTwin
 
 
@@ -28,8 +29,9 @@ class Universe:
         self.scryfall = ScryfallTwin(seed, enforce_rate_limits=enforce_rate_limits)
         self.archidekt = ArchidektTwin(self.scryfall)
         self.vercel = VercelTwin()
+        self.spellbook = SpellbookTwin(seed)
         self.twins: dict[str, Twin] = {t.name: t for t in (self.google, self.microsoft, self.apple, self.facebook,
-                                                           self.scryfall, self.archidekt, self.vercel)}
+                                                           self.scryfall, self.archidekt, self.vercel, self.spellbook)}
         self.by_host: dict[str, Twin] = {h: t for t in self.twins.values() for h in t.hosts}
         self.escapes: list[str] = []
         self.transport = httpx.MockTransport(self.handle)
