@@ -4,7 +4,17 @@
 // the ones you already own), Combos and a Buy list, all computed by the server (/decks/*).
 const { useState: useStateD, useMemo: useMemoD, useEffect: useEffectD } = React;
 
-const isCommander = (c) => c.section === 'commander' || (c.categories || []).some((x) => /commander/i.test(x));
+// Only the deck's actual Commander category, not user categories like "Commander Synergy".
+const isCommander = (c) => c.section === 'commander' || (c.categories || []).some((x) => String(x).trim().toLowerCase() === 'commander');
+
+// The deck a link points at, whatever its form (slug, /api/ path): "archidekt:123", "moxfield:abc".
+function sourceKey(url) {
+  if (!url) return null;
+  let m = url.match(/archidekt\.com\/(?:api\/)?decks\/(\d+)/i);
+  if (m) return 'archidekt:' + m[1];
+  m = url.match(/moxfield\.com\/decks\/([A-Za-z0-9_-]+)/i);
+  return m ? 'moxfield:' + m[1] : url.trim().toLowerCase();
+}
 
 // A deck's cards as a decklist the server parses ("4 Name (SET) 123" per line); commanders go under
 // a "Commander" header so stats, legality and combos know them.
@@ -69,7 +79,7 @@ function DeckView({ data, openCard, initialText, deckId, onOpenDeckId }) {
 
   if (deckId) {
     if (routed === undefined) return <p className="muted label-mono">Loading your deck…</p>;
-    if (routed === null) return <DeckLibrary myDecks={myDecks} onOpen={(o) => o.saved ? onOpenDeckId(o.saved.id) : setLocal(o)} notice="That deck isn't in your decks any more." />;
+    if (routed === null) return <DeckLibrary myDecks={myDecks} onOpen={(o) => { if (o.saved) onOpenDeckId(o.saved.id); else { setLocal(o); onOpenDeckId(null); } }} notice="That deck isn't in your decks any more." />;
     return <DeckPage key={'saved' + routed.id} source={{ saved: routed, url: routed.source_url || null, text: routed.source_url ? null : routed.text }}
       myDecks={myDecks} refreshDecks={refreshDecks} openCard={openCard} onBack={() => onOpenDeckId(null)}
       onSaved={(d) => setRouted((r) => ({ ...r, ...d }))} />;
@@ -213,7 +223,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
       const merged = mergeDeckCards(d.cards);
       d = { ...d, cards: merged };
       setDeck(d);
-      setFormat((f) => f || (merged.some(isCommander) || merged.reduce((n, c) => n + c.qty, 0) >= 99 ? 'commander' : 'standard'));
+      setFormat((f) => f || (merged.some(isCommander) ? 'commander' : 'standard'));
       const cov = await window.VaultApi.deckCoverage(deckListText(merged));
       const lines = coverageFor(merged, cov.cards);
       setProgress({ done: 0, total: merged.length });
@@ -236,7 +246,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
   useEffectD(() => { load(); }, [reload]);
 
   const text = useMemoD(() => (deck ? deckListText(deck.cards) : ''), [deck]);
-  const saved = source.saved || (deck && deck.url && myDecks ? myDecks.find((d) => d.source_url === deck.url) : null);
+  const saved = source.saved || (deck && deck.url && myDecks ? myDecks.find((d) => sourceKey(d.source_url) === sourceKey(deck.url)) : null);
   const summary = useMemoD(() => {
     if (!rows || !coverage) return null;
     let total = 0, ownedQty = 0, missingQty = 0, ownedFully = 0, ownedPartial = 0, missingAll = 0;
@@ -252,7 +262,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
     try {
       const d = saved ? await window.VaultApi.updateDeck(saved.id, name, text, deck.url || null)
         : await window.VaultApi.saveDeck(name, text, deck.url || null);
-      setJustSaved(true); onSaved(d); refreshDecks();
+      setJustSaved(true); onSaved(d); // the caller refreshes what it needs
     } catch (e) { setError('Saving failed: ' + e.message); }
   }
   async function remove() {

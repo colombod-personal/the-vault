@@ -416,7 +416,7 @@ function App() {
             <button aria-current={route.view === 'dashboard' ? 'page' : undefined} className={route.view === 'dashboard' ? 'active' : ''} onClick={() => nav('dashboard')}>Vault</button>
             <button aria-current={route.view === 'browse' ? 'page' : undefined} className={route.view === 'browse' ? 'active' : ''} onClick={() => nav('browse')}>Browse</button>
             <button aria-current={route.view === 'sets' || route.view === 'setdetail' ? 'page' : undefined} className={route.view === 'sets' || route.view === 'setdetail' ? 'active' : ''} onClick={() => nav('sets')}>Sets</button>
-            <button aria-current={route.view === 'decks' ? 'page' : undefined} className={route.view === 'decks' ? 'active' : ''} onClick={() => nav('decks')}>Decks</button>
+            <button aria-current={route.view === 'decks' ? 'page' : undefined} className={route.view === 'decks' ? 'active' : ''} onClick={() => { setDeckText(null); nav('decks'); }}>Decks</button>
             <button aria-current={route.view === 'lab' ? 'page' : undefined} className={route.view === 'lab' ? 'active' : ''} onClick={() => nav('lab')}>Lab</button>
             <button aria-current={route.view === 'graph' ? 'page' : undefined} className={route.view === 'graph' ? 'active' : ''} onClick={() => nav('graph')}>Graph</button>
           </nav>
@@ -458,7 +458,7 @@ function App() {
           )}
           {route.view === 'decks' && (
             <DeckView key={deckText || 'deck'} data={data} openCard={openCard} initialText={deckText}
-              deckId={route.deckId} onOpenDeckId={(id) => nav('decks', id ? { deckId: String(id) } : {})} />
+              deckId={route.deckId} onOpenDeckId={(id) => { setDeckText(null); nav('decks', id ? { deckId: String(id) } : {}); }} />
           )}
           {route.view === 'lab' && (
             <Lab data={data} openCard={openCard} />

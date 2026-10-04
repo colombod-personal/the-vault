@@ -64,7 +64,8 @@ def owned_by_oracle(db: Session, user: User) -> dict[str, int]:
     """Copies of each card (by oracle id) in the person's collection."""
     rows = db.execute(select(Card.oracle_id, func.sum(Entry.quantity))
                       .join(Card, Card.scryfall_id == Entry.scryfall_id)
-                      .where(Entry.user_id == user.id, Card.oracle_id.is_not(None)).group_by(Card.oracle_id)).all()
+                      .where(Entry.user_id == user.id, Card.oracle_id.is_not(None)).group_by(Card.oracle_id)
+                      .having(func.sum(Entry.quantity) > 0)).all()  # a row of 0 copies isn't owning the card
     return {oid: int(n) for oid, n in rows}
 
 

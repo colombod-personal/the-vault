@@ -630,7 +630,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         similar: dict[str, Counter] = {}
         if any(not c.have for c in lines):
             for r in owned_rows:
-                similar.setdefault(loose_name(r.name), Counter())[r.name] += r.quantity
+                if r.quantity > 0:  # a row of 0 copies isn't owning the card
+                    similar.setdefault(loose_name(r.name), Counter())[r.name] += r.quantity
         return {"cards": [{"name": c.entry.name, "set": c.entry.set_code, "number": c.entry.collector_number,
                            "need": c.need, "have": c.have, "missing": c.missing, "status": c.status,
                            "maybe_owned": [] if c.have else [{"name": n, "quantity": q} for n, q in
