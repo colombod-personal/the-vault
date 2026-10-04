@@ -453,7 +453,7 @@ class Rule(Base):
     )
 
     version: Mapped[str] = mapped_column(ForeignKey("rules_versions.version", ondelete="CASCADE"), primary_key=True)
-    number: Mapped[str] = mapped_column(String(20), primary_key=True)  # "613.1a"; glossary terms use "glossary:<term>"
+    number: Mapped[str] = mapped_column(String(120), primary_key=True)  # "613.1a"; glossary terms use "glossary:<term>"
     text: Mapped[str] = mapped_column(Text)
     parent: Mapped[str | None] = mapped_column(String(20))
     kind: Mapped[str] = mapped_column(String(12))  # "rule" or "glossary"

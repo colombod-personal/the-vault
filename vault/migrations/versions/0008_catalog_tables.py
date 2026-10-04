@@ -116,7 +116,7 @@ def upgrade() -> None:
     op.create_index('ix_oracle_tag_links_oracle_id', 'oracle_tag_links', ['oracle_id'], unique=False)
     op.create_table('rules',
     sa.Column('version', sa.String(length=10), nullable=False),
-    sa.Column('number', sa.String(length=20), nullable=False),
+    sa.Column('number', sa.String(length=120), nullable=False),
     sa.Column('text', sa.Text(), nullable=False),
     sa.Column('parent', sa.String(length=20), nullable=True),
     sa.Column('kind', sa.String(length=12), nullable=False),

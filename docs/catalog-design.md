@@ -237,3 +237,7 @@ Proposed, still to confirm:
 2. Whether Neon's restore history counts toward storage (check after the first real job run).
 3. Final list of root tags to link (start from the ones named above).
 4. Whether to keep tokens in `oracle_cards` (922 rows, 2 MB) or flag and filter them.
+
+## Measured with the real loaders
+
+On 2026-10-04 the loaders were run on the real bulk files into Postgres 16: first load 39 seconds (36,462 oracle cards, 79,663 rulings, 4,560 tags with 55,557 links, 4,062 Comprehensive Rules rows); a repeat load with no changes 6 seconds and **zero rows written**. Sizes: oracle_cards 55 MB, rulings 34 MB, oracle_tag_links 16 MB, rules 3 MB, oracle_tags 3 MB; about 111 MB of the catalog in a 120 MB database. This matches the estimate above. Real data also caught one mistake in the first draft: glossary terms need a rule-number column of 120 characters, not 20.

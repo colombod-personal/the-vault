@@ -213,6 +213,28 @@ def sync_oracle_prices(db: Session, rows: list[dict]) -> dict:
     return {"prices": len(rows), "removed": removed}
 
 
+KEEP_RULES_VERSIONS = 8  # old editions keep cited rules reproducible; each is about 3 MB
+
+
+def sync_rules(db: Session, parsed, source_url: str | None = None) -> dict:
+    """Store one edition of the Comprehensive Rules. Editions never change, so a version that is
+    already loaded is skipped; only the newest ``KEEP_RULES_VERSIONS`` editions are kept."""
+    from .models import Rule, RulesVersion
+
+    if db.get(RulesVersion, parsed.version) is not None:
+        return {"version": parsed.version, "skipped": "already loaded"}
+    db.add(RulesVersion(version=parsed.version, effective_date=parsed.effective_date, source_url=source_url))
+    db.flush()
+    _upsert(db, Rule, [{"version": parsed.version, **row} for row in parsed.rules], ("version", "number"))
+    old = db.scalars(select(RulesVersion.version).order_by(RulesVersion.version.desc()).offset(KEEP_RULES_VERSIONS)).all()
+    if old:
+        db.execute(delete(RulesVersion).where(RulesVersion.version.in_(old)))
+    record_source(db, "rules", version=parsed.version, rows=len(parsed.rules),
+                  source_updated_at=datetime(parsed.effective_date.year, parsed.effective_date.month,
+                                             parsed.effective_date.day, tzinfo=timezone.utc), url=source_url)
+    return {"version": parsed.version, "rows": len(parsed.rules), "pruned": len(old)}
+
+
 def sync_cheapest_from_file(db: Session, path, day: date | None = None) -> dict:
     """Cheapest prices from a downloaded default-cards file (the daily price job already has it)."""
     from mtg_toolkits.scryfall import iter_bulk_file
