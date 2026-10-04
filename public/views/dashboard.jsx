@@ -32,7 +32,7 @@ function Dashboard({ data, gotoBrowse, gotoSets, gotoSet, gotoValuation, openCar
 
   return (
     <div data-screen-label="01 Vault">
-      <div style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', marginBottom: 28 }}>
+      <div className="page-head" style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', marginBottom: 28 }}>
         <div>
           <p className="eyebrow">The Vault — overview</p>
           <h1 className="h1" style={{ marginTop: 6 }}>Your collection, at a glance.</h1>
@@ -140,7 +140,7 @@ function Dashboard({ data, gotoBrowse, gotoSets, gotoSet, gotoValuation, openCar
             Browse all →
           </button>
         </div>
-        <CardGrid cards={topCards} onClick={openCard} />
+        <CardGrid cards={topCards} onClick={openCard} rail />
       </div>
 
       {/* Sets ranking + Acquisition timeline */}
@@ -194,7 +194,7 @@ function Dashboard({ data, gotoBrowse, gotoSets, gotoSet, gotoValuation, openCar
             <h2 className="h2" style={{ marginTop: 4 }}>Most recent acquisitions</h2>
           </div>
         </div>
-        <CardGrid cards={recent} onClick={openCard} />
+        <CardGrid cards={recent} onClick={openCard} rail />
       </div>
     </div>
   );
@@ -237,9 +237,10 @@ function Timeline({ data }) {
   );
 }
 
-function CardGrid({ cards, onClick }) {
+// `rail`: on a phone the cards scroll sideways in one row instead of stacking (layout.css, phone layout).
+function CardGrid({ cards, onClick, rail }) {
   return (
-    <div className="card-grid">
+    <div className={rail ? 'card-grid card-rail' : 'card-grid'}>
       {cards.map((c, i) => <CardTile key={c.key || i} c={c} onClick={() => onClick(c)} />)}
     </div>
   );

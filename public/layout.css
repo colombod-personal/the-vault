@@ -9,6 +9,13 @@ button.brand:focus-visible, .nav button:focus-visible { outline: 1px solid var(-
 /* Grid items may shrink below their content's width, so one wide row can't widen the page. */
 .app > * { min-width: 0; }
 
+/* Notched phones in landscape (812px and wider): viewport-fit=cover lets the page run under the
+   side cutouts, so the edges keep clear of them. env() is 0 everywhere else, so these resolve to
+   the usual paddings. */
+.topbar { padding-left: max(28px, env(safe-area-inset-left)); padding-right: max(28px, env(safe-area-inset-right)); }
+main { padding-left: max(28px, env(safe-area-inset-left)); padding-right: max(28px, env(safe-area-inset-right)); }
+.drawer { padding-right: max(28px, env(safe-area-inset-right)); }
+
 @media (max-width: 760px) {
   /* Logo and account on the first row; the sections on their own row, scrolling sideways. */
   .topbar { flex-wrap: wrap; gap: 8px 16px; padding: 10px 16px 0; }
@@ -119,7 +126,7 @@ button.brand:focus-visible, .nav button:focus-visible { outline: 1px solid var(-
 .drawer { padding-top: 0; }
 .drawer .drawer-bar {
   position: sticky; top: 0; z-index: 5; display: flex; justify-content: flex-end; align-items: center;
-  height: 60px; margin: 0 -28px 4px; padding: 0 12px;
+  height: 60px; margin: 0 calc(-1 * max(28px, env(safe-area-inset-right))) 4px -28px; padding: 0 12px;
   background: linear-gradient(var(--bg-2) 70%, transparent);
 }
 .drawer .drawer-bar .close {
@@ -152,4 +159,136 @@ html, body { max-width: 100%; overflow-x: clip; }
 /* Sections row on a phone scrolls sideways: fade its right edge so it is clear there is more. */
 @media (max-width: 760px) {
   .nav { -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent); mask-image: linear-gradient(90deg, #000 88%, transparent); }
+}
+
+/* ==== Phone layout (up to 760px wide) ====
+   Everything from here to the end of the file is inside phone-width media queries (only .m-only,
+   phone-only elements, is hidden outside them), so wider screens render exactly as before; a test
+   enforces it.
+   Markup carries a few phone-only hooks: .page-head (a view's title row), .card-rail (a card row
+   that scrolls sideways), .m-stack / .m-2col / .m-3col / .m-4col (inline grids that reflow),
+   .m-matrix (a wide grid that scrolls inside its panel), .graph-stage, .graph-legend, .acct-menu. */
+
+@media (max-width: 760px) {
+  /* ---- Navigation: the sections become a bottom tab bar, in thumb reach ---- */
+  /* No backdrop-filter here: it would make the top bar the containing block of the fixed tab bar
+     (which then sits on the top bar instead of the bottom of the screen). */
+  .topbar {
+    flex-wrap: nowrap; gap: 8px; padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top));
+    padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right));
+    backdrop-filter: none; -webkit-backdrop-filter: none; background: oklch(0.20 0.014 65 / 0.97);
+  }
+  .brand .title { font-size: 19px; }
+  .brand .mark { width: 24px; height: 24px; font-size: 15px; }
+  .nav {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 0;
+    margin: 0; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    background: oklch(0.18 0.013 65 / 0.94); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border-top: 1px solid var(--border);
+    overflow: visible; -webkit-mask-image: none; mask-image: none;
+  }
+  .nav button {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    min-height: 58px; padding: 6px 2px;
+    font-size: 9.5px; letter-spacing: 0.06em; color: var(--text-2);
+    border-bottom: 0; border-top: 2px solid transparent;
+  }
+  .nav button::before { font-family: var(--sans); font-size: 18px; line-height: 1; letter-spacing: 0; }
+  .nav button:nth-child(1)::before { content: '◇'; }
+  .nav button:nth-child(2)::before { content: '▤'; }
+  .nav button:nth-child(3)::before { content: '▦'; }
+  .nav button:nth-child(4)::before { content: '♠'; }
+  .nav button:nth-child(5)::before { content: '✦'; }
+  .nav button:nth-child(6)::before { content: '◎'; }
+  .nav button.active { color: var(--gold); border-top-color: var(--gold); background: oklch(0.78 0.13 80 / 0.06); }
+  main { padding: 14px max(12px, env(safe-area-inset-right)) 24px max(12px, env(safe-area-inset-left)); }
+  /* Room for the tab bar after the last thing on the page (the footer). */
+  .app.with-tabs { padding-bottom: calc(60px + env(safe-area-inset-bottom)); }
+
+  /* Account actions: compact, one row with the logo. */
+  .acct-menu { gap: 6px !important; min-width: 0; }
+  .acct-menu .btn { padding: 8px 9px; font-size: 9.5px; letter-spacing: 0.08em; min-height: 36px; }
+  .acct-menu .btn { white-space: nowrap; }
+  .acct-menu .acct-name { max-width: 110px; overflow: hidden; text-overflow: ellipsis; display: inline-block; }
+  .acct-menu .acct-signout { display: none; }   /* in the Account panel instead */
+  /* The automatic price refresh note would push the account actions off the row: screen readers
+     still hear it, the dashboard shows the progress bar. */
+  .topbar .auto-refresh {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+    overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+  }
+
+  /* ---- Headings and a view's title row ---- */
+  .h1 { font-size: 30px; line-height: 1.08; }
+  .h2 { font-size: 22px; }
+  .page-head { flex-wrap: wrap; align-items: flex-start !important; gap: 12px; margin-bottom: 18px !important; }
+  .page-head > :last-child { text-align: left !important; }
+  .page-head > :last-child > * { justify-content: flex-start !important; align-items: flex-start !important; }
+  .section { margin-top: 24px; }
+  .section-head { flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+
+  /* ---- Stats: two by two ---- */
+  .stat-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat { padding: 14px; }
+  .stat .value { font-size: 28px; }
+  .stat .value .currency { font-size: 15px; top: 4px; }
+  .stat .delta { font-size: 10.5px; margin-top: 6px; }
+  .stat-link-cue { opacity: 1; }
+
+  /* ---- Cards: two (three on a wide phone) per row; the dashboard's rows scroll sideways ---- */
+  .card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .card-tile:hover { transform: none; }
+  .card-tile .meta { padding: 8px 10px; }
+  .card-tile .meta .name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card-tile .meta .sub { font-size: 10px; gap: 4px; }
+  .card-grid.card-rail {
+    display: grid; grid-auto-flow: column; grid-template-columns: none; grid-auto-columns: 42%;
+    overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+    margin: 0 -12px; padding: 2px 12px 10px; scroll-padding: 0 12px;
+  }
+  .card-grid.card-rail > * { scroll-snap-align: start; }
+
+  /* ---- Panels, rows and tables ---- */
+  .panel { padding: 14px; }
+  .panel.panel-flush { padding: 0; }   /* flush panels (tables, the graph) stay edge to edge */
+  .panel.panel-tight { padding: 10px; }
+  .col-2 { grid-template-columns: 1fr; gap: 12px; }
+  .bar-row { grid-template-columns: 44px minmax(0, 1fr) 54px 56px; gap: 8px; }
+  .tbl th, .tbl td { padding: 9px 8px; }
+  .tbl td { font-size: 13px; }
+  /* The card's name stays in view while a wide table scrolls sideways. */
+  .tbl th:first-child, .tbl td:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); box-shadow: 1px 0 0 var(--border); }
+  .tbl td:first-child { min-width: 130px; max-width: 170px; }
+
+  /* ---- Controls: fingertip-sized ---- */
+  .btn { min-height: 36px; }
+  .btn.sm, .btn.xs { min-height: 34px; padding: 6px 10px; }
+  .chip { min-height: 34px; padding: 6px 12px; font-size: 10.5px; }
+  .input, .select { min-height: 42px; font-size: 16px !important; } /* 16px stops iOS zooming into a focused field */
+  .pip { min-width: 28px; min-height: 28px; }
+  .row { flex-wrap: wrap; }
+
+  /* ---- Inline grids that reflow ---- */
+  .m-stack { grid-template-columns: 1fr !important; }
+  .m-2col { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .m-3col { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  .m-4col { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+  .m-matrix { min-width: 720px; }
+
+  /* ---- Graph: the canvas fills the screen below the controls ---- */
+  /* At least 480px: tall enough for the affinity hover card with five links (about 445px). Set as the
+     height itself (not min-height) so the graph inside, sized 100% of it, grows with it. */
+  .graph-stage { height: max(64vh, 480px) !important; min-height: 0 !important; }
+  .graph-legend { left: 8px; right: 8px !important; bottom: 8px !important; }
+}
+
+/* Phone-only elements (hidden on wider screens). */
+.m-only { display: none !important; }
+@media (max-width: 760px) { .m-only { display: inline-flex !important; } }
+
+/* A wide phone or a small tablet in portrait: three cards per row. */
+@media (min-width: 520px) and (max-width: 760px) {
+  .card-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .card-grid.card-rail { grid-auto-columns: 30%; }
 }

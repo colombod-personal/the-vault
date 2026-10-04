@@ -50,6 +50,7 @@ window.Scryfall = (() => {
       rarity: c.rarity,
       img_small: img?.small || null,
       img_normal: img?.normal || null,
+      img_art: img?.art_crop || null,
       prices: c.prices || {},
       scryfall_uri: c.scryfall_uri,
       artist: c.artist || c.card_faces?.[0]?.artist || null,

@@ -48,3 +48,27 @@ def test_every_page_has_the_site_icon():
     assert (PUBLIC / "favicon.ico").read_bytes()[:4] == b"\0\0\1\0"  # an icon file, not a renamed PNG
     assert (PUBLIC / "apple-touch-icon.png").read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
     assert (PUBLIC / "favicon.svg").read_text(encoding="utf-8").startswith("<svg")
+
+
+def test_the_phone_layout_never_touches_wider_screens():
+    """The phone layout is the last section of public/layout.css. Its rules sit inside phone-width
+    media queries, so tablets and desktops render exactly as without it; only .m-only (phone-only
+    elements) is hidden outside them."""
+    html = (PUBLIC / "index.html").read_text(encoding="utf-8")
+    assert "viewport-fit=cover" in html  # the tab bar keeps clear of the home indicator
+    layout = (PUBLIC / "layout.css").read_text(encoding="utf-8")
+    section = layout[layout.index("/* ==== Phone layout"):]
+    css = re.sub(r"/\*.*?\*/", "", section, flags=re.S)
+    top_level, depth, start = [], 0, 0
+    for i, ch in enumerate(css):
+        if ch == "{":
+            if depth == 0:
+                top_level.append(css[start:i].strip())
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                start = i + 1
+    assert depth == 0
+    outside = [s for s in top_level if not re.fullmatch(r"@media \((min-width: \d+px\) and \()?max-width: 760px\)", s)]
+    assert outside == [".m-only"], outside

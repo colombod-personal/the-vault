@@ -139,7 +139,7 @@ with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic
    - *Deployment branches and tags* → **Selected branches** → add `main`;
    - *Environment secrets* → add `VERCEL_TOKEN` (and `DATABASE_URL` if you want the price sync to
      skip Vercel).
-   For a Vercel team, also set the repository *variable* `VERCEL_SCOPE` (e.g. `wintermute2`).
+   For a Vercel team, also set the repository *variable* `VERCEL_SCOPE` (e.g. `wintermute-team`).
 3. **Database:** Vercel → project → Storage → *Create Database* → **Neon**, region
    **Frankfurt**, connected to Production and Preview. This sets `DATABASE_URL`.
 4. **Sign-in:** passkeys work as soon as the site is up. Google, Microsoft, Apple and
@@ -214,7 +214,7 @@ at a hidden prompt and prints only names, then redeploy (or merge) for them to a
 
 ```bash
 read -rs VERCEL_TOKEN && export VERCEL_TOKEN
-python -m jobs.vercel_setup --scope wintermute2 --provider google   # or microsoft, facebook, apple
+python -m jobs.vercel_setup --scope wintermute-team --provider google   # or microsoft, facebook, apple
 unset VERCEL_TOKEN
 ```
 
@@ -228,7 +228,7 @@ prints it, and the exact redirect URIs, under "Redirect URIs to register with ea
    Publish the app (until then only listed test users can sign in).
 3. APIs & Services → Credentials → Create credentials → OAuth client ID → *Web application*.
    Authorized redirect URI: `https://YOUR-DOMAIN/api/auth/callback/google`.
-4. `python -m jobs.vercel_setup --scope wintermute2 --provider google` and paste the client id and secret.
+4. `python -m jobs.vercel_setup --scope wintermute-team --provider google` and paste the client id and secret.
 
 **Microsoft** (about 5 minutes; personal and work accounts)
 1. [Entra admin center](https://entra.microsoft.com/) → Applications → App registrations → New registration.
@@ -236,7 +236,7 @@ prints it, and the exact redirect URIs, under "Redirect URIs to register with ea
    Microsoft accounts*; redirect URI: platform *Web*, `https://YOUR-DOMAIN/api/auth/callback/microsoft`.
 3. Certificates & secrets → New client secret; copy its **Value** (shown once). The client id is the
    *Application (client) ID* on the Overview page.
-4. `python -m jobs.vercel_setup --scope wintermute2 --provider microsoft` and paste both.
+4. `python -m jobs.vercel_setup --scope wintermute-team --provider microsoft` and paste both.
    Client secrets expire (24 months at most): put a reminder in your calendar.
 
 **Facebook** (about 10 minutes; `email` and `public_profile` need no app review)
@@ -246,7 +246,7 @@ prints it, and the exact redirect URIs, under "Redirect URIs to register with ea
 3. App settings → Basic: privacy policy URL `https://YOUR-DOMAIN/privacy.html`; user data deletion →
    *Data deletion callback URL* `https://YOUR-DOMAIN/api/facebook/data-deletion`; app domain `YOUR-DOMAIN`.
 4. Switch the app to **Live** (in Development mode only people with a role on the app can sign in).
-5. `python -m jobs.vercel_setup --scope wintermute2 --provider facebook` and paste the App ID and App Secret.
+5. `python -m jobs.vercel_setup --scope wintermute-team --provider facebook` and paste the App ID and App Secret.
 
 **Apple** (paid Apple Developer program): Identifiers → an App ID with Sign in with Apple, then a
 **Services ID** (= `APPLE_CLIENT_ID`) with your domain and the return URL

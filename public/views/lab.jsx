@@ -48,7 +48,7 @@ function Lab({ data, openCard }) {
 
   return (
     <div data-screen-label="05 Insights">
-      <div style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', marginBottom: 28 }}>
+      <div className="page-head" style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', marginBottom: 28 }}>
         <div>
           <p className="eyebrow">Insights</p>
           <h1 className="h1" style={{ marginTop: 6 }}>What your numbers reveal.</h1>
@@ -164,7 +164,7 @@ function Lab({ data, openCard }) {
             <SpendChart data={spendTimeline} />
             <div className="divider"></div>
           </>)}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div className="m-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             {!m.costsHidden && (
               <div>
                 <p className="label-mono">Total spent</p>
@@ -202,7 +202,7 @@ function Lab({ data, openCard }) {
           </div>
         ) : (
           <>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10, marginBottom: 20 }}>
+            <div className="m-4col" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10, marginBottom: 20 }}>
               {LAB_COLORS.map(([k, name]) => {
                 const b = bucket(breakdowns?.colors, k);
                 return (

@@ -35,6 +35,17 @@ test('the full name still works, and so does the back face', async () => {
   assert.ok(results[0] && results[1]);
 });
 
+test('the cropped art is kept for the graph, for double-faced cards too', async () => {
+  const uris = (id) => ({ normal: `https://cards.scryfall.io/normal/front/${id}.jpg`, art_crop: `https://cards.scryfall.io/art_crop/front/${id}.jpg` });
+  const solRing = { id: 's1', name: 'Sol Ring', set: 'c21', collector_number: '263', prices: {}, image_uris: uris('s1') };
+  const delver = { id: 'd1', name: 'Delver of Secrets // Insectile Aberration', set: 'isd', collector_number: '51', prices: {},
+    card_faces: [{ image_uris: uris('d1-front') }, { image_uris: uris('d1-back') }] };
+  const scry = load({ data: [solRing, delver], not_found: [] });
+  const [ring, flip] = await scry.collection([{ name: 'Sol Ring' }, { name: 'Delver of Secrets' }]);
+  assert.equal(ring.img_art, 'https://cards.scryfall.io/art_crop/front/s1.jpg');
+  assert.equal(flip.img_art, 'https://cards.scryfall.io/art_crop/front/d1-front.jpg');
+});
+
 test('lookups stay in memory, and the old localStorage card caches are removed', async () => {
   const store = new Map([['scry_cache_v3', '{}'], ['scry_cache_v2', '{}'], ['vault_tweaks', 'keep']]);
   const scry = load({ data: [fireIce], not_found: [] }, store);

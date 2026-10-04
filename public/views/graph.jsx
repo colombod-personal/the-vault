@@ -1,5 +1,5 @@
 // Graph view — network/cluster visualisations via Cytoscape.js
-const { useState: useStateG, useEffect: useEffectG, useRef: useRefG, useMemo: useMemoG } = React;
+const { useState: useStateG, useEffect: useEffectG, useLayoutEffect: useLayoutEffectG, useRef: useRefG, useMemo: useMemoG } = React;
 
 const COLOR_FILL = {
   W: '#e8e1c4', U: '#3a78c9', B: '#3b2a3f', R: '#d04d35', G: '#3f8a5b',
@@ -44,6 +44,21 @@ function graphNode(x, i) {
 // placing deck cards that aren't among the nodes.
 const graphColorKey = (ci) => (!ci || !ci.length ? 'C' : ci.length === 1 ? ci[0] : 'M');
 
+// The card's art, cropped (Scryfall art_crop). Older cached cards only kept the normal image,
+// whose URL differs only in the size segment.
+function artUrl(scry) {
+  if (!scry) return null;
+  return scry.img_art || (scry.img_normal ? scry.img_normal.replace('/normal/', '/art_crop/') : null);
+}
+
+const ART_ASPECT = 626 / 457; // Scryfall's art_crop: a card is drawn as a tile of this shape, never cut
+const MAX_ART_NODES = 60; // art for the most valuable cards only: a big graph would download hundreds of images
+const MAX_LINKS_SHOWN = 5; // a popular card can be picked by many peers: list the strongest
+// No hover on touch screens: the graph previews a card on the first tap (see the tap handler).
+const TOUCH = !!(window.matchMedia && window.matchMedia('(hover: none)').matches);
+const ART_MODES = new Set(['color', 'affinity', 'scatter', 'deck']); // the modes drawn as a network
+const SAME = { set: 'a shared set', type: 'same type', color: 'same color group', rarity: 'same rarity', cmc: 'similar mana value', price: 'similar price' };
+
 function GraphView({ data, openCard }) {
   const api = data.api;
   const containerRef = useRefG(null);
@@ -53,6 +68,19 @@ function GraphView({ data, openCard }) {
   const [minValue, setMinValue] = useStateG(1);
   const [colorFilter, setColorFilter] = useStateG(new Set()); // empty = all
   const [hover, setHover] = useStateG(null);
+  // The input last used on the graph (kept across rebuilds); the legend names its gesture.
+  const lastPointer = useRefG(TOUCH ? 'touch' : 'mouse');
+  const [touchUI, setTouchUI] = useStateG(TOUCH);
+  const [showArt, setShowArt] = useStateG(true); // each card drawn as its whole art
+  const tipRef = useRefG(null);
+  // Keep the whole hover card inside the graph, however tall it is (it grows with the links it lists).
+  // Measured again when the card image arrives, since that sets most of its height.
+  function placeTip() {
+    const tip = tipRef.current, box = containerRef.current;
+    if (!tip || !box || !hover) return;
+    tip.style.top = Math.max(8, Math.min(hover.y + 16, box.offsetHeight - tip.offsetHeight - 8)) + 'px';
+  }
+  useLayoutEffectG(placeTip, [hover]);
   const [deck, setDeck] = useStateG(null); // {title, rows}
   const [deckUrl, setDeckUrl] = useStateG('https://archidekt.com/decks/5292775/the_dragon_in_the_night');
 
@@ -138,6 +166,7 @@ function GraphView({ data, openCard }) {
     // Build elements
     const elements = [];
     const parents = new Set();
+    const artIds = new Set(showArt ? [...filteredNodes].sort((a, b) => b.value - a.value).slice(0, MAX_ART_NODES).map((n) => n.id) : []);
 
     function nodeStyle(n) {
       const radius = Math.max(10, Math.min(80, Math.sqrt(n.value) * 4 + 8));
@@ -154,7 +183,8 @@ function GraphView({ data, openCard }) {
           rawColor: n.color,
           shape,
           inDeck: inDeck === true ? 'yes' : inDeck === false ? 'no' : '',
-          card: n
+          card: n,
+          ...(artIds.has(n.id) && artUrl(n.scry) ? { art: artUrl(n.scry), artW: Math.round(radius * ART_ASPECT) } : {})
         }
       };
     }
@@ -232,16 +262,18 @@ function GraphView({ data, openCard }) {
         (typeIdx[n.type] = typeIdx[n.type] || []).push(i);
         (colorIdx[n.color] = colorIdx[n.color] || []).push(i);
       });
+      // Score and the shared traits behind it (shown when hovering a card).
       function sim(a, b) {
         let s = 0;
-        if (a.sets.some((code) => b.sets.includes(code))) s += 3.0;
-        if (a.type === b.type) s += 2.0;
-        if (a.color === b.color) s += 1.5;
-        if (a.rarity && a.rarity === b.rarity) s += 0.5;
-        if (Math.abs((a.cmc || 0) - (b.cmc || 0)) <= 1) s += 1.0;
+        const why = [];
+        if (a.sets.some((code) => b.sets.includes(code))) {s += 3.0;why.push('set');}
+        if (a.type === b.type) {s += 2.0;why.push('type');}
+        if (a.color === b.color) {s += 1.5;why.push('color');}
+        if (a.rarity && a.rarity === b.rarity) {s += 0.5;why.push('rarity');}
+        if (Math.abs((a.cmc || 0) - (b.cmc || 0)) <= 1) {s += 1.0;why.push('cmc');}
         const lo = Math.min(a.unit, b.unit),hi = Math.max(a.unit, b.unit);
-        if (hi > 0 && lo / hi >= 0.6) s += 1.0;
-        return s;
+        if (hi > 0 && lo / hi >= 0.6) {s += 1.0;why.push('price');}
+        return [s, why];
       }
       nlist.forEach((n) => elements.push(nodeStyle(n)));
       const seen = new Set();
@@ -255,11 +287,11 @@ function GraphView({ data, openCard }) {
         const scored = [];
         cand.forEach((j) => {
           if (j === i) return;
-          const sc = sim(a, nlist[j]);
-          if (sc >= 3.5) scored.push([j, sc]);
+          const [sc, why] = sim(a, nlist[j]);
+          if (sc >= 3.5) scored.push([j, sc, why]);
         });
         scored.sort((x, y) => y[1] - x[1]);
-        scored.slice(0, 4).forEach(([j, sc]) => {
+        scored.slice(0, 4).forEach(([j, sc, why]) => {
           const lo = Math.min(i, j),hi = Math.max(i, j);
           const key = lo + '-' + hi;
           if (seen.has(key)) return;
@@ -269,7 +301,8 @@ function GraphView({ data, openCard }) {
               id: 'e_' + key,
               source: nlist[lo].id,
               target: nlist[hi].id,
-              weight: sc
+              weight: sc,
+              why: why.map((w) => SAME[w]).join(' · ')
             }
           });
         });
@@ -285,6 +318,7 @@ function GraphView({ data, openCard }) {
       // Group by color (from the card data) else by 'unknown'
       const groups = { W: [], U: [], B: [], R: [], G: [], M: [], C: [], '?': [] };
       for (const r of deckRows) groups[r.color in groups ? r.color : '?'].push(r);
+      let deckArt = 0;
       for (const k of Object.keys(groups)) {
         if (groups[k].length === 0) continue;
         const pid = 'p_' + k;
@@ -293,6 +327,8 @@ function GraphView({ data, openCard }) {
         for (const r of groups[k]) {
           const id = 'dk_' + r.name.replace(/[^a-z0-9]/gi, '_');
           const radius = Math.max(8, Math.min(60, Math.sqrt(r.unit || 1) * 5 + 8));
+          const art = showArt && deckArt < MAX_ART_NODES ? artUrl(r.node?.scry || r.scry) : null;
+          if (art) deckArt++;
           elements.push({
             data: {
               id, label: r.name, parent: pid,
@@ -301,7 +337,8 @@ function GraphView({ data, openCard }) {
               inDeck: r.missing > 0 ? 'missing' : 'owned',
               card: r.node || { name: r.name, scry: r.scry, qty: r.owned, value: null },
               deckQty: r.qty,
-              owned: r.owned
+              owned: r.owned,
+              ...(art ? { art, artW: Math.round(radius * ART_ASPECT) } : {})
             }
           });
         }
@@ -330,16 +367,30 @@ function GraphView({ data, openCard }) {
         }
       },
       {
+        // The card's whole art (never cut: a tile in the art's own shape); its color identity is the border.
+        selector: 'node[art]',
+        style: {
+          'shape': 'round-rectangle',
+          'width': 'data(artW)',
+          'background-image': 'data(art)',
+          'background-fit': 'contain',
+          'background-clip': 'node',
+          'background-image-crossorigin': 'anonymous',
+          'border-color': 'data(color)',
+          'border-width': 2.5
+        }
+      },
+      {
         selector: 'node[inDeck = "yes"]',
-        style: { 'border-color': '#f4d35e', 'border-width': 3 }
+        style: { 'outline-color': '#f4d35e', 'outline-width': 3, 'outline-offset': 1 }
       },
       {
         selector: 'node[inDeck = "missing"]',
-        style: { 'border-color': '#d04d35', 'border-width': 3, 'border-style': 'dashed' }
+        style: { 'outline-color': '#d04d35', 'outline-width': 3, 'outline-offset': 1, 'outline-style': 'dashed' }
       },
       {
         selector: 'node[inDeck = "owned"]',
-        style: { 'border-color': '#3f8a5b', 'border-width': 2 }
+        style: { 'outline-color': '#3f8a5b', 'outline-width': 2, 'outline-offset': 1 }
       },
       {
         selector: 'node[?isAnchor]',
@@ -393,7 +444,9 @@ function GraphView({ data, openCard }) {
           'curve-style': 'haystack',
           'haystack-radius': 0.4
         }
-      }],
+      },
+      { selector: '.faded', style: { 'opacity': 0.12 } },
+      { selector: 'edge.linked', style: { 'opacity': 0.9, 'line-color': '#f4d35e' } }],
 
       layout: mode === 'scatter' || mode === 'color' ?
       { name: 'preset', padding: 40, fit: true } :
@@ -413,19 +466,66 @@ function GraphView({ data, openCard }) {
       maxZoom: 3
     });
 
+    // Touch has no hover: the first tap on a card shows what hovering shows (its image, and in the
+    // affinity web its links), a second tap on the same card opens it. Decided by the input that
+    // was used (a finger on a touch laptop too), falling back to the screen's primary pointer.
+    const notePointer = (e) => {
+      lastPointer.current = e.type === 'touchstart' || e.pointerType === 'touch' ? 'touch' : 'mouse';
+      setTouchUI(lastPointer.current === 'touch');
+    };
+    const host = cy.container();
+    host.addEventListener('pointerdown', notePointer, true);
+    host.addEventListener('pointermove', notePointer, true);
+    host.addEventListener('touchstart', notePointer, { capture: true, passive: true });
+    const isTouch = () => lastPointer.current === 'touch';
+    let previewed = null;
+    const clearPreview = () => {
+      cy.elements().removeClass('faded linked');
+      setHover(null);
+    };
+    const showPreview = (node) => {
+      const d = node.data();
+      const pos = node.renderedPosition();
+      let links = null;
+      if (mode === 'affinity') {
+        const edges = node.connectedEdges();
+        cy.elements().removeClass('faded linked');
+        cy.elements().not(node.closedNeighborhood()).addClass('faded');
+        edges.addClass('linked');
+        links = edges.map((e) => ({
+          name: (e.source().id() === node.id() ? e.target() : e.source()).data('label'),
+          why: e.data('why'),
+          weight: e.data('weight')
+        })).sort((x, y) => y.weight - x.weight);
+      }
+      setHover({ d, x: pos.x, y: pos.y, links });
+    };
     cy.on('tap', 'node', (evt) => {
       const d = evt.target.data();
       if (d.isParent || d.isAnchor) return;
+      if (isTouch() && previewed !== evt.target.id()) {
+        previewed = evt.target.id();
+        showPreview(evt.target);
+        return;
+      }
+      previewed = null;
       if (d.card?.name) openName(d.card.name);
+    });
+    cy.on('tap', (evt) => {
+      if (evt.target === cy) { previewed = null; clearPreview(); }
     });
     cy.on('mouseover', 'node', (evt) => {
       const d = evt.target.data();
-      if (d.isParent || d.isAnchor) return;
-      const pos = evt.target.renderedPosition();
-      setHover({ d, x: pos.x, y: pos.y });
+      if (d.isParent || d.isAnchor || isTouch()) return;
+      showPreview(evt.target);
     });
-    cy.on('mouseout', 'node', () => setHover(null));
-    cy.on('viewport', () => setHover(null));
+    cy.on('mouseout', 'node', () => {
+      if (!isTouch()) clearPreview();
+    });
+    cy.on('viewport', () => {
+      previewed = null;
+      clearPreview();
+    });
 
     // Always fit to viewport after layout completes
     cy.one('layoutstop', () => {
@@ -433,15 +533,20 @@ function GraphView({ data, openCard }) {
     });
 
     cyRef.current = cy;
-    return () => {cy.destroy();cyRef.current = null;};
-  }, [filteredNodes, mode, deck]);
+    return () => {
+      host.removeEventListener('pointerdown', notePointer, true);
+      host.removeEventListener('pointermove', notePointer, true);
+      host.removeEventListener('touchstart', notePointer, { capture: true });
+      cy.destroy();cyRef.current = null;
+    };
+  }, [filteredNodes, mode, deck, showArt]);
 
-  // Reset hover on mode change
-  useEffectG(() => setHover(null), [mode]);
+  // A rebuilt graph starts with no card previewed (a tap preview otherwise stays up).
+  useEffectG(() => setHover(null), [filteredNodes, mode, deck, showArt]);
 
   return (
     <div data-screen-label="06 Graph">
-      <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'end' }}>
+      <div className="page-head" style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'end' }}>
         <div>
           <p className="eyebrow">The atlas</p>
           <h1 className="h1" style={{ marginTop: 6 }}>Your collection as a network.</h1>
@@ -468,14 +573,18 @@ function GraphView({ data, openCard }) {
             <button className={`chip ${mode === 'scatter' ? 'active' : ''}`} onClick={() => setMode('scatter')}>Mana / price</button>
             {deck && <button className={`chip ${mode === 'deck' ? 'active' : ''}`} onClick={() => setMode('deck')}>Deck map</button>}
           </div>
-          <div className="row" style={{ gap: 6, marginLeft: 'auto' }}>
+          {ART_MODES.has(mode) ?
+          <button className={`chip ${showArt ? 'active' : ''}`} aria-pressed={showArt} onClick={() => setShowArt((v) => !v)}
+          title="Show each card as its art" style={{ marginLeft: 'auto' }}>Card art</button> :
+          <span style={{ marginLeft: 'auto' }} />}
+          <div className="row" style={{ gap: 6 }}>
             <span className="label-mono" style={{ marginRight: 4 }}>Colors</span>
             {['W', 'U', 'B', 'R', 'G', 'M', 'C'].map((c) =>
             <button key={c} className={`pip ${c}`} onClick={() => toggleColor(c)} style={{ cursor: 'pointer', opacity: colorFilter.size === 0 || colorFilter.has(c) ? 1 : 0.25 }}>{c}</button>
             )}
           </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1.3fr 1.1fr', gap: 20, marginTop: 14 }}>
+        <div className="m-stack" style={{ display: 'grid', gridTemplateColumns: '1.1fr 1.3fr 1.1fr', gap: 20, marginTop: 14 }}>
           <div>
             <p className="label-mono" style={{ marginBottom: 6 }}>Price tier (min value)</p>
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -528,7 +637,7 @@ function GraphView({ data, openCard }) {
       <ModeExplainer mode={mode} nodeCount={filteredNodes.length} />
 
       {/* Canvas + hover */}
-      <div className="panel panel-flush" style={{ height: 'calc(100vh - 420px)', minHeight: 520, position: 'relative', overflow: mode === 'hierarchy' || mode === 'set' || mode === 'type' ? 'auto' : 'hidden' }}>
+      <div className="panel panel-flush graph-stage" style={{ height: 'calc(100vh - 420px)', minHeight: 520, position: 'relative', overflow: mode === 'hierarchy' || mode === 'set' || mode === 'type' ? 'auto' : 'hidden' }}>
         {mode === 'hierarchy' ?
         <HierarchyMatrix data={data} nodes={filteredNodes} openName={openName} /> :
         mode === 'set' ?
@@ -556,16 +665,19 @@ function GraphView({ data, openCard }) {
 
         {/* Hover card */}
         {hover &&
-        <div style={{
+        <div ref={tipRef} style={{
           position: 'absolute',
           left: Math.min(hover.x + 16, (containerRef.current?.offsetWidth || 1000) - 240),
-          top: Math.min(hover.y + 16, (containerRef.current?.offsetHeight || 600) - 320),
+          top: hover.y + 16, // then clamped once its height is known (tipRef)
           width: 220, pointerEvents: 'none',
           background: 'var(--surface)', border: '1px solid var(--gold)', borderRadius: 4,
           padding: 0, zIndex: 10, overflow: 'hidden'
         }}>
-            {hover.d.card?.scry?.img_normal &&
-          <img src={hover.d.card.scry.img_normal} style={{ width: '100%', display: 'block' }} alt="" />
+            {hover.links && artUrl(hover.d.card?.scry) ?
+          // With its links listed, the card shows its art crop (credited below) so it fits the graph.
+          <img src={artUrl(hover.d.card.scry)} onLoad={placeTip} style={{ width: '100%', aspectRatio: '626 / 457', objectFit: 'contain', display: 'block' }} alt="" /> :
+          hover.d.card?.scry?.img_normal &&
+          <img src={hover.d.card.scry.img_normal} onLoad={placeTip} style={{ width: '100%', aspectRatio: '488 / 680', display: 'block' }} alt="" />
           }
             <div style={{ padding: 8 }}>
               <div style={{ fontFamily: 'var(--display)', fontSize: 14, fontWeight: 600 }}>{hover.d.label}</div>
@@ -573,6 +685,28 @@ function GraphView({ data, openCard }) {
                 <span>×{hover.d.card?.qty ?? hover.d.deckQty ?? '?'}</span>
                 <span style={{ color: 'var(--gold)' }}>{hover.d.card?.value != null ? `$${hover.d.card.value.toFixed(2)}` : ''}</span>
               </div>
+              {hover.d.card?.scry?.artist &&
+            <div style={{ fontSize: 10.5, color: 'var(--text-2)', marginTop: 4 }}>Art by {hover.d.card.scry.artist}</div>
+            }
+              {hover.links &&
+            <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+                  <div className="label-mono" style={{ fontSize: 9, marginBottom: 4 }}>
+                    {hover.links.length ? `Linked to ${hover.links.length}` : 'No links: nothing shares enough with it'}
+                  </div>
+                  {hover.links.slice(0, MAX_LINKS_SHOWN).map((l) =>
+              // One line each (cut with an ellipsis), so five links always fit the graph's height.
+              <div key={l.name} style={{ fontSize: 11, lineHeight: 1.35, marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <span style={{ fontWeight: 600 }}>{l.name}</span>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--text-2)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.why}</span>
+                    </div>
+              )}
+                  {hover.links.length > MAX_LINKS_SHOWN &&
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--text-2)' }}>
+                      and {hover.links.length - MAX_LINKS_SHOWN} more (the lit lines show them all)
+                    </div>
+              }
+                </div>
+            }
             </div>
           </div>
         }
@@ -612,12 +746,13 @@ function GraphView({ data, openCard }) {
         }
 
         {/* Legend */}
-        <div style={{ position: 'absolute', bottom: 12, right: 12, padding: '8px 10px', background: 'oklch(0.18 0.012 60 / 0.8)', backdropFilter: 'blur(4px)', borderRadius: 4, border: '1px solid var(--border)', display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div className="graph-legend" style={{ position: 'absolute', bottom: 12, right: 12, padding: '8px 10px', background: 'oklch(0.18 0.012 60 / 0.8)', backdropFilter: 'blur(4px)', borderRadius: 4, border: '1px solid var(--border)', display: 'flex', gap: 12, alignItems: 'center' }}>
           <span className="label-mono" style={{ fontSize: 9 }}>
-            {mode === 'affinity' ? 'Edges = shared set/type/color/cmc/price · Stronger ties pull closer' :
+            {mode === 'affinity' ? `Edges = shared set/type/color/cmc/price/rarity · ${touchUI ? 'Tap' : 'Hover'} a card to see why it is linked` :
             mode === 'hierarchy' ? 'Compound rings = color · Node shape = type · Size = total value' :
             mode === 'scatter' ? 'Position fixed: x = mana, y = log price · Jitter for legibility' :
-            'Size = total value · Hover for image · Click for details'}
+            touchUI ? 'Size = total value · Tap for image · Tap again for details' : 'Size = total value · Hover for image · Click for details'}
+            {showArt && ART_MODES.has(mode) && ` · Art by the credited artists (${touchUI ? 'tap' : 'hover'} a card for its artist)`}
           </span>
         </div>
       </div>
@@ -711,7 +846,7 @@ function SetConstellation({ data, filteredNodes, openCard }) {
           {topCards.length === 0 ?
         <p className="muted" style={{ fontSize: 13 }}>No cards from this set.</p> :
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10 }}>
+        <div className="m-3col" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10 }}>
               {topCards.map((c) =>
           <SetCardThumb key={`${c.s}-${c.cn}-${c.p}`} c={c} valueMode={valueMode} onClick={() => openCard(c)} />
           )}
@@ -891,7 +1026,7 @@ function TypeRoster({ data, filters, filtersKey, openName }) {
           const barPct = (r.value / maxValue) * 100;
           const colorTotal = Object.keys(COLOR_FILL).reduce((a, k) => a + (r.colors[k] || 0), 0) || 1;
           return (
-            <div key={r.type} style={{
+            <div key={r.type} className="m-stack" style={{
               background: 'var(--surface)',
               border: '1px solid var(--border)',
               borderRadius: 6,
@@ -945,7 +1080,7 @@ function TypeRoster({ data, filters, filtersKey, openName }) {
               </div>
 
               {/* Right: top thumbnails */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+              <div className="m-2col" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
                 {r.top.map((c, i) => (
                   <SetCardThumb key={`${r.type}-${c.n}-${i}`} c={c} valueMode="unit" onClick={() => openName(c.n)} />
                 ))}
@@ -1011,7 +1146,7 @@ function HierarchyMatrix({ data, nodes, openName }) {
 
   return (
     <div style={{ padding: 14, position: 'relative' }}>
-      <div style={{
+      <div className="m-matrix" style={{
         display: 'grid',
         gridTemplateColumns: '110px repeat(8, 1fr) 110px',
         gap: 4
@@ -1168,7 +1303,7 @@ const MODE_INFO = {
   },
   affinity: {
     title: 'Affinity Web',
-    body: 'Every card draws weighted similarity edges to its 4 most-related peers. Score combines shared set (+3), type (+2), color (+1.5), similar CMC (+1) and unit price (+1). Stronger ties = shorter springs, so cards that share many attributes visibly cluster.'
+    body: 'Every card draws weighted similarity edges to its 4 most-related peers. Score combines shared set (+3), type (+2), color (+1.5), similar mana value (+1), similar unit price (+1) and rarity (+0.5); a link needs 3.5. Stronger ties = shorter springs, so cards that share many attributes visibly cluster. Hover (or tap) a card to light up its links and see what each one shares.'
   },
   scatter: {
     title: 'Mana Value × Price',

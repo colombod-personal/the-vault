@@ -227,12 +227,12 @@ function EmptyVault({ onImported }) {
 
 function AccountMenu({ me, onImported, onAccount, readOnly }) {
   return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 'auto' }}>
+    <div className="acct-menu" style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 'auto' }}>
       {!readOnly && <ImportButton onImported={onImported} />}
-      <button className="btn sm ghost" title={me && me.email ? me.email : ''} onClick={onAccount}>
+      <button className="btn sm ghost acct-name" title={me && me.email ? me.email : ''} onClick={onAccount}>
         {me ? (me.name || me.email || 'Account') : 'Account'}
       </button>
-      <button className="btn sm ghost" onClick={() => signOut()}>Sign out</button>
+      <button className="btn sm ghost acct-signout" onClick={() => signOut()}>Sign out</button>
     </div>
   );
 }
@@ -476,7 +476,7 @@ function VaultFooter() {
   const style = { color: 'var(--gold)', textDecoration: 'underline', textUnderlineOffset: 2 };
   const link = (href, label) => <a href={href} target="_blank" rel="noopener noreferrer" style={style}>{label}</a>;
   return (
-    <footer className="vault-footer" style={{ margin: '48px 24px 24px', paddingTop: 16, borderTop: '1px solid var(--border)',
+    <footer className="vault-footer" style={{ margin: '48px max(24px, env(safe-area-inset-right)) 24px max(24px, env(safe-area-inset-left))', paddingTop: 16, borderTop: '1px solid var(--border)',
       fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.7, color: 'var(--muted)' }}>
       <p>
         Card data, images &amp; prices from {link('https://scryfall.com', 'Scryfall')} (prices sourced by Scryfall from{' '}
@@ -670,6 +670,8 @@ function SignInMethods({ me, onChanged }) {
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
         {info && info.passkeys && api.passkeys.supported() && <button className="btn sm" onClick={add}>Add a passkey</button>}
         {linkable.map((p) => <a key={p} className="btn sm ghost" href={`/api/auth/login/${p}`}>Link {p[0].toUpperCase() + p.slice(1)}</a>)}
+        {/* On a phone the top bar has no room for Sign out, so it is here (layout.css shows .m-only). */}
+        <button className="btn sm m-only" onClick={() => signOut()}>Sign out</button>
         <button className="btn sm ghost" title="Signs out every browser signed in to this account, including this one"
                 onClick={() => signOut({ everywhere: true })}>Sign out everywhere</button>
       </div>
