@@ -111,3 +111,45 @@ button.brand:focus-visible, .nav button:focus-visible { outline: 1px solid var(-
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: var(--bg-2); }
 ::-webkit-scrollbar-thumb { background: var(--gold); border-radius: 5px; border: 2px solid var(--bg-2); }
 ::-webkit-scrollbar-thumb:hover { background: var(--gold-2); }
+
+/* ---- Overlays that dismiss, and tables on small screens (usability review) ---- */
+
+/* The card panel's close button: its own sticky row at the top of the panel (never under the card header, always
+   in reach while the panel scrolls), the whole 44px square clickable, and a visible focus ring. */
+.drawer { padding-top: 0; }
+.drawer .drawer-bar {
+  position: sticky; top: 0; z-index: 5; display: flex; justify-content: flex-end; align-items: center;
+  height: 60px; margin: 0 -28px 4px; padding: 0 12px;
+  background: linear-gradient(var(--bg-2) 70%, transparent);
+}
+.drawer .drawer-bar .close {
+  position: static; width: 44px; height: 44px; border-radius: 50%; cursor: pointer;
+  font-size: 26px; line-height: 1; color: var(--text); background: var(--bg-2);
+  border: 1px solid var(--text-2);
+}
+.drawer .drawer-bar .close:hover { color: var(--gold); border-color: var(--gold); background: var(--surface-2, var(--bg-2)); }
+.drawer .drawer-bar .close:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+/* ✕ buttons on the account panel and the message bar: a fingertip-sized target, not a 22px chip. */
+.close-x { min-width: 40px; min-height: 40px; font-size: 16px; }
+.close-x:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.nav button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+/* A wide table scrolls inside its panel. Without this the whole page grew wider than the phone, which pushed
+   fixed overlays (the card panel and its close button) off the right edge of the screen. */
+.panel-flush, .panel:has(> table.tbl) { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.tbl { min-width: 560px; }
+html, body { max-width: 100%; overflow-x: clip; }
+
+@media (max-width: 760px) {
+  /* Filters: the search box on its own row, then two across, so labels are readable. */
+  .filter-grid { grid-template-columns: 1fr 1fr !important; }
+  .filter-grid > .input { grid-column: 1 / -1; }
+  .drawer { padding: 0 16px 24px; width: 100vw; }
+  .drawer .drawer-bar { margin: 0 -16px 4px; padding: 0 8px; }
+  .drawer > div[style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
+}
+
+/* Sections row on a phone scrolls sideways: fade its right edge so it is clear there is more. */
+@media (max-width: 760px) {
+  .nav { -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent); mask-image: linear-gradient(90deg, #000 88%, transparent); }
+}

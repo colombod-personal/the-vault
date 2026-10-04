@@ -241,7 +241,31 @@ Object.assign(window, { SignIn, signOut, SESSION_ENDED_KEY, ImportButton, EmptyV
 
 // ---- Account panel: profile, sharing, shared with me, saved decks, GDPR export/delete ----
 
+// Keyboard handling shared by the dialogs (this panel and the card panel): focus moves into the dialog when it
+// opens, Tab stays inside it, and focus returns to whatever opened it when it closes.
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+function useDialogFocus(ref) {
+  useEffectAcc(() => {
+    const opener = document.activeElement;
+    const box = ref.current;
+    if (box) (box.querySelector('[data-autofocus]') || box).focus();
+    const onKey = (e) => {
+      if (e.key !== 'Tab' || !box) return;
+      const items = Array.from(box.querySelectorAll(FOCUSABLE)).filter(el => el.offsetParent !== null);
+      if (!items.length) { e.preventDefault(); return; }
+      const first = items[0], last = items[items.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === box)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      else if (!box.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('keydown', onKey); if (opener && opener.focus && document.contains(opener)) opener.focus(); };
+  }, []);
+}
+
 function Modal({ title, onClose, children }) {
+  const box = useRefAcc(null);
+  useDialogFocus(box);
   useEffectAcc(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
@@ -250,11 +274,11 @@ function Modal({ title, onClose, children }) {
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgb(0 0 0 / 0.55)', zIndex: 50,
       display: 'grid', placeItems: 'start center', overflowY: 'auto', padding: '48px 16px' }}>
-      <div className="panel" role="dialog" aria-label={title} onClick={(e) => e.stopPropagation()}
-        style={{ width: 'min(720px, 100%)' }}>
+      <div className="panel" role="dialog" aria-modal="true" aria-label={title} ref={box} tabIndex={-1}
+        onClick={(e) => e.stopPropagation()} style={{ width: 'min(720px, 100%)', outline: 'none' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <h2 className="h1" style={{ fontSize: 28, margin: 0 }}>{title}</h2>
-          <button className="btn xs ghost" onClick={onClose}>✕</button>
+          <button className="btn xs ghost close-x" data-autofocus onClick={onClose} aria-label={`Close ${title}`} title="Close (Esc)">✕</button>
         </div>
         {children}
       </div>
@@ -473,7 +497,7 @@ function VaultFooter() {
   );
 }
 
-Object.assign(window, { AccountPanel, VaultFooter });
+Object.assign(window, { AccountPanel, VaultFooter, useDialogFocus });
 
 
 // Personal access tokens: let people connect their own AI agents and scripts (MCP or HTTP API).
