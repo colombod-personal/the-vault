@@ -633,7 +633,7 @@ function CardDrawer({ card, onClose, costsHidden }) {
         {card.q > 0 && (
           <div className="panel" style={{ marginBottom: 20 }}>
             <p className="eyebrow" style={{ marginBottom: 12 }}>Your holdings</p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+            <div className="m-2col" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
               <Stat label="Quantity" value={card.q} />
               <Stat label="Total value" value={`$${total.toFixed(2)}`} color="var(--gold)" />
               <Stat label="Spent" value={window.vaultSpentText(card, costsHidden)} muted />
@@ -681,7 +681,7 @@ function CardDrawer({ card, onClose, costsHidden }) {
               Scryfall sources USD prices from <a href="https://www.tcgplayer.com" target="_blank" rel="noopener noreferrer">TCGplayer</a>{' '}
               and EUR prices from <a href="https://www.cardmarket.com" target="_blank" rel="noopener noreferrer">Cardmarket</a>, updated about daily.
             </p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+            <div className="m-2col" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
               <Stat label="USD" value={scry.prices.usd ? `$${scry.prices.usd}` : '—'} />
               <Stat label="USD Foil" value={scry.prices.usd_foil ? `$${scry.prices.usd_foil}` : '—'} />
               <Stat label="EUR" value={scry.prices.eur ? `€${scry.prices.eur}` : '—'} />

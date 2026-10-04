@@ -62,7 +62,7 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
 
   return (
     <div data-screen-label="Valuation">
-      <div style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', marginBottom: 28 }}>
+      <div className="page-head" style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', marginBottom: 28 }}>
         <div>
           <button className="btn ghost sm" onClick={onBack} style={{ marginBottom: 14 }}>← Back to vault</button>
           <p className="eyebrow">The Vault — valuation</p>

@@ -227,12 +227,12 @@ function EmptyVault({ onImported }) {
 
 function AccountMenu({ me, onImported, onAccount, readOnly }) {
   return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 'auto' }}>
+    <div className="acct-menu" style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 'auto' }}>
       {!readOnly && <ImportButton onImported={onImported} />}
-      <button className="btn sm ghost" title={me && me.email ? me.email : ''} onClick={onAccount}>
+      <button className="btn sm ghost acct-name" title={me && me.email ? me.email : ''} onClick={onAccount}>
         {me ? (me.name || me.email || 'Account') : 'Account'}
       </button>
-      <button className="btn sm ghost" onClick={() => signOut()}>Sign out</button>
+      <button className="btn sm ghost acct-signout" onClick={() => signOut()}>Sign out</button>
     </div>
   );
 }
@@ -670,6 +670,8 @@ function SignInMethods({ me, onChanged }) {
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
         {info && info.passkeys && api.passkeys.supported() && <button className="btn sm" onClick={add}>Add a passkey</button>}
         {linkable.map((p) => <a key={p} className="btn sm ghost" href={`/api/auth/login/${p}`}>Link {p[0].toUpperCase() + p.slice(1)}</a>)}
+        {/* On a phone the top bar has no room for Sign out, so it is here (mobile.css shows .m-only). */}
+        <button className="btn sm m-only" onClick={() => signOut()}>Sign out</button>
         <button className="btn sm ghost" title="Signs out every browser signed in to this account, including this one"
                 onClick={() => signOut({ everywhere: true })}>Sign out everywhere</button>
       </div>

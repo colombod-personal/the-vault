@@ -198,7 +198,7 @@ function DeckView({ data, openCard, initialText }) {
 
               <div className="divider"></div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div className="m-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 <div>
                   <p className="label-mono">Owned</p>
                   <p style={{ fontFamily: 'var(--display)', fontSize: 28, fontWeight: 600, lineHeight: 1, marginTop: 4, color: 'var(--good)' }}>

@@ -52,6 +52,8 @@ function artUrl(scry) {
 }
 
 const MAX_LINKS_SHOWN = 5; // a popular card can be picked by many peers: list the strongest
+// No hover on touch screens: the graph previews a card on the first tap (see the tap handler).
+const TOUCH = !!(window.matchMedia && window.matchMedia('(hover: none)').matches);
 const ART_MODES = new Set(['color', 'affinity', 'scatter', 'deck']); // the modes drawn as a network
 const SAME = { set: 'a shared set', type: 'same type', color: 'same color group', rarity: 'same rarity', cmc: 'similar mana value', price: 'similar price' };
 
@@ -453,35 +455,56 @@ function GraphView({ data, openCard }) {
       maxZoom: 3
     });
 
-    cy.on('tap', 'node', (evt) => {
-      const d = evt.target.data();
-      if (d.isParent || d.isAnchor) return;
-      if (d.card?.name) openName(d.card.name);
-    });
-    cy.on('mouseover', 'node', (evt) => {
-      const d = evt.target.data();
-      if (d.isParent || d.isAnchor) return;
-      const pos = evt.target.renderedPosition();
+    // Touch screens have no hover: the first tap on a card shows what hovering shows (its image,
+    // and in the affinity web its links), a second tap on the same card opens it.
+    const touch = TOUCH;
+    let previewed = null;
+    const clearPreview = () => {
+      cy.elements().removeClass('faded linked');
+      setHover(null);
+    };
+    const showPreview = (node) => {
+      const d = node.data();
+      const pos = node.renderedPosition();
       let links = null;
       if (mode === 'affinity') {
-        const edges = evt.target.connectedEdges();
-        cy.elements().not(evt.target.closedNeighborhood()).addClass('faded');
+        const edges = node.connectedEdges();
+        cy.elements().removeClass('faded linked');
+        cy.elements().not(node.closedNeighborhood()).addClass('faded');
         edges.addClass('linked');
         links = edges.map((e) => ({
-          name: (e.source().id() === evt.target.id() ? e.target() : e.source()).data('label'),
+          name: (e.source().id() === node.id() ? e.target() : e.source()).data('label'),
           why: e.data('why'),
           weight: e.data('weight')
         })).sort((x, y) => y.weight - x.weight);
       }
       setHover({ d, x: pos.x, y: pos.y, links });
+    };
+    cy.on('tap', 'node', (evt) => {
+      const d = evt.target.data();
+      if (d.isParent || d.isAnchor) return;
+      if (touch && previewed !== evt.target.id()) {
+        previewed = evt.target.id();
+        showPreview(evt.target);
+        return;
+      }
+      previewed = null;
+      if (d.card?.name) openName(d.card.name);
+    });
+    cy.on('tap', (evt) => {
+      if (evt.target === cy) { previewed = null; clearPreview(); }
+    });
+    cy.on('mouseover', 'node', (evt) => {
+      const d = evt.target.data();
+      if (d.isParent || d.isAnchor || touch) return;
+      showPreview(evt.target);
     });
     cy.on('mouseout', 'node', () => {
-      cy.elements().removeClass('faded linked');
-      setHover(null);
+      if (!touch) clearPreview();
     });
     cy.on('viewport', () => {
-      cy.elements().removeClass('faded linked');
-      setHover(null);
+      previewed = null;
+      clearPreview();
     });
 
     // Always fit to viewport after layout completes
@@ -498,7 +521,7 @@ function GraphView({ data, openCard }) {
 
   return (
     <div data-screen-label="06 Graph">
-      <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'end' }}>
+      <div className="page-head" style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'end' }}>
         <div>
           <p className="eyebrow">The atlas</p>
           <h1 className="h1" style={{ marginTop: 6 }}>Your collection as a network.</h1>
@@ -536,7 +559,7 @@ function GraphView({ data, openCard }) {
             )}
           </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1.3fr 1.1fr', gap: 20, marginTop: 14 }}>
+        <div className="m-stack" style={{ display: 'grid', gridTemplateColumns: '1.1fr 1.3fr 1.1fr', gap: 20, marginTop: 14 }}>
           <div>
             <p className="label-mono" style={{ marginBottom: 6 }}>Price tier (min value)</p>
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -589,7 +612,7 @@ function GraphView({ data, openCard }) {
       <ModeExplainer mode={mode} nodeCount={filteredNodes.length} />
 
       {/* Canvas + hover */}
-      <div className="panel panel-flush" style={{ height: 'calc(100vh - 420px)', minHeight: 520, position: 'relative', overflow: mode === 'hierarchy' || mode === 'set' || mode === 'type' ? 'auto' : 'hidden' }}>
+      <div className="panel panel-flush graph-stage" style={{ height: 'calc(100vh - 420px)', minHeight: 520, position: 'relative', overflow: mode === 'hierarchy' || mode === 'set' || mode === 'type' ? 'auto' : 'hidden' }}>
         {mode === 'hierarchy' ?
         <HierarchyMatrix data={data} nodes={filteredNodes} openName={openName} /> :
         mode === 'set' ?
@@ -698,13 +721,13 @@ function GraphView({ data, openCard }) {
         }
 
         {/* Legend */}
-        <div style={{ position: 'absolute', bottom: 12, right: 12, padding: '8px 10px', background: 'oklch(0.18 0.012 60 / 0.8)', backdropFilter: 'blur(4px)', borderRadius: 4, border: '1px solid var(--border)', display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div className="graph-legend" style={{ position: 'absolute', bottom: 12, right: 12, padding: '8px 10px', background: 'oklch(0.18 0.012 60 / 0.8)', backdropFilter: 'blur(4px)', borderRadius: 4, border: '1px solid var(--border)', display: 'flex', gap: 12, alignItems: 'center' }}>
           <span className="label-mono" style={{ fontSize: 9 }}>
-            {mode === 'affinity' ? 'Edges = shared set/type/color/cmc/price · Hover a card to see why it is linked' :
+            {mode === 'affinity' ? `Edges = shared set/type/color/cmc/price · ${TOUCH ? 'Tap' : 'Hover'} a card to see why it is linked` :
             mode === 'hierarchy' ? 'Compound rings = color · Node shape = type · Size = total value' :
             mode === 'scatter' ? 'Position fixed: x = mana, y = log price · Jitter for legibility' :
-            'Size = total value · Hover for image · Click for details'}
-            {showArt && ART_MODES.has(mode) && ' · Card art by the credited artists (hover a card for its artist)'}
+            TOUCH ? 'Size = total value · Tap for image · Tap again for details' : 'Size = total value · Hover for image · Click for details'}
+            {showArt && ART_MODES.has(mode) && ` · Card art by the credited artists (${TOUCH ? 'tap' : 'hover'} a card for its artist)`}
           </span>
         </div>
       </div>
@@ -798,7 +821,7 @@ function SetConstellation({ data, filteredNodes, openCard }) {
           {topCards.length === 0 ?
         <p className="muted" style={{ fontSize: 13 }}>No cards from this set.</p> :
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10 }}>
+        <div className="m-3col" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10 }}>
               {topCards.map((c) =>
           <SetCardThumb key={`${c.s}-${c.cn}-${c.p}`} c={c} valueMode={valueMode} onClick={() => openCard(c)} />
           )}
@@ -978,7 +1001,7 @@ function TypeRoster({ data, filters, filtersKey, openName }) {
           const barPct = (r.value / maxValue) * 100;
           const colorTotal = Object.keys(COLOR_FILL).reduce((a, k) => a + (r.colors[k] || 0), 0) || 1;
           return (
-            <div key={r.type} style={{
+            <div key={r.type} className="m-stack" style={{
               background: 'var(--surface)',
               border: '1px solid var(--border)',
               borderRadius: 6,
@@ -1032,7 +1055,7 @@ function TypeRoster({ data, filters, filtersKey, openName }) {
               </div>
 
               {/* Right: top thumbnails */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+              <div className="m-2col" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
                 {r.top.map((c, i) => (
                   <SetCardThumb key={`${r.type}-${c.n}-${i}`} c={c} valueMode="unit" onClick={() => openName(c.n)} />
                 ))}
@@ -1098,7 +1121,7 @@ function HierarchyMatrix({ data, nodes, openName }) {
 
   return (
     <div style={{ padding: 14, position: 'relative' }}>
-      <div style={{
+      <div className="m-matrix" style={{
         display: 'grid',
         gridTemplateColumns: '110px repeat(8, 1fr) 110px',
         gap: 4
@@ -1255,7 +1278,7 @@ const MODE_INFO = {
   },
   affinity: {
     title: 'Affinity Web',
-    body: 'Every card draws weighted similarity edges to its 4 most-related peers. Score combines shared set (+3), type (+2), color (+1.5), similar mana value (+1), similar unit price (+1) and rarity (+0.5); a link needs 3.5. Stronger ties = shorter springs, so cards that share many attributes visibly cluster. Hover a card to light up its links and see what each one shares.'
+    body: 'Every card draws weighted similarity edges to its 4 most-related peers. Score combines shared set (+3), type (+2), color (+1.5), similar mana value (+1), similar unit price (+1) and rarity (+0.5); a link needs 3.5. Stronger ties = shorter springs, so cards that share many attributes visibly cluster. Hover (or tap) a card to light up its links and see what each one shares.'
   },
   scatter: {
     title: 'Mana Value × Price',
