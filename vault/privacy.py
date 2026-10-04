@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from .importer import export_collection
 from .sharing import display_name
-from .models import AccessToken, ApiSession, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionValue, Deck, Entry, Identity, Import, Share, User
+from .models import AccessToken, ApiSession, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionValue, Deck, Entry, Identity, Import, Share, StagedUpload, User
 from .prices import history
 from .collection_view import CollectionView
 
@@ -161,6 +161,7 @@ def personal_data(user_id: int) -> dict:
         "retired_refresh_tokens": delete(RetiredRefreshToken).where(RetiredRefreshToken.user_id == user_id),
         "oauth_retired_refresh_tokens": delete(OAuthRetiredRefresh).where(OAuthRetiredRefresh.user_id == user_id),
         "oauth_consents": delete(OAuthConsent).where(OAuthConsent.user_id == user_id),
+        "staged_uploads": delete(StagedUpload).where(StagedUpload.user_id == user_id),  # a file not yet imported
         "oauth_codes": delete(OAuthCode).where(OAuthCode.user_id == user_id),
         "oauth_grants": delete(OAuthGrant).where(OAuthGrant.user_id == user_id),
         "api_sessions": delete(ApiSession).where(ApiSession.user_id == user_id),
