@@ -89,5 +89,5 @@ def test_the_preview_lists_rows_it_cannot_match_so_the_file_can_be_fixed_first(a
     write = make_token(agent, scopes=["read", "write"])
     preview = call_tool(bot, write, "import_collection_csv", csv=file)["structuredContent"]
     assert preview["matched_rows"] + preview["unmatched_rows"] == preview["rows"]
-    assert {"row": preview["rows"], "name": "Not A Real Card", "set": "ZZZ", "number": "9999", "quantity": 1} in preview["unmatched"]
+    assert {"row": preview["rows"], "name": "Not A Real Card", "set": "zzz", "number": "9999", "quantity": 1} in preview["unmatched"]
     assert "Fix the set code and collector number" in preview["note"]

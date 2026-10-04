@@ -89,7 +89,8 @@ def preview_import(db: Session, user: User, content: bytes) -> dict:
     return {"source": source, "rows": len(entries), "copies": sum(e.quantity for e in entries),
             "changes": changes.summary(), "matched_rows": len(entries) - len(unmatched),
             "unmatched_rows": len(unmatched), "unmatched": unmatched[:PREVIEW_UNMATCHED],
-            "note": "Unmatched rows have no printing the Vault can identify (missing or unknown set and number). "
+            "note": "row is the n-th card row of the file, not counting header lines. "
+                    "Unmatched rows have no printing the Vault can identify (missing or unknown set and number). "
                     "They are kept and matched later by name, which can pick the wrong printing and price. "
                     "Fix the set code and collector number in the file before importing if you can."}
 
