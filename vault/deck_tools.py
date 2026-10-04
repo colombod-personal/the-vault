@@ -16,6 +16,7 @@ from mtg_toolkits import decklist
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
+from .catalog_queries import card_priority
 from .models import OracleCard, OraclePrice, OracleTag, OracleTagLink
 
 FORMATS = ("commander", "standard", "pioneer", "modern", "legacy", "vintage", "pauper", "brawl", "standardbrawl",
@@ -93,13 +94,18 @@ def resolve(db: Session, deck: decklist.Decklist) -> Resolved:
     """Match each line to an Oracle card by exact name (front face is enough for double-faced cards)."""
     names = {l.name.strip().lower() for l in deck.lines}
     by_name: dict[str, OracleCard] = {}
+
+    def keep(key: str, card: OracleCard) -> None:  # several cards can share a name (a token); take the playable one
+        if key not in by_name or card_priority(card) < card_priority(by_name[key]):
+            by_name[key] = card
+
     for card in db.scalars(select(OracleCard).where(func.lower(OracleCard.name).in_(names))):
-        by_name[card.name.lower()] = card
+        keep(card.name.lower(), card)
     missing = names - by_name.keys()
     if missing:
         for card in db.scalars(select(OracleCard).where(or_(*[func.lower(OracleCard.name).like(m.replace("%", r"\%").replace("_", r"\_") + " // %", escape="\\")
                                                               for m in missing]))):
-            by_name.setdefault(card.name.lower().split(" // ")[0], card)
+            keep(card.name.lower().split(" // ")[0], card)
     return Resolved([Entry(l, by_name.get(l.name.strip().lower())) for l in deck.lines])
 
 
@@ -370,7 +376,14 @@ def validate_changes(db: Session, text: str, fmt: str, adds: list[str], cuts: li
         issues.append({"kind": "over_budget", "card": None, "detail": f"adds cost ${total:.2f}, budget is ${budget_usd:.2f}"})
     result = Resolved(resolve(db, decklist.Decklist(after_lines)).entries + [Entry(l, e.card) for l, e in zip(add_lines, resolved_adds.entries)])
     outcome = legality(result, fmt)
-    issues += [{**i, "kind": "result_" + i["kind"]} for i in outcome["issues"] if i["kind"] not in ("unknown_card", "not_legal", "color_identity") or i["card"] not in {x.get("card") for x in issues}]
-    return {"valid": not issues, "issues": issues, "format": fmt, "adds": len(adds), "cuts": len(cut_names),
+    # Problems the deck already had are reported apart: they do not make *this plan* invalid (found with a real deck
+    # that had one off-color card: every plan was rejected for it). A problem the plan creates or leaves unsolved
+    # where it matters (size, copies) still counts.
+    had = {(i["kind"], i["card"]) for i in legality(before, fmt)["issues"]}
+    existing = [i for i in outcome["issues"] if (i["kind"], i["card"]) in had and i["kind"] in ("unknown_card", "not_legal", "color_identity")]
+    introduced = [i for i in outcome["issues"] if i not in existing]
+    issues += [{**i, "kind": "result_" + i["kind"]} for i in introduced
+               if i["kind"] not in ("unknown_card", "not_legal", "color_identity") or i["card"] not in {x.get("card") for x in issues}]
+    return {"valid": not issues, "issues": issues, "existing_issues": existing, "format": fmt, "adds": len(adds), "cuts": len(cut_names),
             "cards_after": outcome["cards_checked"], "added_cost_usd": round(total, 2), "budget_usd": budget_usd,
             "cuts_not_refunded": True, "not_checked": outcome["not_checked"]}

@@ -35,6 +35,7 @@ class CardOut(BaseModel):
     suggestions: list[str] = Field(default_factory=list, description="Close names, when the name was not found exactly")
     tags: list[dict] = Field(default_factory=list, description="Scryfall Tagger tags (community opinion, not rules)")
     rulings_total: int = 0
+    price: dict | None = Field(default=None, description="Cheapest priced paper printing, today's figure: usd, usd_foil, eur, as_of, source")
     provenance: list[prov.Provenance]
     links: dict = Field(default_factory=dict, alias="_links")
 
@@ -58,6 +59,7 @@ class RuleOut(BaseModel):
 class RuleSearchOut(BaseModel):
     version: str | None
     query: str
+    matched: str = Field(default="all words", description="'all words' (every word is in each rule) or 'any word' (nothing had all of them, so rules with some of them are listed best first)")
     results: list[dict]
     provenance: list[prov.Provenance]
     links: dict = Field(default_factory=dict, alias="_links")
@@ -229,8 +231,8 @@ def build_router(get_db, optional_user, current_user, settings) -> APIRouter:
     def rules_search(qs: str = Query(alias="q", min_length=2, max_length=200), limit: int = Query(default=5, ge=1, le=q.MAX_RULE_RESULTS),
                      version: str | None = Query(default=None, max_length=10), user=Depends(access),
                      db: Session = Depends(get_db)) -> dict:
-        results, used = q.search_rules(db, qs, version, limit)
-        return {"version": used, "query": qs, "results": results, "provenance": q.provenance_for(db, "rules"),
+        results, used, matched = q.search_rules(db, qs, version, limit)
+        return {"version": used, "query": qs, "matched": matched, "results": results, "provenance": q.provenance_for(db, "rules"),
                 "_links": {"self": link(f"{V1}/catalog/rules/search")}}
 
     @router.get("/rules/{number}", response_model=RuleOut, response_model_by_alias=True,

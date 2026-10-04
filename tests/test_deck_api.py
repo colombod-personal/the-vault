@@ -161,6 +161,31 @@ def test_the_validator_enforces_the_budget_legality_and_colours(loaded):
     assert wrong["valid"] is False and kinds >= {"cut_not_in_deck", "color_identity", "not_legal", "unknown_card"}
 
 
+def test_a_token_with_the_same_name_never_shadows_the_card(loaded, app):
+    """Found with real data: 'Llanowar Elves' is also a token (not legal anywhere), and it replaced the card."""
+    from vault.models import OracleCard
+    with app.state.db.sessions() as db:
+        cs._upsert(db, OracleCard, [cs.oracle_card_row(card(50, "Dull Bear", "Token Creature — Bear", [], 0, legal="not_legal", layout="token"))],
+                   ("oracle_id",))
+        db.commit()
+    r = computed(post(loaded, "legality", text="Commander\n1 Test Commander\n\nDeck\n1 Dull Bear\n98 Test Mountain", format="commander"))
+    assert ("not_legal", "Dull Bear") not in {(i["kind"], i["card"]) for i in r["issues"]}
+    found = loaded.get("/api/v1/catalog/cards", params={"name": "Dull Bear"}).json()
+    assert found["card"]["type_line"] == "Creature — Bear" and found["card"]["layout"] == "normal"
+
+
+def test_problems_the_deck_already_had_do_not_invalidate_a_plan_but_are_reported(loaded):
+    """Found with a real deck that held one off-color card: every plan was rejected because of it."""
+    flawed = VALID.replace("96 Test Mountain", "95 Test Mountain\n1 Blue Cantrip")
+    ok = computed(post(loaded, "validate-changes", text=flawed, format="commander", cuts=["Dull Bear"], adds=["Cheap Ramp"], budget_usd=1))
+    assert ok["valid"] is True and ok["issues"] == []
+    assert [(i["kind"], i["card"]) for i in ok["existing_issues"]] == [("color_identity", "Blue Cantrip")]
+    worse = computed(post(loaded, "validate-changes", text=flawed, format="commander", cuts=["Dull Bear"], adds=["Banned Thing"], budget_usd=5))
+    assert worse["valid"] is False and ("not_legal", "Banned Thing") in {(i["kind"], i["card"]) for i in worse["issues"]}
+    fixed = computed(post(loaded, "validate-changes", text=flawed, format="commander", cuts=["Blue Cantrip"], adds=["Cheap Ramp"], budget_usd=1))
+    assert fixed["valid"] is True and fixed["existing_issues"] == []  # cutting the problem card solves it
+
+
 def test_an_unpriced_add_cannot_be_verified_against_a_budget(loaded):
     r = computed(post(loaded, "validate-changes", text=VALID, format="commander", adds=["Blue Cantrip"], cuts=["Dull Bear"], budget_usd=50))
     assert r["valid"] is False and any(i["kind"] == "no_price" for i in r["issues"])
