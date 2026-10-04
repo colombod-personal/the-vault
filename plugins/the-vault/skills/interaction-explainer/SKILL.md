@@ -6,7 +6,7 @@ description: >-
   combo works, or wants a worked example of triggers, replacement effects, layers or priority.
 license: MIT
 metadata:
-  vault-tools: "get_card_oracle get_rulings search_rules get_rule verify_citation find_combos"
+  vault-tools: "get_card_oracle get_rulings search_rules get_rule verify_citation present_steps find_combos"
 ---
 
 # Interaction explainer
@@ -33,6 +33,9 @@ builds on the `rules-judge` procedure: look everything up, verify every quote, c
    `find_combos` with a decklist that contains them. Its descriptions belong to Commander Spellbook:
    attribute them, link the combo, and say they should be checked on that page.
 6. **Verify quotes** with `verify_citation` before presenting any text as official.
+   If the answer is a sequence, you can also call `present_steps` with your steps and the rule numbers
+   you retrieved: the Vault attaches each rule's text and flags any number that does not exist, and hosts
+   that support it show it as an expandable walkthrough. Still write the answer in the chat.
 7. **Flag the traps.** Common mistakes in this interaction (missing "may", "target" timing, "dies" versus
    leaves the battlefield, last known information). Only mention ones the sources support.
 

@@ -77,6 +77,33 @@ class CitationOut(BaseModel):
     links: dict = Field(default_factory=dict, alias="_links")
 
 
+MAX_STEPS = 12
+MAX_CITED = 4
+
+
+class StepIn(BaseModel):
+    text: str = Field(min_length=1, max_length=700, description="What happens at this step, in your own words")
+    rules: list[str] = Field(default_factory=list, max_length=MAX_CITED, description="Rule numbers this step relies on, e.g. '603.3b'")
+
+
+class WalkthroughIn(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    cards: list[str] = Field(default_factory=list, max_length=8, description="The cards involved")
+    steps: list[StepIn] = Field(min_length=1, max_length=MAX_STEPS)
+    version: str | None = Field(default=None, max_length=10, description="Rules edition YYYY-MM-DD; default latest")
+
+
+class WalkthroughOut(BaseModel):
+    title: str | None
+    cards: list[str]
+    version: str | None
+    steps: list[dict]
+    unknown_rules: list[dict]
+    note: str
+    provenance: list[prov.Provenance]
+    links: dict = Field(default_factory=dict, alias="_links")
+
+
 class StatusOut(BaseModel):
     sources: dict[str, dict]
     rules_version: str | None
@@ -161,7 +188,31 @@ def build_router(get_db, optional_user, current_user, settings) -> APIRouter:
             _, total = q.rulings_for(db, found.oracle_id, 1)
             body |= {"tags": q.card_tags(db, found.oracle_id), "rulings_total": total}
             body["_links"]["rulings"] = link(f"{V1}/catalog/cards/{found.oracle_id}/rulings")
+            price = db.get(q.OraclePrice, found.oracle_id)
+            if price is not None:  # the cheapest priced paper printing, today's figure (no history for cards nobody owns)
+                body["price"] = {"usd": price.usd, "usd_foil": price.usd_foil, "eur": price.eur, "as_of": price.day.isoformat(),
+                                 "source": price.source, "printing": "the cheapest priced paper printing"}
+                body["provenance"] += q.provenance_for(db, "oracle_prices")
         return body
+
+    @router.post("/walkthrough", response_model=WalkthroughOut, response_model_by_alias=True,
+                 summary="Present a step-by-step explanation with each cited rule looked up and attached verbatim")
+    def walkthrough(body: WalkthroughIn, user=Depends(access), db: Session = Depends(get_db)) -> dict:
+        version = body.version or q.latest_rules_version(db)
+        steps, unknown = [], []
+        for i, step in enumerate(body.steps, 1):
+            cited = []
+            for number in step.rules:
+                rule, _, _ = q.get_rule(db, number, version)
+                if rule is None:
+                    unknown.append({"step": i, "rule": number})
+                else:
+                    cited.append({"number": rule["number"], "text": rule["text"]})
+            steps.append({"n": i, "text": step.text, "rules": cited})
+        return {"title": body.title, "cards": body.cards, "version": version, "steps": steps, "unknown_rules": unknown,
+                "note": "Step text is written by the assistant; rule texts are Wizards' Comprehensive Rules, looked up by the Vault. "
+                        "Steps citing an unknown rule number are flagged, not trusted.",
+                "provenance": q.provenance_for(db, "rules"), "_links": {"self": link(f"{V1}/catalog/walkthrough")}}
 
     @router.get("/cards/{oracle_id}/rulings", response_model=RulingsOut, response_model_by_alias=True,
                 summary="A card's rulings (Wizards' text via Scryfall), newest first, at most 25")

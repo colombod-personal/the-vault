@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 
 from ..models import User
+from . import mcp_ui
 from .mcp_catalog import GROUNDING, PROMPTS, catalog_tools, provenance_blocks, render_prompt
 from .schemas import MAX_ID
 
@@ -71,15 +72,19 @@ class Tool:
     # Where third-party data in the answer comes from: "scryfall" / "archidekt" (the server adds a provenance
     # block), "catalog" / "computed" (the API already includes one), or () for the person's own data only.
     provenance: tuple[str, ...] = ()
+    ui: str = ""  # the MCP Apps view (vault/api/mcp_ui.py) a host may show next to this tool's result
 
     def schema(self) -> dict:
-        return {
+        out = {
             "name": self.name, "title": self.title or self.name.replace("_", " ").capitalize(),
             "description": self.description,
             "inputSchema": {"type": "object", "properties": self.properties, "required": self.required,
                             "additionalProperties": False},
             "annotations": {"readOnlyHint": not self.write, "destructiveHint": False, "openWorldHint": False},
         }
+        if self.ui:  # MCP Apps: hosts that support it show the view; others ignore this and show the text answer
+            out["_meta"] = {"ui": {"resourceUri": mcp_ui.uri(self.ui), "visibility": ["model", "app"]}}
+        return out
 
 
 JSON_TYPES = {"string": (str,), "integer": (int,), "number": (int, float), "boolean": (bool,),
@@ -371,7 +376,8 @@ def build_router(optional_user) -> APIRouter:
             asked = params.get("protocolVersion")
             return _result(id_, {
                 "protocolVersion": asked if asked in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
-                "capabilities": {"tools": {"listChanged": False}, "prompts": {"listChanged": False}},
+                "capabilities": {"tools": {"listChanged": False}, "prompts": {"listChanged": False},
+                                 "resources": {"listChanged": False, "subscribe": False}},
                 "serverInfo": {"name": "the-vault", "title": "The Vault", "version": "1"},
                 "instructions": INSTRUCTIONS,
             })
@@ -379,6 +385,13 @@ def build_router(optional_user) -> APIRouter:
             return _result(id_, {})
         if method == "tools/list":
             return _result(id_, {"tools": [t.schema() for t in TOOLS if not t.write or "write" in scopes]})
+        if method == "resources/list":  # the MCP Apps views (ui:// pages); there is nothing else to read
+            return _result(id_, {"resources": mcp_ui.resources()})
+        if method == "resources/templates/list":
+            return _result(id_, {"resourceTemplates": []})
+        if method == "resources/read":
+            found = mcp_ui.read(params.get("uri")) if isinstance(params.get("uri"), str) else None
+            return _result(id_, found) if found else _rpc_error(id_, -32002, f"Resource not found: {params.get('uri')}")
         if method == "prompts/list":
             return _result(id_, {"prompts": [{k: p[k] for k in ("name", "title", "description", "arguments")} for p in PROMPTS]})
         if method == "prompts/get":

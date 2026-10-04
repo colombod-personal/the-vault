@@ -14,7 +14,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from . import provenance as prov
-from .models import CatalogSource, OracleCard, OracleTag, OracleTagLink, Rule, Ruling, RulesVersion
+from .models import CatalogSource, OracleCard, OraclePrice, OracleTag, OracleTagLink, Rule, Ruling, RulesVersion
 
 MAX_RULINGS = 25
 MAX_RULE_RESULTS = 10
@@ -58,6 +58,7 @@ def card_body(card: OracleCard) -> dict:
         "loyalty": card.loyalty, "defense": card.defense, "colors": card.colors, "color_identity": card.color_identity,
         "keywords": card.keywords, "produced_mana": card.produced_mana, "legalities": card.legalities,
         "faces": card.faces, "layout": card.layout, "scryfall_uri": card.scryfall_uri,
+        "artist": card.artist, "image_normal": card.image_normal,
     }
 
 

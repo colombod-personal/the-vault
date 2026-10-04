@@ -46,7 +46,7 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              "Works for any card, owned or not.",
              {"name": {"type": "string", "minLength": 1, "maxLength": 300, "description": "Exact card name"},
               "oracle_id": {"type": "string", "minLength": 36, "maxLength": 36}},
-             path=lambda a: f"{V1}/catalog/cards", query=("name", "oracle_id"), provenance=("catalog",)),
+             path=lambda a: f"{V1}/catalog/cards", query=("name", "oracle_id"), provenance=("catalog",), ui="card"),
         Tool("get_rulings", "A card's rulings (Wizards' text via Scryfall), newest first, at most 25.",
              {"oracle_id": {"type": "string", "minLength": 36, "maxLength": 36, "description": "From get_card_oracle"},
               "limit": {"type": "integer", "minimum": 1, "maximum": 25, "default": 25}}, ["oracle_id"],
@@ -71,7 +71,7 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              body=lambda a: {k: a[k] for k in ("kind", "ref", "quote", "version") if a.get(k) is not None}, provenance=("catalog",)),
         Tool("deck_stats", "Counts, mana curve, color identity, roles (ramp, draw, removal, sweepers...) and estimated cost of a decklist, "
              "computed by the Vault from the catalog.", {"text": deck}, ["text"], method="POST",
-             path=lambda a: f"{V1}/decks/stats", body=lambda a: {"text": a["text"]}, provenance=("computed",)),
+             path=lambda a: f"{V1}/decks/stats", body=lambda a: {"text": a["text"]}, provenance=("computed",), ui="deck"),
         Tool("deck_legality", "Whether a decklist is legal in a format: banned or illegal cards, copy limits, deck size, commander color "
              "identity. Lists every issue, and says what it did not check.", {"text": deck, "format": fmt}, ["text", "format"],
              method="POST", path=lambda a: f"{V1}/decks/legality", body=lambda a: {"text": a["text"], "format": a["format"]},
@@ -85,7 +85,7 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
               "limit": {"type": "integer", "minimum": 1, "maximum": 15, "default": 10}}, ["text", "format", "budget_usd"],
              method="POST", path=lambda a: f"{V1}/decks/upgrades",
              body=lambda a: {k: a[k] for k in ("text", "format", "budget_usd", "roles", "limit") if a.get(k) is not None},
-             provenance=("computed",)),
+             provenance=("computed",), ui="upgrades"),
         Tool("validate_deck_changes", "Check a proposed list of cuts and adds before presenting it: every card exists and is legal, adds are in "
              "the deck's colors, the resulting deck is still legal, and the adds' total price is within budget_usd. Present the plan only "
              "if valid is true.",
@@ -95,6 +95,19 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              ["text", "format"], method="POST", path=lambda a: f"{V1}/decks/validate-changes",
              body=lambda a: {k: a[k] for k in ("text", "format", "adds", "cuts", "budget_usd") if a.get(k) is not None},
              provenance=("computed",)),
+        Tool("present_steps", "Show the person a step-by-step explanation (an interaction, a stack, a ruling) with each cited rule attached. "
+             "Write the steps yourself, citing rule numbers you looked up with get_rule; the Vault attaches each rule's verbatim text and "
+             "edition, and flags any number that does not exist. Use it after you have verified your quotes.",
+             {"title": {"type": "string", "maxLength": 200},
+              "cards": {"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": 300}},
+              "steps": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "object", "properties": {
+                  "text": {"type": "string", "minLength": 1, "maxLength": 700},
+                  "rules": {"type": "array", "maxItems": 4, "items": {"type": "string", "maxLength": 20}}},
+                  "required": ["text"], "additionalProperties": False}},
+              "version": {"type": "string", "maxLength": 10, "description": "Rules edition YYYY-MM-DD; default latest"}}, ["steps"],
+             method="POST", path=lambda a: f"{V1}/catalog/walkthrough",
+             body=lambda a: {k: a[k] for k in ("title", "cards", "steps", "version") if a.get(k) is not None},
+             provenance=("catalog",), ui="steps"),
         Tool("find_combos", "Combos present in a decklist, and combos one card short (with the missing cards), asked of Commander Spellbook "
              "on demand. Descriptions are theirs and are attributed; the Vault keeps no copy of their data.",
              {"text": deck}, ["text"], method="POST", path=lambda a: f"{V1}/decks/combos", body=lambda a: {"text": a["text"]},
@@ -102,7 +115,7 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
         Tool("shopping_list", "The cards of a decklist the person does not own, with the cheapest known price of each (dated, from Scryfall) "
              "and a paste-ready list to put into a store's own list or deck tool. The Vault never contacts stores or fills carts.",
              {"text": deck}, ["text"], method="POST", path=lambda a: f"{V1}/decks/shopping-list",
-             body=lambda a: {"text": a["text"]}, provenance=("computed",)),
+             body=lambda a: {"text": a["text"]}, provenance=("computed",), ui="shopping"),
     ]
 
 
