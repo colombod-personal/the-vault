@@ -51,6 +51,7 @@ function artUrl(scry) {
   return scry.img_art || (scry.img_normal ? scry.img_normal.replace('/normal/', '/art_crop/') : null);
 }
 
+const ART_ASPECT = 626 / 457; // Scryfall's art_crop: a card is drawn as a tile of this shape, never cut
 const MAX_ART_NODES = 60; // art for the most valuable cards only: a big graph would download hundreds of images
 const MAX_LINKS_SHOWN = 5; // a popular card can be picked by many peers: list the strongest
 // No hover on touch screens: the graph previews a card on the first tap (see the tap handler).
@@ -70,7 +71,7 @@ function GraphView({ data, openCard }) {
   // The input last used on the graph (kept across rebuilds); the legend names its gesture.
   const lastPointer = useRefG(TOUCH ? 'touch' : 'mouse');
   const [touchUI, setTouchUI] = useStateG(TOUCH);
-  const [showArt, setShowArt] = useStateG(true); // card art inside each circle
+  const [showArt, setShowArt] = useStateG(true); // each card drawn as its whole art
   const tipRef = useRefG(null);
   // Keep the whole hover card inside the graph, however tall it is (it grows with the links it lists).
   // Measured again when the card image arrives, since that sets most of its height.
@@ -183,7 +184,7 @@ function GraphView({ data, openCard }) {
           shape,
           inDeck: inDeck === true ? 'yes' : inDeck === false ? 'no' : '',
           card: n,
-          ...(artIds.has(n.id) && artUrl(n.scry) ? { art: artUrl(n.scry) } : {})
+          ...(artIds.has(n.id) && artUrl(n.scry) ? { art: artUrl(n.scry), artW: Math.round(radius * ART_ASPECT) } : {})
         }
       };
     }
@@ -337,7 +338,7 @@ function GraphView({ data, openCard }) {
               card: r.node || { name: r.name, scry: r.scry, qty: r.owned, value: null },
               deckQty: r.qty,
               owned: r.owned,
-              ...(art ? { art } : {})
+              ...(art ? { art, artW: Math.round(radius * ART_ASPECT) } : {})
             }
           });
         }
@@ -366,11 +367,13 @@ function GraphView({ data, openCard }) {
         }
       },
       {
-        // The card's art, cut by the circle; its color identity becomes the ring.
+        // The card's whole art (never cut: a tile in the art's own shape); its color identity is the border.
         selector: 'node[art]',
         style: {
+          'shape': 'round-rectangle',
+          'width': 'data(artW)',
           'background-image': 'data(art)',
-          'background-fit': 'cover',
+          'background-fit': 'contain',
           'background-clip': 'node',
           'background-image-crossorigin': 'anonymous',
           'border-color': 'data(color)',
@@ -572,7 +575,7 @@ function GraphView({ data, openCard }) {
           </div>
           {ART_MODES.has(mode) ?
           <button className={`chip ${showArt ? 'active' : ''}`} aria-pressed={showArt} onClick={() => setShowArt((v) => !v)}
-          title="Show each card's art inside its circle" style={{ marginLeft: 'auto' }}>Card art</button> :
+          title="Show each card as its art" style={{ marginLeft: 'auto' }}>Card art</button> :
           <span style={{ marginLeft: 'auto' }} />}
           <div className="row" style={{ gap: 6 }}>
             <span className="label-mono" style={{ marginRight: 4 }}>Colors</span>
