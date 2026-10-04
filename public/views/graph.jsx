@@ -328,7 +328,8 @@ function GraphView({ data, openCard }) {
       // Group by color (from the card data) else by 'unknown'
       const groups = { W: [], U: [], B: [], R: [], G: [], M: [], C: [], '?': [] };
       for (const r of deckRows) groups[r.color in groups ? r.color : '?'].push(r);
-      let deckArt = 0;
+      // Art for the most valuable cards of the deck (up to MAX_ART_NODES), wherever their colour group is.
+      const artNames = new Set(deckRows.slice().sort((a, b) => (b.unit || 0) - (a.unit || 0)).slice(0, MAX_ART_NODES).map((r) => r.name));
       for (const k of Object.keys(groups)) {
         if (groups[k].length === 0) continue;
         const pid = 'p_' + k;
@@ -337,8 +338,7 @@ function GraphView({ data, openCard }) {
         for (const r of groups[k]) {
           const id = 'dk_' + r.name.replace(/[^a-z0-9]/gi, '_');
           const radius = Math.max(8, Math.min(60, Math.sqrt(r.unit || 1) * 5 + 8));
-          const art = showArt && deckArt < MAX_ART_NODES ? artUrl(r.node?.scry || r.scry) : null;
-          if (art) deckArt++;
+          const art = showArt && artNames.has(r.name) ? artUrl(r.node?.scry || r.scry) : null;
           elements.push({
             data: {
               id, label: r.name, parent: pid,

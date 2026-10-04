@@ -69,17 +69,30 @@ function DeckView({ data, openCard, initialText, deckId, onOpenDeckId }) {
   const refreshDecks = () => { setMyDecks((d) => (d === 'error' ? null : d));
     return window.VaultApi.decks(true).then((d) => { setMyDecks(d); return d; }).catch(() => { setMyDecks('error'); return 'error'; }); };
   // The deck at #/decks/{id}: fetched on its own (the library's summaries are only loaded for the library).
-  const [routed, setRouted] = useStateD(undefined); // undefined while loading, null when it isn't yours
+  const [routed, setRouted] = useStateD(undefined); // undefined while loading, null when it isn't yours, { error } when it couldn't load
+  const [tries, setTries] = useStateD(0);
   useEffectD(() => {
     if (!deckId) { refreshDecks(); return; }
     let stop = false;
     setRouted(undefined);
-    window.VaultApi.deck(deckId).then((d) => !stop && setRouted(d)).catch(() => { if (!stop) { setRouted(null); refreshDecks(); } });
+    window.VaultApi.deck(deckId).then((d) => !stop && setRouted(d)).catch((e) => {
+      if (stop) return;
+      if (e.status === 404) { setRouted(null); refreshDecks(); } else setRouted({ error: e.message }); // only a 404 means it's gone
+    });
     return () => { stop = true; };
-  }, [deckId]);
+  }, [deckId, tries]);
 
   if (deckId) {
     if (routed === undefined) return <p className="muted label-mono">Loading your deck…</p>;
+    if (routed && routed.error) return (
+      <div className="panel" style={{ padding: 24, textAlign: 'center' }}>
+        <p style={{ marginBottom: 10, color: 'var(--danger)' }}>Couldn't load this deck ({routed.error}).</p>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+          <button className="btn sm" onClick={() => setTries((n) => n + 1)}>Try again</button>
+          <button className="btn sm ghost" onClick={() => onOpenDeckId(null)}>← Your decks</button>
+        </div>
+      </div>
+    );
     if (routed === null) return <DeckLibrary myDecks={myDecks} onRetry={refreshDecks} onOpen={(o) => { if (o.saved) onOpenDeckId(o.saved.id); else { setLocal(o); onOpenDeckId(null); } }} notice="That deck isn't in your decks any more." />;
     return <DeckPage key={'saved' + routed.id} source={{ saved: routed, url: routed.source_url || null, text: routed.source_url ? null : routed.text }}
       myDecks={myDecks} refreshDecks={refreshDecks} openCard={openCard} onBack={() => onOpenDeckId(null)}
@@ -443,7 +456,8 @@ function DeckStats({ text }) {
           <div><p className="label-mono">Cards</p><p className="deck-big">{r.cards}</p></div>
           <div><p className="label-mono">Lands</p><p className="deck-big">{r.lands}</p></div>
           <div><p className="label-mono">Avg. mana value</p><p className="deck-big">{r.average_mana_value_nonland}</p></div>
-          <div><p className="label-mono">Deck value</p><p className="deck-big">{r.priced_cards ? money(r.estimated_cost_usd) : '?'}</p></div>
+          <div><p className="label-mono">Deck value</p><p className="deck-big">{r.priced_cards ? (r.unpriced_cards ? '≥ ' : '') + money(r.estimated_cost_usd) : '?'}</p>
+            {r.priced_cards > 0 && r.unpriced_cards > 0 && <p className="muted" style={{ fontSize: 10, fontFamily: 'var(--mono)' }}>{r.unpriced_cards} without a price</p>}</div>
         </div>
         <p className="muted" style={{ fontSize: 11, marginTop: 10, display: 'flex', gap: 6, alignItems: 'center' }}>Colour identity <ColorIdentity colors={r.color_identity} /></p>
         {r.unmatched.length > 0 && <p style={{ fontSize: 12, color: 'var(--gold)', marginTop: 6 }}>Not in the card catalog: {r.unmatched.join(', ')}</p>}

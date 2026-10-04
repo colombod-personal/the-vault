@@ -153,6 +153,12 @@ def test_upgrades_can_offer_cards_you_own_first_whatever_their_price(loaded, app
     ramp = mine["candidates"]["ramp"]
     assert ramp[0]["name"] == "Pricey Ramp" and ramp[0]["owned_copies"] == 2  # over budget, but yours
     assert "already in your collection" in ramp[0]["why"] and "priced within the budget" in ramp[1]["why"]
+    from vault.models import OraclePrice
+    with app.state.db.sessions() as db:  # a stored price that isn't a real one is shown as unknown, not sent as-is
+        db.query(OraclePrice).filter(OraclePrice.oracle_id == oid(8)).update({"usd": 1e12})  # beyond any real price
+        db.commit()
+    odd = computed(post(loaded, "upgrades", text=DECK, format="commander", budget_usd=5, roles=["ramp"], use_collection=True))
+    assert odd["candidates"]["ramp"][0]["name"] == "Pricey Ramp" and odd["candidates"]["ramp"][0]["price_usd"] is None
     with app.state.db.sessions() as db:  # a row of 0 copies isn't owning the card
         db.query(Entry).filter(Entry.scryfall_id == "p8").update({"quantity": 0})
         db.commit()

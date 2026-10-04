@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from .catalog_queries import card_priority
 from .models import OracleCard, OraclePrice, OracleTag, OracleTagLink
+from .prices import plausible_price
 
 FORMATS = ("commander", "standard", "pioneer", "modern", "legacy", "vintage", "pauper", "brawl", "standardbrawl",
            "historic", "timeless", "oathbreaker", "paupercommander", "premodern", "penny", "duel", "predh",
@@ -267,7 +268,7 @@ def legality(resolved: Resolved, fmt: str) -> dict:
 # -- upgrades -----------------------------------------------------------------------------------
 
 def _price_fields(p: OraclePrice | None) -> dict:
-    return {"price_usd": p.usd if p else None, "price_date": p.day.isoformat() if p else None, "price_source": p.source if p else None}
+    return {"price_usd": plausible_price(p.usd) if p else None, "price_date": p.day.isoformat() if p else None, "price_source": p.source if p else None}
 
 
 def find_upgrades(db: Session, resolved: Resolved, fmt: str, budget_usd: float, roles: list[str] | None = None,
