@@ -329,7 +329,7 @@ function GraphView({ data, openCard }) {
               card: r.node || { name: r.name, scry: r.scry, qty: r.owned, value: null },
               deckQty: r.qty,
               owned: r.owned,
-              ...(showArt && artUrl(r.node?.scry) ? { art: artUrl(r.node.scry) } : {})
+              ...(showArt && artUrl(r.node?.scry || r.scry) ? { art: artUrl(r.node?.scry || r.scry) } : {})
             }
           });
         }
@@ -661,7 +661,7 @@ function GraphView({ data, openCard }) {
                 <span style={{ color: 'var(--gold)' }}>{hover.d.card?.value != null ? `$${hover.d.card.value.toFixed(2)}` : ''}</span>
               </div>
               {hover.d.card?.scry?.artist &&
-            <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 4 }}>Art by {hover.d.card.scry.artist}</div>
+            <div style={{ fontSize: 10.5, color: 'var(--text-2)', marginTop: 4 }}>Art by {hover.d.card.scry.artist}</div>
             }
               {hover.links &&
             <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 6 }}>
@@ -672,11 +672,11 @@ function GraphView({ data, openCard }) {
               // One line each (cut with an ellipsis), so five links always fit the graph's height.
               <div key={l.name} style={{ fontSize: 11, lineHeight: 1.35, marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       <span style={{ fontWeight: 600 }}>{l.name}</span>
-                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--muted)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.why}</span>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--text-2)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.why}</span>
                     </div>
               )}
                   {hover.links.length > MAX_LINKS_SHOWN &&
-              <div className="muted" style={{ fontFamily: 'var(--mono)', fontSize: 9.5 }}>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--text-2)' }}>
                       and {hover.links.length - MAX_LINKS_SHOWN} more (the lit lines show them all)
                     </div>
               }

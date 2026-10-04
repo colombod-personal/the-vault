@@ -32,7 +32,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE || 'wintermute2' }}
+          VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE || 'wintermute-team' }}
         run: |
           if [ -z "$DATABASE_URL" ]; then
             [ -n "$VERCEL_TOKEN" ] || { echo "::error::Set DATABASE_URL (or VERCEL_TOKEN) in the vercel-production environment"; exit 1; }

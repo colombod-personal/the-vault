@@ -51,13 +51,14 @@ def test_every_page_has_the_site_icon():
 
 
 def test_the_phone_layout_never_touches_wider_screens():
-    """public/mobile.css is the phone layout. Its rules sit inside phone-width media queries, so
-    tablets and desktops render exactly as without it; only .m-only (phone-only elements) is
-    hidden outside them."""
+    """The phone layout is the last section of public/layout.css. Its rules sit inside phone-width
+    media queries, so tablets and desktops render exactly as without it; only .m-only (phone-only
+    elements) is hidden outside them."""
     html = (PUBLIC / "index.html").read_text(encoding="utf-8")
-    assert html.index('href="layout.css"') < html.index('href="mobile.css"'), "mobile.css loads last"
     assert "viewport-fit=cover" in html  # the tab bar keeps clear of the home indicator
-    css = re.sub(r"/\*.*?\*/", "", (PUBLIC / "mobile.css").read_text(encoding="utf-8"), flags=re.S)
+    layout = (PUBLIC / "layout.css").read_text(encoding="utf-8")
+    section = layout[layout.index("/* ==== Phone layout"):]
+    css = re.sub(r"/\*.*?\*/", "", section, flags=re.S)
     top_level, depth, start = [], 0, 0
     for i, ch in enumerate(css):
         if ch == "{":

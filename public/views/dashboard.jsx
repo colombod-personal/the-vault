@@ -237,7 +237,7 @@ function Timeline({ data }) {
   );
 }
 
-// `rail`: on a phone the cards scroll sideways in one row instead of stacking (mobile.css).
+// `rail`: on a phone the cards scroll sideways in one row instead of stacking (layout.css, phone layout).
 function CardGrid({ cards, onClick, rail }) {
   return (
     <div className={rail ? 'card-grid card-rail' : 'card-grid'}>
