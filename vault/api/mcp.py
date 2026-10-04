@@ -64,11 +64,12 @@ class Tool:
     description: str
     properties: dict = field(default_factory=dict)
     required: list[str] = field(default_factory=list)
-    method: str = "GET"
+    method: str | Callable[[dict], str] = "GET"  # a function for preview-then-confirm tools
     path: Callable[[dict], str] = lambda a: V1
     query: tuple[str, ...] = ()
     body: Callable[[dict], Any] | None = None
     write: bool = False
+    destructive: bool = False  # deletes or revokes something: hosts should ask the person first
     title: str = ""
     # Where third-party data in the answer comes from: "scryfall" / "archidekt" (the server adds a provenance
     # block), "catalog" / "computed" (the API already includes one), or () for the person's own data only.
@@ -81,7 +82,7 @@ class Tool:
             "description": self.description,
             "inputSchema": {"type": "object", "properties": self.properties, "required": self.required,
                             "additionalProperties": False},
-            "annotations": {"readOnlyHint": not self.write, "destructiveHint": False, "openWorldHint": False},
+            "annotations": {"readOnlyHint": not self.write, "destructiveHint": self.destructive, "openWorldHint": False},
         }
         if self.ui:  # MCP Apps: hosts that support it show the view; others ignore this and show the text answer
             out["_meta"] = {"ui": {"resourceUri": mcp_ui.uri(self.ui), "visibility": ["model", "app"]}}
@@ -153,6 +154,7 @@ def _base(args: dict) -> str:
 ID = {"type": "integer", "minimum": 1, "maximum": MAX_ID}
 SHARE = {"share_id": {**ID, "description": "Read a collection someone shared with you (from list_shared_with_me) instead of your own"}}
 DECKLIST = {"type": "string", "maxLength": 50_000}  # as the API's TextIn and DeckIn
+CONFIRM = {"type": "boolean", "description": "true only after the person agreed to this exact change"}
 SOURCE_URL = {"type": "string", "maxLength": 500, "description": "Where the deck came from (an http or https link)"}
 SET_SORTS = ["-value", "value", "-quantity", "quantity", "-unique", "unique", "name", "code", "release", "-release"]
 PAGING = {
@@ -274,6 +276,26 @@ TOOLS = [
          path=lambda a: f"{V1}/shared"),
     Tool("get_shared_deck", "A deck someone shared, checked against this person's collection.",
          {"share_id": ID}, ["share_id"], path=lambda a: f"{V1}/shared/{int(a['share_id'])}/deck"),
+    Tool("get_import", "One collection import: when it ran, the file, and what it added, removed and changed.",
+         {"import_id": ID}, ["import_id"], path=lambda a: f"{V1}/imports/{int(a['import_id'])}"),
+    Tool("delete_deck", "Delete one of the person's saved decks. Without confirm it only shows the deck that would be "
+         "deleted: show it to the person and call again with confirm true only after they say yes.",
+         {"deck_id": ID, "confirm": CONFIRM}, ["deck_id"],
+         method=lambda a: "DELETE" if a.get("confirm") is True else "GET",
+         path=lambda a: f"{V1}/decks/{int(a['deck_id'])}", write=True, destructive=True),
+    Tool("list_my_shares", "What this person has shared (their collection or a deck), with whom, and whether the "
+         "invite was accepted. Creating a share is done by the person in the Vault, not by an assistant.",
+         dict(PAGING), path=lambda a: f"{V1}/shares", query=("limit", "cursor")),
+    Tool("accept_share", "Accept an invite link someone sent this person (the token after ?invite= in the link), so "
+         "their collection or deck appears under list_shared_with_me.",
+         {"invite_token": {"type": "string", "minLength": 8, "maxLength": 200, "description": "The invite token"}}, ["invite_token"],
+         method="POST", path=lambda a: f"{V1}/shares/accept", body=lambda a: {"token": a["invite_token"]}, write=True),
+    Tool("stop_sharing", "Stop a share: as the owner, revoke it; as the recipient, leave it. Without confirm it only "
+         "lists the person's shares: show the one that would end and call again with confirm true after they say yes.",
+         {"share_id": ID, "confirm": CONFIRM}, ["share_id"],
+         method=lambda a: "DELETE" if a.get("confirm") is True else "GET",
+         path=lambda a: f"{V1}/shares/{int(a['share_id'])}" if a.get("confirm") is True else f"{V1}/shares",
+         write=True, destructive=True),
 ]
 TOOLS.extend(catalog_tools(Tool, ID, PAGING))
 INSTRUCTIONS += "\n" + GROUNDING
@@ -284,7 +306,8 @@ SCRYFALL_DATA = {"get_collection_summary", "search_cards", "get_card", "list_set
                  "get_collection_breakdowns", "get_valuation", "get_value_history", "list_card_names", "refresh_prices",
                  "check_decklist", "lookup_cards", "get_deck", "get_shared_deck"}
 OWN_DATA_ONLY = {"get_acquisition_timeline", "parse_decklist", "list_decks", "save_deck", "update_deck", "list_imports",
-                 "import_collection_csv", "list_export_formats", "list_shared_with_me"}
+                 "import_collection_csv", "list_export_formats", "list_shared_with_me", "get_import", "delete_deck",
+                 "list_my_shares", "accept_share", "stop_sharing"}
 for _tool in TOOLS:
     if not _tool.provenance:
         _tool.provenance = ("scryfall",) if _tool.name in SCRYFALL_DATA else ("archidekt",) if _tool.name == "get_archidekt_deck" else ()
@@ -338,7 +361,8 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
         transport = httpx.ASGITransport(app=_marked_as_mcp(request.app))
         try:
             async with httpx.AsyncClient(transport=transport, base_url=str(request.base_url).rstrip("/")) as client:
-                res = await client.request(tool.method, tool.path(args), **kwargs)
+                method = tool.method(args) if callable(tool.method) else tool.method
+                res = await client.request(method, tool.path(args), **kwargs)
         except Exception:  # the API failed: this tool call failed, not the whole MCP request (or its batch)
             log.exception("MCP tool %s failed", tool.name)
             return 500, {"type": "about:blank", "title": "Internal server error", "status": 500,
