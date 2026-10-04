@@ -62,6 +62,7 @@ class Settings:
     oauth_rate_limit: int = field(default_factory=lambda: int(_env("OAUTH_RATE_LIMIT", "120")))  # authorize, token, revoke
     oauth_client_cap: int = field(default_factory=lambda: int(_env("OAUTH_CLIENT_CAP", "2000")))
     oauth_cimd_cap: int = field(default_factory=lambda: int(_env("OAUTH_CIMD_CAP", "5000")))  # cached client metadata documents
+    oauth_fetch_ip_limit: int = field(default_factory=lambda: int(_env("OAUTH_FETCH_IP_LIMIT", "10")))  # ... per caller
     oauth_fetch_limit: int = field(default_factory=lambda: int(_env("OAUTH_FETCH_LIMIT", "60")))  # metadata fetches a minute, all callers
     passkey_challenge_cap: int = field(default_factory=lambda: int(_env("PASSKEY_CHALLENGE_CAP", "10000")))
     # Calls per minute per user to POST /api/v1/collection/refresh (each fetches up to 300

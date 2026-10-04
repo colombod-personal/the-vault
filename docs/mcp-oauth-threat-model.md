@@ -134,6 +134,9 @@ so an app cannot revoke or list its siblings.
   detection and revokes the grant, so the exposure ends at the next legitimate use.
 
 ### 7. Consent phishing and clickjacking
+- Names are cleaned of everything that draws nothing or reorders text: control characters, all Unicode format characters (soft hyphen,
+  zero-width, bidi, tag characters U+E0000-E007F, byte-order mark, word joiner), surrogates, private use, and blank-looking letters
+  (Hangul filler, braille blank), with whitespace collapsed; a name with nothing left is refused (C `test_names_lose_invisible_characters_and_keep_their_host_line`).
 - A name is only what the app says. The title is **name followed by the host that identifies it** ("Twin Agent (app.example)"),
   an IDN host shows its Unicode form and its technical (punycode) form with a warning, and a self-registered app is titled
   "Unverified app: <name>" with a visible warning; write stays unticked (C `test_a_named_app_is_shown_with_its_address_next_to_the_name`,
@@ -157,6 +160,10 @@ so an app cannot revoke or list its siblings.
   `test_a_consent_cookie_and_form_cannot_be_replayed`, `test_racing_consent_answers_make_one_code`, `test_unanswered_consent_screens_are_capped_per_person`,
   `test_consent_needs_the_nonce_made_for_this_browser`, `test_a_consent_answer_works_once`, `test_consent_expires`,
   `test_the_consent_belongs_to_the_account_that_saw_it`).
+- The session holds the nonces of the browser's open consent screens (a list, not one slot), so a second `GET /oauth/authorize`
+  (another tab, or a cross-site link) does not break an open screen; past the cap the oldest are evicted first, in the cookie and the
+  database alike (M `test_a_second_authorize_request_does_not_break_an_open_consent_screen`, `test_open_consent_screens_are_evicted_oldest_first`,
+  `test_a_non_ascii_nonce_is_an_error_page_not_a_crash`).
 - The app's global cross-site write guard refuses a foreign `Origin` on `POST /oauth/authorize`
   (M `test_a_consent_form_posted_from_another_site_is_refused`). Only the token, registration and revocation
   endpoints, which take no cookies, accept cross-origin calls (C `test_registration_can_be_called_from_a_browser_*`).
@@ -181,10 +188,22 @@ A stranger sets `client_id=https://x/...` and the Vault fetches it. Mitigations 
   the document's `client_id` must equal the URL, and it needs a name and valid redirect URIs (C `test_a_document_about_another_client_is_refused`).
 - Errors never repeat fetched content (C `test_errors_never_repeat_what_was_fetched`). Results are cached an hour; a stale
   client whose document vanished is refused (fail closed).
-- The authorize endpoint is rate limited per IP. Fetching a stranger's URL also has **global** limits that many addresses
+- The authorize endpoint is rate limited per IP. Fetching a stranger's URL also has **shared** limits that many addresses
   can not get around: at most `OAUTH_FETCH_LIMIT` (60) fetches a minute for everyone together (C `test_metadata_fetches_are_limited_for_everyone_together`),
   at most 8 at once per process (C `test_only_a_few_fetches_run_at_once`), and the request's database connection is released before
-  the fetch starts (C `test_the_metadata_fetch_does_not_hold_a_database_connection`).
+  the fetch starts (C `test_the_metadata_fetch_does_not_hold_a_database_connection`). The limits themselves must not become a
+  denial-of-service lever, so: a URL or host that is refused (bad shape, unresolvable, any non-public address) is rejected **before**
+  any budget or slot is spent (C `test_refused_urls_and_hosts_cost_no_budget`); each caller (keyed hash of the IP) also has a much smaller
+  budget of its own, `OAUTH_FETCH_IP_LIMIT` (10 a minute), spent first, so one address can not use up the shared one (C
+  `test_one_caller_cannot_spend_the_shared_budget`); and when the shared budget or every slot is spent, an app seen before is served from
+  its cached row (up to 7 days old) instead of failing, while an app never seen fails with 503 (C `test_an_app_seen_before_keeps_working_when_the_budget_is_spent`,
+  `test_an_app_seen_before_keeps_working_when_every_slot_is_busy`). A fetch that fails (as opposed to being out of budget) still fails closed.
+- Every failure while fetching answers the caller with **one message** ("could not be fetched"); the detail (private address,
+  redirect, bad content, size, time) goes to the server log, so the endpoint is not an oracle for what the Vault can reach (C
+  `test_every_failure_while_fetching_looks_the_same_to_the_caller`, `test_names_that_resolve_to_private_addresses_are_never_contacted`).
+- The raw query string is what is stored (consent row, session), so its own length is limited (2000), not the decoded one (C
+  `test_a_heavily_percent_encoded_query_is_refused_not_a_server_error`); every other stored value is length-checked by its parser
+  (client id 512, redirect URI 2000, challenge 128, resource and scopes fixed values).
 - Cached documents have their own cap (`OAUTH_CIMD_CAP`, 5000), apart from registrations, so neither crowds out the other; at the cap the
   oldest unused documents are dropped and fetched again if used, and documents a grant uses are never dropped (C `test_cached_documents_and_registrations_have_separate_caps`,
   `test_the_cache_is_capped_by_dropping_the_oldest_unused`, `test_documents_in_use_are_not_evicted`).

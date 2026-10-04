@@ -27,6 +27,7 @@ import secrets
 import socket
 import threading
 import time
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
@@ -49,9 +50,20 @@ USED_TTL = timedelta(days=90)
 MAX_REDIRECT_URIS = 10
 MAX_URL = 512
 MAX_NAME = 80
+STALE_MAX = timedelta(days=7)  # a cached document older than the cache TTL is still served when fetching is not possible
+FETCH_FAILED = "The app's metadata document could not be fetched"  # the one message for every fetch-stage failure
+BLANKS = "\u2800\u3164\u115f\u1160\uffa0\u180e"  # letters and symbols that draw nothing
 MAX_CONCURRENT_FETCHES = 8  # per process: a flood of metadata URLs can not tie up every worker
 LOOPBACK_HOSTS = ("127.0.0.1", "[::1]", "localhost")
 LOOPBACK_NAMES = ("127.0.0.1", "::1", "localhost")
+
+
+def _refuse(detail: str) -> ClientError:
+    """The error for any failure while fetching a document. The caller gets one message whatever went
+    wrong (an answer that differed for private addresses, redirects and bad content would tell a
+    stranger what the Vault can reach); the detail goes to the log, which holds no secrets."""
+    log.warning("client metadata refused: %s", detail)
+    return ClientError("invalid_client", FETCH_FAILED)
 
 
 class ClientError(Exception):
@@ -150,8 +162,18 @@ def display_host(host: str) -> tuple[str, str]:
 
 def clean_name(value) -> str:
     """A display name the consent screen can show: printable, one line, short."""
-    text = re.sub(r"[\x00-\x1f\x7f-\x9f​-‏‪-‮⁦-⁩]", " ", value) if isinstance(value, str) else ""
-    return " ".join(text.split())[:MAX_NAME]
+    if not isinstance(value, str):
+        return ""
+    kept = []
+    for ch in value:
+        kind = unicodedata.category(ch)
+        if kind == "Cc":
+            kept.append(" ")  # a control character separates words
+        elif kind[0] == "C" or ch in BLANKS:
+            continue  # format characters (soft hyphen, zero-width, bidi, tag characters), surrogates, private use: invisible, dropped
+        else:
+            kept.append(ch)
+    return " ".join("".join(kept).split())[:MAX_NAME]
 
 
 def _redirect_list(value) -> list[str]:
@@ -233,15 +255,22 @@ class ClientFetcher:
         try:
             found = self.resolver(host)
         except OSError:
-            raise ClientError("invalid_client", "The app's metadata document could not be fetched") from None
+            raise _refuse(f"{host} does not resolve") from None
         if not found or not all(public_address(a) for a in found):
-            log.warning("refused to fetch client metadata: %s resolves to a non-public address", host)
-            raise ClientError("invalid_client", "The app's metadata document is not on a public address")
+            raise _refuse(f"{host} resolves to a non-public address")
         return found
 
-    def fetch(self, url: str) -> dict:
+    def prepare(self, url: str) -> tuple[str, list[str]]:
+        """Check the URL's shape and classify its host (every address public). Costs nothing and uses no
+        slot, so a URL that is refused here never spends the shared budgets."""
         host = check_client_id_url(url)
-        found = self.addresses(host)
+        return host, self.addresses(host)
+
+    def fetch(self, url: str) -> dict:
+        host, found = self.prepare(url)
+        return self.fetch_prepared(url, host, found)
+
+    def fetch_prepared(self, url: str, host: str, found: list[str]) -> dict:
         if not self._slots.acquire(blocking=False):
             raise ClientError("temporarily_unavailable", "Too many apps are being checked right now; try again in a moment")
         try:
@@ -256,7 +285,7 @@ class ClientFetcher:
                 return self._get(url, host, address, deadline)
             except httpx.TransportError as exc:
                 log.warning("client metadata fetch failed: %s", type(exc).__name__)
-        raise ClientError("invalid_client", "The app's metadata document could not be fetched")
+        raise _refuse("no address answered")
 
     def _get(self, url: str, host: str, address: str | None, deadline: float) -> dict:
         target, extensions, headers = url, {}, {"Accept": "application/json", "User-Agent": "TheVault-client-metadata/1"}
@@ -268,25 +297,25 @@ class ClientFetcher:
                           trust_env=False) as client:
             with client.stream("GET", target, headers=headers, extensions=extensions) as res:
                 if res.status_code != 200:  # redirects included: a redirect could lead anywhere
-                    raise ClientError("invalid_client", "The app's metadata document is not served directly (no redirects)")
+                    raise _refuse(f"status {res.status_code} (redirects are not followed)")
                 if not res.headers.get("content-type", "").lower().startswith("application/json"):
-                    raise ClientError("invalid_client", "The app's metadata document is not JSON")
+                    raise _refuse("not application/json")
                 declared = res.headers.get("content-length", "0")
                 if declared.isdigit() and int(declared) > self.max_bytes:
-                    raise ClientError("invalid_client", "The app's metadata document is too large")
+                    raise _refuse("too large")
                 body = b""
                 for chunk in res.iter_bytes():
                     body += chunk
                     if len(body) > self.max_bytes:
-                        raise ClientError("invalid_client", "The app's metadata document is too large")
+                        raise _refuse("too large")
                     if time.monotonic() > deadline:
-                        raise ClientError("invalid_client", "The app's metadata document took too long")
+                        raise _refuse("too slow")
         if time.monotonic() > deadline:
-            raise ClientError("invalid_client", "The app's metadata document took too long")
+            raise _refuse("too slow")
         try:
             return json.loads(body)
         except ValueError:
-            raise ClientError("invalid_client", "The app's metadata document is not valid JSON") from None
+            raise _refuse("not valid JSON") from None
 
 
 def parse_document(url: str, doc) -> tuple[str, list[str]]:
@@ -310,6 +339,7 @@ class Limits:
     dcr_cap: int = 2000  # registered clients
     cimd_cap: int = 5000  # cached metadata documents
     fetch_per_minute: int = 60  # metadata fetches, all callers together
+    fetch_per_caller: int = 10  # metadata fetches a minute for one caller (a keyed hash of the IP)
 
 
 def _make_room(db: Session, cap: int, kind: str) -> None:
@@ -327,10 +357,10 @@ def _make_room(db: Session, cap: int, kind: str) -> None:
         raise ClientError("temporarily_unavailable", "Too many clients are registered; try again later")
 
 
-def _spend_fetch_budget(db: Session, per_minute: int) -> None:
-    """One fetch of a stranger's URL, counted for everyone together (the per-IP limits can't stop many
-    addresses at once)."""
-    key = hashlib.sha256(b"oauth-metadata-fetch").hexdigest()
+def _spend_fetch_budget(db: Session, per_minute: int, scope: str = "") -> None:
+    """One fetch of a stranger's URL, counted for everyone together (``scope`` empty) or for one caller.
+    The per-caller budget is much smaller than the shared one, so one address can not use all of it."""
+    key = hashlib.sha256(b"oauth-metadata-fetch:" + scope.encode()).hexdigest()
     used = hit(db, key, int(time.time() // 60))
     db.commit()
     if used > per_minute:
@@ -355,23 +385,35 @@ def _store_cimd(db: Session, client_id: str, name: str, uris: list[str], cap: in
     raise ClientError("temporarily_unavailable", "Could not save the app's details; try again")
 
 
-def _cimd_client(db: Session, fetcher: ClientFetcher, client_id: str, limits: Limits) -> OAuthClient:
+def _cimd_client(db: Session, fetcher: ClientFetcher, client_id: str, limits: Limits, caller: str = "") -> OAuthClient:
     row = db.scalar(select(OAuthClient).where(OAuthClient.client_id == client_id))
-    if row is not None and row.kind == "cimd" and row.fetched_at and _now() - _aware(row.fetched_at) < CACHE_TTL:
+    cached = row is not None and row.kind == "cimd" and row.fetched_at is not None
+    if cached and _now() - _aware(row.fetched_at) < CACHE_TTL:
         return row
+    stale = row if cached and _now() - _aware(row.fetched_at) < STALE_MAX else None
     db.commit()  # end the read transaction: the connection goes back to the pool while a stranger's server answers
-    _spend_fetch_budget(db, limits.fetch_per_minute)
-    name, uris = parse_document(client_id, fetcher.fetch(client_id))
+    host, found = fetcher.prepare(client_id)  # refused URLs and hosts cost nothing: no budget, no slot
+    try:
+        if caller:
+            _spend_fetch_budget(db, limits.fetch_per_caller, caller)  # first: one caller over its share spends none of the shared one
+        _spend_fetch_budget(db, limits.fetch_per_minute)
+        document = fetcher.fetch_prepared(client_id, host, found)
+    except ClientError as exc:
+        if exc.code == "temporarily_unavailable" and stale is not None:
+            return stale  # out of budget or slots: an app seen before keeps working on what was fetched last
+        raise
+    name, uris = parse_document(client_id, document)
     return _store_cimd(db, client_id, name, uris, limits.cimd_cap)
 
 
-def resolve_client(db: Session, fetcher: ClientFetcher, client_id: str, limits: Limits = Limits()) -> OAuthClient:
+def resolve_client(db: Session, fetcher: ClientFetcher, client_id: str, limits: Limits = Limits(),
+                   caller: str = "") -> OAuthClient:
     """The client for a ``client_id``: a metadata document URL (fetched, cached an hour) or a
     registered id. Unknown ids and ids that are neither answer the same ``invalid_client``."""
     if not client_id or len(client_id) > MAX_URL:
         raise ClientError("invalid_client", "Unknown client_id")
     if is_metadata_client_id(client_id):
-        return _cimd_client(db, fetcher, client_id, limits)
+        return _cimd_client(db, fetcher, client_id, limits, caller)
     row = db.scalar(select(OAuthClient).where(OAuthClient.client_id == client_id, OAuthClient.kind == "dcr"))
     if row is None or (row.expires_at and _aware(row.expires_at) < _now()):
         raise ClientError("invalid_client", "Unknown client_id")

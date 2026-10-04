@@ -34,7 +34,7 @@ from . import oauth_server as server
 from .auth import PKCE_CHALLENGE as PKCE_CHALLENGE_RE, session_user
 from .config import Settings
 from .models import OAuthClient, User
-from .ratelimit import limited
+from .ratelimit import client_ip, limited
 
 log = logging.getLogger(__name__)
 
@@ -87,14 +87,16 @@ def with_query(uri: str, params: dict) -> str:
     return parts._replace(query=query).geturl()
 
 
-def parse_authorize(query: QueryParams, db: Session, fetcher: clients.ClientFetcher, settings: Settings) -> AuthRequest:
+def parse_authorize(query: QueryParams, db: Session, fetcher: clients.ClientFetcher, settings: Settings,
+                    caller: str = "") -> AuthRequest:
     """Validate an authorization request, in the order that decides what may be redirected."""
     if any(len(query.getlist(name)) > 1 for name in PARAMS):
         raise PageError("This request repeats a parameter, so it can't be trusted.")
     get = lambda name: query.get(name) or None  # noqa: E731
     try:
-        limits = clients.Limits(settings.oauth_client_cap, settings.oauth_cimd_cap, settings.oauth_fetch_limit)
-        client = clients.resolve_client(db, fetcher, get("client_id") or "", limits)
+        limits = clients.Limits(settings.oauth_client_cap, settings.oauth_cimd_cap, settings.oauth_fetch_limit,
+                                settings.oauth_fetch_ip_limit)
+        client = clients.resolve_client(db, fetcher, get("client_id") or "", limits, caller)
     except clients.ClientError as exc:
         raise PageError(exc.description, 503 if exc.code == "temporarily_unavailable" else 400) from None
     redirect_uri = get("redirect_uri")
@@ -288,16 +290,19 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
         return Response(status_code=204, headers=CORS)
 
     # -- authorization endpoint -----------------------------------------------------------
-    def check(request: Request, query: QueryParams, db: Session) -> AuthRequest:
-        if len(str(query)) > MAX_QUERY:
+    def check(request: Request, raw: str, db: Session) -> AuthRequest:
+        # What is stored is the raw string (consent row, session), so its own length is what is limited.
+        if len(raw) > MAX_QUERY:
             raise PageError("This request is too long.")
-        return parse_authorize(query, db, fetcher, settings)
+        caller = hmac.new(settings.session_secret.encode(), f"oauth-fetch:{client_ip(request, settings)}".encode(),
+                          "sha256").hexdigest()
+        return parse_authorize(QueryParams(raw), db, fetcher, settings, caller)
 
     @router.get("/oauth/authorize", dependencies=limit, include_in_schema=False)
     def authorize(request: Request, db: Session = Depends(get_db)):
         raw = request.url.query
         try:
-            req = check(request, request.query_params, db)
+            req = check(request, raw, db)
         except PageError as exc:
             return error_page(exc.text, exc.status)
         except RedirectError as exc:
@@ -310,7 +315,10 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
         request.session.pop("oauth_pending", None)
         nonce = secrets.token_urlsafe(24)
         server.save_consent(db, user.id, nonce, raw)
-        request.session["oauth_consent"] = nonce  # the browser's half; the database holds the request, once
+        # The browser's half: the nonces of its open consent screens (oldest dropped past the cap, as in the
+        # database), so a second authorize request in another tab does not replace the first screen's.
+        open_screens = [n for n in request.session.get("oauth_consents", []) if isinstance(n, str)]
+        request.session["oauth_consents"] = open_screens[-(server.MAX_PENDING_CONSENTS - 1):] + [nonce]
         return consent_page(req, user, nonce)
 
     def _passkeys_on() -> bool:
@@ -323,16 +331,18 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
                db: Session = Depends(get_db)):
         """The person's answer. The request being answered comes from the session, not the form, and
         the one-time nonce proves this form is the one we just showed this browser (CSRF)."""
-        mine = request.session.pop("oauth_consent", None)
+        mine = [n for n in request.session.get("oauth_consents", []) if isinstance(n, str)]
+        shown = next((n for n in mine if hmac.compare_digest(n.encode(), nonce.encode())), None)
+        if shown is not None:
+            request.session["oauth_consents"] = [n for n in mine if n != shown]
         user = session_user(db, request)
         # Both halves must match (this browser's, and the form's), then the database row is consumed
         # atomically: a copied cookie and form can not be played twice.
-        asked = (server.take_consent(db, user.id, nonce)
-                 if user is not None and isinstance(mine, str) and hmac.compare_digest(mine, nonce) else None)
+        asked = server.take_consent(db, user.id, nonce) if user is not None and shown is not None else None
         if asked is None:
             return error_page("This page expired or was not made for this browser. Start again from the app.")
         try:
-            req = check(request, QueryParams(asked), db)
+            req = check(request, asked, db)
         except PageError as exc:
             return error_page(exc.text, exc.status)
         except RedirectError as exc:

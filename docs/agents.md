@@ -71,7 +71,7 @@ URL. The threat model, with the tests that prove each mitigation, is in
   They never get account powers: no tokens, export, deletion, sign-in or app management (403 even on the tools' own calls).
 - Only SHA-256 hashes are stored. Rate limits: `OAUTH_RATE_LIMIT` (120 a minute per IP) for authorize, token and revoke,
   `OAUTH_REGISTER_RATE_LIMIT` (20) for registration, `OAUTH_CLIENT_CAP` (2000) registered clients,
-  `OAUTH_CIMD_CAP` (5000) cached metadata documents, `OAUTH_FETCH_LIMIT` (60 a minute, all callers) metadata fetches.
+  `OAUTH_CIMD_CAP` (5000) cached metadata documents, `OAUTH_FETCH_LIMIT` (60 a minute, all callers) and `OAUTH_FETCH_IP_LIMIT` (10 a minute per caller) metadata fetches.
 
 **Connected apps** (Account → Connected apps, or `GET /api/v1/me/apps`, `DELETE /api/v1/me/apps/{id}`): each app with its
 name, web address, what was allowed, when it connected and last acted. Disconnecting ends it at once. They are in the data

@@ -1,5 +1,7 @@
 """Who is asking: Client ID Metadata Documents (with the SSRF abuse cases) and dynamic registration."""
 
+import html
+import logging
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -22,7 +24,7 @@ BASE = "http://testserver"
 def settings(database_url):
     return Settings(database_url=database_url, session_secret="test", dev_login=True, base_url=BASE,
                     oauth_rate_limit=1000, oauth_register_rate_limit=1000, oauth_client_cap=5, oauth_cimd_cap=5,
-                    oauth_fetch_limit=1000)
+                    oauth_fetch_limit=1000, oauth_fetch_ip_limit=1000)
 
 
 @pytest.fixture
@@ -55,6 +57,9 @@ def start(browser, client_id, redirect="https://app.example/callback", **extra):
     c = McpClient(lambda: browser, client_id, redirect)
     c.browser = browser
     return c, c.authorize(**extra)
+
+
+GENERIC = html.escape(oc.FETCH_FAILED)  # the one message for every failure while fetching
 
 
 def contacted(universe, host):
@@ -106,7 +111,7 @@ def test_valid_redirect_uris(uri, ok):
 
 
 def test_clean_names_lose_control_and_bidi_characters():
-    assert oc.clean_name("A‮B\x00C\n D") == "A B C D"
+    assert oc.clean_name("A‮B\x00C\n D") == "AB C D"  # (the bidi control is dropped, the control characters separate words)
     assert oc.clean_name(None) == "" and len(oc.clean_name("x" * 500)) == 80
 
 
@@ -148,11 +153,12 @@ def test_a_stale_client_whose_document_vanished_is_refused(app, universe, browse
 
 @pytest.mark.parametrize("host", ["internal.example", "metadata.example", "loopback.example", "mixed.example",
                                   "mapped.example", "shared.example"])
-def test_names_that_resolve_to_private_addresses_are_never_contacted(app, universe, browser, host):
+def test_names_that_resolve_to_private_addresses_are_never_contacted(app, universe, browser, host, caplog):
+    caplog.set_level(logging.WARNING)
     url = universe.client_hosts.publish(host)
     _, res = start(browser, url)
     assert res.status_code == 400 and "location" not in res.headers
-    assert "public address" in res.text
+    assert GENERIC in res.text and "non-public" in caplog.text  # the detail is for the log, not the caller
     assert contacted(universe, host) == [] and clients_of(app) == []
 
 
@@ -172,7 +178,7 @@ def test_redirects_are_not_followed(app, universe, browser):
         302, headers={"location": "http://169.254.169.254/latest/meta-data/"}))
     universe.client_hosts.publish("metadata.example")
     _, res = start(browser, url)
-    assert res.status_code == 400 and "no redirects" in res.text
+    assert res.status_code == 400 and GENERIC in res.text
     assert len(contacted(universe, "redirector.example")) == 1 and contacted(universe, "metadata.example") == []
 
 
@@ -188,7 +194,7 @@ def test_oversized_documents_are_refused(app, universe, browser):
     url = universe.client_hosts.serve("big.example", "/c.json", lambda r: httpx.Response(
         200, content=big.encode(), headers={"content-type": "application/json"}))
     _, res = start(browser, url)
-    assert res.status_code == 400 and "too large" in res.text and clients_of(app) == []
+    assert res.status_code == 400 and GENERIC in res.text and clients_of(app) == []
 
 
 def test_a_document_that_claims_to_be_small_but_streams_more_is_cut_off(app, universe, browser):
@@ -198,7 +204,7 @@ def test_a_document_that_claims_to_be_small_but_streams_more_is_cut_off(app, uni
 
     url = universe.client_hosts.serve("big.example", "/c.json", lambda r: httpx.Response(
         200, content=chunks(), headers={"content-type": "application/json"}))
-    assert "too large" in start(browser, url)[1].text
+    assert GENERIC in start(browser, url)[1].text
 
 
 def test_slow_documents_are_given_up_on(app, universe, browser):
@@ -206,15 +212,15 @@ def test_slow_documents_are_given_up_on(app, universe, browser):
     url = universe.client_hosts.publish("slow.example")
     universe.client_hosts.latency = 0.4
     _, res = start(browser, url)
-    assert res.status_code == 400 and "too long" in res.text
+    assert res.status_code == 400 and GENERIC in res.text
 
 
 @pytest.mark.parametrize("handler,why", [
-    (lambda r: httpx.Response(200, content=b"<html>", headers={"content-type": "text/html"}), "not JSON"),
-    (lambda r: httpx.Response(200, content=b"{not json", headers={"content-type": "application/json"}), "valid JSON"),
+    (lambda r: httpx.Response(200, content=b"<html>", headers={"content-type": "text/html"}), GENERIC),
+    (lambda r: httpx.Response(200, content=b"{not json", headers={"content-type": "application/json"}), GENERIC),
     (lambda r: httpx.Response(200, content=b"[1]", headers={"content-type": "application/json"}), "not about"),
-    (lambda r: httpx.Response(404), "not served directly"),
-    (lambda r: httpx.Response(500, content=b"{}", headers={"content-type": "application/json"}), "not served directly"),
+    (lambda r: httpx.Response(404), GENERIC),
+    (lambda r: httpx.Response(500, content=b"{}", headers={"content-type": "application/json"}), GENERIC),
 ])
 def test_documents_that_are_not_documents_are_refused(app, universe, browser, handler, why):
     url = universe.client_hosts.serve(GOOD_HOST, "/c.json", handler)
@@ -511,3 +517,131 @@ def test_only_a_few_fetches_run_at_once():
     assert err.value.code == "temporarily_unavailable"
     for _ in held:
         fetcher._slots.release()
+
+
+# -- second review: budgets, stale rows, generic errors, names ----------------------------------
+
+def app_with(database_url, universe, **limits):
+    settings = Settings(database_url=database_url, session_secret="test", dev_login=True, base_url=BASE,
+                        oauth_rate_limit=1000, **limits)
+    return create_app(settings, serve_static=False, transport=universe.transport, resolver=universe.resolve)
+
+
+def authorize_as_new_browser(app, url, redirect="https://app.example/callback"):
+    c = TestClient(app)
+    return c.get("/oauth/authorize", params=McpClient(lambda: c, url, redirect).authorize_params())
+
+
+def global_fetches(app):
+    import hashlib
+
+    from vault.models import RateHit
+
+    key = hashlib.sha256(b"oauth-metadata-fetch:").hexdigest()
+    with app.state.db.sessions() as db:
+        return sum(r.hits for r in db.scalars(select(RateHit).where(RateHit.key == key)))
+
+
+def test_refused_urls_and_hosts_cost_no_budget(database_url, universe):
+    app = app_with(database_url, universe, oauth_fetch_limit=2, oauth_fetch_ip_limit=2)
+    try:
+        junk = ["https://1.2.3.4/c.json", "https://app.example:8443/c.json", "https://app.example/", "http://app.example/c.json",
+                "https://nowhere.invalid/c.json"] + [universe.client_hosts.publish(h) for h in
+                                                      ("internal.example", "metadata.example", "loopback.example", "mixed.example")]
+        for url in junk * 2:
+            assert authorize_as_new_browser(app, url).status_code == 400
+        assert global_fetches(app) == 0 and universe.client_hosts.calls == []
+        good = universe.client_hosts.publish(GOOD_HOST)
+        assert authorize_as_new_browser(app, good).status_code == 200  # the budget is all there
+    finally:
+        app.state.db.engine.dispose()
+
+
+def test_one_caller_cannot_spend_the_shared_budget(database_url, universe):
+    app = app_with(database_url, universe, oauth_fetch_limit=50, oauth_fetch_ip_limit=3)
+    try:
+        urls = [universe.client_hosts.publish(GOOD_HOST, f"/c{i}.json") for i in range(6)]
+        statuses = [authorize_as_new_browser(app, url).status_code for url in urls]
+        assert statuses == [200, 200, 200, 503, 503, 503]
+        assert global_fetches(app) == 3  # the caller over its own share spent nothing of the shared one
+    finally:
+        app.state.db.engine.dispose()
+
+
+def test_an_app_seen_before_keeps_working_when_the_budget_is_spent(database_url, universe):
+    app = app_with(database_url, universe, oauth_fetch_limit=1, oauth_fetch_ip_limit=100)
+    try:
+        known = universe.client_hosts.publish(GOOD_HOST, "/known.json")
+        assert authorize_as_new_browser(app, known).status_code == 200
+        with app.state.db.sessions() as db:
+            db.execute(update(OAuthClient).values(fetched_at=datetime.now(timezone.utc) - timedelta(hours=3)))
+            db.commit()
+        calls = len(contacted(universe, GOOD_HOST))
+        assert authorize_as_new_browser(app, known).status_code == 200  # stale, budget gone: served from the cache
+        assert len(contacted(universe, GOOD_HOST)) == calls
+        unseen = universe.client_hosts.publish(GOOD_HOST, "/unseen.json")
+        assert authorize_as_new_browser(app, unseen).status_code == 503  # never seen: no cache to fall back on
+        with app.state.db.sessions() as db:
+            db.execute(update(OAuthClient).values(fetched_at=datetime.now(timezone.utc) - timedelta(days=8)))
+            db.commit()
+        assert authorize_as_new_browser(app, known).status_code == 503  # too old to trust
+    finally:
+        app.state.db.engine.dispose()
+
+
+def test_an_app_seen_before_keeps_working_when_every_slot_is_busy(app, universe, browser):
+    known = universe.client_hosts.publish(GOOD_HOST, "/known.json")
+    assert start(browser, known)[1].status_code == 200
+    with app.state.db.sessions() as db:
+        db.execute(update(OAuthClient).values(fetched_at=datetime.now(timezone.utc) - timedelta(hours=3)))
+        db.commit()
+    slots = app.state.client_fetcher._slots
+    held = [slots.acquire(blocking=False) for _ in range(oc.MAX_CONCURRENT_FETCHES)]
+    try:
+        assert start(browser, known)[1].status_code == 200
+        assert start(browser, universe.client_hosts.publish(GOOD_HOST, "/new.json"))[1].status_code == 503
+    finally:
+        for _ in held:
+            slots.release()
+
+
+def test_every_failure_while_fetching_looks_the_same_to_the_caller(app, universe, browser):
+    big = b'{"x": "' + b"a" * 100_000 + b'"}'
+    cases = {
+        "private": universe.client_hosts.publish("internal.example"),
+        "unresolvable": "https://nowhere.invalid/c.json",
+        "redirect": universe.client_hosts.serve("redirector.example", "/c.json", lambda r: httpx.Response(302, headers={"location": "http://10.0.0.1/"})),
+        "html": universe.client_hosts.serve("plain.example", "/c.json", lambda r: httpx.Response(200, content=b"x", headers={"content-type": "text/html"})),
+        "missing": universe.client_hosts.serve("other.example", "/c.json", lambda r: httpx.Response(404)),
+        "big": universe.client_hosts.serve("big.example", "/c.json", lambda r: httpx.Response(200, content=big, headers={"content-type": "application/json"})),
+        "badjson": universe.client_hosts.serve("evil.example", "/c.json", lambda r: httpx.Response(200, content=b"{", headers={"content-type": "application/json"})),
+    }
+    pages = {name: start(browser, url)[1] for name, url in cases.items()}
+    assert {p.status_code for p in pages.values()} == {400}
+    assert len({p.text for p in pages.values()}) == 1 and GENERIC in next(iter(pages.values())).text
+
+
+def test_a_heavily_percent_encoded_query_is_refused_not_a_server_error(app, universe, browser):
+    url = universe.client_hosts.publish(GOOD_HOST)
+    c = McpClient(lambda: browser, url)
+    raw = "&".join(f"{k}={v}" for k, v in {**c.authorize_params(), "redirect_uri": "https%3A%2F%2Fapp.example%2Fcallback",
+                                           "resource": "http%3A%2F%2Ftestserver%2Fapi%2Fmcp"}.items())
+    padded = raw + "&pad=" + "%41" * 600  # 1800 raw characters of padding that decode to 600
+    assert len(padded) > 2000 and len(padded.replace("%41", "A")) < 2000  # long as sent, short once decoded
+    res = browser.get("/oauth/authorize?" + padded, follow_redirects=False)
+    assert res.status_code == 400 and "too long" in res.text
+    assert browser.get("/oauth/authorize?" + raw + "&pad=" + "%41" * 100, follow_redirects=False).status_code == 200  # shorter: fine
+
+
+def test_names_lose_invisible_characters_and_keep_their_host_line(app, universe, browser):
+    assert oc.clean_name("Cla\u00adu\u200bde\U000e0041\u202e (claude.ai)") == "Claude (claude.ai)"
+    assert oc.clean_name("A\u3164B\u2800C\u115fD\ufeffE\u2060F\ud800G\ue000H") == "ABCDEFGH"
+    assert oc.clean_name("a\tb\n\u00a0 c\u3000d\u2028e") == "a b c d e"
+    assert oc.clean_name("\u200b\u00ad\U000e0041") == "" and oc.clean_name(None) == "" and oc.clean_name(5) == ""
+    url = universe.client_hosts.publish(GOOD_HOST, name="Cla\u00adude\u200b (claude.ai)")
+    _, page = start(browser, url)
+    assert "Connect Claude (claude.ai) (app.example) to your Vault?" in page.text
+    assert "Identified by its web address <strong><code>app.example</code>" in page.text
+    assert "\u00ad" not in page.text and "\u200b" not in page.text
+    nameless = universe.client_hosts.publish(GOOD_HOST, "/n.json", name="\u200b\u00ad")
+    assert start(browser, nameless)[1].status_code == 400

@@ -35,7 +35,8 @@ BASE = "http://testserver"
 def settings(database_url):
     return Settings(database_url=database_url, session_secret="test", dev_login=True, base_url=BASE,
                     google_client_id="google-web", google_client_secret="x",
-                    oauth_rate_limit=1000, oauth_register_rate_limit=1000)
+                    oauth_rate_limit=1000, oauth_register_rate_limit=1000,
+                    oauth_fetch_limit=100_000, oauth_fetch_ip_limit=100_000)
 
 
 @pytest.fixture
@@ -979,6 +980,9 @@ def test_a_grant_has_an_absolute_maximum_age(app, client):
 
 
 def test_the_mcp_marker_only_applies_to_v1_paths(app, client):
+    """On the tools' own calls (marked, /api/v1) an OAuth token is accepted, and refused only for account
+    powers (403). On any other path it is unknown (401): with the marker applied everywhere the account
+    route below would answer 403 instead, and this test fails."""
     import anyio
 
     client.connect()
@@ -987,15 +991,37 @@ def test_the_mcp_marker_only_applies_to_v1_paths(app, client):
     async def run():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_marked_as_mcp(app)), base_url=BASE) as c:
             assert (await c.get(f"{V1}/collection", headers=bearer)).status_code == 200
-            # not a path the MCP tools build: the token is as good as unknown there (401, not the account 403)
-            for method, path in (("POST", "/api/auth/passkey/register/options"), ("POST", "/api/auth/logout"),
-                                 ("GET", "/oauth/authorize")):
-                res = await c.request(method, path, headers=bearer)
-                assert res.status_code != 200 or path != "/api/auth/passkey/register/options"
+            assert (await c.delete(f"{V1}/me/apps/1", headers=bearer)).status_code == 403  # known, but not the person
             res = await c.post("/api/auth/passkey/register/options", headers=bearer)
-            assert res.status_code == 401
+            assert res.status_code == 401 and 'error="invalid_token"' in res.headers["www-authenticate"]
 
     anyio.run(run)
+
+
+def test_a_second_authorize_request_does_not_break_an_open_consent_screen(app, client):
+    from vault.models import OAuthConsent
+
+    client.sign_in()
+    first = client.authorize()
+    nonce_first = client.nonce(first)
+    client.authorize()  # another tab, or a cross-site GET to /oauth/authorize
+    res = client.answer(first)
+    assert res.status_code == 303 and query(res)["code"]
+    assert nonce_first and db_do(app, lambda db: len(list(db.scalars(select(OAuthConsent))))) == 1  # the second screen is still open
+
+
+def test_open_consent_screens_are_evicted_oldest_first(client):
+    client.sign_in()
+    pages = [client.authorize() for _ in range(oauth_server.MAX_PENDING_CONSENTS + 2)]
+    assert client.answer(pages[0]).status_code == 400 and client.answer(pages[1]).status_code == 400  # the oldest two are gone
+    assert client.answer(pages[-1]).status_code == 303 and client.answer(pages[-2]).status_code == 303
+
+
+def test_a_non_ascii_nonce_is_an_error_page_not_a_crash(client):
+    client.sign_in()
+    client.authorize()
+    res = client.browser.post("/oauth/authorize", data={"nonce": "caf\u00e9", "decision": "allow"}, follow_redirects=False)
+    assert res.status_code == 400
 
 
 def test_sign_out_everywhere_is_browser_only_like_tokens_and_app_sessions(client):
