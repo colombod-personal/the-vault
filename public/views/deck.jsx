@@ -63,10 +63,11 @@ const primaryType = (r) => {
 // A saved deck has its own address (#/decks/{id}), so refresh, bookmarks and Back work; a deck
 // opened from a link or a pasted list lives on screen until it's saved.
 function DeckView({ data, openCard, initialText, deckId, onOpenDeckId }) {
-  const [myDecks, setMyDecks] = useStateD(null); // your saved decks, with summaries (null while loading)
+  const [myDecks, setMyDecks] = useStateD(null); // your saved decks, with summaries (null while loading, 'error' if that failed)
   const [local, setLocalRaw] = useStateD(initialText ? { text: initialText, key: 1 } : null);
   const setLocal = (o) => setLocalRaw(o && { ...o, key: Date.now() });
-  const refreshDecks = () => window.VaultApi.decks(true).then((d) => { setMyDecks(d); return d; }).catch(() => { setMyDecks([]); return []; });
+  const refreshDecks = () => { setMyDecks((d) => (d === 'error' ? null : d));
+    return window.VaultApi.decks(true).then((d) => { setMyDecks(d); return d; }).catch(() => { setMyDecks('error'); return 'error'; }); };
   // The deck at #/decks/{id}: fetched on its own (the library's summaries are only loaded for the library).
   const [routed, setRouted] = useStateD(undefined); // undefined while loading, null when it isn't yours
   useEffectD(() => {
@@ -79,7 +80,7 @@ function DeckView({ data, openCard, initialText, deckId, onOpenDeckId }) {
 
   if (deckId) {
     if (routed === undefined) return <p className="muted label-mono">Loading your deck…</p>;
-    if (routed === null) return <DeckLibrary myDecks={myDecks} onOpen={(o) => { if (o.saved) onOpenDeckId(o.saved.id); else { setLocal(o); onOpenDeckId(null); } }} notice="That deck isn't in your decks any more." />;
+    if (routed === null) return <DeckLibrary myDecks={myDecks} onRetry={refreshDecks} onOpen={(o) => { if (o.saved) onOpenDeckId(o.saved.id); else { setLocal(o); onOpenDeckId(null); } }} notice="That deck isn't in your decks any more." />;
     return <DeckPage key={'saved' + routed.id} source={{ saved: routed, url: routed.source_url || null, text: routed.source_url ? null : routed.text }}
       myDecks={myDecks} refreshDecks={refreshDecks} openCard={openCard} onBack={() => onOpenDeckId(null)}
       onSaved={(d) => setRouted((r) => ({ ...r, ...d }))} />;
@@ -89,20 +90,21 @@ function DeckView({ data, openCard, initialText, deckId, onOpenDeckId }) {
       onBack={() => { setLocal(null); refreshDecks(); }}
       onSaved={(d) => refreshDecks().then(() => { setLocal(null); onOpenDeckId(d.id); })} />;
   }
-  return <DeckLibrary myDecks={myDecks} onOpen={(o) => o.saved ? onOpenDeckId(o.saved.id) : setLocal(o)} />;
+  return <DeckLibrary myDecks={myDecks} onRetry={refreshDecks} onOpen={(o) => o.saved ? onOpenDeckId(o.saved.id) : setLocal(o)} />;
 }
 
 // -- the library ----------------------------------------------------------------------------------
 
-function DeckLibrary({ myDecks, onOpen, notice }) {
+function DeckLibrary({ myDecks, onOpen, onRetry, notice }) {
+  const list = Array.isArray(myDecks) ? myDecks : [];
   const [tab, setTab] = useStateD('url');
   const [src, setSrc] = useStateD('');
   // Each deck against your collection, from the list's summaries (one request for the library).
-  const covers = useMemoD(() => Object.fromEntries((myDecks || []).map((d) => [d.id, d.summary ? {
+  const covers = useMemoD(() => Object.fromEntries(list.map((d) => [d.id, d.summary ? {
     need: d.summary.need, have: d.summary.have, missingCards: d.summary.missing, pct: d.summary.need ? d.summary.have / d.summary.need : 0,
     cost: d.summary.missing_cost || 0, unpriced: d.summary.missing_unpriced || 0 } : 'error'])), [myDecks]);
 
-  const sorted = useMemoD(() => (myDecks || []).slice().sort((a, b) => {
+  const sorted = useMemoD(() => list.slice().sort((a, b) => {
     const ca = covers[a.id], cb = covers[b.id];
     const pa = ca && ca !== 'error' ? ca.pct : -1, pb = cb && cb !== 'error' ? cb.pct : -1;
     return pb - pa || a.name.localeCompare(b.name);
@@ -153,6 +155,12 @@ function DeckLibrary({ myDecks, onOpen, notice }) {
       </div>
 
       {myDecks === null ? <p className="muted label-mono">Loading your decks…</p> :
+       myDecks === 'error' ? (
+         <div className="panel" style={{ padding: 24, textAlign: 'center' }}>
+           <p style={{ marginBottom: 10, color: 'var(--danger)' }}>Couldn't load your decks.</p>
+           <button className="btn sm" onClick={onRetry}>Try again</button>
+         </div>
+       ) :
        myDecks.length === 0 ? (
          <div className="panel" style={{ padding: 32, textAlign: 'center' }}>
            <p className="h-display" style={{ fontSize: 20, marginBottom: 8 }}>No decks yet.</p>
@@ -235,7 +243,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
         return { ...c, scry: scry[i], owned: l ? l.have : 0, need: l ? l.missing : c.qty, status: l ? l.status : 'missing',
           maybeOwned: l && l.maybe_owned ? l.maybe_owned : [], unitPrice: unit, priced: unit != null,
           rowCost: l && l.missing_cost != null ? l.missing_cost : 0,
-          ownEntries: (l ? l.owned_printings : []).map((o) => ({ s: o.set, sn: '', cn: o.collector_number, p: o.printing, q: o.quantity, mk: o.unit_price })) };
+          ownEntries: (l ? l.owned_printings : []).filter((o) => o.quantity > 0).map((o) => ({ s: o.set, sn: '', cn: o.collector_number, p: o.printing, q: o.quantity, mk: o.unit_price })) };
       }));
       setCoverage(cov);
     } catch (e) {
@@ -246,7 +254,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
   useEffectD(() => { load(); }, [reload]);
 
   const text = useMemoD(() => (deck ? deckListText(deck.cards) : ''), [deck]);
-  const saved = source.saved || (deck && deck.url && myDecks ? myDecks.find((d) => sourceKey(d.source_url) === sourceKey(deck.url)) : null);
+  const saved = source.saved || (deck && deck.url && Array.isArray(myDecks) ? myDecks.find((d) => sourceKey(d.source_url) === sourceKey(deck.url)) : null);
   const summary = useMemoD(() => {
     if (!rows || !coverage) return null;
     let total = 0, ownedQty = 0, missingQty = 0, ownedFully = 0, ownedPartial = 0, missingAll = 0;
@@ -291,7 +299,8 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
         </div>
         {deck && (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <button className="btn sm primary" onClick={save} disabled={justSaved || (myDecks === null && !source.saved) || !rows}>
+            <button className="btn sm primary" onClick={save} disabled={justSaved || (!Array.isArray(myDecks) && !source.saved) || !rows}
+              title={!Array.isArray(myDecks) && !source.saved ? 'Waiting for your saved decks, to update rather than duplicate' : undefined}>
               {justSaved ? 'Saved ✓' : saved ? 'Update saved copy' : 'Save to your decks'}
             </button>
             {deck.url && <button className="btn sm" onClick={() => { setJustSaved(false); setReload((n) => n + 1); }} disabled={loading}>Refresh</button>}
@@ -324,9 +333,9 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
 
       {rows && (
         <>
-          <div className="deck-tabs" role="tablist">
+          <div className="deck-tabs" role="group" aria-label="Deck views">
             {TABS.map(([k, label]) => (
-              <button key={k} role="tab" aria-selected={tab === k} className={`chip ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>{label}</button>
+              <button key={k} aria-pressed={tab === k} className={`chip ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>{label}</button>
             ))}
           </div>
           {tab === 'cards' && <DeckCards rows={rows} summary={summary} filter={filter} setFilter={setFilter} openCard={openCard} />}
@@ -496,10 +505,20 @@ function DeckLegality({ text, format, setFormat }) {
 
 // -- Upgrades: candidates within a budget, marking the ones already in your collection -------------
 
+// Role guidelines (ramp 10, draw 10, …) exist only for 100-card decks (vault/deck_tools.py SIZE_100);
+// for other formats you pick the roles to look for.
+const GUIDED_FORMATS = ['commander', 'duel', 'predh', 'paupercommander'];
+const ROLES = ['ramp', 'draw', 'removal', 'sweeper', 'counterspell', 'tutor', 'recursion', 'sacrifice_outlet'];
+
 function DeckUpgrades({ text, format, setFormat }) {
   const [budget, setBudget] = useStateD(5);
   const [asked, setAsked] = useStateD(5);
-  const s = useDeckAnswer(() => window.VaultApi.deckUpgrades(text, format, Number(asked) || 0), text + '|' + format + '|' + asked);
+  const [roles, setRoles] = useStateD(['removal', 'draw']);
+  const guided = GUIDED_FORMATS.includes(format);
+  const pick = guided ? null : roles;
+  const s = useDeckAnswer(() => (pick && !pick.length ? Promise.reject(new Error('Pick at least one role to look for.'))
+    : window.VaultApi.deckUpgrades(text, format, Number(asked) || 0, pick)), text + '|' + format + '|' + asked + '|' + (pick || []).join());
+  const toggle = (r) => setRoles((rs) => (rs.includes(r) ? rs.filter((x) => x !== r) : [...rs, r]));
   return (
     <div className="panel">
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -510,9 +529,17 @@ function DeckUpgrades({ text, format, setFormat }) {
         </label>
         <button className="btn sm primary" onClick={() => setAsked(budget)}>Find upgrades</button>
       </div>
+      {!guided && (
+        <div style={{ marginTop: 12 }}>
+          <p className="muted" style={{ fontSize: 12, marginBottom: 6 }}>There are no usual role counts for {format}; pick what to look for.</p>
+          <div className="row" style={{ gap: 4, flexWrap: 'wrap' }} role="group" aria-label="Roles to look for">
+            {ROLES.map((r) => <button key={r} className={`chip ${roles.includes(r) ? 'active' : ''}`} aria-pressed={roles.includes(r)} onClick={() => toggle(r)}>{r.replace(/_/g, ' ')}</button>)}
+          </div>
+        </div>
+      )}
       {!s.result ? <div style={{ marginTop: 12 }}><Waiting state={s} what="upgrade candidates" /></div> : (
         <>
-          {Object.keys(s.result.gaps).length === 0 && <p className="muted" style={{ marginTop: 12 }}>The deck meets the usual role counts for {s.result.format}; no gaps to fill.</p>}
+          {guided && Object.keys(s.result.gaps).length === 0 && <p className="muted" style={{ marginTop: 12 }}>The deck meets the usual role counts for {s.result.format}; no gaps to fill.</p>}
           {Object.entries(s.result.candidates).map(([role, list]) => (
             <div key={role} style={{ marginTop: 16 }}>
               <p className="eyebrow">{role.replace(/_/g, ' ')} <span className="muted">· the deck has {s.result.gaps[role]?.have}{s.result.gaps[role]?.guideline ? `, about ${s.result.gaps[role].guideline} is usual` : ''}</span></p>

@@ -286,13 +286,13 @@ def find_upgrades(db: Session, resolved: Resolved, fmt: str, budget_usd: float, 
     commanders = resolved.section("commander")
     if fmt in COMMANDER_STYLE and commanders:
         ident = set(identity(commanders))
-    wanted = list(roles) if roles else [r for r, n in (targets or (COMMANDER_TARGETS if fmt in SIZE_100 else {})).items()
-                                        if st["roles"][r]["count"] < n]
+    guide = targets or (COMMANDER_TARGETS if fmt in SIZE_100 else {})  # the usual counts exist for 100-card decks only
+    wanted = list(roles) if roles else [r for r, n in guide.items() if st["roles"][r]["count"] < n]
     unknown = [r for r in wanted if r not in ROLE_TAGS]
     if unknown:
         raise DeckError(f"Unknown role(s) {unknown}; use: {', '.join(ROLE_TAGS)}")
     tag_ids = role_tag_ids(db)
-    gaps = {r: {"have": st["roles"][r]["count"], "guideline": (targets or COMMANDER_TARGETS).get(r)} for r in wanted}
+    gaps = {r: {"have": st["roles"][r]["count"], "guideline": guide.get(r)} for r in wanted}
     candidates: dict[str, list[dict]] = {}
     for role in wanted:
         if not tag_ids.get(role):

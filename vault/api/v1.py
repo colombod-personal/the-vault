@@ -667,13 +667,16 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         rows = list(db.scalars(select(Deck).where(Deck.user_id == user.id)))
         page, nxt = paginate(rows, lambda d: (d.name.lower(),), lambda d: d.id, cursor=cursor, limit=limit)
         items = [_deck(d) for d in page]
-        if summary and page:  # each deck against your collection, read once for the page
+        if summary and page:  # each deck against your collection; the collection and prices read once for the page
             owned = user_entries(db, user)
+            readable = []
             for item, d in zip(items, page):
                 try:
-                    cov = analytics.price_coverage(db, user.id, _coverage(d.text, owned))
+                    readable.append((item, _coverage(d.text, owned)))
                 except HTTPException:  # a saved list the parser can no longer read
                     continue
+            priced = analytics.price_coverages(db, user.id, [c for _, c in readable], owned_printings=False)
+            for (item, _), cov in zip(readable, priced):
                 need = sum(c["need"] for c in cov["cards"])
                 have = sum(min(c["have"], c["need"]) for c in cov["cards"])
                 item["summary"] = {"need": need, "have": have, "missing": need - have,

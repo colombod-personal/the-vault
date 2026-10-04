@@ -254,6 +254,37 @@ def test_deck_list_can_carry_each_decks_summary(signed_in):
     assert signed_in.get(nxt).json()["items"][0]["summary"]["need"] == 1
 
 
+def test_owned_printings_leave_out_rows_of_no_copies(app, signed_in):
+    upload(signed_in)
+    from vault.models import Entry, User
+    with app.state.db.sessions() as db:
+        uid = db.query(User.id).order_by(User.id.desc()).first()[0]
+        db.add(Entry(user_id=uid, name="Rhystic Study", set_code="pcy", collector_number="45", quantity=0))
+        db.commit()
+    cards = {c["name"]: c for c in signed_in.post(f"{V1}/decks/coverage", json={"text": "1 Rhystic Study\n1 Sol Ring"}).json()["cards"]}
+    assert cards["Rhystic Study"]["owned_printings"] == [] and cards["Rhystic Study"]["status"] == "missing"
+    assert cards["Sol Ring"]["owned_printings"] and all(o["quantity"] > 0 for o in cards["Sol Ring"]["owned_printings"])
+
+
+def test_deck_list_summaries_take_the_same_queries_for_one_deck_or_many(app, signed_in):
+    from sqlalchemy import event
+    upload(signed_in)
+    engine = app.state.db.engine
+    statements, counts = [], []
+    listen = lambda *args: statements.append(args[2])  # noqa: E731
+    for n in (1, 4):
+        while len(signed_in.get(f"{V1}/decks").json()["items"]) < n:
+            signed_in.post(f"{V1}/decks", json={"name": "D", "text": "2 Sol Ring\n1 Rhystic Study"})
+        event.listen(engine, "before_cursor_execute", listen)
+        try:
+            statements.clear()
+            assert len(signed_in.get(f"{V1}/decks?summary=true").json()["items"]) == n
+            counts.append(len(statements))
+        finally:
+            event.remove(engine, "before_cursor_execute", listen)
+    assert counts[0] == counts[1], counts
+
+
 def test_openapi_documents_the_api(client):
     spec = client.get("/api/openapi.json").json()
     paths = spec["paths"]

@@ -454,7 +454,7 @@ window.VaultApi = (() => {
     // deck analysis, computed by the server from the card catalog (each answer is { result, provenance })
     deckStats: (text) => call(V1 + '/decks/stats', { method: 'POST', json: { text } }),
     deckLegality: (text, format) => call(V1 + '/decks/legality', { method: 'POST', json: { text, format } }),
-    deckUpgrades: (text, format, budget_usd) => call(V1 + '/decks/upgrades', { method: 'POST', json: { text, format, budget_usd, use_collection: true } }),
+    deckUpgrades: (text, format, budget_usd, roles) => call(V1 + '/decks/upgrades', { method: 'POST', json: { text, format, budget_usd, use_collection: true, ...(roles ? { roles } : {}) } }),
     deckCombos: (text) => call(V1 + '/decks/combos', { method: 'POST', json: { text } }),
     deckShopping: (text) => call(V1 + '/decks/shopping-list', { method: 'POST', json: { text } }),
 

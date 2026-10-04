@@ -161,6 +161,15 @@ def test_upgrades_can_offer_cards_you_own_first_whatever_their_price(loaded, app
     assert [c["name"] for c in ramp[1:]] == ["Cheap Ramp", "Other Rock"] and ramp[1]["owned_copies"] == 0
 
 
+def test_role_guidelines_are_only_for_100_card_formats(loaded):
+    """Modern has no usual role counts: nothing is assumed missing, and asked-for roles carry no
+    Commander guideline."""
+    assert computed(post(loaded, "upgrades", text=DECK, format="modern", budget_usd=5))["gaps"] == {}
+    r = computed(post(loaded, "upgrades", text=DECK, format="modern", budget_usd=5, roles=["ramp"]))
+    assert r["gaps"]["ramp"]["guideline"] is None and "ramp" in r["candidates"]
+    assert computed(post(loaded, "upgrades", text=DECK, format="commander", budget_usd=5, roles=["ramp"]))["gaps"]["ramp"]["guideline"] == 10
+
+
 def test_upgrades_need_the_prices_and_tags_to_be_loaded(signed_in, app):
     with app.state.db.sessions() as db:
         cs.sync_oracle_cards(db, CARDS)
