@@ -176,6 +176,15 @@ def test_the_consent_screen_names_the_app_the_scopes_and_what_is_never_allowed(c
     assert "app.example" in text.split("sent back to")[1]
 
 
+def test_the_consent_form_can_post_back_from_a_browser(client):
+    """A browser sends ``Origin: null`` on a form POST when the page's referrer policy is
+    no-referrer, and the CSRF guard refuses it: consent then fails for every real user (found by
+    connecting claude.ai to production). The page must keep a policy that still sends Origin."""
+    client.sign_in()
+    page = client.authorize(scope="read")
+    assert page.headers["referrer-policy"] == "same-origin"
+
+
 def test_read_only_request_shows_no_write_option(client):
     client.sign_in()
     assert 'name="write"' not in client.authorize(scope="read").text
