@@ -255,7 +255,9 @@ TOOLS = [
          ["deck_id", "name", "text"], method="PUT", path=lambda a: f"{V1}/decks/{int(a['deck_id'])}",
          body=lambda a: {"name": a["name"], "text": a["text"],
                          **({"source_url": a["source_url"]} if "source_url" in a else {})}, write=True),
-    Tool("get_archidekt_deck", "A public deck from Archidekt by its id (the number in archidekt.com/decks/<id>).",
+    Tool("get_archidekt_deck", "A public deck from Archidekt by its id (the number in archidekt.com/decks/<id>). "
+         "One deck per request, only the one the person gave you. Check list_decks first: the deck may be saved. "
+         "The deck is Archidekt's: credit Archidekt and link the deck when you use it.",
          {"deck_id": ID}, ["deck_id"], path=lambda a: f"{V1}/archidekt/decks/{int(a['deck_id'])}"),
     Tool("list_imports", "Past collection imports, newest first, with what changed each time.", dict(PAGING),
          path=lambda a: f"{V1}/imports", query=("limit", "cursor")),
