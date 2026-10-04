@@ -7,6 +7,9 @@ description: >-
 vault-tools:
   - whoami
   - shopping_list
+  - get_archidekt_deck
+  - deck_legality
+  - find_upgrades
   - validate_deck_changes
   - check_decklist
   - get_collection_summary
@@ -15,6 +18,7 @@ vault-tools:
   - lookup_cards
 skills:
   - shopping-assistant
+  - archidekt-deck-helper
   - collection-analyst
   - vault-attribution
 ---
