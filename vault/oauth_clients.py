@@ -223,7 +223,8 @@ class ClientFetcher:
                     raise ClientError("invalid_client", "The app's metadata document is not served directly (no redirects)")
                 if not res.headers.get("content-type", "").lower().startswith("application/json"):
                     raise ClientError("invalid_client", "The app's metadata document is not JSON")
-                if int(res.headers.get("content-length", "0") or 0) > self.max_bytes:
+                declared = res.headers.get("content-length", "0")
+                if declared.isdigit() and int(declared) > self.max_bytes:
                     raise ClientError("invalid_client", "The app's metadata document is too large")
                 body = b""
                 for chunk in res.iter_bytes():

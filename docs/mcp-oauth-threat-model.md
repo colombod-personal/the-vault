@@ -162,8 +162,8 @@ A stranger sets `client_id=https://x/...` and the Vault fetches it. Mitigations 
   unused registrations expire after a day and are removed when room is needed (C `test_the_number_of_registrations_is_capped`,
   `test_unused_registrations_expire_and_cannot_be_used`, M `test_the_authorize_token_and_registration_endpoints_are_rate_limited`).
 - Registered clients are shown as unverified. A registration grants nothing by itself.
-- Residual: an attacker can fill the cap until rows expire (a day) and block new registrations; CIMD clients
-  are unaffected by that, since the two share a cap only when the table itself is full (see Residual risks).
+- Residual: an attacker who gets past the rate limit can fill the cap until the rows expire (a day) and block new
+  registrations and new metadata clients, since both share one table and one cap (see Residual risks).
 
 ### 12. Tenancy leaks
 - A grant belongs to one user and every token resolves to that user; MCP tool calls use the existing user-scoped
