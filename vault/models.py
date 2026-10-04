@@ -17,6 +17,8 @@ from datetime import date, datetime, timezone
 
 from mtg_toolkits.models import CollectionEntry, Condition, Finish
 from sqlalchemy import JSON, Boolean, Index, LargeBinary, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import DDL, event
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -372,3 +374,152 @@ class CollectionValue(Base):
     cost_usd: Mapped[float] = mapped_column(Float)
     copies: Mapped[int] = mapped_column(Integer)
     priced_copies: Mapped[int] = mapped_column(Integer)  # copies with a Scryfall price (rest use the file's)
+
+
+# -- The catalog: global, read-only grounding data (no user_id, nothing personal). Filled by
+# jobs/sync_catalog.py from Scryfall's bulk files and the Comprehensive Rules; read by the MCP
+# tools. Every row can be traced to a ``catalog_sources`` entry. See docs/catalog-design.md and
+# docs/compliance.md: always show provenance, never present this data as the Vault's own.
+
+class OracleCard(Base):
+    """One row per Oracle card (Scryfall's ``oracle_cards`` file). Not the owned-printings ``cards``."""
+
+    __tablename__ = "oracle_cards"
+    __table_args__ = (
+        Index("ix_oracle_cards_name_lower", text("lower(name)")),
+        Index("ix_oracle_cards_name_trgm", "name", postgresql_using="gin", postgresql_ops={"name": "gin_trgm_ops"}),
+        Index("ix_oracle_cards_fts", text("to_tsvector('english', oracle_text)"),
+              postgresql_using="gin"),
+    )
+
+    oracle_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(300))
+    layout: Mapped[str | None] = mapped_column(String(40))
+    mana_cost: Mapped[str | None] = mapped_column(String(100))
+    cmc: Mapped[float | None] = mapped_column(Float)
+    type_line: Mapped[str | None] = mapped_column(String(300))
+    oracle_text: Mapped[str | None] = mapped_column(Text)
+    power: Mapped[str | None] = mapped_column(String(20))
+    toughness: Mapped[str | None] = mapped_column(String(20))
+    loyalty: Mapped[str | None] = mapped_column(String(20))
+    defense: Mapped[str | None] = mapped_column(String(20))
+    colors: Mapped[list] = mapped_column(JSONB, default=list)
+    color_identity: Mapped[list] = mapped_column(JSONB, default=list)
+    keywords: Mapped[list] = mapped_column(JSONB, default=list)
+    produced_mana: Mapped[list] = mapped_column(JSONB, default=list)
+    legalities: Mapped[dict] = mapped_column(JSONB, default=dict)
+    faces: Mapped[list | None] = mapped_column(JSONB)  # per-face text for multi-face cards
+    game_changer: Mapped[bool | None] = mapped_column(Boolean)
+    edhrec_rank: Mapped[int | None] = mapped_column(Integer)
+    released_at: Mapped[date | None] = mapped_column(Date)
+    scryfall_uri: Mapped[str | None] = mapped_column(String(500))
+    representative_id: Mapped[str | None] = mapped_column(String(36))  # the printing Scryfall shows
+    digital: Mapped[bool] = mapped_column(Boolean, default=False)
+    content_hash: Mapped[str] = mapped_column(String(40))  # lets the daily job skip unchanged rows
+
+
+# The name search index needs pg_trgm; the migration creates it too (Neon and Postgres 14+ allow it).
+event.listen(OracleCard.__table__, "before_create", DDL("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+
+
+class Ruling(Base):
+    """A ruling as published (Wizards' text via Scryfall). The id is a hash of its content, so a
+    ruling that did not change is never rewritten."""
+
+    __tablename__ = "rulings"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    oracle_id: Mapped[str] = mapped_column(String(36), index=True)
+    published_at: Mapped[date | None] = mapped_column(Date)
+    source: Mapped[str] = mapped_column(String(20))  # "wotc" or "scryfall": who wrote it
+    comment: Mapped[str] = mapped_column(Text)
+
+
+class RulesVersion(Base):
+    """One edition of the Comprehensive Rules. Old editions are kept so a cited rule stays reproducible."""
+
+    __tablename__ = "rules_versions"
+
+    version: Mapped[str] = mapped_column(String(10), primary_key=True)  # effective date, YYYY-MM-DD
+    effective_date: Mapped[date] = mapped_column(Date)
+    source_url: Mapped[str | None] = mapped_column(String(500))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Rule(Base):
+    __tablename__ = "rules"
+    __table_args__ = (
+        Index("ix_rules_fts", text("to_tsvector('english', text)"), postgresql_using="gin"),
+    )
+
+    version: Mapped[str] = mapped_column(ForeignKey("rules_versions.version", ondelete="CASCADE"), primary_key=True)
+    number: Mapped[str] = mapped_column(String(120), primary_key=True)  # "613.1a"; glossary terms use "glossary:<term>"
+    text: Mapped[str] = mapped_column(Text)
+    parent: Mapped[str | None] = mapped_column(String(20))
+    kind: Mapped[str] = mapped_column(String(12))  # "rule" or "glossary"
+
+
+class OracleTag(Base):
+    """A functional tag from Scryfall's Tagger (community opinion, not a rule)."""
+
+    __tablename__ = "oracle_tags"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    slug: Mapped[str] = mapped_column(String(120), unique=True)
+    label: Mapped[str | None] = mapped_column(String(160))
+    description: Mapped[str | None] = mapped_column(Text)
+    parent_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    child_ids: Mapped[list] = mapped_column(JSONB, default=list)
+
+
+class OracleTagLink(Base):
+    """Which cards carry which tag, for a curated set of tags only (docs/catalog-design.md)."""
+
+    __tablename__ = "oracle_tag_links"
+    __table_args__ = (Index("ix_oracle_tag_links_oracle_id", "oracle_id"),)
+
+    tag_id: Mapped[str] = mapped_column(ForeignKey("oracle_tags.id", ondelete="CASCADE"), primary_key=True)
+    oracle_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    weight: Mapped[str | None] = mapped_column(String(12))  # Scryfall's own word: weak, median, strong...
+
+
+class LegalityChange(Base):
+    """Written by the daily job when a card's legality in a format changes, so answers can say "as of"."""
+
+    __tablename__ = "legality_changes"
+    __table_args__ = (Index("ix_legality_changes_oracle_id", "oracle_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    oracle_id: Mapped[str] = mapped_column(String(36))
+    format: Mapped[str] = mapped_column(String(30))
+    old: Mapped[str | None] = mapped_column(String(20))
+    new: Mapped[str | None] = mapped_column(String(20))
+    observed_on: Mapped[date] = mapped_column(Date)
+
+
+class OraclePrice(Base):
+    """The cheapest priced paper printing of each card, today only (no history; see docs/catalog-design.md)."""
+
+    __tablename__ = "oracle_prices"
+
+    oracle_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    scryfall_id: Mapped[str] = mapped_column(String(36))
+    usd: Mapped[float | None] = mapped_column(Float)
+    usd_foil: Mapped[float | None] = mapped_column(Float)
+    eur: Mapped[float | None] = mapped_column(Float)
+    day: Mapped[date] = mapped_column(Date)
+    source: Mapped[str] = mapped_column(String(40), default="scryfall")  # whose numbers these are
+
+
+class CatalogSource(Base):
+    """What was loaded, when, from where. Feeds ``whoami`` and every "as of" line."""
+
+    __tablename__ = "catalog_sources"
+
+    name: Mapped[str] = mapped_column(String(40), primary_key=True)  # "oracle_cards", "rulings", "oracle_tags", "rules"
+    version: Mapped[str] = mapped_column(String(60))
+    source_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    rows: Mapped[int] = mapped_column(Integer, default=0)
+    checksum: Mapped[str | None] = mapped_column(String(64))
+    url: Mapped[str | None] = mapped_column(String(500))
