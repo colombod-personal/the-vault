@@ -21,11 +21,14 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
-from .models import OAuthCode, OAuthGrant, OAuthRetiredRefresh, User
+from .models import OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, User
 from .tokens import PKCE_VERIFIER, _touch, s256
 
 ACCESS_TTL = timedelta(hours=1)
 REFRESH_TTL = timedelta(days=30)
+GRANT_MAX_AGE = timedelta(days=90)  # from first consent: refreshing never extends a grant past this
+CONSENT_TTL = timedelta(minutes=10)
+MAX_PENDING_CONSENTS = 5  # unanswered consent screens per person
 CODE_TTL = timedelta(seconds=60)
 ACCESS_PREFIX = "vault_oat_"
 REFRESH_PREFIX = "vault_ort_"
@@ -121,27 +124,34 @@ def _make_room(db: Session, user_id: int) -> None:
     """At most MAX_APPS grants per person: connecting one more drops the oldest."""
     old = list(db.scalars(select(OAuthGrant.id).where(OAuthGrant.user_id == user_id).order_by(OAuthGrant.id.desc())
                           .offset(MAX_APPS - 1)))
-    for grant_id in old:
-        revoke_grant(db, grant_id)
+    if old:  # not committed here: the caller's transaction (the code's redemption) commits it
+        db.execute(delete(OAuthRetiredRefresh).where(OAuthRetiredRefresh.grant_id.in_(old)))
+        db.execute(delete(OAuthGrant).where(OAuthGrant.id.in_(old)))
 
 
 def exchange_code(db: Session, client_id: str, code: str, redirect_uri: str, verifier: str, resource: str | None) -> dict:
+    """Redeem a code. Claiming it and making the grant are **one transaction**: a second request with
+    the same code waits on the claim's row lock, and when it gets through the grant exists, so the
+    replay finds it and revokes it. A code that fails a check is burnt on purpose (the claim is
+    committed): a wrong verifier or client does not get a second try."""
     row = db.scalar(select(OAuthCode).where(OAuthCode.code_hash == _hash(code or "")))
     if row is None:
         raise OAuthError("invalid_grant", "The authorization code is invalid, expired or already used")
-    # Claimed with a conditional UPDATE, so of two requests with the same code only one wins.
     claimed = db.execute(update(OAuthCode).where(OAuthCode.id == row.id, OAuthCode.used_at.is_(None))
                          .values(used_at=_now()).execution_options(synchronize_session=False)).rowcount
-    db.commit()
     if not claimed:
         # A code coming back means it was copied: what the first redemption issued is revoked.
-        db.expire_all()
+        db.rollback()
         revoke_grant(db, db.scalar(select(OAuthCode.grant_id).where(OAuthCode.id == row.id)))
         raise OAuthError("invalid_grant", "The authorization code is invalid, expired or already used")
-    _check_code(row, client_id, redirect_uri, verifier, resource)
-    user = db.get(User, row.user_id)
-    if user is None:
-        raise OAuthError("invalid_grant", "The authorization code is invalid, expired or already used")
+    try:
+        _check_code(row, client_id, redirect_uri, verifier, resource)
+        user = db.get(User, row.user_id)
+        if user is None:
+            raise OAuthError("invalid_grant", "The authorization code is invalid, expired or already used")
+    except OAuthError:
+        db.commit()  # the burn
+        raise
     _make_room(db, user.id)
     values, access, refresh = _new_pair()
     grant = OAuthGrant(user_id=user.id, client_id=row.client_id, scopes=row.scopes, access_scopes=row.scopes,
@@ -182,13 +192,15 @@ def refresh(db: Session, client_id: str, refresh_token: str, scope: str | None, 
     grant = db.scalar(select(OAuthGrant).where(OAuthGrant.refresh_hash == h))
     if grant is None:
         _unknown_refresh(db, h)
-    if grant.client_id != client_id or _aware(grant.refresh_expires) < _now():
+    ends = _aware(grant.created_at) + GRANT_MAX_AGE
+    if grant.client_id != client_id or _aware(grant.refresh_expires) < _now() or _now() > ends:
         revoke_grant(db, grant.id)  # presented by another client (copied), or past its life
         raise OAuthError("invalid_grant", "The refresh token is invalid, expired or revoked")
     if resource is not None and resource != grant.resource:
         raise OAuthError("invalid_target", "resource does not match the grant")
     scopes = _narrow(scope, grant.scopes)
     values, access, refresh_new = _new_pair()
+    values["refresh_expires"] = min(values["refresh_expires"], ends)  # refreshing never outlives the grant
     # Compare-and-swap: of two refreshes racing with the same token, only one rotates it.
     if not db.execute(update(OAuthGrant).where(OAuthGrant.id == grant.id, OAuthGrant.refresh_hash == h)
                       .values(access_scopes=scopes, **values)).rowcount:
@@ -199,6 +211,30 @@ def refresh(db: Session, client_id: str, refresh_token: str, scope: str | None, 
     db.add(OAuthRetiredRefresh(user_id=grant.user_id, grant_id=grant.id, token_hash=h, expires_at=grant.refresh_expires))
     db.commit()
     return _response(access, refresh_new, scopes)
+
+
+# -- consent screens ------------------------------------------------------------------------
+
+def save_consent(db: Session, user_id: int, nonce: str, query: str) -> None:
+    """Remember a consent screen that was shown (by the nonce's hash), so the answer can be matched
+    to it exactly once."""
+    db.execute(delete(OAuthConsent).where(OAuthConsent.expires_at < _now()))
+    stale = list(db.scalars(select(OAuthConsent.id).where(OAuthConsent.user_id == user_id)
+                            .order_by(OAuthConsent.id.desc()).offset(MAX_PENDING_CONSENTS - 1)))
+    if stale:
+        db.execute(delete(OAuthConsent).where(OAuthConsent.id.in_(stale)))
+    db.add(OAuthConsent(user_id=user_id, nonce_hash=_hash(nonce), query=query, expires_at=_now() + CONSENT_TTL))
+    db.commit()
+
+
+def take_consent(db: Session, user_id: int, nonce: str) -> str | None:
+    """The authorization request this nonce was shown for, or None. One conditional DELETE ... RETURNING:
+    of any number of answers with the same nonce (a replayed cookie and form, requests racing), one wins."""
+    taken = db.execute(delete(OAuthConsent).where(
+        OAuthConsent.nonce_hash == _hash(nonce or ""), OAuthConsent.user_id == user_id,
+        OAuthConsent.expires_at > _now()).returning(OAuthConsent.query)).scalar()
+    db.commit()
+    return taken
 
 
 # -- using a token ---------------------------------------------------------------------------

@@ -65,11 +65,13 @@ URL. The threat model, with the tests that prove each mitigation, is in
 - Codes last 60 seconds, work once, and are bound to client, redirect URI, challenge, resource and person. Using one twice
   revokes what the first use issued.
 - A rotated refresh token coming back (it was copied) revokes the whole grant. A refresh can narrow scopes, never widen them.
+  A grant lasts at most 90 days from the person's consent, however often it is refreshed; then the app asks again.
 - **read** is the default. **write** is offered only if the app asks for it, and it is an unticked box on the consent screen.
 - Tokens are for `https://<host>/api/mcp` only (RFC 8707). Used on `/api/v1` directly they are refused (401).
   They never get account powers: no tokens, export, deletion, sign-in or app management (403 even on the tools' own calls).
 - Only SHA-256 hashes are stored. Rate limits: `OAUTH_RATE_LIMIT` (120 a minute per IP) for authorize, token and revoke,
-  `OAUTH_REGISTER_RATE_LIMIT` (20) for registration, `OAUTH_CLIENT_CAP` (2000) registered clients.
+  `OAUTH_REGISTER_RATE_LIMIT` (20) for registration, `OAUTH_CLIENT_CAP` (2000) registered clients,
+  `OAUTH_CIMD_CAP` (5000) cached metadata documents, `OAUTH_FETCH_LIMIT` (60 a minute, all callers) metadata fetches.
 
 **Connected apps** (Account → Connected apps, or `GET /api/v1/me/apps`, `DELETE /api/v1/me/apps/{id}`): each app with its
 name, web address, what was allowed, when it connected and last acted. Disconnecting ends it at once. They are in the data

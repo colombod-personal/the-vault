@@ -235,7 +235,7 @@ def test_a_provider_sign_in_returns_to_the_pending_request(client, universe):
     back = client.browser.get(callback.url.replace(BASE, ""), follow_redirects=False)
     assert back.status_code == 303 and back.headers["location"].startswith("/oauth/authorize?")
     page = client.browser.get(back.headers["location"], follow_redirects=False)
-    assert "Connect Twin Agent to your Vault?" in page.text and "Ann" in page.text
+    assert "Connect Twin Agent (app.example) to your Vault?" in page.text and "Ann" in page.text
 
 
 def test_an_ordinary_sign_in_does_not_resume_an_old_request(client, universe):
@@ -298,11 +298,13 @@ def test_a_consent_form_posted_from_another_site_is_refused(client):
     assert res.status_code == 403
 
 
-def test_consent_expires(client, monkeypatch):
+def test_consent_expires(app, client):
+    from vault.models import OAuthConsent
+
     client.sign_in()
     page = client.authorize()
-    real = time.time
-    monkeypatch.setattr(time, "time", lambda: real() + 3600)
+    db_do(app, lambda db: (db.execute(update(OAuthConsent).values(expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))),
+                           db.commit()))
     assert client.answer(page).status_code == 400
 
 
@@ -782,3 +784,225 @@ def test_state_is_optional_but_echoed_when_present(client):
     client.sign_in()
     res = client.answer(client.authorize(state=None))
     assert "state" not in query(res) and query(res)["code"]
+
+
+# -- review fixes: redirect rebuilding, one-time consent, grant age, marker, races -------------
+
+BAD_LOOPBACK = [
+    "http://evil.com\\@127.0.0.1:9/cb", "http://evil.com%5c@127.0.0.1:9/cb", "http://evil.com%5C@127.0.0.1:9/cb",
+    "http://127.0.0.1:9/cb\t", "http://127.0.0.1:9/c\nb", "http://127.0.0.1:9/cb\r", "http://127.0.0.1:9/cb ",
+    "http://user@127.0.0.1:9/cb", "http://evil.com@127.0.0.1:9/cb", "http://127.0.0.1:9/cb#frag",
+    "http://127.0.0.1:9/cb%5c", "http://127.0.0.1:080/cb", "http://127.0.0.1:0/cb", "http://127.0.0.1:99999/cb",
+    "http://127.0.0.1:9/cb\u00e9", "http://127.0.0.1./cb", "http://127.1:9/cb", "http://0x7f.0.0.1:9/cb",
+    "http://[::ffff:127.0.0.1]:9/cb", "http://127.0.0.1:9\\@evil.com/cb", "http://127.0.0.1:9/cb?x=1",
+]
+
+
+@pytest.mark.parametrize("given", BAD_LOOPBACK)
+def test_loopback_redirects_are_checked_strictly_and_never_sent_as_given(make_client, given):
+    c = make_client(redirect_uris=("http://127.0.0.1:8080/cb",))
+    c.sign_in()
+    c.redirect_uri = given
+    res = c.authorize()
+    assert res.status_code == 400 and "location" not in res.headers
+
+
+@pytest.mark.parametrize("given", [
+    "http://[0:0:0:0:0:0:0:1]:9/cb", "http://[::1]./cb", "http://[::1]:9/other", "http://[::2]:9/cb", "http://[::1:9/cb",
+    "http://LOCALHOST:9/cb", "http://Localhost:9/cb", "http://localhost.:9/cb", "http://127.0.0.1:9/cb",
+])
+def test_other_loopback_spellings_are_refused(make_client, given):
+    c = make_client(redirect_uris=("http://localhost:8080/cb", "http://[::1]:8080/cb"))
+    c.sign_in()
+    c.redirect_uri = given
+    res = c.authorize()
+    assert res.status_code == 400 and "location" not in res.headers
+
+
+def test_a_good_loopback_redirect_is_sent_to_exactly_the_registered_host(make_client):
+    c = make_client(redirect_uris=("http://127.0.0.1:8080/cb?x=1", "http://[::1]:8080/cb", "http://localhost/cb"))
+    c.sign_in()
+    for given, netloc in (("http://127.0.0.1:9/cb?x=1", "127.0.0.1:9"), ("http://[::1]:5555/cb", "[::1]:5555"),
+                          ("http://localhost:7/cb", "localhost:7")):
+        c.redirect_uri = given
+        res = c.answer(c.authorize())
+        where = location(res)
+        assert (where.scheme, where.netloc) == ("http", netloc) and res.headers["location"].startswith(given.split("?")[0])
+        assert query(res)["code"]
+
+
+def test_the_review_exploit_string_is_refused():
+    from vault.oauth_clients import match_redirect, redirect_matches
+
+    assert not redirect_matches(["http://127.0.0.1:8080/cb"], "http://evil.com\\@127.0.0.1:9/cb")
+    assert match_redirect(["http://127.0.0.1:8080/cb"], "http://127.0.0.1:9/cb") == "http://127.0.0.1:9/cb"
+    assert match_redirect(["http://127.0.0.1:8080/cb"], "http://127.0.0.1:8080/cb") == "http://127.0.0.1:8080/cb"
+
+
+@pytest.mark.parametrize("given", BAD_LOOPBACK[:12] + ["http://127.0.0.1:8/cb", "http://127.0.0.1/cb"])
+def test_the_token_step_refuses_redirect_variants_too(make_client, given):
+    c = make_client(redirect_uris=("http://127.0.0.1:8080/cb",))
+    c.sign_in()
+    c.redirect_uri = "http://127.0.0.1:9/cb"
+    code = c.approve()["code"]
+    res = c.redeem(code, redirect_uri=given)
+    assert res.status_code == 400 and res.json()["error"] == "invalid_grant"
+
+
+def test_a_consent_cookie_and_form_cannot_be_replayed(app, client):
+    from vault.models import OAuthConsent
+
+    client.sign_in()
+    page = client.authorize()
+    nonce = client.nonce(page)
+    saved = dict(client.browser.cookies)
+    with app.state.db.sessions() as db:
+        [row] = list(db.scalars(select(OAuthConsent)))
+        assert row.nonce_hash != nonce and len(row.nonce_hash) == 64  # only a hash is stored
+    first = client.answer(page)
+    assert first.status_code == 303 and query(first)["code"]
+    replay = TestClient(app)
+    for k, v in saved.items():  # the copied cookie, from before the answer
+        replay.cookies.set(k, v)
+    res = replay.post("/oauth/authorize", data={"nonce": nonce, "decision": "allow"}, follow_redirects=False)
+    assert res.status_code == 400 and "location" not in res.headers
+    assert db_do(app, lambda db: db.scalar(select(OAuthConsent))) is None
+    assert db_do(app, lambda db: len(list(db.scalars(select(OAuthCode))))) == 1  # only the first answer made a code
+
+
+def test_racing_consent_answers_make_one_code(app, client):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    client.sign_in()
+    page = client.authorize()
+    nonce, saved = client.nonce(page), dict(client.browser.cookies)
+    barrier = threading.Barrier(2)
+
+    def answer():
+        c = TestClient(app)
+        for k, v in saved.items():
+            c.cookies.set(k, v)
+        barrier.wait()
+        return c.post("/oauth/authorize", data={"nonce": nonce, "decision": "allow"}, follow_redirects=False).status_code
+
+    with ThreadPoolExecutor(2) as pool:
+        statuses = sorted(f.result() for f in [pool.submit(answer), pool.submit(answer)])
+    assert statuses == [303, 400]
+    assert db_do(app, lambda db: len(list(db.scalars(select(OAuthCode))))) == 1
+
+
+def test_unanswered_consent_screens_are_capped_per_person(app, client):
+    from vault.models import OAuthConsent
+
+    client.sign_in()
+    for _ in range(9):
+        client.authorize()
+    assert db_do(app, lambda db: len(list(db.scalars(select(OAuthConsent))))) == oauth_server.MAX_PENDING_CONSENTS
+
+
+def test_a_code_that_fails_a_check_is_burnt(app, client):
+    client.sign_in()
+    code = client.approve()["code"]
+    assert client.redeem(code, code_verifier="v" * 50).status_code == 400
+    assert client.redeem(code).status_code == 400  # the right verifier no longer helps
+    assert grant_of(app) is None
+
+
+@pytest.mark.parametrize("round_", range(6))
+def test_two_parallel_redemptions_of_one_code(app, client, round_):
+    """Exactly one wins; the other is a replay, which revokes what the winner got."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    client.sign_in()
+    code = client.approve()["code"]
+    barrier = threading.Barrier(2)
+    form = client.token_form({"grant_type": "authorization_code", "code": code, "redirect_uri": client.redirect_uri,
+                              "code_verifier": client.verifier}, {})
+
+    def redeem():
+        c = TestClient(app)
+        barrier.wait()
+        return c.post("/oauth/token", data=form)
+
+    with ThreadPoolExecutor(2) as pool:
+        results = [f.result() for f in [pool.submit(redeem), pool.submit(redeem)]]
+    assert sorted(r.status_code for r in results) == [200, 400]
+    assert next(r for r in results if r.status_code == 400).json()["error"] == "invalid_grant"
+    winner = next(r for r in results if r.status_code == 200).json()
+    assert grant_of(app) is None  # the replay found the grant (same transaction as the claim) and revoked it
+    assert client.mcp("ping", token=winner["access_token"]).status_code == 401
+
+
+@pytest.mark.parametrize("round_", range(6))
+def test_two_parallel_refreshes_with_one_token(app, client, round_):
+    """Exactly one rotates the token. A loser that lost the swap is not treated as theft (it may be a
+    retry), one that arrives after the rotation is a reuse and revokes the grant; either way the old
+    token never works again, and the state is consistent."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    client.connect()
+    old = client.tokens["refresh_token"]
+    form = client.token_form({"grant_type": "refresh_token", "refresh_token": old}, {})
+    barrier = threading.Barrier(2)
+
+    def refresh():
+        c = TestClient(app)
+        barrier.wait()
+        return c.post("/oauth/token", data=form)
+
+    with ThreadPoolExecutor(2) as pool:
+        results = [f.result() for f in [pool.submit(refresh), pool.submit(refresh)]]
+    assert sorted(r.status_code for r in results) == [200, 400]
+    winner = next(r for r in results if r.status_code == 200).json()
+    alive = grant_of(app) is not None
+    assert (client.mcp("ping", token=winner["access_token"]).status_code == 200) is alive
+    assert client.refresh(old).status_code == 400  # the old token is dead for good
+    assert grant_of(app) is None  # and presenting it again is reuse: the grant is gone
+    assert client.mcp("ping", token=winner["access_token"]).status_code == 401
+
+
+def test_a_grant_has_an_absolute_maximum_age(app, client):
+    client.connect()
+    now = datetime.now(timezone.utc)
+    db_do(app, lambda db: (db.execute(update(OAuthGrant).values(created_at=now - timedelta(days=89))), db.commit()))
+    assert client.refresh().status_code == 200
+    grant = grant_of(app)
+    assert grant.refresh_expires <= grant.created_at + oauth_server.GRANT_MAX_AGE + timedelta(seconds=1)  # not a full 30 days
+    assert grant.refresh_expires < now + timedelta(days=2)
+    db_do(app, lambda db: (db.execute(update(OAuthGrant).values(created_at=now - timedelta(days=91))), db.commit()))
+    res = client.refresh()
+    assert res.status_code == 400 and res.json()["error"] == "invalid_grant" and grant_of(app) is None
+    assert oauth_server.GRANT_MAX_AGE == timedelta(days=90)
+
+
+def test_the_mcp_marker_only_applies_to_v1_paths(app, client):
+    import anyio
+
+    client.connect()
+    bearer = {"Authorization": f"Bearer {client.tokens['access_token']}"}
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_marked_as_mcp(app)), base_url=BASE) as c:
+            assert (await c.get(f"{V1}/collection", headers=bearer)).status_code == 200
+            # not a path the MCP tools build: the token is as good as unknown there (401, not the account 403)
+            for method, path in (("POST", "/api/auth/passkey/register/options"), ("POST", "/api/auth/logout"),
+                                 ("GET", "/oauth/authorize")):
+                res = await c.request(method, path, headers=bearer)
+                assert res.status_code != 200 or path != "/api/auth/passkey/register/options"
+            res = await c.post("/api/auth/passkey/register/options", headers=bearer)
+            assert res.status_code == 401
+
+    anyio.run(run)
+
+
+def test_sign_out_everywhere_is_browser_only_like_tokens_and_app_sessions(client):
+    """Found: 'sign out everywhere' rotates only the account's browser session key (docs/api.md: apps are
+    signed out under /me/sessions, tokens are revoked one by one). OAuth grants behave the same: their own
+    credentials, revoked under Connected apps. The 90 day grant age bounds how long one can last."""
+    client.sign_in()
+    client.connect()
+    client.browser.post("/api/auth/logout?everywhere=true")
+    assert client.mcp("ping").status_code == 200

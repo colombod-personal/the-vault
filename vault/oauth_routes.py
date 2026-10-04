@@ -42,7 +42,6 @@ PARAMS = ("response_type", "client_id", "redirect_uri", "state", "scope", "code_
           "code_challenge_method", "resource")
 MAX_QUERY = 2000  # the pending request lives in the session cookie
 MAX_STATE = 500
-CONSENT_SECONDS = 600
 REGISTER_MAX_BYTES = 8192
 CORS = {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, Authorization", "Access-Control-Max-Age": "3600"}
@@ -94,12 +93,15 @@ def parse_authorize(query: QueryParams, db: Session, fetcher: clients.ClientFetc
         raise PageError("This request repeats a parameter, so it can't be trusted.")
     get = lambda name: query.get(name) or None  # noqa: E731
     try:
-        client = clients.resolve_client(db, fetcher, get("client_id") or "", settings.oauth_client_cap)
+        limits = clients.Limits(settings.oauth_client_cap, settings.oauth_cimd_cap, settings.oauth_fetch_limit)
+        client = clients.resolve_client(db, fetcher, get("client_id") or "", limits)
     except clients.ClientError as exc:
-        raise PageError(exc.description) from None
+        raise PageError(exc.description, 503 if exc.code == "temporarily_unavailable" else 400) from None
     redirect_uri = get("redirect_uri")
-    if not redirect_uri or not clients.redirect_matches(client.redirect_uris, redirect_uri):
+    target = clients.match_redirect(client.redirect_uris, redirect_uri) if redirect_uri else None
+    if target is None:
         raise PageError("The app's redirect address is not one it registered, so the Vault won't send you there.")
+    redirect_uri = target  # what the browser is sent to is rebuilt from what was registered, never the raw input
     state = get("state")
     fail = lambda code, text: RedirectError(redirect_uri, state, code, text)  # noqa: E731
     if state is not None and len(state) > MAX_STATE:
@@ -169,10 +171,24 @@ def error_page(text: str, status: int = 400) -> HTMLResponse:
                 "<p class=small>Nothing was shared. Go back to the app and try again.</p>", status=status)
 
 
+def client_label(client: OAuthClient) -> str:
+    """The app as a title: a named app is always followed by the address that identifies it (a name
+    is whatever the app says; the address is what it is), and a self-registered app is called unverified."""
+    if client.kind == "cimd":
+        return f"{client.name} ({clients.display_host(urlsplit(client.client_id).hostname)[0]})"
+    return f"Unverified app: {client.name}"
+
+
 def who_is_asking(client: OAuthClient) -> str:
     if client.kind == "cimd":
-        return f"Identified by its web address <code>{esc(urlsplit(client.client_id).hostname)}</code>."
-    return "<strong>Unverified:</strong> this app registered itself, so the Vault can't confirm who made it."
+        readable, ascii_form = clients.display_host(urlsplit(client.client_id).hostname)
+        text = f"Identified by its web address <strong><code>{esc(readable)}</code></strong>."
+        if readable != ascii_form:
+            text += (f' <span class="warn">This address uses non-English letters; its technical form is '
+                     f"<code>{esc(ascii_form)}</code>. Check it carefully.</span>")
+        return text
+    return ('<span class="warn"><strong>Unverified app.</strong> It registered itself, so the Vault can\'t confirm who '
+            "made it or that its name is true. Continue only if you started this connection.</span>")
 
 
 def where_it_returns(redirect_uri: str) -> str:
@@ -190,7 +206,7 @@ def sign_in_page(req: AuthRequest, providers: list[str], passkeys: bool, dev_log
         buttons += '<button type="button" id="passkey">Sign in with a passkey</button>'
     if dev_login:
         buttons += '<button type="button" id="dev">Developer sign-in</button>'
-    body = (f"<h1>Sign in to connect {esc(req.client.name)}</h1><p>{who_is_asking(req.client)}</p>"
+    body = (f"<h1>Sign in to connect {esc(client_label(req.client))}</h1><p>{who_is_asking(req.client)}</p>"
             f"<p>Sign in to your Vault account to choose what it may do.</p><p>{buttons}</p>"
             '<p id="note" class="small" role="status"></p>'
             '<p class="small">New to the Vault? Create your account at <a href="/">the Vault</a> first, then connect again.</p>')
@@ -201,7 +217,7 @@ def consent_page(req: AuthRequest, user: User, nonce: str) -> HTMLResponse:
     write = ('<label><input type="checkbox" name="write" value="on"> <strong>Write.</strong> '
              f"{esc(SCOPE_TEXT['write'])}</label>") if "write" in req.scopes else ""
     never = "".join(f"<li>{esc(n)}</li>" for n in NEVER)
-    body = (f"<h1>Connect {esc(req.client.name)} to your Vault?</h1><p>{who_is_asking(req.client)}</p>"
+    body = (f"<h1>Connect {esc(client_label(req.client))} to your Vault?</h1><p>{who_is_asking(req.client)}</p>"
             f"{where_it_returns(req.redirect_uri)}"
             f'<p class=small>Signed in as <strong>{esc(user.name or user.email or "your account")}</strong>.</p>'
             '<form method="post" action="/oauth/authorize"><input type="hidden" name="nonce" value="' + esc(nonce) + '">'
@@ -293,7 +309,8 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
             return sign_in_page(req, auth.offered, _passkeys_on(), settings.dev_login)
         request.session.pop("oauth_pending", None)
         nonce = secrets.token_urlsafe(24)
-        request.session["oauth_consent"] = {"nonce": nonce, "q": raw, "uid": user.id, "exp": time.time() + CONSENT_SECONDS}
+        server.save_consent(db, user.id, nonce, raw)
+        request.session["oauth_consent"] = nonce  # the browser's half; the database holds the request, once
         return consent_page(req, user, nonce)
 
     def _passkeys_on() -> bool:
@@ -306,21 +323,24 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
                db: Session = Depends(get_db)):
         """The person's answer. The request being answered comes from the session, not the form, and
         the one-time nonce proves this form is the one we just showed this browser (CSRF)."""
-        consent = request.session.pop("oauth_consent", None)
+        mine = request.session.pop("oauth_consent", None)
         user = session_user(db, request)
-        if (not isinstance(consent, dict) or user is None or consent.get("uid") != user.id
-                or time.time() > consent.get("exp", 0) or not hmac.compare_digest(str(consent.get("nonce")), nonce)):
+        # Both halves must match (this browser's, and the form's), then the database row is consumed
+        # atomically: a copied cookie and form can not be played twice.
+        asked = (server.take_consent(db, user.id, nonce)
+                 if user is not None and isinstance(mine, str) and hmac.compare_digest(mine, nonce) else None)
+        if asked is None:
             return error_page("This page expired or was not made for this browser. Start again from the app.")
         try:
-            req = check(request, QueryParams(consent["q"]), db)
+            req = check(request, QueryParams(asked), db)
         except PageError as exc:
             return error_page(exc.text, exc.status)
         except RedirectError as exc:
             return redirect(exc.redirect_uri, {"error": exc.code, "state": exc.state}, settings)
         if decision == "switch":  # another account: sign out here, then sign in again
             request.session.clear()
-            request.session["oauth_pending"] = {"q": consent["q"], "t": int(time.time())}
-            return RedirectResponse("/oauth/authorize?" + consent["q"], status_code=303, headers=NO_STORE)
+            request.session["oauth_pending"] = {"q": asked, "t": int(time.time())}
+            return RedirectResponse("/oauth/authorize?" + asked, status_code=303, headers=NO_STORE)
         if decision != "allow":
             return redirect(req.redirect_uri, {"error": "access_denied", "state": req.state}, settings)
         granted = ["read"] + (["write"] if write == "on" and "write" in req.scopes else [])

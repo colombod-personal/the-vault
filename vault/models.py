@@ -292,6 +292,21 @@ class OAuthCode(Base):
     grant_id: Mapped[int | None] = mapped_column(Integer)  # the grant this code made (no FK: it may be revoked)
 
 
+class OAuthConsent(Base):
+    """A consent screen that was shown and not yet answered (10 minutes). The browser's session holds
+    only a random nonce; the answer must present it, and the row is consumed by one conditional DELETE,
+    so a copied cookie and form can not be replayed. ``query`` is the authorization request being
+    answered (no secrets)."""
+
+    __tablename__ = "oauth_consents"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    nonce_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    query: Mapped[str] = mapped_column(String(2000))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class NativeNonce(Base):
     """A one-time value already used, kept until it would expire anyway: a native sign-in's nonce
     (the same Apple / Google ID token can't sign in twice) or a Facebook data-deletion request

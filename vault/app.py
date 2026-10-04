@@ -148,7 +148,8 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
             if oauth_server.is_access_token(bearer):
                 # An OAuth access token is for the MCP server only (RFC 8707): /api/mcp and the calls
                 # it makes in-process for its tools. Anywhere else it is as good as unknown.
-                mcp_request = request.url.path == mcp.PATH or getattr(request.state, "via_mcp", False)
+                mcp_request = request.url.path == mcp.PATH or (
+                    getattr(request.state, "via_mcp", False) and request.url.path.startswith(mcp.V1 + "/"))
                 found = oauth_server.authenticate(session, bearer, resource) if mcp_request else None
                 user, request.state.scopes = found if found else (None, set())
             elif tokens.is_pat(bearer):

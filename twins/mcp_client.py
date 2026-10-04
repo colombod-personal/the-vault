@@ -32,7 +32,8 @@ HOSTS = {  # host -> the addresses its name resolves to
     GOOD_HOST: [PUBLIC], "other.example": [PUBLIC], "evil.example": [PUBLIC], "redirector.example": [PUBLIC],
     "big.example": [PUBLIC], "slow.example": [PUBLIC], "plain.example": [PUBLIC],
     "internal.example": ["10.0.0.5"], "metadata.example": ["169.254.169.254"], "loopback.example": ["127.0.0.1"],
-    "mixed.example": [PUBLIC, "10.0.0.8"], "mapped.example": ["::ffff:127.0.0.1"], "shared.example": ["100.64.0.9"],
+    "mixed.example": [PUBLIC, "10.0.0.8"], "mapped.example": ["::ffff:127.0.0.1"],
+    "аpple.example": [PUBLIC], "shared.example": ["100.64.0.9"],  # (a Cyrillic "a": looks like apple.example)
 }
 
 
@@ -52,6 +53,10 @@ class ClientHostTwin(Twin):
 
     def resolve(self, host: str) -> list[str]:
         """DNS for the universe: a known name's addresses, or a failure like an unknown name."""
+        try:  # the punycode form and the Unicode form are one name
+            host = host.encode("ascii").decode("idna")
+        except UnicodeError:
+            pass
         if host not in HOSTS:
             raise OSError(f"Name or service not known: {host}")
         return list(HOSTS[host])

@@ -21,7 +21,8 @@ BASE = "http://testserver"
 @pytest.fixture
 def settings(database_url):
     return Settings(database_url=database_url, session_secret="test", dev_login=True, base_url=BASE,
-                    oauth_rate_limit=1000, oauth_register_rate_limit=1000, oauth_client_cap=5)
+                    oauth_rate_limit=1000, oauth_register_rate_limit=1000, oauth_client_cap=5, oauth_cimd_cap=5,
+                    oauth_fetch_limit=1000)
 
 
 @pytest.fixture
@@ -278,11 +279,12 @@ def test_proxies_from_the_environment_are_ignored(monkeypatch):
     assert seen  # went through the given transport, not the proxy
 
 
-def test_the_registry_is_capped(app, universe, browser):
+def test_the_cache_is_capped_by_dropping_the_oldest_unused(app, universe, browser):
     for i in range(5):
         start(browser, universe.client_hosts.publish(GOOD_HOST, f"/c{i}.json"))
     _, res = start(browser, universe.client_hosts.publish(GOOD_HOST, "/c-extra.json"))
-    assert res.status_code == 400 and "Too many" in res.text
+    assert res.status_code == 200 and len(clients_of(app)) == 5
+    assert "https://app.example/c0.json" not in [c.client_id for c in clients_of(app)]
 
 
 def test_clients_that_expired_unused_make_room(app, universe, browser):
@@ -386,3 +388,126 @@ def test_registration_can_be_called_from_a_browser_app_on_another_site(app, brow
     token = browser.post("/oauth/token", data={"grant_type": "refresh_token", "client_id": "x"},
                          headers={"Origin": "https://some-mcp-client.example"})
     assert token.status_code == 400  # not the cross-site 403: the token endpoint takes no cookies
+
+
+# -- review fixes: names and addresses, caps, budgets, races ------------------------------------
+
+def test_a_named_app_is_shown_with_its_address_next_to_the_name(app, universe, browser):
+    url = universe.client_hosts.publish(GOOD_HOST)
+    _, page = start(browser, url)
+    assert "Connect Twin Agent (app.example) to your Vault?" in page.text
+    assert 'name="write"' not in page.text or 'checked' not in page.text.split('name="write"')[1].split(">")[0]
+
+
+def test_a_look_alike_address_shows_its_technical_form(app, universe, browser):
+    host = "xn--pple-43d.example"  # the Cyrillic a followed by "pple"
+    url = universe.client_hosts.publish("аpple.example", name="Apple Sync")
+    _, page = start(browser, url)
+    assert page.status_code == 200
+    assert "\u0430pple.example" in page.text and host in page.text and "non-English letters" in page.text
+    assert "Connect Apple Sync (\u0430pple.example)" in page.text
+    assert oc.display_host("xn--pple-43d.example") == ("\u0430pple.example", "xn--pple-43d.example")
+    assert oc.display_host("app.example") == ("app.example", "app.example")
+    assert oc.display_host("\u0430pple.example")[1] == "xn--pple-43d.example"
+
+
+def test_a_self_registered_app_is_titled_unverified_and_write_stays_unticked(app, browser):
+    client_id = register(browser, client_name="Totally Official Anthropic").json()["client_id"]
+    c, page = start(browser, client_id, scope="read write")
+    assert "Connect Unverified app: Totally Official Anthropic to your Vault?" in page.text
+    assert "Unverified app." in page.text and "can't confirm who" in page.text
+    assert 'name="write"' in page.text and "checked" not in page.text.split('name="write"')[1].split(">")[0]
+    sign_in = TestClient(app).get("/oauth/authorize?" + "&".join(f"{k}={v}" for k, v in c.authorize_params().items()
+                                                              if k != "redirect_uri") + "&redirect_uri=https%3A%2F%2Fapp.example%2Fcallback")
+    assert "Sign in to connect Unverified app: Totally Official Anthropic" in sign_in.text
+
+
+def test_the_metadata_fetch_does_not_hold_a_database_connection(app, universe, browser):
+    held = []
+    pool = app.state.db.engine.pool
+
+    def handler(request):
+        held.append(pool.checkedout())
+        return json_response(200, {"client_id": "https://app.example/oauth/c.json", "client_name": "X",
+                                   "redirect_uris": ["https://app.example/callback"]})
+
+    url = universe.client_hosts.serve(GOOD_HOST, "/oauth/c.json", handler)
+    assert start(browser, url)[1].status_code == 200
+    assert held == [0]  # the request's session had given its connection back while waiting for the stranger's server
+
+
+def test_two_first_fetches_of_one_url_at_once_do_not_fail(app):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    barrier = threading.Barrier(2, timeout=10)
+    url = "https://app.example/oauth/client.json"
+
+    def handler(request):
+        barrier.wait()  # both are fetching before either has saved
+        return json_response(200, {"client_id": url, "client_name": "Racer", "redirect_uris": ["https://app.example/cb"]})
+
+    fetcher = oc.ClientFetcher(httpx.MockTransport(handler), lambda host: [PUBLIC])
+
+    def resolve():
+        with app.state.db.sessions() as db:
+            return oc.resolve_client(db, fetcher, url).name
+
+    with ThreadPoolExecutor(2) as pool:
+        assert [f.result() for f in [pool.submit(resolve), pool.submit(resolve)]] == ["Racer", "Racer"]
+    assert len(clients_of(app)) == 1
+
+
+def test_cached_documents_and_registrations_have_separate_caps(app, universe, browser):
+    for _ in range(5):
+        assert register(browser).status_code == 201  # the registration cap (5) is full
+    for i in range(5):
+        assert start(browser, universe.client_hosts.publish(GOOD_HOST, f"/c{i}.json"))[1].status_code == 200
+    assert register(browser).status_code == 503  # still full
+    # cached documents are at their own cap: the oldest unused are dropped to make room
+    assert start(browser, universe.client_hosts.publish(GOOD_HOST, "/new.json"))[1].status_code == 200
+    kinds = [c.kind for c in clients_of(app)]
+    assert kinds.count("dcr") == 5 and kinds.count("cimd") == 5
+
+
+def test_documents_in_use_are_not_evicted(app, universe, browser):
+    first = universe.client_hosts.publish(GOOD_HOST, "/used.json")
+    c, page = start(browser, first)
+    assert c.redeem(query_code(c, page)).status_code == 200  # a grant now uses it
+    for i in range(6):
+        start(browser, universe.client_hosts.publish(GOOD_HOST, f"/c{i}.json"))
+    assert first in [c.client_id for c in clients_of(app)]
+
+
+def query_code(c, page):
+    from urllib.parse import parse_qs, urlsplit
+
+    res = c.answer(page)
+    return parse_qs(urlsplit(res.headers["location"]).query)["code"][0]
+
+
+def test_metadata_fetches_are_limited_for_everyone_together(database_url, universe):
+    settings = Settings(database_url=database_url, session_secret="test", dev_login=True, base_url=BASE,
+                        oauth_rate_limit=1000, oauth_fetch_limit=2)
+    app = create_app(settings, serve_static=False, transport=universe.transport, resolver=universe.resolve)
+    try:
+        urls = [universe.client_hosts.publish(GOOD_HOST, f"/c{i}.json") for i in range(3)]
+        statuses = []
+        for url in urls:  # a fresh browser (and so no shared state) each time: only the global budget is common
+            c = TestClient(app)
+            statuses.append(c.get("/oauth/authorize", params=McpClient(lambda: c, url).authorize_params()).status_code)
+        assert statuses[:2] == [200, 200] and statuses[2] == 503
+        assert TestClient(app).get("/oauth/authorize", params=McpClient(lambda: c, urls[0]).authorize_params()).status_code == 200  # cached: free
+    finally:
+        app.state.db.engine.dispose()
+
+
+def test_only_a_few_fetches_run_at_once():
+    fetcher = oc.ClientFetcher(httpx.MockTransport(lambda r: pytest.fail("fetched")), lambda host: [PUBLIC])
+    held = [fetcher._slots.acquire(blocking=False) for _ in range(oc.MAX_CONCURRENT_FETCHES)]
+    assert all(held)
+    with pytest.raises(oc.ClientError) as err:
+        fetcher.fetch("https://app.example/c.json")
+    assert err.value.code == "temporarily_unavailable"
+    for _ in held:
+        fetcher._slots.release()

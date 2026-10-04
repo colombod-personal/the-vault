@@ -18,21 +18,26 @@ whose port may differ. Anything else must be https.
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import logging
 import re
 import secrets
 import socket
+import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
 import httpx
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .models import OAuthClient, OAuthGrant
+from .ratelimit import hit
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +49,7 @@ USED_TTL = timedelta(days=90)
 MAX_REDIRECT_URIS = 10
 MAX_URL = 512
 MAX_NAME = 80
+MAX_CONCURRENT_FETCHES = 8  # per process: a flood of metadata URLs can not tie up every worker
 LOOPBACK_HOSTS = ("127.0.0.1", "[::1]", "localhost")
 LOOPBACK_NAMES = ("127.0.0.1", "::1", "localhost")
 
@@ -83,7 +89,8 @@ def is_loopback(uri: str) -> bool:
 def valid_redirect_uri(uri) -> bool:
     """https, or http to the loopback interface (a desktop app listening on a port). No
     fragments, no credentials, no control characters, no custom schemes."""
-    if not isinstance(uri, str) or not uri or len(uri) > 2000 or re.search(r"[\x00-\x20\x7f\\]", uri):
+    if (not isinstance(uri, str) or not uri or len(uri) > 2000 or not uri.isascii() or "%5c" in uri.lower()
+            or re.search(r"[\x00-\x20\x7f\\]", uri)):
         return False
     parts = _parts(uri)
     if parts is None or parts.fragment or parts.username or parts.password or not parts.hostname:
@@ -92,21 +99,53 @@ def valid_redirect_uri(uri) -> bool:
         parts.port  # noqa: B018  (raises ValueError for a bad port)
     except ValueError:
         return False
-    return parts.scheme == "https" or is_loopback(uri)
+    return (parts.scheme == "https" or is_loopback(uri)) and "@" not in parts.netloc
+
+
+def match_redirect(registered: list[str], given: str) -> str | None:
+    """The address to send the browser to for a requested ``redirect_uri``, or None.
+
+    The requested string is validated strictly first (:func:`valid_redirect_uri`: no backslash,
+    control characters, userinfo, fragment or encoded backslash), because different parsers read a
+    sloppy string differently, and a browser may go somewhere this parser did not see. Then it must
+    equal a registered URI exactly. For a loopback URI (RFC 8252) only the port may differ: the
+    target is **rebuilt from the registered scheme, host, path and query plus the requested port**,
+    and the request is refused unless it is exactly that rebuilt string, so what is checked is
+    what is used."""
+    if not valid_redirect_uri(given):
+        return None
+    if given in registered:
+        return given
+    if not is_loopback(given):
+        return None
+    wanted = _parts(given)
+    for uri in registered:
+        known = _parts(uri)
+        if known and is_loopback(uri) and known.hostname == wanted.hostname and (known.path, known.query) == (wanted.path, wanted.query):
+            host = f"[{known.hostname}]" if ":" in known.hostname else known.hostname
+            port = f":{wanted.port}" if wanted.port else ""
+            target = f"{known.scheme}://{host}{port}{known.path}" + (f"?{known.query}" if known.query else "")
+            if target == given:
+                return target
+    return None
 
 
 def redirect_matches(registered: list[str], given: str) -> bool:
-    """Exact match; for a loopback URI the port may differ (RFC 8252 section 7.3)."""
-    if given in registered:
-        return True
-    if not is_loopback(given):
-        return False
-    g = _parts(given)
-    for uri in registered:
-        r = _parts(uri)
-        if r and is_loopback(uri) and (r.hostname, r.path, r.query) == (g.hostname, g.path, g.query):
-            return True
-    return False
+    return match_redirect(registered, given) is not None
+
+
+def display_host(host: str) -> tuple[str, str]:
+    """(Unicode form, ASCII/punycode form) of a host name, so an address that only looks like
+    another one (a homograph) shows its technical form next to the readable one."""
+    try:
+        ascii_form = host.encode("idna").decode("ascii")
+    except UnicodeError:
+        ascii_form = host
+    try:
+        readable = ascii_form.encode("ascii").decode("idna")
+    except UnicodeError:
+        readable = ascii_form
+    return readable, ascii_form
 
 
 def clean_name(value) -> str:
@@ -188,6 +227,7 @@ class ClientFetcher:
         self.pin = transport is None if pin is None else pin
         self.seconds = seconds
         self.max_bytes = max_bytes
+        self._slots = threading.BoundedSemaphore(MAX_CONCURRENT_FETCHES)
 
     def addresses(self, host: str) -> list[str]:
         try:
@@ -202,6 +242,14 @@ class ClientFetcher:
     def fetch(self, url: str) -> dict:
         host = check_client_id_url(url)
         found = self.addresses(host)
+        if not self._slots.acquire(blocking=False):
+            raise ClientError("temporarily_unavailable", "Too many apps are being checked right now; try again in a moment")
+        try:
+            return self._fetch_pinned(url, host, found)
+        finally:
+            self._slots.release()
+
+    def _fetch_pinned(self, url: str, host: str, found: list[str]) -> dict:
         deadline = time.monotonic() + self.seconds
         for address in (found if self.pin else [None]):
             try:
@@ -255,35 +303,75 @@ def parse_document(url: str, doc) -> tuple[str, list[str]]:
 
 # -- registry --------------------------------------------------------------------------------
 
-def _make_room(db: Session, cap: int) -> None:
-    """Forget clients nobody used in time (and no grant uses), and refuse new ones past ``cap``."""
+@dataclass(frozen=True)
+class Limits:
+    """Caps on what anonymous requests can make the Vault store or fetch."""
+
+    dcr_cap: int = 2000  # registered clients
+    cimd_cap: int = 5000  # cached metadata documents
+    fetch_per_minute: int = 60  # metadata fetches, all callers together
+
+
+def _make_room(db: Session, cap: int, kind: str) -> None:
+    """Forget clients nobody used in time (and no grant uses), and refuse a new ``kind`` of client past
+    ``cap``. Registrations and cached documents are counted apart, so neither can crowd out the other;
+    at the cap, the oldest unused cached documents are dropped first (they are fetched again when used)."""
     in_use = select(OAuthGrant.client_id)
     db.execute(delete(OAuthClient).where(OAuthClient.expires_at < _now(), OAuthClient.client_id.not_in(in_use)))
-    if db.scalar(select(func.count(OAuthClient.id))) >= cap:
+    count = lambda: db.scalar(select(func.count(OAuthClient.id)).where(OAuthClient.kind == kind))  # noqa: E731
+    if count() >= cap and kind == "cimd":
+        oldest = (select(OAuthClient.id).where(OAuthClient.kind == "cimd", OAuthClient.client_id.not_in(in_use))
+                  .order_by(OAuthClient.fetched_at).limit(max(1, cap // 10)))
+        db.execute(delete(OAuthClient).where(OAuthClient.id.in_(oldest)))
+    if count() >= cap:
         raise ClientError("temporarily_unavailable", "Too many clients are registered; try again later")
 
 
-def _cimd_client(db: Session, fetcher: ClientFetcher, client_id: str, cap: int) -> OAuthClient:
+def _spend_fetch_budget(db: Session, per_minute: int) -> None:
+    """One fetch of a stranger's URL, counted for everyone together (the per-IP limits can't stop many
+    addresses at once)."""
+    key = hashlib.sha256(b"oauth-metadata-fetch").hexdigest()
+    used = hit(db, key, int(time.time() // 60))
+    db.commit()
+    if used > per_minute:
+        raise ClientError("temporarily_unavailable", "Too many apps are being checked right now; try again in a minute")
+
+
+def _store_cimd(db: Session, client_id: str, name: str, uris: list[str], cap: int) -> OAuthClient:
+    """Save a fetched document. Two first fetches of one URL at once both reach the insert: the
+    unique index lets one win, and the other updates the winner's row."""
+    for _ in range(2):
+        row = db.scalar(select(OAuthClient).where(OAuthClient.client_id == client_id))
+        try:
+            if row is None:
+                _make_room(db, cap, "cimd")
+                row = OAuthClient(client_id=client_id, kind="cimd")
+                db.add(row)
+            row.name, row.redirect_uris, row.fetched_at, row.expires_at = name, uris, _now(), _now() + UNUSED_TTL
+            db.commit()
+            return row
+        except IntegrityError:
+            db.rollback()
+    raise ClientError("temporarily_unavailable", "Could not save the app's details; try again")
+
+
+def _cimd_client(db: Session, fetcher: ClientFetcher, client_id: str, limits: Limits) -> OAuthClient:
     row = db.scalar(select(OAuthClient).where(OAuthClient.client_id == client_id))
     if row is not None and row.kind == "cimd" and row.fetched_at and _now() - _aware(row.fetched_at) < CACHE_TTL:
         return row
+    db.commit()  # end the read transaction: the connection goes back to the pool while a stranger's server answers
+    _spend_fetch_budget(db, limits.fetch_per_minute)
     name, uris = parse_document(client_id, fetcher.fetch(client_id))
-    if row is None:
-        _make_room(db, cap)
-        row = OAuthClient(client_id=client_id, kind="cimd")
-        db.add(row)
-    row.name, row.redirect_uris, row.fetched_at, row.expires_at = name, uris, _now(), _now() + UNUSED_TTL
-    db.commit()
-    return row
+    return _store_cimd(db, client_id, name, uris, limits.cimd_cap)
 
 
-def resolve_client(db: Session, fetcher: ClientFetcher, client_id: str, cap: int = 2000) -> OAuthClient:
+def resolve_client(db: Session, fetcher: ClientFetcher, client_id: str, limits: Limits = Limits()) -> OAuthClient:
     """The client for a ``client_id``: a metadata document URL (fetched, cached an hour) or a
     registered id. Unknown ids and ids that are neither answer the same ``invalid_client``."""
     if not client_id or len(client_id) > MAX_URL:
         raise ClientError("invalid_client", "Unknown client_id")
     if is_metadata_client_id(client_id):
-        return _cimd_client(db, fetcher, client_id, cap)
+        return _cimd_client(db, fetcher, client_id, limits)
     row = db.scalar(select(OAuthClient).where(OAuthClient.client_id == client_id, OAuthClient.kind == "dcr"))
     if row is None or (row.expires_at and _aware(row.expires_at) < _now()):
         raise ClientError("invalid_client", "Unknown client_id")
@@ -315,7 +403,7 @@ def register(db: Session, body, cap: int) -> dict:
     if body.get("response_types", ["code"]) != ["code"]:
         raise ClientError("invalid_client_metadata", "response_types must be [\"code\"]")
     name = clean_name(body.get("client_name")) or "Unnamed app"
-    _make_room(db, cap)
+    _make_room(db, cap, "dcr")
     client = OAuthClient(client_id="vault_client_" + secrets.token_urlsafe(24), kind="dcr", name=name,
                          redirect_uris=uris, expires_at=_now() + UNUSED_TTL)
     db.add(client)
