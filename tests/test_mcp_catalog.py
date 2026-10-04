@@ -60,7 +60,7 @@ def test_every_tool_is_classified_for_provenance():
 def test_the_catalog_tools_are_listed_and_read_only(agent, bot):
     read = make_token(agent)
     tools = {t["name"]: t for t in rpc(bot, "tools/list", token=read).json()["result"]["tools"]}
-    for name in ("whoami", "get_card_oracle", "get_rulings", "search_rules", "get_rule", "verify_citation", "deck_stats",
+    for name in ("whoami", "get_card_oracle", "get_rulings", "search_rules", "get_rule", "verify_citation", "present_steps", "deck_stats",
                  "deck_legality", "find_upgrades", "validate_deck_changes", "shopping_list"):
         assert name in tools and tools[name]["annotations"]["readOnlyHint"] is True, name
 
@@ -69,6 +69,7 @@ SAMPLE_ARGS = {
     "whoami": {}, "get_card_oracle": {"name": "Lightning Bolt"}, "get_rulings": {"oracle_id": BOLT},
     "search_rules": {"query": "sample rule"}, "get_rule": {"number": "100.1"},
     "verify_citation": {"kind": "rule", "ref": "100.1", "quote": "First sample rule."},
+    "present_steps": {"steps": [{"text": "A thing happens.", "rules": ["100.1", "999.9"]}]},
     "deck_stats": {"text": VALID}, "deck_legality": {"text": VALID, "format": "commander"},
     "find_upgrades": {"text": VALID, "format": "commander", "budget_usd": 5, "roles": ["ramp"]},
     "validate_deck_changes": {"text": VALID, "format": "commander", "adds": ["Cheap Ramp"], "cuts": ["Dull Bear"], "budget_usd": 1},

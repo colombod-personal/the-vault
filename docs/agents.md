@@ -119,3 +119,5 @@ rate-limited per IP; MCP always needs a token for now. `CATALOG_RATE_LIMIT` (def
 Tools that return Scryfall or Archidekt data they did not compute (collection and deck tools) get a
 `provenance` block added by the MCP layer. A test fails for any tool that is in neither the "Scryfall data"
 nor the "own data only" group (`vault/api/mcp.py`).
+
+MCP Apps: five tools also have an interactive view shown inside hosts that support it (docs/mcp-apps.md); other hosts show the same information as text.

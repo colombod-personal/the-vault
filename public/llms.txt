@@ -23,7 +23,7 @@ read-write, and it expires.
     `get_shared_deck`
   - connection check: `whoami` (who you are, your scopes, and which data versions the Vault holds)
   - rules and cards, from the Comprehensive Rules and Oracle data: `get_card_oracle`, `get_rulings`,
-    `search_rules`, `get_rule`, `verify_citation`
+    `search_rules`, `get_rule`, `verify_citation`, `present_steps`
   - deck analysis, computed by the Vault: `deck_stats`, `deck_legality`, `find_upgrades`,
     `validate_deck_changes`, `find_combos`, `shopping_list`
 - MCP prompts (`prompts/list`): `rules_judge`, `explain_interaction`, `upgrade_deck`, `shopping_help`.
