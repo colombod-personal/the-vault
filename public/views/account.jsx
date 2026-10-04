@@ -476,7 +476,7 @@ function VaultFooter() {
   const style = { color: 'var(--gold)', textDecoration: 'underline', textUnderlineOffset: 2 };
   const link = (href, label) => <a href={href} target="_blank" rel="noopener noreferrer" style={style}>{label}</a>;
   return (
-    <footer className="vault-footer" style={{ margin: '48px 24px 24px', paddingTop: 16, borderTop: '1px solid var(--border)',
+    <footer className="vault-footer" style={{ margin: '48px max(24px, env(safe-area-inset-right)) 24px max(24px, env(safe-area-inset-left))', paddingTop: 16, borderTop: '1px solid var(--border)',
       fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.7, color: 'var(--muted)' }}>
       <p>
         Card data, images &amp; prices from {link('https://scryfall.com', 'Scryfall')} (prices sourced by Scryfall from{' '}

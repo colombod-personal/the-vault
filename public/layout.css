@@ -9,6 +9,13 @@ button.brand:focus-visible, .nav button:focus-visible { outline: 1px solid var(-
 /* Grid items may shrink below their content's width, so one wide row can't widen the page. */
 .app > * { min-width: 0; }
 
+/* Notched phones in landscape (812px and wider): viewport-fit=cover lets the page run under the
+   side cutouts, so the edges keep clear of them. env() is 0 everywhere else, so these resolve to
+   the usual paddings. */
+.topbar { padding-left: max(28px, env(safe-area-inset-left)); padding-right: max(28px, env(safe-area-inset-right)); }
+main { padding-left: max(28px, env(safe-area-inset-left)); padding-right: max(28px, env(safe-area-inset-right)); }
+.drawer { padding-right: max(28px, env(safe-area-inset-right)); }
+
 @media (max-width: 760px) {
   /* Logo and account on the first row; the sections on their own row, scrolling sideways. */
   .topbar { flex-wrap: wrap; gap: 8px 16px; padding: 10px 16px 0; }
@@ -119,7 +126,7 @@ button.brand:focus-visible, .nav button:focus-visible { outline: 1px solid var(-
 .drawer { padding-top: 0; }
 .drawer .drawer-bar {
   position: sticky; top: 0; z-index: 5; display: flex; justify-content: flex-end; align-items: center;
-  height: 60px; margin: 0 -28px 4px; padding: 0 12px;
+  height: 60px; margin: 0 calc(-1 * max(28px, env(safe-area-inset-right))) 4px -28px; padding: 0 12px;
   background: linear-gradient(var(--bg-2) 70%, transparent);
 }
 .drawer .drawer-bar .close {
@@ -168,6 +175,7 @@ html, body { max-width: 100%; overflow-x: clip; }
      (which then sits on the top bar instead of the bottom of the screen). */
   .topbar {
     flex-wrap: nowrap; gap: 8px; padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top));
+    padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right));
     backdrop-filter: none; -webkit-backdrop-filter: none; background: oklch(0.20 0.014 65 / 0.97);
   }
   .brand .title { font-size: 19px; }
@@ -175,7 +183,7 @@ html, body { max-width: 100%; overflow-x: clip; }
   .nav {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
     display: grid; grid-template-columns: repeat(6, 1fr); gap: 0;
-    margin: 0; padding: 0 0 env(safe-area-inset-bottom);
+    margin: 0; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
     background: oklch(0.18 0.013 65 / 0.94); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
     border-top: 1px solid var(--border);
     overflow: visible; -webkit-mask-image: none; mask-image: none;
@@ -194,8 +202,9 @@ html, body { max-width: 100%; overflow-x: clip; }
   .nav button:nth-child(5)::before { content: '✦'; }
   .nav button:nth-child(6)::before { content: '◎'; }
   .nav button.active { color: var(--gold); border-top-color: var(--gold); background: oklch(0.78 0.13 80 / 0.06); }
-  /* Room under the content for the tab bar. */
-  main { padding: 14px 12px calc(84px + env(safe-area-inset-bottom)); }
+  main { padding: 14px max(12px, env(safe-area-inset-right)) 24px max(12px, env(safe-area-inset-left)); }
+  /* Room for the tab bar after the last thing on the page (the footer). */
+  .app.with-tabs { padding-bottom: calc(60px + env(safe-area-inset-bottom)); }
 
   /* Account actions: compact, one row with the logo. */
   .acct-menu { gap: 6px !important; min-width: 0; }
@@ -250,7 +259,7 @@ html, body { max-width: 100%; overflow-x: clip; }
   .btn { min-height: 36px; }
   .btn.sm, .btn.xs { min-height: 34px; padding: 6px 10px; }
   .chip { min-height: 34px; padding: 6px 12px; font-size: 10.5px; }
-  .input, .select { min-height: 42px; font-size: 16px; } /* 16px stops iOS zooming into a focused field */
+  .input, .select { min-height: 42px; font-size: 16px !important; } /* 16px stops iOS zooming into a focused field */
   .pip { min-width: 28px; min-height: 28px; }
   .row { flex-wrap: wrap; }
 

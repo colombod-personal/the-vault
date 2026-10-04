@@ -400,7 +400,7 @@ function App() {
     );
   } else {
     body = (
-      <div className="app">
+      <div className="app with-tabs">
         <header className="topbar">
           <button className="brand" onClick={() => nav('dashboard')} aria-label="The Vault: home">
             <span className="mark"><span>V</span></span>
