@@ -22,6 +22,22 @@ function coverageFor(cards, lines) {
   return cards.map((c) => byName[nameKey(c.name)] || null);
 }
 
+// A card listed more than once (two printings of a land, say) as one line: the server counts what
+// you own by name. When the rows name different printings, the line names none, so it's priced by
+// name rather than as the first row's printing.
+function mergeDeckCards(cards) {
+  const merged = [], at = {};
+  for (const c of cards) {
+    const k = nameKey(c.name);
+    if (!(k in at)) { at[k] = merged.length; merged.push({ ...c }); continue; }
+    const m = merged[at[k]];
+    const same = (m.set || '') === (c.set || '') && String(m.collector_number || '') === String(c.collector_number || '');
+    merged[at[k]] = { ...m, qty: m.qty + c.qty, ...(same ? {} : { set: '', collector_number: '' }),
+      categories: [...new Set([...(m.categories || []), ...(c.categories || [])])] };
+  }
+  return merged;
+}
+
 // How much of a deck you own, from the server's coverage lines.
 function coverageSummary(cov) {
   let need = 0, have = 0, missingCards = 0;
@@ -152,7 +168,7 @@ function DeckLibrary({ myDecks, onOpen }) {
                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 12 }}>
                        <span><strong>{Math.round(c.pct * 100)}%</strong> <span className="muted">owned · {c.have}/{c.need}</span></span>
                        <span style={{ color: c.missingCards ? 'var(--gold)' : 'var(--good)' }}>
-                         {c.missingCards ? `${c.missingCards} missing · ${c.unpriced ? '≥ ' : ''}${money(c.cost)}` : 'complete'}
+                         {c.missingCards ? `${c.missingCards} missing` + (c.cost ? ` · ${c.unpriced ? '≥ ' : ''}${money(c.cost)}` : '') : 'complete'}
                        </span>
                      </div>
                    </>
@@ -197,13 +213,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
         if (source.saved) d = { ...d, title: source.saved.name };
       }
       if (!d.cards.length) throw new Error('No cards found. Use "4 Card Name" per line.');
-      // A card listed more than once (two printings of a land, say) is one line.
-      const merged = [], at = {};
-      for (const c of d.cards) {
-        const k = nameKey(c.name);
-        if (k in at) merged[at[k]] = { ...merged[at[k]], qty: merged[at[k]].qty + c.qty };
-        else { at[k] = merged.length; merged.push({ ...c }); }
-      }
+      const merged = mergeDeckCards(d.cards);
       d = { ...d, cards: merged };
       setDeck(d);
       setFormat((f) => f || (merged.some(isCommander) || merged.reduce((n, c) => n + c.qty, 0) >= 99 ? 'commander' : 'standard'));
@@ -300,7 +310,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
           <CoverageDonut summary={summary} size={84} />
           <div><p className="label-mono">Owned</p><p className="deck-big" style={{ color: 'var(--good)' }}>{summary.ownedQty}<span className="muted" style={{ fontSize: 15 }}>/{summary.total}</span></p></div>
           <div><p className="label-mono">Missing</p><p className="deck-big" style={{ color: summary.missingQty ? 'var(--danger)' : 'var(--good)' }}>{summary.missingQty}</p></div>
-          <div><p className="label-mono">To finish</p><p className="deck-big" style={{ color: 'var(--gold)' }}>{summary.unpricedQty ? '≥ ' : ''}{money(summary.missingCost)}</p>
+          <div><p className="label-mono">To finish</p><p className="deck-big" style={{ color: 'var(--gold)' }}>{summary.missingQty && !summary.missingCost && summary.unpricedQty ? 'no price' : (summary.unpricedQty ? '≥ ' : '') + money(summary.missingCost)}</p>
             {summary.unpricedQty > 0 && <p className="muted" style={{ fontSize: 10, fontFamily: 'var(--mono)' }}>{summary.unpricedQty} without a price</p>}</div>
         </div>
       )}

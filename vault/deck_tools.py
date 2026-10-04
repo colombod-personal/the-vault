@@ -77,7 +77,7 @@ def loose_name(name: str) -> str:
     accents, case, punctuation and spaces ("Lim-Dûl's Vault" and "Lim-Dul's Vault" both become
     "limdulsvault"). For pointing out near matches, never for counting a card as owned."""
     front = name.split(" // ")[0].strip()
-    front = re.sub(r"^A-(?=\S)", "", front)
+    front = re.sub(r"^a-(?=\S)", "", front, flags=re.IGNORECASE)
     ascii_name = unicodedata.normalize("NFKD", front).encode("ascii", "ignore").decode()
     return re.sub(r"[^a-z0-9]", "", ascii_name.lower())
 

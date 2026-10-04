@@ -116,8 +116,9 @@ function GraphView({ data, openCard }) {
   // From the URL box, or a saved deck: its link when it has one (the deck as it is now), else its saved list.
   async function loadDeck(saved) {
     try {
-      const d = saved && !saved.source_url ? await window.DeckSrc.parseText(saved.text)
+      let d = saved && !saved.source_url ? await window.DeckSrc.parseText(saved.text)
         : await window.DeckSrc.fetchUrl((saved ? saved.source_url : deckUrl).trim());
+      d.cards = mergeDeckCards(d.cards); // one line per card, as on the Decks page
       // What you own of it comes from the server's coverage; colours from the cards' data.
       const [cov, scry] = await Promise.all([
         window.VaultApi.deckCoverage(deckListText(d.cards)),

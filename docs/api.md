@@ -193,7 +193,7 @@ ignored and the connection's address is used.
 | POST / GET | `/api/v1/imports` | upload a Dragon Shield, Moxfield or generic CSV, detected from the header (multipart `file`, 201; the import's `source` says which; 409 if another import of the collection finished while this one ran) / list imports with changes |
 | GET | `/api/v1/imports/{id}` | one import |
 | POST | `/api/v1/decks/parse` | parse a pasted decklist |
-| POST | `/api/v1/decks/coverage` | owned / partial / missing per card, with `unit_price` (the cheapest known USD price of the line's printing, else of any printing of the card, any finish), `missing_cost`, and `owned_printings`; the deck's `missing_cost` and `missing_unpriced` (lines with missing copies and no known price). `GET /decks/{id}` and `GET /shared/{id}/deck` carry the same |
+| POST | `/api/v1/decks/coverage` | owned / partial / missing per card, with `unit_price` (the cheapest known USD price of the line's printing, else of any printing of the card, any finish), `missing_cost`, `owned_printings`, and `maybe_owned` (on a line you own none of: collection cards whose name differs only in accents, punctuation, case or an Alchemy "A-", each `{name, quantity}`; counting stays by exact name); the deck's `missing_cost` and `missing_unpriced` (lines with missing copies and no known price). `GET /decks/{id}` and `GET /shared/{id}/deck` carry the same |
 | GET / POST | `/api/v1/decks` | saved decks / save one |
 | GET / PUT / DELETE | `/api/v1/decks/{id}` | a deck with coverage / update (an omitted `source_url` is kept) / delete |
 | GET | `/api/v1/archidekt/decks/{id}` | a public Archidekt deck, fetched server-side |

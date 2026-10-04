@@ -224,9 +224,9 @@ def test_deck_coverage_and_parsing(signed_in):
     assert all(c["maybe_owned"] == [] for c in res.json()["cards"])
     # Written a little differently in the deck (case, punctuation, accents, an Alchemy "A-"): still
     # missing by name, but the near match is pointed out with the copies owned.
-    res = signed_in.post(f"{V1}/decks/coverage", json={"text": "1 A-Sol-Ring\n1 a killer among üs\n1 Rhystic Study"})
+    res = signed_in.post(f"{V1}/decks/coverage", json={"text": "1 a-Sol-Ring\n1 a killer among üs\n1 Rhystic Study"})
     near = {c["name"]: (c["status"], c["maybe_owned"]) for c in res.json()["cards"]}
-    assert near["A-Sol-Ring"][1] == [{"name": "Sol Ring", "quantity": near_qty(signed_in, "Sol Ring")}]
+    assert near["a-Sol-Ring"][1] == [{"name": "Sol Ring", "quantity": near_qty(signed_in, "Sol Ring")}]
     assert near["a killer among üs"][1] == [{"name": "A Killer Among Us", "quantity": near_qty(signed_in, "A Killer Among Us")}]
     assert near["Rhystic Study"] == ("missing", [])
     text = "1x Sol Ring (c21) 263 [Ramp]\n1x Duress [Sideboard]\n1 Kenrith, the Returned King (CMM) 1 *F*"

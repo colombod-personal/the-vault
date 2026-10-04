@@ -254,6 +254,10 @@ html, body { max-width: 100%; overflow-x: clip; }
   .section-head { flex-wrap: wrap; align-items: flex-end; gap: 8px; }
 
   .deck-summary { grid-template-columns: 1fr 1fr 1fr; gap: 10px; padding: 12px; }
+  /* Deck rows: the card name gets the width; the "need × price" column folds into the cost. */
+  .deck-row { grid-template-columns: 26px minmax(0, 1fr) 56px 64px; gap: 8px; padding: 9px 10px; }
+  .deck-row > :nth-child(4) { display: none; }
+  .deck-group { padding: 10px 10px 6px; }
   .deck-summary > :first-child { grid-column: 1 / -1; }
   .deck-summary .deck-big { font-size: 22px; }
   .deck-library { grid-template-columns: 1fr; }
