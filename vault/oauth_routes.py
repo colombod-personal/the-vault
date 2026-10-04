@@ -163,7 +163,7 @@ def page(title: str, body: str, *, status: int = 200, script_nonce: str | None =
            f'content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">'
            f'<title>{esc(title)}</title><style>{STYLE}</style></head><body>{body}{script_tag}</body></html>')
     return HTMLResponse(doc, status_code=status, headers={
-        **NO_STORE, "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
+        **NO_STORE, "X-Frame-Options": "DENY", "Referrer-Policy": "same-origin", "X-Content-Type-Options": "nosniff",
         "Content-Security-Policy": ("default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; "
                                     "base-uri 'none';" + script)})
 
