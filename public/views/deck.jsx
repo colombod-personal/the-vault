@@ -1,362 +1,585 @@
-// Deck view — paste Archidekt/Moxfield URL or list, get coverage report. What you own of it and
-// what the missing cards cost come from the server (POST /decks/coverage), against your collection.
-const { useState: useStateD, useMemo: useMemoD, useRef: useRefD, useEffect: useEffectD } = React;
+// Decks — your saved decks, and a page per deck. The library lists each deck with how much of it
+// you own and what finishing it costs (GET /decks/{id}, coverage against your collection). A deck's
+// page has tabs: Cards (what you own of each, grouped by type), Stats, Legality, Upgrades (marking
+// the ones you already own), Combos and a Buy list, all computed by the server (/decks/*).
+const { useState: useStateD, useMemo: useMemoD, useEffect: useEffectD } = React;
 
-// A deck's cards as a decklist the server parses ("4 Name (SET) 123" per line).
-const deckListText = (cards) => cards.map(c => `${c.qty} ${c.name}` + (c.set && c.collector_number ? ` (${c.set.toUpperCase()}) ${c.collector_number}` : '')).join('\n');
+const isCommander = (c) => c.section === 'commander' || (c.categories || []).some((x) => /commander/i.test(x));
 
-// The server's coverage line for each deck card: in order when it answers line for line, else by name.
-function coverageFor(cards, lines) {
-  const byName = {};
-  for (const l of lines) (byName[l.name.toLowerCase().trim()] = byName[l.name.toLowerCase().trim()] || []).push(l);
-  const inOrder = lines.length === cards.length && lines.every((l, i) => l.name.toLowerCase().trim() === cards[i].name.toLowerCase().trim());
-  return cards.map((c, i) => (inOrder ? lines[i] : (byName[c.name.toLowerCase().trim()] || []).shift() || null));
+// A deck's cards as a decklist the server parses ("4 Name (SET) 123" per line); commanders go under
+// a "Commander" header so stats, legality and combos know them.
+function deckListText(cards) {
+  const line = (c) => `${c.qty} ${c.name}` + (c.set && c.collector_number ? ` (${c.set.toUpperCase()}) ${c.collector_number}` : '');
+  const cmd = cards.filter(isCommander), rest = cards.filter((c) => !isCommander(c));
+  return (cmd.length ? 'Commander\n' + cmd.map(line).join('\n') + '\n\nDeck\n' : '') + rest.map(line).join('\n');
 }
 
+// The server's coverage line for each deck card, by name (front face, case-folded).
+const nameKey = (n) => n.split(' // ')[0].trim().toLowerCase();
+function coverageFor(cards, lines) {
+  const byName = {};
+  for (const l of lines) byName[nameKey(l.name)] = l;
+  return cards.map((c) => byName[nameKey(c.name)] || null);
+}
+
+// How much of a deck you own, from the server's coverage lines.
+function coverageSummary(cov) {
+  let need = 0, have = 0, missingCards = 0;
+  for (const l of cov.cards || []) { need += l.need; have += Math.min(l.have, l.need); if (l.missing) missingCards += l.missing; }
+  return { need, have, missingCards, pct: need ? have / need : 0, cost: cov.missing_cost || 0, unpriced: cov.missing_unpriced || 0 };
+}
+
+const money = (v) => (v == null ? '?' : '$' + Number(v).toFixed(2));
+const scryfallLink = (name) => 'https://scryfall.com/search?q=' + encodeURIComponent(`!"${name}"`);
+const FORMAT_CHOICES = ['commander', 'standard', 'pioneer', 'modern', 'legacy', 'vintage', 'pauper', 'brawl', 'historic',
+  'oathbreaker', 'paupercommander', 'premodern', 'penny'];
+const TYPE_ORDER = ['Commander', 'Creature', 'Planeswalker', 'Battle', 'Instant', 'Sorcery', 'Artifact', 'Enchantment', 'Land', 'Other'];
+const primaryType = (r) => {
+  if (isCommander(r)) return 'Commander';
+  const t = r.scry?.type_line || '';
+  return TYPE_ORDER.find((k) => k !== 'Commander' && k !== 'Other' && t.includes(k)) || 'Other';
+};
+
 function DeckView({ data, openCard, initialText }) {
-  const [src, setSrc] = useStateD(initialText || '');
-  const [tab, setTab] = useStateD(initialText ? 'text' : 'url'); // 'url' | 'text'
-  const [saved, setSaved] = useStateD(null);
-  const [myDecks, setMyDecks] = useStateD(null); // the decks you saved (null while loading)
+  const [myDecks, setMyDecks] = useStateD(null); // your saved decks (null while loading)
+  const [open, setOpenRaw] = useStateD(initialText ? { text: initialText, key: 1 } : null); // the deck on screen
+  const setOpen = (o) => setOpenRaw(o && { ...o, key: Date.now() }); // a new key per deck opened, kept when it's saved
   const refreshDecks = () => window.VaultApi.decks().then(setMyDecks).catch(() => setMyDecks([]));
   useEffectD(() => { refreshDecks(); }, []);
-  const [deck, setDeck] = useStateD(null);
-  const [enriched, setEnriched] = useStateD(null); // [{...deckCard, scry, owned, ownEntries}]
-  const [coverage, setCoverage] = useStateD(null); // the server's deck totals
-  const [loading, setLoading] = useStateD(false);
-  const [error, setError] = useStateD('');
-  const [progress, setProgress] = useStateD({ done: 0, total: 0 });
-  const [filter, setFilter] = useStateD('all'); // 'all'|'missing'|'partial'|'owned'
 
-  async function loadFromUrl(url = src) {
-    setError(''); setDeck(null); setEnriched(null); setSaved(null); setLoading(true);
-    try {
-      const d = await window.DeckSrc.fetchUrl(url.trim());
-      await processDeck(d);
-    } catch (e) {
-      setError(e.message + ' — try pasting the decklist as text instead.');
-      setLoading(false);
-    }
+  if (open) {
+    return <DeckPage key={open.key} source={open} myDecks={myDecks}
+      refreshDecks={refreshDecks} openCard={openCard} onBack={() => { setOpen(null); refreshDecks(); }}
+      onSaved={(d) => setOpenRaw((o) => ({ ...o, saved: d }))} />;
   }
-  async function loadFromText(text = src) {
-    setError(''); setDeck(null); setEnriched(null); setSaved(null); setLoading(true);
-    try {
-      const d = await window.DeckSrc.parseText(text);
-      if (!d.cards.length) throw new Error('No cards parsed. Use "4 Card Name" per line.');
-      await processDeck(d);
-    } catch (e) {
-      setError(e.message);
-      setLoading(false);
-    }
-  }
+  return <DeckLibrary myDecks={myDecks} onOpen={setOpen} />;
+}
 
-  // A saved deck you already have (same link): saving again updates it rather than adding a copy.
-  const savedMatch = deck && deck.url && myDecks ? myDecks.find((d) => d.source_url === deck.url) : null;
+// -- the library ----------------------------------------------------------------------------------
 
-  async function saveDeck() {
-    const text = deckListText(deck.cards);
-    const name = savedMatch ? savedMatch.name
-      : deck.title === 'Pasted decklist' ? (prompt('Name this deck', 'My deck') || 'My deck') : deck.title;
-    try {
-      setSaved(savedMatch ? await window.VaultApi.updateDeck(savedMatch.id, name, text, deck.url)
-        : await window.VaultApi.saveDeck(name, text, deck.url || null));
-      refreshDecks();
-    } catch (e) { setError('Saving failed: ' + e.message); }
-  }
+function DeckLibrary({ myDecks, onOpen }) {
+  const [tab, setTab] = useStateD('url');
+  const [src, setSrc] = useStateD('');
+  const [covers, setCovers] = useStateD({}); // deck id -> coverage summary (or 'error')
 
-  // Open a saved deck: from its link when it has one (so you see the deck as it is now), else its saved list.
-  function openSaved(d) {
-    if (d.source_url) { setTab('url'); setSrc(d.source_url); loadFromUrl(d.source_url); }
-    else { setTab('text'); setSrc(d.text); loadFromText(d.text); }
-  }
-  async function removeSaved(d) {
-    if (!confirm(`Remove “${d.name}” from your decks?`)) return;
-    try {
-      await window.VaultApi.deleteDeck(d.id);
-      if (saved && saved.id === d.id) setSaved(null); // the deck on screen can be saved again
-      refreshDecks();
-    }
-    catch (e) { setError('Removing failed: ' + e.message); }
-  }
+  // Each saved deck checked against your collection, a few at a time.
+  useEffectD(() => {
+    if (!myDecks) return;
+    let stop = false;
+    const queue = myDecks.filter((d) => !(d.id in covers));
+    const worker = async () => {
+      while (!stop && queue.length) {
+        const d = queue.shift();
+        try {
+          const full = await window.VaultApi.deck(d.id);
+          if (!stop) setCovers((c) => ({ ...c, [d.id]: coverageSummary(full.coverage || {}) }));
+        } catch (e) { if (!stop) setCovers((c) => ({ ...c, [d.id]: 'error' })); }
+      }
+    };
+    Promise.all([worker(), worker(), worker()]);
+    return () => { stop = true; };
+  }, [myDecks]);
 
-  // A deck opened from Account (saved or shared with you): analyse it straight away.
-  useEffectD(() => { if (initialText) loadFromText(); }, []);
+  const sorted = useMemoD(() => (myDecks || []).slice().sort((a, b) => {
+    const ca = covers[a.id], cb = covers[b.id];
+    const pa = ca && ca !== 'error' ? ca.pct : -1, pb = cb && cb !== 'error' ? cb.pct : -1;
+    return pb - pa || a.name.localeCompare(b.name);
+  }), [myDecks, covers]);
 
-  async function processDeck(d) {
-    // A card listed more than once (two printings of a land, say) is one line: the server counts
-    // what you own of it by name, so separate rows would show the later ones as missing.
-    const merged = [], at = {};
-    for (const c of d.cards) {
-      const k = c.name.split(' // ')[0].trim().toLowerCase();
-      if (k in at) merged[at[k]] = { ...merged[at[k]], qty: merged[at[k]].qty + c.qty };
-      else { at[k] = merged.length; merged.push({ ...c }); }
-    }
-    d = { ...d, cards: merged };
-    setDeck(d);
-    // What you own and what the rest costs: the server's coverage, priced in Postgres.
-    const cov = await window.VaultApi.deckCoverage(deckListText(d.cards));
-    const lines = coverageFor(d.cards, cov.cards);
-    // Card data (image, colours, type) for display, from the Vault's card table.
-    const ids = d.cards.map(c => ({ name: c.name, set: c.set, collector_number: c.collector_number }));
-    setProgress({ done: 0, total: ids.length });
-    const scry = await window.Scryfall.collection(ids, (p) => setProgress({ done: p.done, total: p.total }));
-    const rows = d.cards.map((c, i) => {
-      const line = lines[i];
-      const owned = line ? line.have : 0;
-      const need = line ? line.missing : c.qty;
-      const unitPrice = line ? line.unit_price : null;  // no price known: unknown, not $0
-      return {
-        ...c,
-        scry: scry[i],
-        owned,
-        ownEntries: (line ? line.owned_printings : []).map(o => ({ s: o.set, sn: '', cn: o.collector_number, p: o.printing, q: o.quantity, mk: o.unit_price })),
-        need,
-        status: line ? line.status : 'missing',
-        maybeOwned: line && line.maybe_owned ? line.maybe_owned : [], // owned under a name written differently
-        unitPrice,
-        priced: unitPrice != null,
-        rowCost: line && line.missing_cost != null ? line.missing_cost : 0,
-      };
-    });
-    setCoverage(cov);
-    setEnriched(rows);
-    setLoading(false);
-  }
-
-  const summary = useMemoD(() => {
-    if (!enriched || !coverage) return null;
-    // Tallies of the server's lines; the cost to complete is the server's.
-    let total = 0, ownedQty = 0, missingQty = 0;
-    let ownedFully = 0, ownedPartial = 0, missingAll = 0;
-    for (const r of enriched) {
-      total += r.qty;
-      ownedQty += Math.min(r.owned, r.qty);
-      missingQty += r.need;
-      if (r.status === 'owned') ownedFully++;
-      else if (r.status === 'partial') ownedPartial++;
-      else missingAll++;
-    }
-    return { total, ownedQty, missingQty, missingCost: coverage.missing_cost || 0, unpricedQty: coverage.missing_unpriced || 0,
-      ownedFully, ownedPartial, missingAll };
-  }, [enriched, coverage]);
-
-  const rowsFiltered = useMemoD(() => {
-    if (!enriched) return [];
-    return enriched.filter(r => filter === 'all' || r.status === filter);
-  }, [enriched, filter]);
+  const add = () => {
+    const v = src.trim();
+    if (!v) return;
+    onOpen(tab === 'url' ? { url: v } : { text: v });
+  };
 
   return (
     <div data-screen-label="04 Decks">
-      <div style={{ marginBottom: 24 }}>
-        <p className="eyebrow">Deck coverage</p>
-        <h1 className="h1" style={{ marginTop: 6 }}>What's in your vault — and what's missing.</h1>
+      <div className="page-head" style={{ marginBottom: 20 }}>
+        <div>
+          <p className="eyebrow">Decks</p>
+          <h1 className="h1" style={{ marginTop: 6 }}>Your decks.</h1>
+          <p className="muted" style={{ fontSize: 13, marginTop: 8, maxWidth: 560, lineHeight: 1.5 }}>
+            Every deck you save, checked against your collection: how much of it you own, and what it costs to finish.
+            Open one for its cards, stats, legality, upgrades, combos and a buy list.
+          </p>
+        </div>
       </div>
 
-      <div className="coverage-grid">
-        <div>
-          {/* Your saved decks: open one again, from its link when it has one */}
-          <div className="panel" style={{ marginBottom: 16 }}>
-            <p className="eyebrow" style={{ marginBottom: 12 }}>Your decks</p>
-            {myDecks === null ? <p className="muted label-mono">Loading…</p> :
-             myDecks.length === 0 ? <p className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>Decks you save appear here, so you can open them again any time. Load one below and press “Save to your decks”.</p> :
-             <div style={{ display: 'grid', gap: 8 }}>
-               {myDecks.map((d) => (
-                 <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                   <div style={{ flex: '1 1 160px', minWidth: 0 }}>
-                     <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</div>
-                     {d.source_url ?
-                       <a href={d.source_url} target="_blank" rel="noopener noreferrer" className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.source_url.replace(/^https?:\/\/(www\.)?/, '')}</a> :
-                       <span className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)' }}>pasted list</span>}
-                   </div>
-                   <button className="btn sm primary" onClick={() => openSaved(d)} disabled={loading}>Open</button>
-                   <button className="btn sm ghost" onClick={() => removeSaved(d)} aria-label={`Remove ${d.name}`}>Remove</button>
+      <div className="panel" style={{ marginBottom: 20 }}>
+        <p className="eyebrow" style={{ marginBottom: 10 }}>Add a deck</p>
+        <div className="row" style={{ gap: 4, marginBottom: 10 }}>
+          <button className={`chip ${tab === 'url' ? 'active' : ''}`} onClick={() => setTab('url')}>From a link</button>
+          <button className={`chip ${tab === 'text' ? 'active' : ''}`} onClick={() => setTab('text')}>Paste a list</button>
+        </div>
+        {tab === 'url' ? (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <input className="input" style={{ flex: '1 1 240px' }} placeholder="Paste an Archidekt link" value={src}
+              onChange={(e) => setSrc(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
+            <button className="btn primary" onClick={add} disabled={!src.trim()}>Open deck</button>
+          </div>
+        ) : (
+          <>
+            <textarea className="input" rows="8" value={src} onChange={(e) => setSrc(e.target.value)}
+              placeholder={'Commander\n1 Atraxa, Praetors\' Voice\n\nDeck\n1 Sol Ring\n4 Lightning Bolt\n…'} />
+            <button className="btn primary" style={{ marginTop: 8 }} onClick={add} disabled={!src.trim()}>Open list</button>
+          </>
+        )}
+        <p className="muted" style={{ fontSize: 11, marginTop: 8, fontFamily: 'var(--mono)', lineHeight: 1.5 }}>
+          Archidekt decks are fetched by the Vault server. For Moxfield, export the list as text and paste it.
+        </p>
+      </div>
+
+      {myDecks === null ? <p className="muted label-mono">Loading your decks…</p> :
+       myDecks.length === 0 ? (
+         <div className="panel" style={{ padding: 32, textAlign: 'center' }}>
+           <p className="h-display" style={{ fontSize: 20, marginBottom: 8 }}>No decks yet.</p>
+           <p className="muted" style={{ fontSize: 13, lineHeight: 1.6 }}>Add one above, then press “Save to your decks” on its page.</p>
+         </div>
+       ) : (
+         <div className="deck-library">
+           {sorted.map((d) => {
+             const c = covers[d.id];
+             return (
+               <button key={d.id} className="panel deck-tile" onClick={() => onOpen({ saved: d, url: d.source_url || null, text: d.source_url ? null : d.text })}>
+                 <div style={{ fontWeight: 600, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</div>
+                 <div className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', marginTop: 2 }}>
+                   {d.source_url ? d.source_url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/decks\//, ' · ') : 'pasted list'}
                  </div>
-               ))}
-             </div>}
-          </div>
+                 {!c ? <p className="muted label-mono" style={{ marginTop: 12 }}>Checking your collection…</p> :
+                  c === 'error' ? <p className="muted label-mono" style={{ marginTop: 12 }}>Couldn't check this deck</p> : (
+                   <>
+                     <div className="progress-bar" style={{ marginTop: 12 }}><div style={{ width: `${c.pct * 100}%`, background: 'var(--good)' }}></div></div>
+                     <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 12 }}>
+                       <span><strong>{Math.round(c.pct * 100)}%</strong> <span className="muted">owned · {c.have}/{c.need}</span></span>
+                       <span style={{ color: c.missingCards ? 'var(--gold)' : 'var(--good)' }}>
+                         {c.missingCards ? `${c.missingCards} missing · ${c.unpriced ? '≥ ' : ''}${money(c.cost)}` : 'complete'}
+                       </span>
+                     </div>
+                   </>
+                 )}
+               </button>
+             );
+           })}
+         </div>
+       )}
+    </div>
+  );
+}
 
-          {/* Input panel */}
-          <div className="panel">
-            <p className="eyebrow" style={{ marginBottom: 12 }}>Load a deck</p>
-            <div className="row" style={{ gap: 4, marginBottom: 12 }}>
-              <button className={`chip ${tab === 'url' ? 'active' : ''}`} onClick={() => setTab('url')}>From URL</button>
-              <button className={`chip ${tab === 'text' ? 'active' : ''}`} onClick={() => setTab('text')}>Paste list</button>
-            </div>
-            {tab === 'url' ? (
-              <>
-                <input
-                  className="input"
-                  placeholder="Paste an Archidekt or Moxfield link"
-                  value={src}
-                  onChange={e => setSrc(e.target.value)}
-                />
-                <p className="muted" style={{ fontSize: 11, marginTop: 8, fontFamily: 'var(--mono)', lineHeight: 1.5 }}>
-                  Archidekt decks are fetched by the Vault server.<br />For Moxfield, use the <em>Paste list</em> tab.
-                </p>
-                <div className="row" style={{ marginTop: 12 }}>
-                  <button className="btn primary" onClick={() => loadFromUrl()} disabled={loading || !src.trim()}>
-                    {loading ? <><span className="spinner"></span> Loading</> : 'Analyse deck'}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <textarea
-                  className="input"
-                  rows="14"
-                  placeholder={'1 Sol Ring\n1 Arcane Signet\n4 Lightning Bolt\n…\n\nFormats supported:\n4 Lightning Bolt\n1 Sol Ring (CMR) 123'}
-                  value={src}
-                  onChange={e => setSrc(e.target.value)}
-                />
-                <div className="row" style={{ marginTop: 12 }}>
-                  <button className="btn primary" onClick={() => loadFromText()} disabled={loading || !src.trim()}>
-                    {loading ? <><span className="spinner"></span> Loading</> : 'Analyse list'}
-                  </button>
-                </div>
-              </>
-            )}
-            {error && (
-              <div style={{ marginTop: 12, padding: 12, background: 'oklch(0.62 0.18 25 / 0.08)', border: '1px solid oklch(0.62 0.18 25 / 0.4)', borderRadius: 'var(--radius)', fontSize: 12, lineHeight: 1.5 }}>
-                <strong style={{ color: 'var(--danger)' }}>Couldn't fetch:</strong> {error}
-              </div>
-            )}
-            {loading && progress.total > 0 && (
-              <div style={{ marginTop: 12 }}>
-                <div className="progress-bar"><div style={{ width: `${(progress.done / progress.total) * 100}%` }}></div></div>
-                <p className="muted" style={{ fontSize: 10, fontFamily: 'var(--mono)', marginTop: 6, letterSpacing: '0.12em' }}>
-                  Fetching card data {progress.done}/{progress.total}…
-                </p>
-              </div>
-            )}
-          </div>
+// -- a deck's page ----------------------------------------------------------------------------------
 
-          {/* Summary panel */}
-          {summary && (
-            <div className="panel" style={{ marginTop: 16 }}>
-              <p className="eyebrow" style={{ marginBottom: 8 }}>{deck?.title}</p>
-              {deck?.author && <p className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)' }}>by {deck.author}</p>}
-              {deck?.url && /archidekt\.com/.test(deck.url) && (
-                <p className="muted" style={{ fontSize: 10, fontFamily: 'var(--mono)' }}>
-                  Deck list from <a href={deck.url} target="_blank" rel="noopener noreferrer">Archidekt</a>. Thanks to its author.
-                </p>
-              )}
-              <button className="btn xs" style={{ marginTop: 8 }} disabled={!!saved || myDecks === null} onClick={saveDeck}>
-                {saved ? 'Saved to your decks ✓' : savedMatch ? 'Update in your decks' : 'Save to your decks'}
-              </button>
+function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) {
+  const [deck, setDeck] = useStateD(null);
+  const [rows, setRows] = useStateD(null);
+  const [coverage, setCoverage] = useStateD(null);
+  const [error, setError] = useStateD('');
+  const [loading, setLoading] = useStateD(true);
+  const [progress, setProgress] = useStateD({ done: 0, total: 0 });
+  const [tab, setTab] = useStateD('cards');
+  const [filter, setFilter] = useStateD('all');
+  const [format, setFormat] = useStateD(null);
+  const [justSaved, setJustSaved] = useStateD(false);
+  const [reload, setReload] = useStateD(0);
 
-              <div style={{ marginTop: 20 }}>
-                <CoverageDonut summary={summary} />
-              </div>
+  async function load() {
+    setError(''); setLoading(true); setRows(null); setCoverage(null);
+    try {
+      let d;
+      if (source.url) {
+        try { d = await window.DeckSrc.fetchUrl(source.url.trim()); }
+        catch (e) {
+          if (!source.saved) throw e;
+          d = await window.DeckSrc.parseText(source.saved.text); // the source is unreachable: the saved copy
+          d = { ...d, title: source.saved.name, url: source.saved.source_url, offline: e.message };
+        }
+      } else {
+        d = await window.DeckSrc.parseText(source.text);
+        if (source.saved) d = { ...d, title: source.saved.name };
+      }
+      if (!d.cards.length) throw new Error('No cards found. Use "4 Card Name" per line.');
+      // A card listed more than once (two printings of a land, say) is one line.
+      const merged = [], at = {};
+      for (const c of d.cards) {
+        const k = nameKey(c.name);
+        if (k in at) merged[at[k]] = { ...merged[at[k]], qty: merged[at[k]].qty + c.qty };
+        else { at[k] = merged.length; merged.push({ ...c }); }
+      }
+      d = { ...d, cards: merged };
+      setDeck(d);
+      setFormat((f) => f || (merged.some(isCommander) || merged.reduce((n, c) => n + c.qty, 0) >= 99 ? 'commander' : 'standard'));
+      const cov = await window.VaultApi.deckCoverage(deckListText(merged));
+      const lines = coverageFor(merged, cov.cards);
+      setProgress({ done: 0, total: merged.length });
+      const scry = await window.Scryfall.collection(merged.map((c) => ({ name: c.name, set: c.set, collector_number: c.collector_number })),
+        (p) => setProgress({ done: p.done, total: p.total }));
+      setRows(merged.map((c, i) => {
+        const l = lines[i];
+        const unit = l ? l.unit_price : null;
+        return { ...c, scry: scry[i], owned: l ? l.have : 0, need: l ? l.missing : c.qty, status: l ? l.status : 'missing',
+          maybeOwned: l && l.maybe_owned ? l.maybe_owned : [], unitPrice: unit, priced: unit != null,
+          rowCost: l && l.missing_cost != null ? l.missing_cost : 0,
+          ownEntries: (l ? l.owned_printings : []).map((o) => ({ s: o.set, sn: '', cn: o.collector_number, p: o.printing, q: o.quantity, mk: o.unit_price })) };
+      }));
+      setCoverage(cov);
+    } catch (e) {
+      setError(e.message);
+    }
+    setLoading(false);
+  }
+  useEffectD(() => { load(); }, [reload]);
 
-              <div className="divider"></div>
+  const text = useMemoD(() => (deck ? deckListText(deck.cards) : ''), [deck]);
+  const saved = source.saved || (deck && deck.url && myDecks ? myDecks.find((d) => d.source_url === deck.url) : null);
+  const summary = useMemoD(() => {
+    if (!rows || !coverage) return null;
+    let total = 0, ownedQty = 0, missingQty = 0, ownedFully = 0, ownedPartial = 0, missingAll = 0;
+    for (const r of rows) {
+      total += r.qty; ownedQty += Math.min(r.owned, r.qty); missingQty += r.need;
+      if (r.status === 'owned') ownedFully++; else if (r.status === 'partial') ownedPartial++; else missingAll++;
+    }
+    return { total, ownedQty, missingQty, missingCost: coverage.missing_cost || 0, unpricedQty: coverage.missing_unpriced || 0, ownedFully, ownedPartial, missingAll };
+  }, [rows, coverage]);
 
-              <div className="m-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <div>
-                  <p className="label-mono">Owned</p>
-                  <p style={{ fontFamily: 'var(--display)', fontSize: 28, fontWeight: 600, lineHeight: 1, marginTop: 4, color: 'var(--good)' }}>
-                    {summary.ownedQty}<span style={{ color: 'var(--muted)', fontSize: 16 }}>/{summary.total}</span>
-                  </p>
-                </div>
-                <div>
-                  <p className="label-mono">Missing</p>
-                  <p style={{ fontFamily: 'var(--display)', fontSize: 28, fontWeight: 600, lineHeight: 1, marginTop: 4, color: summary.missingQty > 0 ? 'var(--danger)' : 'var(--good)' }}>
-                    {summary.missingQty}
-                  </p>
-                </div>
-              </div>
+  async function save() {
+    const name = saved ? saved.name : deck.title === 'Pasted decklist' ? (prompt('Name this deck', 'My deck') || 'My deck') : deck.title;
+    try {
+      const d = saved ? await window.VaultApi.updateDeck(saved.id, name, text, deck.url || null)
+        : await window.VaultApi.saveDeck(name, text, deck.url || null);
+      setJustSaved(true); onSaved(d); refreshDecks();
+    } catch (e) { setError('Saving failed: ' + e.message); }
+  }
+  async function remove() {
+    if (!saved || !confirm(`Remove “${saved.name}” from your decks?`)) return;
+    try { await window.VaultApi.deleteDeck(saved.id); onBack(); }
+    catch (e) { setError('Removing failed: ' + e.message); }
+  }
 
-              <div style={{ marginTop: 20, padding: 14, background: 'var(--bg-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
-                <p className="label-mono">Cost to complete</p>
-                <p style={{ fontFamily: 'var(--display)', fontSize: 42, fontWeight: 600, lineHeight: 1, marginTop: 4, color: 'var(--gold)' }}>
-                  <span style={{ fontSize: 20, color: 'var(--text-2)', position: 'relative', top: -8 }}>{summary.unpricedQty ? '≥ $' : '$'}</span>
-                  {summary.missingCost.toFixed(2)}
-                </p>
-                <p className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', marginTop: 6 }}>
-                  at current Scryfall USD prices, checked against your collection
-                </p>
-                {summary.unpricedQty > 0 && (
-                  <p className="muted deck-unpriced-note" style={{ fontSize: 11, fontFamily: 'var(--mono)', marginTop: 4 }}>
-                    incomplete: {summary.unpricedQty} missing {summary.unpricedQty === 1 ? 'card has' : 'cards have'} no price (?) and {summary.unpricedQty === 1 ? 'is' : 'are'} not counted
-                  </p>
-                )}
-              </div>
+  const TABS = [['cards', 'Cards'], ['stats', 'Stats'], ['legality', 'Legality'], ['upgrades', 'Upgrades'], ['combos', 'Combos'], ['buy', 'Buy list']];
 
-              <div className="divider"></div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, textAlign: 'center' }}>
-                <FilterPill active={filter === 'owned'} onClick={() => setFilter(filter === 'owned' ? 'all' : 'owned')} count={summary.ownedFully} label="Have" color="var(--good)" />
-                <FilterPill active={filter === 'partial'} onClick={() => setFilter(filter === 'partial' ? 'all' : 'partial')} count={summary.ownedPartial} label="Partial" color="var(--gold)" />
-                <FilterPill active={filter === 'missing'} onClick={() => setFilter(filter === 'missing' ? 'all' : 'missing')} count={summary.missingAll} label="Need" color="var(--danger)" />
-              </div>
-
-              {deck?.url && (
-                <a href={deck.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', marginTop: 16, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)', textDecoration: 'underline' }}>
-                  {/archidekt\.com/.test(deck.url) ? 'View this deck on Archidekt ↗' : 'Open original deck ↗'}
-                </a>
-              )}
-            </div>
+  return (
+    <div data-screen-label="04 Deck">
+      <button className="btn xs ghost" onClick={onBack} style={{ marginBottom: 12 }}>← Your decks</button>
+      <div className="page-head" style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-end', marginBottom: 16 }}>
+        <div style={{ minWidth: 0 }}>
+          <p className="eyebrow">{saved ? 'Saved deck' : 'Deck'}</p>
+          <h1 className="h1" style={{ marginTop: 6 }}>{deck ? deck.title : loading ? 'Loading…' : 'Deck'}</h1>
+          {deck && (
+            <p className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', marginTop: 6 }}>
+              {deck.author && <>by {deck.author} · </>}
+              {deck.url && <a href={deck.url} target="_blank" rel="noopener noreferrer">{/archidekt\.com/.test(deck.url) ? 'on Archidekt' : 'original'} ↗</a>}
+              {deck.url && /archidekt\.com/.test(deck.url) && <> · deck list from Archidekt, thanks to its author</>}
+            </p>
           )}
+          {deck && deck.offline && <p style={{ fontSize: 12, color: 'var(--gold)', marginTop: 6 }}>Couldn't reach the deck's site ({deck.offline}), so this is your saved copy.</p>}
         </div>
+        {deck && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button className="btn sm primary" onClick={save} disabled={justSaved || myDecks === null || !rows}>
+              {justSaved ? 'Saved ✓' : saved ? 'Update saved copy' : 'Save to your decks'}
+            </button>
+            {deck.url && <button className="btn sm" onClick={() => { setJustSaved(false); setReload((n) => n + 1); }} disabled={loading}>Refresh</button>}
+            {saved && <button className="btn sm ghost" onClick={remove}>Remove</button>}
+          </div>
+        )}
+      </div>
 
-        {/* Right column — card list */}
-        <div>
-          {!enriched && !loading && (
-            <div className="panel" style={{ padding: 60, textAlign: 'center' }}>
-              <div style={{ fontFamily: 'var(--display)', fontSize: 42, color: 'var(--muted)', marginBottom: 12, lineHeight: 1 }}>◇</div>
-              <p className="h-display" style={{ fontSize: 22, marginBottom: 8 }}>Awaiting a decklist.</p>
-              <p className="muted" style={{ fontSize: 13, maxWidth: 360, margin: '0 auto', lineHeight: 1.6 }}>
-                Paste an Archidekt or Moxfield link on the left and press <span className="kbd">Analyse deck</span>, or open one of your decks.
-              </p>
-            </div>
-          )}
-
-          {enriched && (
-            <div className="panel panel-flush">
-              <div className="deck-row head">
-                <div>Qty</div>
-                <div>Card</div>
-                <div className="num">Have</div>
-                <div className="num">Need × $</div>
-                <div className="num">Cost</div>
-              </div>
-              {rowsFiltered.map((r, i) => {
-                const status = r.status;
-                return (
-                  <div className={`deck-row ${status}`} key={i} {...(r.scry ? window.vaultPressable(() => openCard({ n: r.name, s: r.scry.set, cn: r.scry.collector_number, p: 'Normal', c: 'Mint', l: 'English', q: r.owned, mk: r.unitPrice || 0, lo: 0, mi: 0, pd: 0, fd: '', ld: '', _scry: r.scry, _ownEntries: r.ownEntries, _deckRow: r }), r.name) : {})} style={{ cursor: r.scry ? 'pointer' : 'default' }}>
-                    <div className="qty">{r.qty}×</div>
-                    <div>
-                      <div style={{ fontWeight: 600 }}>{r.name}</div>
-                      {r.maybeOwned.length > 0 && (
-                        <div style={{ fontSize: 11, color: 'var(--gold)', marginTop: 2 }}>
-                          You may own {r.maybeOwned.map((m) => `${m.quantity} as “${m.name}”`).join(', ')}
-                        </div>
-                      )}
-                      {r.scry && (
-                        <div className="muted" style={{ fontSize: 10, fontFamily: 'var(--mono)', marginTop: 2, display: 'flex', gap: 6, alignItems: 'center' }}>
-                          <ColorIdentity colors={r.scry.color_identity} />
-                          <span>{r.scry.type_line?.split(' — ')[0]}</span>
-                          <span style={{ color: 'var(--gold)' }}>· {r.scry.set?.toUpperCase()}</span>
-                        </div>
-                      )}
-                    </div>
-                    <div className={`have ${status === 'owned' ? 'full' : status === 'partial' ? 'part' : 'none'}`}>
-                      {r.owned > 0 ? `${Math.min(r.owned, r.qty)}/${r.qty}` : '0'}
-                      {r.owned > r.qty && <div className="muted" style={{ fontSize: 10, fontFamily: 'var(--mono)' }}>you own {r.owned}</div>}
-                    </div>
-                    <div className="cost muted">{r.need > 0 ? `${r.need} × ${r.priced ? '$' + r.unitPrice.toFixed(2) : '?'}` : '—'}</div>
-                    <div className="cost" style={{ color: r.rowCost > 0 ? 'var(--gold)' : 'var(--muted)' }} title={r.need > 0 && !r.priced ? 'No price available' : undefined}>
-                      {r.need > 0 ? (r.priced ? `$${r.rowCost.toFixed(2)}` : '?') : '✓'}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+      {error && (
+        <div className="panel" style={{ borderColor: 'oklch(0.62 0.18 25 / 0.5)', marginBottom: 16, fontSize: 13 }}>
+          <strong style={{ color: 'var(--danger)' }}>Couldn't load this deck:</strong> {error}
         </div>
+      )}
+      {loading && (
+        <div className="panel" style={{ marginBottom: 16 }}>
+          <span className="spinner"></span> <span className="muted">Checking the deck against your collection…</span>
+          {progress.total > 0 && <div className="progress-bar" style={{ marginTop: 10 }}><div style={{ width: `${(progress.done / progress.total) * 100}%` }}></div></div>}
+        </div>
+      )}
+
+      {summary && (
+        <div className="deck-summary panel" style={{ marginBottom: 16 }}>
+          <CoverageDonut summary={summary} size={84} />
+          <div><p className="label-mono">Owned</p><p className="deck-big" style={{ color: 'var(--good)' }}>{summary.ownedQty}<span className="muted" style={{ fontSize: 15 }}>/{summary.total}</span></p></div>
+          <div><p className="label-mono">Missing</p><p className="deck-big" style={{ color: summary.missingQty ? 'var(--danger)' : 'var(--good)' }}>{summary.missingQty}</p></div>
+          <div><p className="label-mono">To finish</p><p className="deck-big" style={{ color: 'var(--gold)' }}>{summary.unpricedQty ? '≥ ' : ''}{money(summary.missingCost)}</p>
+            {summary.unpricedQty > 0 && <p className="muted" style={{ fontSize: 10, fontFamily: 'var(--mono)' }}>{summary.unpricedQty} without a price</p>}</div>
+        </div>
+      )}
+
+      {rows && (
+        <>
+          <div className="deck-tabs" role="tablist">
+            {TABS.map(([k, label]) => (
+              <button key={k} role="tab" aria-selected={tab === k} className={`chip ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>{label}</button>
+            ))}
+          </div>
+          {tab === 'cards' && <DeckCards rows={rows} summary={summary} filter={filter} setFilter={setFilter} openCard={openCard} />}
+          {tab === 'stats' && <DeckStats text={text} />}
+          {tab === 'legality' && <DeckLegality text={text} format={format} setFormat={setFormat} />}
+          {tab === 'upgrades' && <DeckUpgrades text={text} format={format} setFormat={setFormat} />}
+          {tab === 'combos' && <DeckCombos text={text} />}
+          {tab === 'buy' && <DeckBuyList text={text} />}
+        </>
+      )}
+    </div>
+  );
+}
+
+// Calls a deck analysis endpoint when `key` changes; { result } or { error }.
+function useDeckAnswer(call, key) {
+  const [state, setState] = useStateD({ loading: true });
+  useEffectD(() => {
+    let stop = false;
+    setState({ loading: true });
+    call().then((a) => !stop && setState({ result: a.result })).catch((e) => !stop && setState({ error: e.message }));
+    return () => { stop = true; };
+  }, [key]);
+  return state;
+}
+const Waiting = ({ state, what }) => state.loading ? <div className="panel"><span className="spinner"></span> <span className="muted">Working out {what}…</span></div>
+  : state.error ? <div className="panel"><strong style={{ color: 'var(--danger)' }}>Couldn't work out {what}:</strong> {state.error}</div> : null;
+
+function FormatPicker({ format, setFormat }) {
+  return (
+    <label className="label-mono" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      Format
+      <select className="select" value={format} onChange={(e) => setFormat(e.target.value)}>
+        {FORMAT_CHOICES.map((f) => <option key={f} value={f}>{f}</option>)}
+      </select>
+    </label>
+  );
+}
+
+// -- Cards: what you own of each, grouped by type ----------------------------------------------
+
+function DeckCards({ rows, summary, filter, setFilter, openCard }) {
+  const groups = useMemoD(() => {
+    const g = {};
+    for (const r of rows) if (filter === 'all' || r.status === filter) (g[primaryType(r)] = g[primaryType(r)] || []).push(r);
+    return TYPE_ORDER.filter((t) => g[t]).map((t) => [t, g[t].sort((a, b) => a.name.localeCompare(b.name))]);
+  }, [rows, filter]);
+  return (
+    <>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, margin: '12px 0' }}>
+        <FilterPill active={filter === 'owned'} onClick={() => setFilter(filter === 'owned' ? 'all' : 'owned')} count={summary.ownedFully} label="Have" color="var(--good)" />
+        <FilterPill active={filter === 'partial'} onClick={() => setFilter(filter === 'partial' ? 'all' : 'partial')} count={summary.ownedPartial} label="Partial" color="var(--gold)" />
+        <FilterPill active={filter === 'missing'} onClick={() => setFilter(filter === 'missing' ? 'all' : 'missing')} count={summary.missingAll} label="Need" color="var(--danger)" />
+      </div>
+      <div className="panel panel-flush">
+        <div className="deck-row head"><div>Qty</div><div>Card</div><div className="num">Have</div><div className="num">Need × $</div><div className="num">Cost</div></div>
+        {groups.map(([type, list]) => (
+          <React.Fragment key={type}>
+            <div className="deck-group">{type} <span className="muted">· {list.reduce((n, r) => n + r.qty, 0)}</span></div>
+            {list.map((r) => (
+              <div className={`deck-row ${r.status}`} key={r.name} {...(r.scry ? window.vaultPressable(() => openCard({ n: r.name, s: r.scry.set, cn: r.scry.collector_number, p: 'Normal', c: 'Mint', l: 'English', q: r.owned, mk: r.unitPrice || 0, lo: 0, mi: 0, pd: 0, fd: '', ld: '', _scry: r.scry, _ownEntries: r.ownEntries, _deckRow: r }), r.name) : {})} style={{ cursor: r.scry ? 'pointer' : 'default' }}>
+                <div className="qty">{r.qty}×</div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600 }}>{r.name}</div>
+                  {r.maybeOwned.length > 0 && <div style={{ fontSize: 11, color: 'var(--gold)', marginTop: 2 }}>You may own {r.maybeOwned.map((m) => `${m.quantity} as “${m.name}”`).join(', ')}</div>}
+                  {r.ownEntries.length > 0 && (
+                    <div className="muted" style={{ fontSize: 10, fontFamily: 'var(--mono)', marginTop: 2 }}>
+                      in your vault: {r.ownEntries.slice(0, 3).map((o) => `${o.q}× ${String(o.s).toUpperCase()}${o.p && o.p !== 'Normal' ? ' ' + o.p.toLowerCase() : ''}`).join(', ')}{r.ownEntries.length > 3 ? ` +${r.ownEntries.length - 3} more` : ''}
+                    </div>
+                  )}
+                  {r.scry && !r.ownEntries.length && (
+                    <div className="muted" style={{ fontSize: 10, fontFamily: 'var(--mono)', marginTop: 2, display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <ColorIdentity colors={r.scry.color_identity} /><span>{r.scry.type_line?.split(' — ')[0]}</span>
+                    </div>
+                  )}
+                </div>
+                <div className={`have ${r.status === 'owned' ? 'full' : r.status === 'partial' ? 'part' : 'none'}`}>
+                  {r.owned > 0 ? `${Math.min(r.owned, r.qty)}/${r.qty}` : '0'}
+                  {r.owned > r.qty && <div className="muted" style={{ fontSize: 10, fontFamily: 'var(--mono)' }}>you own {r.owned}</div>}
+                </div>
+                <div className="cost muted">{r.need > 0 ? `${r.need} × ${r.priced ? money(r.unitPrice) : '?'}` : '—'}</div>
+                <div className="cost" style={{ color: r.rowCost > 0 ? 'var(--gold)' : 'var(--muted)' }}>{r.need > 0 ? (r.priced ? money(r.rowCost) : '?') : '✓'}</div>
+              </div>
+            ))}
+          </React.Fragment>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// -- Stats --------------------------------------------------------------------------------------
+
+function DeckStats({ text }) {
+  const s = useDeckAnswer(() => window.VaultApi.deckStats(text), text);
+  if (!s.result) return <Waiting state={s} what="the deck's stats" />;
+  const r = s.result;
+  const curveMax = Math.max(1, ...Object.values(r.curve));
+  const roles = Object.entries(r.roles).filter(([, v]) => v.count > 0).sort((a, b) => b[1].count - a[1].count);
+  return (
+    <div className="deck-panels">
+      <div className="panel">
+        <p className="eyebrow">At a glance</p>
+        <div className="deck-glance">
+          <div><p className="label-mono">Cards</p><p className="deck-big">{r.cards}</p></div>
+          <div><p className="label-mono">Lands</p><p className="deck-big">{r.lands}</p></div>
+          <div><p className="label-mono">Avg. mana value</p><p className="deck-big">{r.average_mana_value_nonland}</p></div>
+          <div><p className="label-mono">Deck value</p><p className="deck-big">{r.priced_cards ? money(r.estimated_cost_usd) : '?'}</p></div>
+        </div>
+        <p className="muted" style={{ fontSize: 11, marginTop: 10, display: 'flex', gap: 6, alignItems: 'center' }}>Colour identity <ColorIdentity colors={r.color_identity} /></p>
+        {r.unmatched.length > 0 && <p style={{ fontSize: 12, color: 'var(--gold)', marginTop: 6 }}>Not in the card catalog: {r.unmatched.join(', ')}</p>}
+      </div>
+      <div className="panel">
+        <p className="eyebrow">Mana curve <span className="muted">(non-land cards)</span></p>
+        <div className="deck-curve">
+          {Object.entries(r.curve).map(([mv, n]) => (
+            <div key={mv} className="deck-curve-col">
+              <span className="label-mono">{n || ''}</span>
+              <div style={{ height: `${(n / curveMax) * 100}%` }}></div>
+              <span className="label-mono">{mv}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="panel">
+        <p className="eyebrow">Card types</p>
+        {Object.entries(r.types).sort((a, b) => b[1] - a[1]).map(([t, n]) => (
+          <div key={t} className="deck-kv"><span>{t}</span><strong>{n}</strong></div>
+        ))}
+      </div>
+      <div className="panel">
+        <p className="eyebrow">Roles</p>
+        {roles.length === 0 ? <p className="muted" style={{ fontSize: 12 }}>No role tags found for these cards.</p> :
+          roles.map(([role, v]) => (
+            <details key={role} className="deck-kv-details">
+              <summary className="deck-kv"><span>{role.replace(/_/g, ' ')}</span><strong>{v.count}</strong></summary>
+              <p className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>{v.cards.map((c) => c.name).join(', ')}</p>
+            </details>
+          ))}
+        <p className="muted" style={{ fontSize: 10, marginTop: 8 }}>{r.role_note}</p>
       </div>
     </div>
   );
 }
+
+// -- Legality -----------------------------------------------------------------------------------
+
+function DeckLegality({ text, format, setFormat }) {
+  const s = useDeckAnswer(() => window.VaultApi.deckLegality(text, format), text + '|' + format);
+  return (
+    <div className="panel">
+      <FormatPicker format={format} setFormat={setFormat} />
+      {!s.result ? <div style={{ marginTop: 12 }}><Waiting state={s} what="legality" /></div> : (
+        <>
+          <p className="h-display" style={{ fontSize: 22, margin: '14px 0 8px', color: s.result.legal ? 'var(--good)' : 'var(--danger)' }}>
+            {s.result.legal ? `Legal in ${s.result.format}.` : `${s.result.issues.length} ${s.result.issues.length === 1 ? 'problem' : 'problems'} in ${s.result.format}.`}
+          </p>
+          {s.result.issues.map((i, n) => (
+            <div key={n} className="deck-kv"><span>{i.card ? <a href={scryfallLink(i.card)} target="_blank" rel="noopener noreferrer">{i.card}</a> : 'Deck'}</span><span className="muted" style={{ textAlign: 'right' }}>{i.detail}</span></div>
+          ))}
+          <p className="muted" style={{ fontSize: 11, marginTop: 12, lineHeight: 1.5 }}>Not checked: {s.result.not_checked.join('; ')}.</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+// -- Upgrades: candidates within a budget, marking the ones already in your collection -------------
+
+function DeckUpgrades({ text, format, setFormat }) {
+  const [budget, setBudget] = useStateD(5);
+  const [asked, setAsked] = useStateD(5);
+  const s = useDeckAnswer(() => window.VaultApi.deckUpgrades(text, format, Number(asked) || 0), text + '|' + format + '|' + asked);
+  const [owned, setOwned] = useStateD({}); // name -> copies you own
+  useEffectD(() => {
+    if (!s.result) return;
+    const names = [...new Set(Object.values(s.result.candidates).flat().map((c) => c.name))];
+    if (!names.length) return;
+    window.VaultApi.deckCoverage(names.map((n) => `1 ${n}`).join('\n'))
+      .then((cov) => setOwned(Object.fromEntries(cov.cards.map((l) => [nameKey(l.name), l.have]))))
+      .catch(() => {});
+  }, [s.result]);
+  return (
+    <div className="panel">
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <FormatPicker format={format} setFormat={setFormat} />
+        <label className="label-mono" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          Up to $<input className="input" type="number" min="0" step="1" style={{ width: 90 }} value={budget} onChange={(e) => setBudget(e.target.value)} />
+          a card
+        </label>
+        <button className="btn sm primary" onClick={() => setAsked(budget)}>Find upgrades</button>
+      </div>
+      {!s.result ? <div style={{ marginTop: 12 }}><Waiting state={s} what="upgrade candidates" /></div> : (
+        <>
+          {Object.keys(s.result.gaps).length === 0 && <p className="muted" style={{ marginTop: 12 }}>The deck meets the usual role counts for {s.result.format}; no gaps to fill.</p>}
+          {Object.entries(s.result.candidates).map(([role, list]) => (
+            <div key={role} style={{ marginTop: 16 }}>
+              <p className="eyebrow">{role.replace(/_/g, ' ')} <span className="muted">· the deck has {s.result.gaps[role]?.have}{s.result.gaps[role]?.guideline ? `, about ${s.result.gaps[role].guideline} is usual` : ''}</span></p>
+              {list.length === 0 ? <p className="muted" style={{ fontSize: 12 }}>Nothing within the budget.</p> : list.map((c) => {
+                const have = owned[nameKey(c.name)] || 0;
+                return (
+                  <div key={c.name} className="deck-kv">
+                    <span><a href={scryfallLink(c.name)} target="_blank" rel="noopener noreferrer">{c.name}</a>
+                      {have > 0 && <span className="deck-badge">in your vault ×{have}</span>}
+                      <span className="muted" style={{ display: 'block', fontSize: 11 }}>{c.type_line}</span></span>
+                    <strong style={{ color: have ? 'var(--good)' : 'var(--gold)' }}>{have ? 'free' : money(c.price_usd)}</strong>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+          {s.result.cut_candidates.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <p className="eyebrow">Cards to consider cutting</p>
+              <p className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>{s.result.cut_candidates.map((c) => c.name).join(', ')}</p>
+            </div>
+          )}
+          <p className="muted" style={{ fontSize: 10, marginTop: 12, lineHeight: 1.5 }}>{s.result.notes.slice(0, 3).join(' ')}</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+// -- Combos ------------------------------------------------------------------------------------------
+
+function DeckCombos({ text }) {
+  const s = useDeckAnswer(() => window.VaultApi.deckCombos(text), text);
+  if (!s.result) return <Waiting state={s} what="combos" />;
+  const r = s.result;
+  const combo = (v, i) => (
+    <div key={v.id || i} className="deck-kv" style={{ alignItems: 'flex-start' }}>
+      <span style={{ minWidth: 0 }}>
+        <a href={v.url} target="_blank" rel="noopener noreferrer">{v.cards.join(' + ')}</a>
+        <span className="muted" style={{ display: 'block', fontSize: 11 }}>{v.produces.join(', ')}</span>
+        {v.missing.length > 0 && <span style={{ display: 'block', fontSize: 11, color: 'var(--gold)' }}>needs {v.missing.join(', ')}</span>}
+      </span>
+    </div>
+  );
+  return (
+    <div className="deck-panels">
+      <div className="panel"><p className="eyebrow">In this deck · {r.totals.included}</p>{r.included.length ? r.included.map(combo) : <p className="muted" style={{ fontSize: 12 }}>None found.</p>}</div>
+      <div className="panel"><p className="eyebrow">One card away · {r.totals.almost_included}</p>{r.almost_included.length ? r.almost_included.map(combo) : <p className="muted" style={{ fontSize: 12 }}>None found.</p>}</div>
+      <p className="muted" style={{ fontSize: 10 }}>Combos from <a href="https://commanderspellbook.com" target="_blank" rel="noopener noreferrer">Commander Spellbook</a>, written by its community.</p>
+    </div>
+  );
+}
+
+// -- Buy list -------------------------------------------------------------------------------------------
+
+function DeckBuyList({ text }) {
+  const s = useDeckAnswer(() => window.VaultApi.deckShopping(text), text);
+  const [copied, setCopied] = useStateD(false);
+  if (!s.result) return <Waiting state={s} what="the buy list" />;
+  const r = s.result;
+  if (!r.lines.length) return <div className="panel"><p className="h-display" style={{ fontSize: 20, color: 'var(--good)' }}>You own every card in this deck.</p></div>;
+  return (
+    <div className="panel">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <p className="eyebrow">{r.lines.reduce((n, l) => n + l.quantity, 0)} cards to buy · {r.unpriced_lines === r.lines.length ? 'no prices yet' : (r.unpriced_lines ? '≥ ' : '') + money(r.total_usd)}</p>
+        <button className="btn sm primary" onClick={() => navigator.clipboard.writeText(r.text).then(() => setCopied(true))}>{copied ? 'Copied ✓' : 'Copy list'}</button>
+      </div>
+      {r.lines.map((l) => (
+        <div key={l.name} className="deck-kv"><span>{l.quantity}× <a href={scryfallLink(l.name)} target="_blank" rel="noopener noreferrer">{l.name}</a></span><span className="muted">{l.unit_price_usd == null ? '?' : money(l.unit_price_usd * l.quantity)}</span></div>
+      ))}
+      <p className="muted" style={{ fontSize: 10, marginTop: 10, lineHeight: 1.5 }}>{r.notes.join(' ')}</p>
+    </div>
+  );
+}
+
 
 function FilterPill({ active, onClick, count, label, color }) {
   return (
@@ -383,12 +606,12 @@ function ColorIdentity({ colors }) {
   );
 }
 
-function CoverageDonut({ summary }) {
+function CoverageDonut({ summary, size = 120 }) {
   const r = 50, c = 2 * Math.PI * r;
   const ownedPct = summary.total > 0 ? summary.ownedQty / summary.total : 0;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-      <svg width="120" height="120" viewBox="0 0 120 120" className="donut">
+      <svg width={size} height={size} viewBox="0 0 120 120" className="donut">
         <circle cx="60" cy="60" r={r} stroke="oklch(0.32 0.014 65)" strokeWidth="10" />
         <circle
           cx="60" cy="60" r={r}
