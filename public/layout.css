@@ -7,7 +7,7 @@ button.brand:hover .title { color: var(--gold); }
 button.brand:focus-visible, .nav button:focus-visible { outline: 1px solid var(--gold); outline-offset: 4px; }
 
 /* Grid items may shrink below their content's width, so one wide row can't widen the page. */
-.app > * { min-width: 0; }
+.app > *, .coverage-grid > * { min-width: 0; }
 
 /* Notched phones in landscape (812px and wider): viewport-fit=cover lets the page run under the
    side cutouts, so the edges keep clear of them. env() is 0 everywhere else, so these resolve to

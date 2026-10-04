@@ -449,6 +449,7 @@ window.VaultApi = (() => {
     decks: () => all(V1 + '/decks'),
     deck: (id) => call(V1 + '/decks/' + id),
     saveDeck: (name, text, source_url) => create(V1 + '/decks', { json: { name, text, source_url } }),
+    updateDeck: (id, name, text, source_url) => call(V1 + '/decks/' + id, { method: 'PUT', json: { name, text, source_url } }),
     deleteDeck: (id) => call(V1 + '/decks/' + id, { method: 'DELETE' }),
 
     // sharing

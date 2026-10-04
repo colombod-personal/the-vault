@@ -82,7 +82,9 @@ function GraphView({ data, openCard }) {
   }
   useLayoutEffectG(placeTip, [hover]);
   const [deck, setDeck] = useStateG(null); // {title, rows}
-  const [deckUrl, setDeckUrl] = useStateG('https://archidekt.com/decks/5292775/the_dragon_in_the_night');
+  const [deckUrl, setDeckUrl] = useStateG('');
+  const [savedDecks, setSavedDecks] = useStateG([]); // the decks you saved on the Decks tab, to overlay in one pick
+  useEffectG(() => { window.VaultApi.decks().then(setSavedDecks).catch(() => setSavedDecks([])); }, []);
 
   // The nodes: the server's top names by value, filtered there by colour and price (min value),
   // as many as the depth asks for (GET /collection/names).
@@ -112,9 +114,11 @@ function GraphView({ data, openCard }) {
     return s;
   }, [deck]);
 
-  async function loadDeck() {
+  // From the URL box, or a saved deck: its link when it has one (the deck as it is now), else its saved list.
+  async function loadDeck(saved) {
     try {
-      const d = await window.DeckSrc.fetchUrl(deckUrl.trim());
+      const d = saved && !saved.source_url ? await window.DeckSrc.parseText(saved.text)
+        : await window.DeckSrc.fetchUrl((saved ? saved.source_url : deckUrl).trim());
       // What you own of it comes from the server's coverage; colours from the cards' data.
       const [cov, scry] = await Promise.all([
         window.VaultApi.deckCoverage(deckListText(d.cards)),
@@ -625,9 +629,15 @@ function GraphView({ data, openCard }) {
           </div>
           <div>
             <p className="label-mono" style={{ marginBottom: 6 }}>Overlay a deck</p>
+            {savedDecks.length > 0 &&
+            <select className="select" aria-label="Your saved decks" value="" style={{ width: '100%', marginBottom: 6 }}
+              onChange={(e) => { const s = savedDecks.find((x) => String(x.id) === e.target.value); if (s) { setDeckUrl(s.source_url || ''); loadDeck(s); } }}>
+                <option value="">Your decks…</option>
+                {savedDecks.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>}
             <div style={{ display: 'flex', gap: 6 }}>
-              <input className="input" style={{ fontSize: 11, padding: '7px 8px' }} value={deckUrl} onChange={(e) => setDeckUrl(e.target.value)} placeholder="archidekt or moxfield url" />
-              <button className="btn sm primary" onClick={loadDeck}>Load</button>
+              <input className="input" style={{ fontSize: 11, padding: '7px 8px' }} value={deckUrl} onChange={(e) => setDeckUrl(e.target.value)} placeholder="Paste an Archidekt or Moxfield link" />
+              <button className="btn sm primary" onClick={() => loadDeck()} disabled={!deckUrl.trim()}>Load</button>
             </div>
           </div>
         </div>

@@ -2,8 +2,6 @@
 // what the missing cards cost come from the server (POST /decks/coverage), against your collection.
 const { useState: useStateD, useMemo: useMemoD, useRef: useRefD, useEffect: useEffectD } = React;
 
-const SAMPLE_URL = 'https://archidekt.com/decks/5292775/the_dragon_in_the_night';
-
 // A deck's cards as a decklist the server parses ("4 Name (SET) 123" per line).
 const deckListText = (cards) => cards.map(c => `${c.qty} ${c.name}` + (c.set && c.collector_number ? ` (${c.set.toUpperCase()}) ${c.collector_number}` : '')).join('\n');
 
@@ -16,9 +14,12 @@ function coverageFor(cards, lines) {
 }
 
 function DeckView({ data, openCard, initialText }) {
-  const [src, setSrc] = useStateD(initialText || SAMPLE_URL);
+  const [src, setSrc] = useStateD(initialText || '');
   const [tab, setTab] = useStateD(initialText ? 'text' : 'url'); // 'url' | 'text'
   const [saved, setSaved] = useStateD(null);
+  const [myDecks, setMyDecks] = useStateD(null); // the decks you saved (null while loading)
+  const refreshDecks = () => window.VaultApi.decks().then(setMyDecks).catch(() => setMyDecks([]));
+  useEffectD(() => { refreshDecks(); }, []);
   const [deck, setDeck] = useStateD(null);
   const [enriched, setEnriched] = useStateD(null); // [{...deckCard, scry, owned, ownEntries}]
   const [coverage, setCoverage] = useStateD(null); // the server's deck totals
@@ -27,20 +28,20 @@ function DeckView({ data, openCard, initialText }) {
   const [progress, setProgress] = useStateD({ done: 0, total: 0 });
   const [filter, setFilter] = useStateD('all'); // 'all'|'missing'|'partial'|'owned'
 
-  async function loadFromUrl() {
-    setError(''); setDeck(null); setEnriched(null); setLoading(true);
+  async function loadFromUrl(url = src) {
+    setError(''); setDeck(null); setEnriched(null); setSaved(null); setLoading(true);
     try {
-      const d = await window.DeckSrc.fetchUrl(src.trim());
+      const d = await window.DeckSrc.fetchUrl(url.trim());
       await processDeck(d);
     } catch (e) {
       setError(e.message + ' — try pasting the decklist as text instead.');
       setLoading(false);
     }
   }
-  async function loadFromText() {
-    setError(''); setDeck(null); setEnriched(null); setLoading(true);
+  async function loadFromText(text = src) {
+    setError(''); setDeck(null); setEnriched(null); setSaved(null); setLoading(true);
     try {
-      const d = await window.DeckSrc.parseText(src);
+      const d = await window.DeckSrc.parseText(text);
       if (!d.cards.length) throw new Error('No cards parsed. Use "4 Card Name" per line.');
       await processDeck(d);
     } catch (e) {
@@ -49,11 +50,29 @@ function DeckView({ data, openCard, initialText }) {
     }
   }
 
+  // A saved deck you already have (same link): saving again updates it rather than adding a copy.
+  const savedMatch = deck && deck.url && myDecks ? myDecks.find((d) => d.source_url === deck.url) : null;
+
   async function saveDeck() {
     const text = deckListText(deck.cards);
-    const name = deck.title === 'Pasted decklist' ? (prompt('Name this deck', 'My deck') || 'My deck') : deck.title;
-    try { setSaved(await window.VaultApi.saveDeck(name, text, deck.url || null)); }
-    catch (e) { setError('Saving failed: ' + e.message); }
+    const name = savedMatch ? savedMatch.name
+      : deck.title === 'Pasted decklist' ? (prompt('Name this deck', 'My deck') || 'My deck') : deck.title;
+    try {
+      setSaved(savedMatch ? await window.VaultApi.updateDeck(savedMatch.id, name, text, deck.url)
+        : await window.VaultApi.saveDeck(name, text, deck.url || null));
+      refreshDecks();
+    } catch (e) { setError('Saving failed: ' + e.message); }
+  }
+
+  // Open a saved deck: from its link when it has one (so you see the deck as it is now), else its saved list.
+  function openSaved(d) {
+    if (d.source_url) { setTab('url'); setSrc(d.source_url); loadFromUrl(d.source_url); }
+    else { setTab('text'); setSrc(d.text); loadFromText(d.text); }
+  }
+  async function removeSaved(d) {
+    if (!confirm(`Remove “${d.name}” from your decks?`)) return;
+    try { await window.VaultApi.deleteDeck(d.id); refreshDecks(); }
+    catch (e) { setError('Removing failed: ' + e.message); }
   }
 
   // A deck opened from Account (saved or shared with you): analyse it straight away.
@@ -121,6 +140,27 @@ function DeckView({ data, openCard, initialText }) {
 
       <div className="coverage-grid">
         <div>
+          {/* Your saved decks: open one again, from its link when it has one */}
+          <div className="panel" style={{ marginBottom: 16 }}>
+            <p className="eyebrow" style={{ marginBottom: 12 }}>Your decks</p>
+            {myDecks === null ? <p className="muted label-mono">Loading…</p> :
+             myDecks.length === 0 ? <p className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>Decks you save appear here, so you can open them again any time. Load one below and press “Save to your decks”.</p> :
+             <div style={{ display: 'grid', gap: 8 }}>
+               {myDecks.map((d) => (
+                 <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                   <div style={{ flex: '1 1 160px', minWidth: 0 }}>
+                     <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</div>
+                     {d.source_url ?
+                       <a href={d.source_url} target="_blank" rel="noopener noreferrer" className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.source_url.replace(/^https?:\/\/(www\.)?/, '')}</a> :
+                       <span className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)' }}>pasted list</span>}
+                   </div>
+                   <button className="btn sm primary" onClick={() => openSaved(d)} disabled={loading}>Open</button>
+                   <button className="btn sm ghost" onClick={() => removeSaved(d)} aria-label={`Remove ${d.name}`}>Remove</button>
+                 </div>
+               ))}
+             </div>}
+          </div>
+
           {/* Input panel */}
           <div className="panel">
             <p className="eyebrow" style={{ marginBottom: 12 }}>Load a deck</p>
@@ -132,19 +172,17 @@ function DeckView({ data, openCard, initialText }) {
               <>
                 <input
                   className="input"
-                  placeholder="archidekt.com/decks/… or moxfield.com/decks/…"
+                  placeholder="Paste an Archidekt or Moxfield link"
                   value={src}
                   onChange={e => setSrc(e.target.value)}
                 />
                 <p className="muted" style={{ fontSize: 11, marginTop: 8, fontFamily: 'var(--mono)', lineHeight: 1.5 }}>
-                  Sample: <span style={{ color: 'var(--gold)' }}>The Dragon in the Night</span> is pre-loaded.<br />
                   Archidekt decks are fetched by the Vault server.<br />For Moxfield, use the <em>Paste list</em> tab.
                 </p>
                 <div className="row" style={{ marginTop: 12 }}>
-                  <button className="btn primary" onClick={loadFromUrl} disabled={loading}>
+                  <button className="btn primary" onClick={() => loadFromUrl()} disabled={loading || !src.trim()}>
                     {loading ? <><span className="spinner"></span> Loading</> : 'Analyse deck'}
                   </button>
-                  <button className="btn ghost" onClick={() => setSrc(SAMPLE_URL)}>Sample</button>
                 </div>
               </>
             ) : (
@@ -157,7 +195,7 @@ function DeckView({ data, openCard, initialText }) {
                   onChange={e => setSrc(e.target.value)}
                 />
                 <div className="row" style={{ marginTop: 12 }}>
-                  <button className="btn primary" onClick={loadFromText} disabled={loading}>
+                  <button className="btn primary" onClick={() => loadFromText()} disabled={loading || !src.trim()}>
                     {loading ? <><span className="spinner"></span> Loading</> : 'Analyse list'}
                   </button>
                 </div>
@@ -189,7 +227,7 @@ function DeckView({ data, openCard, initialText }) {
                 </p>
               )}
               <button className="btn xs" style={{ marginTop: 8 }} disabled={!!saved} onClick={saveDeck}>
-                {saved ? 'Saved ✓ (share it from Account)' : 'Save deck'}
+                {saved ? 'Saved to your decks ✓' : savedMatch ? 'Update in your decks' : 'Save to your decks'}
               </button>
 
               <div style={{ marginTop: 20 }}>
