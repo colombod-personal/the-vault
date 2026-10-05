@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -43,6 +44,20 @@ def _empty_postgres(url: str) -> None:
     db = Database(url)
     db.migrate()
     db.engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def frozen_rate_limit_clock(monkeypatch):
+    """Rate limits count in clock-aligned one-minute windows, so a burst that crossed a minute
+    boundary would start a fresh window and miss its 429 (#112). Freeze the limiter's clock (its
+    own ``time`` reference only, not ``time.time`` everywhere) at the test's start; a test that
+    moves time sets ``ratelimit.time.time`` itself."""
+    import types
+
+    from vault import ratelimit
+
+    now = time.time()
+    monkeypatch.setattr(ratelimit, "time", types.SimpleNamespace(time=lambda: now))
 
 
 @pytest.fixture

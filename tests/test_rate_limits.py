@@ -66,6 +66,14 @@ def test_old_windows_are_deleted(settings, monkeypatch):
             assert [r.minute for r in s.scalars(select(RateHit))] == [110]
 
 
+def test_the_limiter_clock_stands_still_during_a_test():
+    # A burst that crossed a minute boundary would start a fresh window and miss its 429 (#112).
+    start = ratelimit.time.time()
+    time.sleep(0.02)
+    assert ratelimit.time.time() == start
+    assert ratelimit.time is not time  # frozen for the limiter only, not time.time everywhere
+
+
 def test_forwarded_headers_count_only_on_vercel(settings):
     spoofed = [{"x-forwarded-for": f"198.51.100.{i}"} for i in range(3)]
     with limited_client(settings) as c:  # not on Vercel: anyone could send these headers
