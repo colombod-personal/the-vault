@@ -202,3 +202,11 @@ def test_the_public_site_is_checked_after_the_manual_deploy_too():
     condition = data["jobs"]["public"]["if"]
     assert "github.event.workflow_run.conclusion == 'success'" in condition
     assert "github.event.workflow_run.head_branch == 'main'" in condition
+
+
+def test_the_public_site_check_runs_the_smoke_test_of_the_deployed_release():
+    # main may move on after a deploy; newer smoke-test code must not judge an older release.
+    steps = load(ROOT / ".github" / "workflows" / "public-site.yml")["jobs"]["public"]["steps"]
+    checkout = next(s for s in steps if s.get("uses", "").startswith("actions/checkout@"))
+    assert checkout["with"]["ref"] == "${{ github.event.deployment.sha || github.event.workflow_run.head_sha || github.sha }}"
+    assert checkout["with"]["persist-credentials"] is False
