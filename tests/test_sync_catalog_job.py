@@ -88,3 +88,9 @@ def test_an_unknown_source_is_refused(database_url, monkeypatch, universe):
     monkeypatch.setenv("DATABASE_URL", database_url)
     with pytest.raises(SystemExit):
         sync_catalog.main(["--sources", "rules,everything"], transport=universe.transport)
+
+
+def test_a_source_another_job_loads_is_skipped_not_refused(database_url, monkeypatch, universe):
+    """CATALOG_SOURCES is shared with the price job: oracle_prices there must not stop the catalog job."""
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    assert sync_catalog.main(["--sources", "oracle_prices"], transport=universe.transport) == {}
