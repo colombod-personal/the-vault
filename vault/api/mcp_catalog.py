@@ -158,6 +158,17 @@ PROMPTS = [
      "text": "Work out what this deck still needs from the person's collection and give them a list to buy:\n\n{deck}\n\n" + GROUNDING +
              "\nCall shopping_list. Show the paste-ready list and the dated total. Tell them to paste it into the store's own list or deck tool "
              "and compare prices there; the Vault does not contact stores."},
+    {"name": "council_review", "title": "Review a deck with an expert council",
+     "description": "On-topic experts review a deck independently, a devil's advocate challenges them, and you get a checked plan.",
+     "arguments": [_arg("deck", "The deck: a saved deck's name, a link, or the decklist"), _arg("format", "The format, e.g. commander"),
+                   _arg("goal", "What the person wants: tune it, check it, explain it, find synergies", required=False)],
+     "text": "Act as the chair of an expert council reviewing this {format} deck. Goal: {goal}\n\nDeck: {deck}\n\n" + GROUNDING +
+             "\nSteps: find the deck (list_decks and get_deck for a saved deck); gather shared facts once with deck_stats, deck_legality, "
+             "find_combos, check_decklist and get_deck_overlap. Seat only experts for this format (for commander: the Commander expert and a "
+             "casual table voice), plus a rules judge and a devil's advocate, and the synergy or collection analyst if useful. Give each at most "
+             "three points with evidence, then let the devil's advocate challenge them with evidence. Answer with the plan first (checked with "
+             "validate_deck_changes, shown only if valid is true), then Agreed, Disputed and Not checked in one line each, and offer the full "
+             "discussion on request. Label metagame knowledge as opinion."},
 ]
 
 
