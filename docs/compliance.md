@@ -100,7 +100,8 @@ What the Vault does, and keeps doing:
   the cache, and an over-limit read gets the cached copy instead of an error (#133). Until then each read
   is one request a person made.
 - No background jobs, crawling or deck search; nothing is fetched without a person asking. Decks are stored only
-  when a person presses Save: their copy of that one deck's list and link, in their account, removable any time.
+  when a person presses Save: their copy of that one deck's list, link and author's public username (for the
+  credit), in their account, removable any time.
 - Until Archidekt confirms, this is our reading of their terms and their developers' posts, not their permission.
 - Every Archidekt deck is labelled "Deck list from Archidekt", with its author and a link back.
 

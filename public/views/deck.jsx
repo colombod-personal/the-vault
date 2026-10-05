@@ -221,8 +221,10 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
     try {
       let d;
       if (source.url) {
-        try { d = await window.DeckSrc.fetchUrl(source.url.trim()); }
-        catch (e) {
+        try {
+          d = await window.DeckSrc.fetchUrl(source.url.trim());
+          window.VaultApi.rememberDeckAuthor(source.saved, d.author);
+        } catch (e) {
           if (!source.saved) throw e;
           d = await window.DeckSrc.parseText(source.saved.text); // the source is unreachable: the saved copy
           d = { ...d, title: source.saved.name, url: source.saved.source_url, author: source.saved.source_author || '', offline: e.message };

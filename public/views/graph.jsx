@@ -121,7 +121,7 @@ function GraphView({ data, openCard }) {
       else if (!saved) d = await window.DeckSrc.fetchUrl(deckUrl.trim());
       else {
         // The deck as it is now on its site; your saved copy when the site can't be reached (or is Moxfield).
-        try { d = await window.DeckSrc.fetchUrl(saved.source_url.trim()); }
+        try { d = await window.DeckSrc.fetchUrl(saved.source_url.trim()); window.VaultApi.rememberDeckAuthor(saved, d.author); }
         catch (e) { d = { ...(await window.DeckSrc.parseText(saved.text)), title: saved.name, url: saved.source_url, author: saved.source_author || '', savedCopy: true }; }
       }
       d.cards = mergeDeckCards(d.cards); // one line per card, as on the Decks page

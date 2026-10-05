@@ -98,9 +98,9 @@ https://archidekt.com/terms first (last updated 2018-09-07 when this was drafted
 > cards they already own and what the rest would cost. Every deck is labelled as Archidekt's, with its author
 > and a link back. We never write to Archidekt, never sign in to anyone's account, and the person makes any
 > changes on Archidekt themselves. Nothing is fetched without a person asking: no crawling and no search. If the
-> person presses Save, the Vault keeps their copy of that deck's list and its link in their account (still credited
-> to Archidekt and the author, removable at any time); nothing else is stored. We plan to cache each deck briefly
-> so that opening the same deck again doesn't reach you.
+> person presses Save, the Vault keeps their copy of that deck's list, its link and its author's public username in
+> their account (so the copy stays credited to Archidekt and the author, removable at any time); nothing else is
+> stored. We plan to cache each deck briefly so that opening the same deck again doesn't reach you.
 >
 > Your forum posts say the read API is open and that we're welcome to use it within your rate limits; we want to
 > be sure that still holds and that this use is fine with you.

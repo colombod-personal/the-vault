@@ -449,6 +449,10 @@ window.VaultApi = (() => {
     decks: (summary) => all(V1 + '/decks' + (summary ? '?summary=true' : '')), // summary: owned / missing / cost to finish of each
     deck: (id) => call(V1 + '/decks/' + id),
     saveDeck: (name, text, source_url, source_author) => create(V1 + '/decks', { json: { name, text, source_url, source_author } }),
+    // A copy saved before authors were kept: record the author it shows now that the source answered.
+    rememberDeckAuthor: (saved, author) => (saved && saved.source_url && !saved.source_author && author
+      ? call(V1 + '/decks/' + saved.id, { method: 'PUT', json: { name: saved.name, text: saved.text, source_author: author } }).catch(() => null)
+      : Promise.resolve(null)),
     updateDeck: (id, name, text, source_url, source_author) => call(V1 + '/decks/' + id, { method: 'PUT', json: { name, text, source_url, source_author } }),
     deleteDeck: (id) => call(V1 + '/decks/' + id, { method: 'DELETE' }),
     // deck analysis, computed by the server from the card catalog (each answer is { result, provenance })

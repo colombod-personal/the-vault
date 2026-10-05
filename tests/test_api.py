@@ -522,6 +522,30 @@ def test_a_saved_deck_keeps_its_authors_credit(signed_in):
     assert signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring"}).json()["source_author"] is None
 
 
+def test_a_new_source_link_drops_the_old_author_unless_given(signed_in):
+    deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring", "source_url": "https://archidekt.com/decks/1",
+                                               "source_author": "Michael"}).json()
+    path = f"{V1}/decks/{deck['id']}"
+    same = signed_in.put(path, json={"name": "x", "text": "1 Sol Ring", "source_url": "https://archidekt.com/decks/1"}).json()
+    assert same["source_author"] == "Michael"  # the same link: still its author
+    moved = signed_in.put(path, json={"name": "x", "text": "1 Sol Ring", "source_url": "https://archidekt.com/decks/2"}).json()
+    assert moved["source_author"] is None  # another deck: not its author
+    given = signed_in.put(path, json={"name": "x", "text": "1 Sol Ring", "source_url": "https://archidekt.com/decks/3",
+                                      "source_author": "Ana"}).json()
+    assert given["source_author"] == "Ana"
+
+
+def test_recording_the_author_of_an_unchanged_deck_is_not_an_edit(signed_in):
+    deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring",
+                                               "source_url": "https://archidekt.com/decks/1"}).json()
+    path = f"{V1}/decks/{deck['id']}"
+    # A copy saved before authors were kept: the deck page records the author when the source answers.
+    after = signed_in.put(path, json={"name": "x", "text": "1 Sol Ring", "source_author": "Michael"}).json()
+    assert after["source_author"] == "Michael" and after["updated_at"] == deck["updated_at"]
+    edited = signed_in.put(path, json={"name": "x", "text": "2 Sol Ring"}).json()
+    assert edited["updated_at"] > deck["updated_at"] and edited["source_author"] == "Michael"
+
+
 @pytest.mark.parametrize("text", ["", "no cards here", "9" * 5000 + " Sol Ring"], ids=["empty", "no-cards", "huge-quantity"])
 def test_updating_a_deck_needs_cards_like_creating_one(signed_in, text):
     deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring"}).json()

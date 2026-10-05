@@ -759,12 +759,16 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         deck = owned_deck(db, user, deck_id)
         if not _parse(body.text).lines:
             raise HTTPException(400, "No cards found in the decklist")
-        values = {"name": body.name.strip()[:200] or deck.name, "text": body.text,
-                  "updated_at": datetime.now(timezone.utc)}
+        values = {"name": body.name.strip()[:200] or deck.name, "text": body.text}
         if "source_url" in body.model_fields_set:  # omitted: keep it (null clears it)
             values["source_url"] = body.source_url
         if "source_author" in body.model_fields_set:
             values["source_author"] = body.source_author
+        elif values.get("source_url", deck.source_url) != deck.source_url:
+            values["source_author"] = None  # a new source without its author: the old one isn't its author
+        # Recording the author of an unchanged deck (a copy saved before authors were kept) isn't an edit.
+        if any(values[k] != getattr(deck, k) for k in values if k != "source_author"):
+            values["updated_at"] = datetime.now(timezone.utc)
         # One UPDATE of the row as it is now: a deck deleted meanwhile is simply not found.
         done = db.execute(update(Deck).where(Deck.id == deck.id, Deck.user_id == user.id).values(**values))
         if done.rowcount != 1:
