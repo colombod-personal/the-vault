@@ -59,7 +59,10 @@ before building anything automated.
 
 ### Archidekt
 
-**Decision (owner, 2026-10-05, issue #79): the Vault only reads from Archidekt, and keeps to its terms.**
+**Decision (owner, 2026-10-05, issue #79): the Vault only reads from Archidekt, and is designed to respect its
+terms.** This is an operating decision, not settled compliance: the terms forbid automated requests, the Vault's
+server does make the request, and Archidekt has not confirmed this use yet (the message to send is in
+`outreach-drafts.md`).
 It never writes to Archidekt, never signs in to anyone's Archidekt account, and never "syncs" a deck.
 When the Vault suggests changes, the person applies them on Archidekt themselves; the Vault gives the
 change list and the buying list.
@@ -93,6 +96,7 @@ What the Vault does, and keeps doing:
   the cache, and an over-limit read gets the cached copy instead of an error (#133). Until then each read
   is one request a person made.
 - No background jobs, crawling, deck search or deck corpus; nothing is fetched without a person asking.
+- Until Archidekt confirms, this is our reading of their terms and their developers' posts, not their permission.
 - Every Archidekt deck is labelled "Deck list from Archidekt", with its author and a link back.
 
 Code review that nothing writes to Archidekt, with a guard test: #132.

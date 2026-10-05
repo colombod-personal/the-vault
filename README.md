@@ -154,6 +154,9 @@ with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic
    provider's redirect URI.
 8. **Public access:** project → Settings → Deployment Protection → Vercel Authentication →
    *Standard Protection* (protects previews only) so visitors aren't sent to a Vercel login.
+   The **public-site** workflow checks this: after every production deployment and once a day it runs the
+   smoke test against the public domain (`https://mtgvault.cards`, or the `PUBLIC_URL` repository variable)
+   signed out, with `SMOKE_EXPECT_PUBLIC=1`, and fails if the site is behind a Vercel login or broken.
 
 ### Security
 
@@ -347,7 +350,8 @@ Rules to keep (from [Scryfall's API terms](https://scryfall.com/docs/api) and
 
 ## Archidekt: read only
 
-**The Vault only reads from Archidekt, and keeps to [Archidekt's terms](https://archidekt.com/terms).**
+**The Vault only reads from Archidekt.** That is the owner's policy, designed to respect
+[Archidekt's terms](https://archidekt.com/terms); Archidekt has not yet confirmed this use (see below).
 
 - It reads **one public deck at a time, only when you ask** (you paste a deck link, open a saved deck, or an
   AI assistant calls `get_archidekt_deck` for you). There are no background jobs, no crawling, no deck search
@@ -359,8 +363,11 @@ Rules to keep (from [Scryfall's API terms](https://scryfall.com/docs/api) and
   for it).
 - Every deck is credited to Archidekt and its author, with a link back.
 
-Why: Archidekt's terms forbid automated requests and building a competing site; its developers say the read
-API is open but offer no way for other apps to change decks. The decision and its sources are in
+Why: Archidekt's terms forbid automated requests and building a competing site. Its developers have said on
+their forum that the read API is open to use within their rate limits, but that is not a licence, and they offer
+no way for other apps to change decks. Because the Vault's server does make the request, we keep reads to one
+deck per person's request and are asking Archidekt to confirm this use (draft in
+[`docs/outreach-drafts.md`](docs/outreach-drafts.md#to-archidekt)); until they reply, treat it as unconfirmed. The decision and its sources are in
 [`docs/compliance.md`](docs/compliance.md#archidekt) (#79). Open work: a code review that nothing writes to
 Archidekt (#132), and a cache so repeat reads don't reach Archidekt, with a rate cap only if needed (#133).
 

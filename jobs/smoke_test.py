@@ -4,6 +4,8 @@
 
 Writes a table to stdout (and to the GitHub job summary). Exits 1 if something is broken.
 A deployment that answers 503 "not configured yet" is reported as such, not as broken.
+A preview behind Vercel Authentication is reported, not failed; with SMOKE_EXPECT_PUBLIC=1 (the public
+production domain) a login wall is a failure: everyone must be able to reach the Vault.
 """
 
 from __future__ import annotations
@@ -28,6 +30,9 @@ def run(base: str, transport: httpx.BaseTransport | None = None) -> tuple[list[t
         walled = (first.status_code in (301, 302, 303, 307, 308) and "vercel.com" in location) or \
             (first.status_code == 401 and "vercel" in first.text.lower() and "The Vault" not in first.text)
         if walled:  # Vercel Authentication: a redirect to vercel.com's login (or its 401 page)
+            if os.environ.get("SMOKE_EXPECT_PUBLIC") == "1":  # the public site: a login wall is an outage
+                return [("Public (no Vercel login)", False, "behind Vercel Authentication: set Deployment Protection "
+                         "to Standard Protection so the production domain is open to everyone")], True
             return [("Deployment protection", True, "this deployment is behind Vercel Authentication; run the "
                      "smoke test locally with VERCEL_AUTOMATION_BYPASS_SECRET to test it")], False
 

@@ -1,0 +1,40 @@
+# The production site must be open to everyone, not only to people signed in to Vercel. The deploy
+# check (vercel-check.yml) tests each deployment's own URL, which Vercel's Standard Protection keeps
+# behind its login, so it cannot see this. This tests the public domain, signed out, after every
+# production deployment and once a day; it fails if the domain is behind a Vercel login or broken.
+name: public-site
+on:
+  deployment_status:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  public:
+    if: >-
+      github.event_name != 'deployment_status' ||
+      (github.event.deployment_status.state == 'success' && startsWith(github.event.deployment.environment, 'Production'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PUBLIC_URL: ${{ vars.PUBLIC_URL || 'https://mtgvault.cards' }}
+      SMOKE_EXPECT_PUBLIC: "1"
+      SMOKE_EXPECT_REGION: fra1
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.12"
+      - run: pip install --require-hashes --no-deps -r jobs/requirements-ops.txt
+      - name: Smoke-test the public site, signed out
+        run: |
+          echo "Public site: $PUBLIC_URL" >> "$GITHUB_STEP_SUMMARY"
+          for i in 1 2 3 4 5 6; do  # the domain moves to a new deployment a few seconds after it is ready
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$PUBLIC_URL/api/health" || true)
+            [ "$code" = "200" ] && break
+            sleep 10
+          done
+          python -m jobs.smoke_test "$PUBLIC_URL"
