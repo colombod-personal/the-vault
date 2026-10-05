@@ -36,6 +36,7 @@ from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
 from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, import_days, view_version
+from .. import deck_match
 from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, export_collection, import_collection,
                         preview_import as preview_collection_import, user_entries)
 from ..models import AccessToken, ApiSession, Deck, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
@@ -658,8 +659,12 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                           for c in lines],
                 "unparsed": deck.unparsed}
 
+    def _source_kind(url: str | None) -> str:
+        host = (urlsplit(url).hostname or "").lower() if url else ""
+        return "archidekt" if host.endswith("archidekt.com") else "moxfield" if host.endswith("moxfield.com") else "link" if url else "pasted"
+
     def _deck(d: Deck, coverage: dict | None = None) -> dict:
-        out = {"id": d.id, "name": d.name, "text": d.text, "source_url": d.source_url, "source_author": d.source_author,
+        out = {"id": d.id, "name": d.name, "text": d.text, "source_url": d.source_url, "source": _source_kind(d.source_url), "source_author": d.source_author,
                "created_at": _iso(d.created_at), "updated_at": _iso(d.updated_at),
                "_links": {"self": link(f"{V1}/decks/{d.id}")}}
         if coverage is not None:
@@ -713,9 +718,17 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     @router.get("/decks", tags=["decks"], response_model=S.DeckPage)
     def list_decks(request: Request, cursor: str | None = None, limit: int | None = None, summary: bool = False,
+                   q: str | None = Query(None, max_length=200, description="Find a deck by words from its name ('sliver swarm'); "
+                                         "best match first; when nothing matches, `closest` lists near names"),
                    user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         rows = list(db.scalars(select(Deck).where(Deck.user_id == user.id)))
-        page, nxt = paginate(rows, lambda d: (d.name.lower(),), lambda d: d.id, cursor=cursor, limit=limit)
+        closest: list[str] = []
+        if q and q.strip():
+            ids, closest = deck_match.search({d.id: d.name for d in rows}, q, limit or 25)
+            by_id = {d.id: d for d in rows}
+            page, nxt = [by_id[i] for i in ids], None  # ranked by how well the name matches, not by name
+        else:
+            page, nxt = paginate(rows, lambda d: (d.name.lower(),), lambda d: d.id, cursor=cursor, limit=limit)
         items = [_deck(d) for d in page]
         if summary and page:  # each deck against your collection; the collection and prices read once for the page
             owned = user_entries(db, user)
@@ -731,7 +744,10 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 have = sum(min(c["have"], c["need"]) for c in cov["cards"])
                 item["summary"] = {"need": need, "have": have, "missing": need - have,
                                    "missing_cost": cov.get("missing_cost"), "missing_unpriced": cov.get("missing_unpriced")}
-        return page_body(request, items, nxt, len(rows), limit=limit, summary="true" if summary else None)
+        body = page_body(request, items, nxt, len(rows), limit=limit, summary="true" if summary else None, q=q or None)
+        if q and q.strip():
+            body["closest"] = closest
+        return body
 
     @router.post("/decks", tags=["decks"], response_model=S.Deck, status_code=201)
     def create_deck(request: Request, body: S.DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)):

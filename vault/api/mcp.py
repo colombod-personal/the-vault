@@ -250,7 +250,11 @@ TOOLS = [
              "anyOf": [{"required": ["id"]}, {"required": ["name"]}, {"required": ["set", "collector_number"]}]}}},
          ["identifiers"],
          method="POST", path=lambda a: f"{V1}/cards/lookup", body=lambda a: {"identifiers": a["identifiers"]}),
-    Tool("list_decks", "The person's saved decks.", dict(PAGING), path=lambda a: f"{V1}/decks", query=("limit", "cursor")),
+    Tool("list_decks", "The person's saved decks, each with where it came from (archidekt, moxfield, link, pasted). Pass `query` with "
+         "words from the deck's name ('sliver swarm') to find it: best match first, and when nothing matches `closest` lists "
+         "near names. People name their decks; use this before asking for a link or an id.",
+         {**PAGING, "query": {"type": "string", "maxLength": 200, "description": "Words from the deck's name"}},
+         path=lambda a: f"{V1}/decks", query=("limit", "cursor", "query")),
     Tool("get_deck_overlap", "Cards that are in more than one of the person's saved decks, how many copies building "
          "every deck at once needs, how many they own, and how many they are short. Basic lands are left out.",
          path=lambda a: f"{V1}/decks/overlap"),
