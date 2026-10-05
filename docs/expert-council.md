@@ -1,0 +1,117 @@
+# Expert council: design (issue #103)
+
+Status: **draft for the owner's review**. Nothing here is implemented; #104 builds it once this is agreed
+(`status:ready`).
+
+## What it is for
+
+A player asks their assistant to review a deck, settle a rules question, or find synergies. Instead of one voice, a
+small council of experts looks at it from different angles, one of them argues against the others, and a chair
+reports what they agree on, where they disagree and why, and a plan the Vault has checked. Every claim is grounded in
+the Vault's tools; opinion is labelled as opinion.
+
+Three jobs:
+
+1. **Deck review**: "Is my Sliver deck good? What would you change for under $50?"
+2. **Rulings discussion**: "Does Doubling Season double the loyalty a planeswalker enters with?" with the experts
+   reasoning from the Comprehensive Rules and rulings, and disagreements resolved by citation.
+3. **Synergy and plan**: "What does this deck want to do, and which cards in my collection fit it?", including
+   formats with special rules such as Two-Headed Giant.
+
+## The members
+
+A council run picks the **chair**, the **judge**, the **devil's advocate**, one or two **format experts** for the
+deck's format, and the **analysts** the question needs. Typically 4 to 6 members, never all of them.
+
+| Member | Role | Main tools |
+|---|---|---|
+| Chair | Frames the question, picks members, reconciles, writes the answer | all read tools; `validate_deck_changes` |
+| Judge | Rules and rulings only; every quote verified | `get_card_oracle`, `get_rulings`, `search_rules`, `get_rule`, `verify_citation`, `present_steps` |
+| Devil's advocate | Attacks the strongest claims and the proposed plan; must cite a reason | same as the claim it attacks |
+| Synergy analyst | What the deck is trying to do; engines, enablers, payoffs; combos | `deck_stats`, `find_combos`, `get_card_oracle`, `search_cards` |
+| Collection and budget analyst | What the person owns, what it costs, cards shared between their decks | `check_decklist`, `get_deck_overlap`, `find_upgrades`, `shopping_list` |
+
+**Format experts** (one or two per run, chosen by the deck's format):
+
+| Expert | Knows |
+|---|---|
+| Commander | 100-card singleton, colour identity, the Commander Brackets, multiplayer politics, social contract |
+| cEDH | Fast mana, interaction density, win lines, turn-by-turn speed |
+| Brawl / Standard Brawl | 60/100-card variants, rotation |
+| Standard, Pioneer, Modern, Legacy, Vintage | 60-card constructed: curve, interaction, sideboard plans, rotation and bans |
+| Pauper | Commons only; format-specific staples |
+| Limited (draft and sealed) | Curve, removal count, two-colour discipline, signals, set mechanics |
+| Two-Headed Giant | Shared turns and life total (30), team attacks, which effects scale with two opponents, team synergies |
+| Oathbreaker and other variants | The variant's own rules (`deck_legality` lists what it checks) |
+
+Format experts do not invent meta knowledge. Until #105 finds sources we may use, metagame claims ("this is the best
+deck") are labelled as general knowledge, dated if possible, and never presented as data.
+
+## How a run works
+
+1. **Intake (chair).** Deck (saved deck by name, link, or pasted list), format, goal ("tune it", "is this legal",
+   "explain this interaction"), budget and constraints. The chair says which members it is calling and why.
+2. **Facts first (chair).** The chair gathers the shared facts once, so every member argues from the same evidence:
+   `deck_stats`, `deck_legality`, `find_combos`, `check_decklist`, `get_deck_overlap` as relevant. Members get these
+   facts plus their own tools.
+3. **Independent views (members, in parallel where the host allows).** Each member writes a short view without
+   seeing the others: at most 3 points, each with the tool result it rests on. The judge answers only rules points.
+4. **Challenge (devil's advocate).** It reads all views and attacks the 2 or 3 strongest claims and any proposed
+   change: counter-evidence from the tools, rules the claim misreads, costs it ignores. It may not attack without a
+   reason it can cite.
+5. **Answer (chair).** The chair reconciles:
+   - **Agreed:** points no one disputed, or that survived the challenge, with their sources.
+   - **Disputed:** each disagreement, both sides in one line each, and which evidence would settle it.
+   - **Plan:** concrete changes, checked with `validate_deck_changes` (budget and legality); only a valid plan is
+     shown.
+   - **Not checked:** what the council could not verify (meta, prices of shops, anything outside the tools).
+   Provenance of every source is passed on (Scryfall, Wizards, Commander Spellbook, Archidekt).
+
+For **rulings**, steps 3 to 5 are the judge and one format expert reasoning from rules text; a disagreement is
+settled only by a verified citation (`verify_citation`), and if the rules do not settle it the answer says so and
+points to a judge.
+
+## Rules every member follows
+
+- The grounding rules in the MCP server instructions apply to every member (cards and rules from the tools, quotes
+  verified, provenance passed on, no shop prices, no carts).
+- Each point names its evidence: a tool result, a rule number, or "opinion".
+- Members never write to the collection or decks. Only the person can approve a change, through the normal
+  preview-then-confirm tools.
+- Popularity (EDHREC rank) is not power; Scryfall Tagger roles are community opinion. Say so once.
+- The answer is short. The full transcript of views is available on request, not dumped by default.
+
+## Hosts
+
+| Host | How the council runs |
+|---|---|
+| Claude Code, Codex, Copilot (agents with sub-agents) | Each member is an agent definition (generated by `scripts/build_plugin.py`, like the existing judge, deckbuilder and buyer); the chair runs them in parallel |
+| claude.ai, ChatGPT (no sub-agents) | One `expert-council` skill: the assistant plays the members in turn, following the same steps, and labels each view; the independence is weaker, and the answer says so |
+| Any host without skills | An MCP prompt `council_review` that carries the same procedure |
+
+Cost control: members get the shared facts instead of re-querying; views are capped at 3 points; the chair calls 4
+to 6 members, not all.
+
+## Keeping experts current (link to #107)
+
+Every council answer records the rules edition (`whoami` returns `rules_version`) and the card data date. When a new
+Comprehensive Rules edition, rulings or legality changes arrive, the reconciler (#107) produces a change brief; the
+experts' instructions cite rules by number and are re-checked against the new edition; answers given under an older
+edition say so if asked again.
+
+## What #104 builds (acceptance)
+
+- Agent definitions for chair, judge, devil's advocate, synergy analyst, collection and budget analyst, and the
+  format experts above; generated for each host; tests that every tool named exists and agents stay read-only.
+- The `expert-council` skill and the `council_review` prompt with this procedure.
+- Tests: member selection by format, the answer has Agreed / Disputed / Plan / Not checked sections, a plan is
+  presented only when `validate_deck_changes` is valid.
+- A real run on a saved Commander deck and a rulings question, recorded in docs/ai-integration-testing.md.
+
+## Open questions for the owner
+
+1. **Members:** is the list right? Add or drop experts (e.g. a separate "casual table" voice for Commander, or a
+   cube expert)?
+2. **Visibility:** show the disputed points by default (current proposal) or only the final plan?
+3. **Two-Headed Giant and Limited first,** or Commander first? (Commander has the most data in the Vault today.)
+4. **Meta knowledge:** acceptable to label general knowledge as opinion until #105 finds licensed sources?
