@@ -95,10 +95,11 @@ What the Vault does, and keeps doing:
 - Reads **one public deck per request a person makes** (opening a link, the deck page, the graph overlay,
   or the `get_archidekt_deck` tool), server-side, with the toolkit's User-Agent naming the project.
   Private decks are not read (Archidekt answers 404 without sign-in).
-- **No rate cap yet, by design.** A cap is added only if it is needed, and then only behind a cache, so
-  Archidekt is protected and people still get their deck: repeat reads of the same deck are served from
-  the cache, and an over-limit read gets the cached copy instead of an error (#133). Until then each read
-  is one request a person made.
+- **A cache, and no rate cap yet, by design (#133, 2026-10-06).** A read of a public deck is kept in `archidekt_deck_cache`
+  (the deck's public JSON by id, no person's id) and served for 10 minutes; Refresh asks Archidekt again unless the copy
+  is under a minute old; entries older than 7 days are deleted. Every answer carries `vault_cache` (from cache or not,
+  fetched_at, age in seconds). Calls to Archidekt and cache hits are logged as counts. A cap is added only if the counts
+  show it is needed, and then only behind this cache: an over-limit read gets the cached copy instead of an error.
 - No background jobs, crawling or deck search; nothing is fetched without a person asking. Decks are stored only
   when a person presses Save: their copy of that one deck's list, link and author's public username (for the
   credit), in their account, removable any time.
