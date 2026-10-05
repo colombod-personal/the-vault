@@ -246,6 +246,9 @@ TOOLS = [
          ["identifiers"],
          method="POST", path=lambda a: f"{V1}/cards/lookup", body=lambda a: {"identifiers": a["identifiers"]}),
     Tool("list_decks", "The person's saved decks.", dict(PAGING), path=lambda a: f"{V1}/decks", query=("limit", "cursor")),
+    Tool("get_deck_overlap", "Cards that are in more than one of the person's saved decks, how many copies building "
+         "every deck at once needs, how many they own, and how many they are short. Basic lands are left out.",
+         path=lambda a: f"{V1}/decks/overlap"),
     Tool("get_deck", "A saved deck with its text and coverage against the collection.",
          {"deck_id": ID}, ["deck_id"], path=lambda a: f"{V1}/decks/{int(a['deck_id'])}"),
     Tool("save_deck", "Save a decklist to the person's decks.",
@@ -323,7 +326,7 @@ SCRYFALL_DATA = {"get_collection_summary", "search_cards", "get_card", "list_set
 OWN_DATA_ONLY = {"get_acquisition_timeline", "parse_decklist", "list_decks", "save_deck", "update_deck", "list_imports",
                  "import_collection_csv", "list_export_formats", "list_shared_with_me", "get_import", "delete_deck",
                  "list_my_shares", "accept_share", "stop_sharing", "start_collection_upload",
-                 "get_staged_upload", "confirm_staged_upload"}
+                 "get_staged_upload", "confirm_staged_upload", "get_deck_overlap"}
 for _tool in TOOLS:
     if not _tool.provenance:
         _tool.provenance = ("scryfall",) if _tool.name in SCRYFALL_DATA else ("archidekt",) if _tool.name == "get_archidekt_deck" else ()

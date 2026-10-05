@@ -21,7 +21,7 @@ Scopes: **read**, **write** (changes the collection or decks; off by default on 
 | **Upload a collection file (CSV)** | `POST /imports` (multipart) | `import_collection_csv` (shows what would change; replaces only with `confirm`); big files: `start_collection_upload`, `get_staged_upload`, `confirm_staged_upload` | write | no |
 | See past imports and what changed | `GET /imports`, `GET /imports/{id}` | `list_imports`, `get_import` | read | no |
 | Export the collection to another app | `GET /collection/exports` | `list_export_formats` (download links) | read | no |
-| Graph view (clusters, deck map) | computed in the browser from the collection | none | read | **yes**: no AI equivalent (G4) |
+| Graph view (clusters, deck map) | computed in the browser from the collection | `get_deck_overlap` (cards shared by several decks, and copies short) | read | partly: the clusters themselves stay visual |
 
 All collection tools also read a collection someone shared with you (`share_id`, routes under `/shared/{id}/collection`).
 
@@ -71,8 +71,7 @@ Shown on the consent screen as "It will never be able to". These stay web-only.
 - ~~G1 Large files~~: a one-time upload link (`start_collection_upload`), the file staged and previewed (`get_staged_upload`), imported only with `confirm` (`confirm_staged_upload`); `vault/uploads.py`.
 - ~~G2 Import preview~~: `import_collection_csv` previews (`POST /imports/preview`, writes nothing) unless `confirm` is true.
 - ~~G3 One import's changes~~: `get_import`.
-- **G4 Graph view.** No AI equivalent: decide whether a tool returning clusters/deck overlaps is useful (e.g. "which of my
-  decks share cards"; the real claude.ai run worked this out by hand).
+- ~~G4 Deck overlap~~: `get_deck_overlap` ("which of my decks share cards, and am I short?"); the graph's clusters stay visual.
 - ~~G5 Delete a deck~~: `delete_deck`, preview then `confirm`.
 - ~~G6 Sharing~~: `list_my_shares`, `accept_share`, `stop_sharing` (confirm). Creating a share stays with the person (see the table).
 - Deck items (name search, import from link, `deck_id` analysis) are in #96, owned by the deck work (#88).
