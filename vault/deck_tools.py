@@ -214,6 +214,8 @@ def stats(db: Session, resolved: Resolved) -> dict:
     priced = sum(e.line.quantity for e in known if e.card.oracle_id in prices and prices[e.card.oracle_id].usd is not None)
     cmcs = [(e.card.cmc or 0, e.line.quantity) for e in nonland]
     avg = sum(c * q for c, q in cmcs) / max(1, sum(q for _, q in cmcs))
+    changers = [{"name": e.card.name, "quantity": e.line.quantity} for e in known if e.card.game_changer]
+    n_changers = sum(c["quantity"] for c in changers)
     return {
         "cards": total, "unique": len(played), "by_section": dict(Counter(e.line.section for e in resolved.entries for _ in range(e.line.quantity))),
         "lands": lands, "nonland": total - lands, "types": dict(kinds), "average_mana_value_nonland": round(avg, 2),
@@ -222,6 +224,14 @@ def stats(db: Session, resolved: Resolved) -> dict:
         "roles": {r: {"count": sum(c["quantity"] for c in cards), "cards": cards[:MAX_LISTED]} for r, cards in role_cards.items()},
         "estimated_cost_usd": round(cost, 2), "priced_cards": priced, "unpriced_cards": total - priced,
         "unmatched": resolved.unmatched,
+        "game_changers": {
+            "count": n_changers, "cards": changers,
+            "bracket_floor": 4 if n_changers > 3 else 3 if n_changers else None,
+            "note": "Scryfall marks Wizards' Game Changers. Commander Brackets 1 and 2 allow none, Bracket 3 up to three, so this "
+                    "is a floor from Game Changers alone: mass land denial, chained extra turns, tutors and early two-card combos "
+                    "also decide the bracket and are not counted here (the limits are as reported by community guides: "
+                    "Wizards' own page was not readable by a tool, so check it).",
+        },
         "price_note": "Cheapest priced paper printing of each card, from Scryfall; see provenance for the date.",
         "role_note": "Roles are Scryfall Tagger tags, a community's opinion with weights, not rules.",
     }
