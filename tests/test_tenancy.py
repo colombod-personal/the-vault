@@ -24,9 +24,11 @@ def test_private_by_default(client):
     login(client, "bob@example.com")
     assert client.get("/api/v1/collection").json()["copies"] == 0  # Bob's own, empty
     for method, path in [("GET", f"/api/v1/decks/{deck_id}"), ("PUT", f"/api/v1/decks/{deck_id}"),
-                         ("DELETE", f"/api/v1/decks/{deck_id}"), ("DELETE", f"/api/v1/shares/{share_id}"),
+                         ("DELETE", f"/api/v1/decks/{deck_id}"), ("POST", f"/api/v1/decks/{deck_id}/source-author"),
+                         ("DELETE", f"/api/v1/shares/{share_id}"),
                          ("GET", f"/api/v1/shared/{share_id}/collection"), ("GET", f"/api/v1/shared/{share_id}/deck")]:
-        kwargs = {"json": {"name": "x", "text": "1 Island"}} if method == "PUT" else {}
+        kwargs = ({"json": {"name": "x", "text": "1 Island"}} if method == "PUT" else
+                  {"json": {"source_url": "https://archidekt.com/decks/1", "source_author": "Bob"}} if method == "POST" else {})
         assert client.request(method, path, **kwargs).status_code == 404, (method, path)
     assert client.get("/api/v1/decks").json()["items"] == [] and client.get("/api/v1/shared").json()["items"] == []
     assert client.get("/api/v1/imports").json()["items"] == []

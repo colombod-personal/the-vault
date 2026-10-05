@@ -1,0 +1,79 @@
+# The production site must be open to everyone, not only to people signed in to Vercel. The deploy
+# check (vercel-check.yml) tests each deployment's own URL, which Vercel's Standard Protection keeps
+# behind its login, so it cannot see this. This tests the public domain, signed out, after every
+# production deployment and once a day; it fails if the domain is behind a Vercel login or broken.
+# Production deployments come from Vercel's Git integration (deployment_status) or, as a fallback,
+# from the manual "deploy (manual fallback)" workflow with the Vercel CLI (workflow_run).
+name: public-site
+on:
+  deployment_status:
+  workflow_run:
+    workflows: ["deploy (manual fallback)"]
+    types: [completed]
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  public:
+    if: >-
+      (github.event_name != 'deployment_status' && github.event_name != 'workflow_run') ||
+      (github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success' &&
+       startsWith(github.event.deployment.environment, 'Production')) ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    # A newer production deployment (Git or manual) replaces the release an older run waits for, so
+    # that run could only fail: cancel it and check the newest. Set on the job, not the workflow, so
+    # preview deployment events and failed manual deploys (which skip this job) never cancel a check.
+    concurrency:
+      group: public-site-${{ (github.event_name == 'deployment_status' || github.event_name == 'workflow_run') && 'deploy' || github.run_id }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PUBLIC_URL: ${{ vars.PUBLIC_URL || 'https://mtgvault.cards' }}
+      SMOKE_EXPECT_PUBLIC: "1"
+      SMOKE_EXPECT_REGION: fra1
+      # On a deployment event, that deployment's own address (as vercel-check.yml reads it). A commit
+      # isn't enough: a redeploy of the same commit (after a settings change) would match the old
+      # release. Empty for the daily and manual runs and after a manual CLI deploy.
+      EXPECT_DEPLOYMENT: ${{ github.event.deployment_status.environment_url || github.event.deployment_status.target_url }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          # The smoke test of the release being checked: the deployed commit (a Git deploy, or the
+          # main commit a manual deploy shipped), else main for the daily and manual runs.
+          ref: ${{ github.event.deployment.sha || github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.12"
+      - run: pip install --require-hashes --no-deps -r jobs/requirements-ops.txt
+      - name: Smoke-test the public site, signed out
+        run: |
+          echo "Public site: $PUBLIC_URL" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$EXPECT_DEPLOYMENT" ]; then
+            # The deployment's host (https://the-vault-abc123.vercel.app/ → the-vault-abc123.vercel.app),
+            # which is what /api/health reports as "deployment" (Vercel's VERCEL_URL).
+            expected=$(python -c 'import sys, urllib.parse as u; print((u.urlsplit(sys.argv[1]).hostname or "").lower())' "$EXPECT_DEPLOYMENT")
+            # After a production deployment the domain moves to it a little later, and the old release
+            # also answers 200: wait until /api/health reports this deployment (up to 5 minutes; each
+            # request gives up after 10 seconds, so a server that hangs can't use up the job).
+            deadline=$((SECONDS + 300))
+            while :; do
+              live=$(curl -s --connect-timeout 5 --max-time 10 "$PUBLIC_URL/api/health" | python -c 'import json,sys; print(((json.load(sys.stdin) or {}).get("deployment") or "").lower())' 2>/dev/null || true)
+              [ -n "$expected" ] && [ "$live" = "$expected" ] && break
+              [ "$SECONDS" -ge "$deadline" ] && break
+              sleep 10
+            done
+            # Anything else (an older release, the same commit's previous deployment, or no deployment
+            # reported) is a failure.
+            if [ -z "$expected" ] || [ "$live" != "$expected" ]; then
+              echo "::error::$PUBLIC_URL serves deployment '${live:-none reported}' after 5 minutes, not $EXPECT_DEPLOYMENT"
+              [ -z "$live" ] && echo "::error::No deployment reported: turn on Vercel → Settings → Environment Variables → Automatically expose System Environment Variables (sync-prices does), then redeploy"
+              exit 1
+            fi
+            echo "Serving the new deployment $expected" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          python -m jobs.smoke_test "$PUBLIC_URL"

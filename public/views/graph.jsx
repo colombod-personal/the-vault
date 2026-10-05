@@ -117,12 +117,12 @@ function GraphView({ data, openCard }) {
   async function loadDeck(saved) {
     try {
       let d;
-      if (saved && !saved.source_url) d = await window.DeckSrc.parseText(saved.text);
+      if (saved && !saved.source_url) d = { ...(await window.DeckSrc.parseText(saved.text)), title: saved.name }; // a pasted deck: its saved name
       else if (!saved) d = await window.DeckSrc.fetchUrl(deckUrl.trim());
       else {
         // The deck as it is now on its site; your saved copy when the site can't be reached (or is Moxfield).
-        try { d = await window.DeckSrc.fetchUrl(saved.source_url.trim()); }
-        catch (e) { d = { ...(await window.DeckSrc.parseText(saved.text)), title: saved.name }; }
+        try { d = await window.DeckSrc.fetchUrl(saved.source_url.trim()); window.VaultApi.rememberDeckAuthor(saved, d.author); }
+        catch (e) { d = { ...(await window.DeckSrc.parseText(saved.text)), title: saved.name, url: saved.source_url, author: saved.source_author || '', savedCopy: true }; }
       }
       d.cards = mergeDeckCards(d.cards); // one line per card, as on the Decks page
       // What you own of it comes from the server's coverage; colours from the cards' data.
@@ -133,7 +133,8 @@ function GraphView({ data, openCard }) {
       const lines = coverageFor(d.cards, cov.cards);
       const rows = d.cards.map((c, i) => ({ ...c, scry: scry[i], owned: lines[i] ? lines[i].have : 0,
         missing: lines[i] ? lines[i].missing : c.qty, unit: lines[i] ? lines[i].unit_price : null }));
-      setDeck({ title: d.title, rows });
+      // Where the list came from, so the overlay credits Archidekt and its author with a link back.
+      setDeck({ title: d.title, rows, url: d.url || (saved && saved.source_url) || null, author: d.author || null, savedCopy: !!d.savedCopy });
       setMode('deck');
     } catch (e) {
       alert('Could not load deck: ' + e.message);
@@ -643,6 +644,16 @@ function GraphView({ data, openCard }) {
               <input className="input" style={{ fontSize: 11, padding: '7px 8px' }} value={deckUrl} onChange={(e) => setDeckUrl(e.target.value)} placeholder="Paste an Archidekt or Moxfield link" />
               <button className="btn sm primary" onClick={() => loadDeck()} disabled={!deckUrl.trim()}>Load</button>
             </div>
+            {deck && (
+              <p className="muted deck-credit" style={{ fontSize: 11, fontFamily: 'var(--mono)', marginTop: 6, lineHeight: 1.5 }}>
+                Showing <strong style={{ color: 'var(--text)' }}>{deck.title}</strong>
+                {deck.url && window.DeckSrc.isArchidekt(deck.url) && <>
+                  {' · '}{deck.savedCopy ? 'your saved copy of a deck list from Archidekt' : 'deck list from Archidekt'}
+                  {deck.author && <> by {deck.author}</>}
+                  {' · '}<a href={deck.url} target="_blank" rel="noopener noreferrer">view on Archidekt ↗</a>
+                </>}
+              </p>
+            )}
           </div>
         </div>
       </div>

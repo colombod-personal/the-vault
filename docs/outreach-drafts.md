@@ -82,3 +82,35 @@ Where: their Discord or GitHub (backend repository).
 3. Moxfield and Commander Spellbook (optional features).
 
 Record each answer in `docs/compliance.md` with the date and who answered; unanswered means "not allowed yet".
+
+## To Archidekt
+
+Where: Archidekt's contact page or Discord (linked from https://archidekt.com), to the developers. Read
+https://archidekt.com/terms first (last updated 2018-09-07 when this was drafted). Issue #79.
+
+> Subject: A free tool that reads Archidekt decks on a person's request: is this OK with you?
+>
+> Hello Archidekt team,
+>
+> I run The Vault (https://github.com/colombod-personal/the-vault), a free, non-commercial, open-source (MIT)
+> Magic collection manager. When a person pastes the link to a public Archidekt deck, the Vault reads that one
+> deck from your API (server-side, `GET /api/decks/{id}/`, with a User-Agent naming the project) and shows which
+> cards they already own and what the rest would cost. Every deck is labelled as Archidekt's, with its author
+> and a link back. We never write to Archidekt, never sign in to anyone's account, and the person makes any
+> changes on Archidekt themselves. Nothing is fetched without a person asking: no crawling and no search. If the
+> person presses Save, the Vault keeps their copy of that deck's list, its link and its author's public username in
+> their account (so the copy stays credited to Archidekt and the author, removable at any time); nothing else is
+> stored. We plan to cache each deck briefly so that opening the same deck again doesn't reach you.
+>
+> Your forum posts say the read API is open and that we're welcome to use it within your rate limits; we want to
+> be sure that still holds and that this use is fine with you.
+>
+> 1. Is reading one public deck at a time, on a person's request, as described, OK with you?
+> 2. May we also list a person's own public decks by the Archidekt username they give us (one search request when
+>    they ask), so they can pick one, or would you rather we didn't?
+> 3. Is there anything you'd like changed: the attribution, the rate, the User-Agent, or a contact address?
+> 4. If you ever offer a way for apps to make changes on a person's behalf (with their sign-in), we'd like to
+>    know; until then we only read.
+>
+> Thank you for Archidekt, and for keeping the API open.
+

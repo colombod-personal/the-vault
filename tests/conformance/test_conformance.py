@@ -219,6 +219,8 @@ def test_archidekt_search_and_deck(real, twin):
 
 VERCEL = "https://api.vercel.com"
 VERCEL_CALLS = [
+    ("GET", "/v9/projects/the-vault"),
+    ("PATCH", "/v9/projects/the-vault"),
     ("GET", "/v10/projects/the-vault/env"),
     ("POST", "/v10/projects/the-vault/env"),
     ("PATCH", "/v9/projects/the-vault/env/env_x"),
@@ -252,7 +254,8 @@ def vercel_project():
 
 
 def test_vercel_contract_used_by_the_setup_job(real, twin, vercel_project):
-    """Read-only, plus one redeploy of a deployment that doesn't exist (refused, builds nothing)."""
+    """Read-only except one project setting, switched on and restored, plus one redeploy of a
+    deployment that doesn't exist (refused, builds nothing)."""
     project, headers, params = vercel_project
     v = twin.universe.vercel
     v.add_project("scratch", ["scratch.vercel.app"], [{"key": "EXAMPLE", "target": ["production"]}])
@@ -275,6 +278,24 @@ def test_vercel_contract_used_by_the_setup_job(real, twin, vercel_project):
     t = twin.get(f"{VERCEL}/v13/deployments/scratch.vercel.app", headers=tw).json()
     assert missing(r, ["id", "url", "createdAt", "meta"]) == [] and r["target"] == "production"
     assert invented(t, r) == []
+
+    # The project setting that gives functions VERCEL_GIT_COMMIT_SHA: turned on, read back, then the
+    # scratch project's own value restored.
+    before = real.get(f"{VERCEL}/v9/projects/{project}", headers=headers, params=params)
+    assert before.status_code == 200
+    original = bool(before.json().get("autoExposeSystemEnvs"))
+    try:
+        r = real.patch(f"{VERCEL}/v9/projects/{project}", headers=headers, params=params, json={"autoExposeSystemEnvs": True})
+        t = twin.patch(f"{VERCEL}/v9/projects/scratch", headers=tw, json={"autoExposeSystemEnvs": True})
+        assert r.status_code == t.status_code == 200
+        assert r.json()["autoExposeSystemEnvs"] is t.json()["autoExposeSystemEnvs"] is True
+        r = real.get(f"{VERCEL}/v9/projects/{project}", headers=headers, params=params).json()
+        t = twin.get(f"{VERCEL}/v9/projects/scratch", headers=tw).json()
+        assert r["autoExposeSystemEnvs"] is True and missing(r, ["id", "name"]) == []
+        assert invented(t, r) == []
+    finally:
+        real.patch(f"{VERCEL}/v9/projects/{project}", headers=headers, params=params,
+                   json={"autoExposeSystemEnvs": original}).raise_for_status()
 
     body = {"name": project, "deploymentId": "dpl_doesnotexist", "target": "production"}
     r = real.post(f"{VERCEL}/v13/deployments", headers=headers, params=params, json=body)

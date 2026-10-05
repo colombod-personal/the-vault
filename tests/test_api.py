@@ -508,6 +508,67 @@ def test_updating_a_deck_keeps_its_source_url_unless_given(signed_in):
     assert signed_in.get(path).json()["source_url"] is None
 
 
+def test_a_saved_deck_keeps_the_credit_of_its_author(signed_in):
+    # A saved copy shown while Archidekt can't be reached still names the deck's author.
+    deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring", "source_url": "https://archidekt.com/decks/1",
+                                               "source_author": "  Michael  "}).json()
+    assert deck["source_author"] == "Michael"
+    path = f"{V1}/decks/{deck['id']}"
+    assert signed_in.put(path, json={"name": "y", "text": "2 Sol Ring"}).json()["source_author"] == "Michael"  # kept
+    assert signed_in.get(path).json()["source_author"] == "Michael"
+    assert signed_in.put(path, json={"name": "y", "text": "2 Sol Ring", "source_author": "Ana"}).json()["source_author"] == "Ana"
+    assert signed_in.put(path, json={"name": "y", "text": "2 Sol Ring", "source_author": None}).json()["source_author"] is None
+    assert signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring", "source_author": "a" * 201}).status_code == 422
+    assert signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring"}).json()["source_author"] is None
+
+
+def test_a_new_source_link_drops_the_old_author_unless_given(signed_in):
+    deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring", "source_url": "https://archidekt.com/decks/1",
+                                               "source_author": "Michael"}).json()
+    path = f"{V1}/decks/{deck['id']}"
+    same = signed_in.put(path, json={"name": "x", "text": "1 Sol Ring", "source_url": "https://archidekt.com/decks/1"}).json()
+    assert same["source_author"] == "Michael"  # the same link: still its author
+    moved = signed_in.put(path, json={"name": "x", "text": "1 Sol Ring", "source_url": "https://archidekt.com/decks/2"}).json()
+    assert moved["source_author"] is None  # another deck: not its author
+    given = signed_in.put(path, json={"name": "x", "text": "1 Sol Ring", "source_url": "https://archidekt.com/decks/3",
+                                      "source_author": "Ana"}).json()
+    assert given["source_author"] == "Ana"
+
+
+def test_a_stale_update_never_pairs_an_author_with_another_link(signed_in):
+    # The keep-or-clear decision is made in the UPDATE, against the link the row has at that moment.
+    deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring", "source_url": "https://archidekt.com/decks/1",
+                                               "source_author": "Michael"}).json()
+    path = f"{V1}/decks/{deck['id']}"
+    signed_in.put(path, json={"name": "x", "text": "1 Sol Ring", "source_url": "https://archidekt.com/decks/2", "source_author": "Ana"})
+    # A client that still thinks the deck is on link 1 sends link 1 without an author:
+    stale = signed_in.put(path, json={"name": "x", "text": "1 Sol Ring", "source_url": "https://archidekt.com/decks/1"}).json()
+    assert stale["source_url"] == "https://archidekt.com/decks/1" and stale["source_author"] is None  # not Ana's
+
+
+def test_recording_the_author_of_an_older_copy_never_overwrites_an_edit(signed_in):
+    url = "https://archidekt.com/decks/1"
+    deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring", "source_url": url}).json()
+    path = f"{V1}/decks/{deck['id']}"
+    # Edited elsewhere after the page loaded: recording the author must not bring the old name or text back.
+    signed_in.put(path, json={"name": "renamed", "text": "2 Sol Ring"})
+    edited = signed_in.get(path).json()
+    rec = signed_in.post(f"{path}/source-author", json={"source_url": url, "source_author": "  Michael "})
+    assert rec.status_code == 200 and rec.json()["recorded"] is True
+    assert rec.json()["source_author"] == "Michael" and rec.json()["_links"]["self"]["href"].endswith(f"/decks/{deck['id']}")
+    after = signed_in.get(path).json()
+    assert (after["name"], after["text"], after["source_author"]) == ("renamed", "2 Sol Ring", "Michael")
+    assert after["updated_at"] == edited["updated_at"]  # not an edit
+    # Already credited, or moved to another link meanwhile: nothing is recorded.
+    assert signed_in.post(f"{path}/source-author", json={"source_url": url, "source_author": "Ana"}).json()["recorded"] is False
+    signed_in.put(path, json={"name": "renamed", "text": "2 Sol Ring", "source_url": "https://archidekt.com/decks/2"})
+    assert signed_in.post(f"{path}/source-author", json={"source_url": url, "source_author": "Ana"}).json()["recorded"] is False
+    assert signed_in.get(path).json()["source_author"] is None
+    for blank in ("", "   "):
+        assert signed_in.post(f"{path}/source-author", json={"source_url": url, "source_author": blank}).status_code == 422
+    assert signed_in.post(f"{V1}/decks/999999/source-author", json={"source_url": url, "source_author": "A"}).status_code == 404
+
+
 @pytest.mark.parametrize("text", ["", "no cards here", "9" * 5000 + " Sol Ring"], ids=["empty", "no-cards", "huge-quantity"])
 def test_updating_a_deck_needs_cards_like_creating_one(signed_in, text):
     deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring"}).json()

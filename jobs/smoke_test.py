@@ -4,6 +4,8 @@
 
 Writes a table to stdout (and to the GitHub job summary). Exits 1 if something is broken.
 A deployment that answers 503 "not configured yet" is reported as such, not as broken.
+A preview behind Vercel Authentication is reported, not failed; with SMOKE_EXPECT_PUBLIC=1 (the public
+production domain) a login wall is a failure: everyone must be able to reach the Vault.
 """
 
 from __future__ import annotations
@@ -28,6 +30,9 @@ def run(base: str, transport: httpx.BaseTransport | None = None) -> tuple[list[t
         walled = (first.status_code in (301, 302, 303, 307, 308) and "vercel.com" in location) or \
             (first.status_code == 401 and "vercel" in first.text.lower() and "The Vault" not in first.text)
         if walled:  # Vercel Authentication: a redirect to vercel.com's login (or its 401 page)
+            if os.environ.get("SMOKE_EXPECT_PUBLIC") == "1":  # the public site: a login wall is an outage
+                return [("Public (no Vercel login)", False, "behind Vercel Authentication: set Deployment Protection "
+                         "to Standard Protection so the production domain is open to everyone")], True
             return [("Deployment protection", True, "this deployment is behind Vercel Authentication; run the "
                      "smoke test locally with VERCEL_AUTOMATION_BYPASS_SECRET to test it")], False
 
@@ -44,9 +49,10 @@ def run(base: str, transport: httpx.BaseTransport | None = None) -> tuple[list[t
         health = check("GET /api/health", "GET", "/api/health", 200)
         if health is not None and health.status_code == 503:
             # Not configured yet (no database): every path answers 503, so the other checks would
-            # only repeat it. Report that one finding; main() doesn't count it as broken.
+            # only repeat it. Report that one finding; main() doesn't count it as broken, except for
+            # the public site (SMOKE_EXPECT_PUBLIC=1), where it means production is down.
             results[-1] = ("GET /api/health", False, "503 not configured yet: " + health.text[:200])
-            return results, False
+            return results, os.environ.get("SMOKE_EXPECT_PUBLIC") == "1"
         home = check("GET / (web app)", "GET", "/", 200, lambda r: "The Vault" in r.text)
         check("GET /favicon.ico (site icon)", "GET", "/favicon.ico", 200, lambda r: r.content[:4] == b"\0\0\1\0")
         for page in ("/credits.html", "/privacy.html", "/llms.txt"):

@@ -27,7 +27,7 @@ from mtg_toolkits.formats import FORMATS
 from mtg_toolkits.archidekt import ArchidektClient
 from mtg_toolkits.normalize import SET_ALIAS_PREFIXES, set_alias_map
 from mtg_toolkits.http import ApiError
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -659,7 +659,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 "unparsed": deck.unparsed}
 
     def _deck(d: Deck, coverage: dict | None = None) -> dict:
-        out = {"id": d.id, "name": d.name, "text": d.text, "source_url": d.source_url,
+        out = {"id": d.id, "name": d.name, "text": d.text, "source_url": d.source_url, "source_author": d.source_author,
                "created_at": _iso(d.created_at), "updated_at": _iso(d.updated_at),
                "_links": {"self": link(f"{V1}/decks/{d.id}")}}
         if coverage is not None:
@@ -740,7 +740,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
         def run():
             deck = Deck(user_id=user.id, name=body.name.strip()[:200] or "Untitled deck", text=body.text,
-                        source_url=body.source_url)
+                        source_url=body.source_url, source_author=body.source_author)
             db.add(deck)
             db.flush()
             return _deck(deck)
@@ -763,6 +763,14 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                   "updated_at": datetime.now(timezone.utc)}
         if "source_url" in body.model_fields_set:  # omitted: keep it (null clears it)
             values["source_url"] = body.source_url
+        if "source_author" in body.model_fields_set:
+            values["source_author"] = body.source_author
+        elif "source_url" in values:
+            # A new source without its author: the old one isn't its author. Decided in the UPDATE against the
+            # row's link at that moment (SET reads the old row), so a concurrent change of link can't leave an
+            # author next to a link that isn't theirs.
+            values["source_author"] = case((Deck.source_url.is_not_distinct_from(body.source_url), Deck.source_author),
+                                           else_=None)
         # One UPDATE of the row as it is now: a deck deleted meanwhile is simply not found.
         done = db.execute(update(Deck).where(Deck.id == deck.id, Deck.user_id == user.id).values(**values))
         if done.rowcount != 1:
@@ -770,6 +778,24 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             raise HTTPException(404, "Deck not found")
         db.commit()
         return _deck(deck)
+
+    @router.post("/decks/{deck_id}/source-author", tags=["decks"], response_model=S.AuthorRecorded,
+                 summary="Record the source's author on a copy saved before authors were kept")
+    def record_deck_author(deck_id: Id, body: S.DeckAuthorIn, user: User = Depends(current_user),
+                           db: Session = Depends(get_db)) -> dict:
+        # Only the author, only if the deck still has that link and no author yet: an edit made meanwhile
+        # (another tab, another device) is never overwritten, and the deck's updated time doesn't change.
+        # One locked read of the caller's row: a deck that isn't theirs, or was deleted meanwhile, is 404,
+        # and nothing can change or delete it between this check and the write.
+        deck = db.execute(select(Deck).where(Deck.id == deck_id, Deck.user_id == user.id).with_for_update()
+                          .execution_options(populate_existing=True)).scalar_one_or_none()
+        if deck is None:
+            raise HTTPException(404, "Deck not found")
+        recorded = deck.source_url == body.source_url and deck.source_author is None
+        if recorded:
+            deck.source_author = body.source_author
+        db.commit()
+        return {**_deck(deck), "recorded": recorded}  # the deck as it is now, with its links
 
     @router.delete("/decks/{deck_id}", tags=["decks"])
     def delete_deck(deck_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:

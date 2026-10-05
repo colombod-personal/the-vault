@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import hashlib
 import hmac
 from pathlib import Path
@@ -204,7 +206,11 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
 
     @app.get("/api/health")
     def health() -> dict:
-        return {"ok": True}
+        # Which deployment answers (its own *.vercel.app host) and the commit it was built from (Vercel
+        # sets both; the repository is public), so public-site.yml can tell the new deployment from the
+        # old one while the domain moves over, even when both were built from the same commit.
+        return {"ok": True, "commit": os.environ.get("VERCEL_GIT_COMMIT_SHA") or None,
+                "deployment": os.environ.get("VERCEL_URL") or None}
 
     # Local development: serve the front end too. On Vercel, public/ is served by the CDN.
     if serve_static and PUBLIC_DIR.is_dir():

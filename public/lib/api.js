@@ -448,8 +448,17 @@ window.VaultApi = (() => {
     deckCoverage: (text) => call(V1 + '/decks/coverage', { method: 'POST', json: { text } }),
     decks: (summary) => all(V1 + '/decks' + (summary ? '?summary=true' : '')), // summary: owned / missing / cost to finish of each
     deck: (id) => call(V1 + '/decks/' + id),
-    saveDeck: (name, text, source_url) => create(V1 + '/decks', { json: { name, text, source_url } }),
-    updateDeck: (id, name, text, source_url) => call(V1 + '/decks/' + id, { method: 'PUT', json: { name, text, source_url } }),
+    saveDeck: (name, text, source_url, source_author) => create(V1 + '/decks', { json: { name, text, source_url, source_author } }),
+    // A copy saved before authors were kept: record the author it shows now that the source answered.
+    // The saved deck held by the view is updated too, so a later offline fallback in this session credits the author.
+    rememberDeckAuthor: (saved, author) => (saved && saved.source_url && !saved.source_author && author && author.trim()
+      ? create(V1 + '/decks/' + saved.id + '/source-author', { json: { source_url: saved.source_url, source_author: author } })
+        // Only while the deck still has this link: if another tab moved it to another deck meanwhile, that
+        // deck's author isn't this link's author.
+        .then((deck) => { if (deck && deck.source_author && deck.source_url === saved.source_url) saved.source_author = deck.source_author; return deck; })
+        .catch(() => null)
+      : Promise.resolve(null)),
+    updateDeck: (id, name, text, source_url, source_author) => call(V1 + '/decks/' + id, { method: 'PUT', json: { name, text, source_url, source_author } }),
     deleteDeck: (id) => call(V1 + '/decks/' + id, { method: 'DELETE' }),
     // deck analysis, computed by the server from the card catalog (each answer is { result, provenance })
     deckStats: (text) => call(V1 + '/decks/stats', { method: 'POST', json: { text } }),

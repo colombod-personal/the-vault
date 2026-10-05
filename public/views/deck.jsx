@@ -7,15 +7,6 @@ const { useState: useStateD, useMemo: useMemoD, useEffect: useEffectD } = React;
 // Only the deck's actual Commander category, not user categories like "Commander Synergy".
 const isCommander = (c) => c.section === 'commander' || (c.categories || []).some((x) => String(x).trim().toLowerCase() === 'commander');
 
-// The deck a link points at, whatever its form (slug, /api/ path): "archidekt:123", "moxfield:abc".
-function sourceKey(url) {
-  if (!url) return null;
-  let m = url.match(/archidekt\.com\/(?:api\/)?decks\/(\d+)/i);
-  if (m) return 'archidekt:' + m[1];
-  m = url.match(/moxfield\.com\/decks\/([A-Za-z0-9_-]+)/i);
-  return m ? 'moxfield:' + m[1] : url.trim().toLowerCase();
-}
-
 // A deck's cards as a decklist the server parses ("4 Name (SET) 123" per line); commanders go under
 // a "Commander" header so stats, legality and combos know them.
 function deckListText(cards) {
@@ -64,7 +55,9 @@ const primaryType = (r) => {
 // opened from a link or a pasted list lives on screen until it's saved.
 function DeckView({ data, openCard, initialText, deckId, onOpenDeckId }) {
   const [myDecks, setMyDecks] = useStateD(null); // your saved decks, with summaries (null while loading, 'error' if that failed)
-  const [local, setLocalRaw] = useStateD(initialText ? { text: initialText, key: 1 } : null);
+  // A pasted list, or a shared deck ({ text, credit: { name, url, author } }) shown with its source's credit.
+  const [local, setLocalRaw] = useStateD(initialText ? (typeof initialText === 'string' ? { text: initialText, key: 1 }
+    : { text: initialText.text, credit: initialText.credit, key: 1 }) : null);
   const setLocal = (o) => setLocalRaw(o && { ...o, key: Date.now() });
   const refreshDecks = () => { setMyDecks((d) => (d === 'error' ? null : d));
     return window.VaultApi.decks(true).then((d) => { setMyDecks(d); return d; }).catch(() => { setMyDecks('error'); return 'error'; }); };
@@ -230,15 +223,18 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
     try {
       let d;
       if (source.url) {
-        try { d = await window.DeckSrc.fetchUrl(source.url.trim()); }
-        catch (e) {
+        try {
+          d = await window.DeckSrc.fetchUrl(source.url.trim());
+          window.VaultApi.rememberDeckAuthor(source.saved, d.author);
+        } catch (e) {
           if (!source.saved) throw e;
           d = await window.DeckSrc.parseText(source.saved.text); // the source is unreachable: the saved copy
-          d = { ...d, title: source.saved.name, url: source.saved.source_url, offline: e.message };
+          d = { ...d, title: source.saved.name, url: source.saved.source_url, author: source.saved.source_author || '', offline: e.message };
         }
       } else {
         d = await window.DeckSrc.parseText(source.text);
         if (source.saved) d = { ...d, title: source.saved.name };
+        if (source.credit) d = { ...d, title: source.credit.name || d.title, url: source.credit.url, author: source.credit.author };
       }
       if (!d.cards.length) throw new Error('No cards found. Use "4 Card Name" per line.');
       const merged = mergeDeckCards(d.cards);
@@ -267,7 +263,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
   useEffectD(() => { load(); }, [reload]);
 
   const text = useMemoD(() => (deck ? deckListText(deck.cards) : ''), [deck]);
-  const saved = source.saved || (deck && deck.url && Array.isArray(myDecks) ? myDecks.find((d) => sourceKey(d.source_url) === sourceKey(deck.url)) : null);
+  const saved = source.saved || (deck && deck.url && Array.isArray(myDecks) ? myDecks.find((d) => window.DeckSrc.sourceKey(d.source_url) === window.DeckSrc.sourceKey(deck.url)) : null);
   const summary = useMemoD(() => {
     if (!rows || !coverage) return null;
     let total = 0, ownedQty = 0, missingQty = 0, ownedFully = 0, ownedPartial = 0, missingAll = 0;
@@ -281,8 +277,10 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
   async function save() {
     const name = saved ? saved.name : deck.title === 'Pasted decklist' ? (prompt('Name this deck', 'My deck') || 'My deck') : deck.title;
     try {
-      const d = saved ? await window.VaultApi.updateDeck(saved.id, name, text, deck.url || null)
-        : await window.VaultApi.saveDeck(name, text, deck.url || null);
+      // The author goes with the copy, so it is still credited when the source can't be reached.
+      const author = (deck.url && (deck.author || (saved && saved.source_author))) || null;
+      const d = saved ? await window.VaultApi.updateDeck(saved.id, name, text, deck.url || null, author)
+        : await window.VaultApi.saveDeck(name, text, deck.url || null, author);
       setJustSaved(true); onSaved(d); // the caller refreshes what it needs
     } catch (e) { setError('Saving failed: ' + e.message); }
   }
@@ -304,8 +302,8 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
           {deck && (
             <p className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', marginTop: 6 }}>
               {deck.author && <>by {deck.author} · </>}
-              {deck.url && <a href={deck.url} target="_blank" rel="noopener noreferrer">{/archidekt\.com/.test(deck.url) ? 'on Archidekt' : 'original'} ↗</a>}
-              {deck.url && /archidekt\.com/.test(deck.url) && <> · deck list from Archidekt, thanks to its author</>}
+              {deck.url && <a href={deck.url} target="_blank" rel="noopener noreferrer">{window.DeckSrc.isArchidekt(deck.url) ? 'on Archidekt' : 'original'} ↗</a>}
+              {deck.url && window.DeckSrc.isArchidekt(deck.url) && <> · deck list from Archidekt, thanks to its author</>}
             </p>
           )}
           {deck && deck.offline && <p style={{ fontSize: 12, color: 'var(--gold)', marginTop: 6 }}>Couldn't reach the deck's site ({deck.offline}), so this is your saved copy.</p>}

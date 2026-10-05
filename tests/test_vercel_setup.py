@@ -10,10 +10,10 @@ from twins import Universe
 class FakeVercel:
     """A Vercel project on the Vercel twin, with a production deployment once it has domains."""
 
-    def __init__(self, domains=(), envs=None, deployed=None):
+    def __init__(self, domains=(), envs=None, deployed=None, exposed=True):
         self.universe = Universe()
         self.twin = self.universe.vercel
-        self.twin.add_project("the-vault", domains, envs or [])
+        self.twin.add_project("the-vault", domains, envs or [])["autoExposeSystemEnvs"] = exposed
         self.live = self.twin.deploy("the-vault") if (domains if deployed is None else deployed) else None
         self.transport = self.universe.transport
 
@@ -46,6 +46,24 @@ def test_first_run_before_any_deploy():
     assert state["changed"] == ["SESSION_SECRET (production)", "SESSION_SECRET (preview)"] and state["base_url"] is None
     assert len(fake.value("SESSION_SECRET")) == 64
     assert fake.value("SESSION_SECRET", "preview") != fake.value("SESSION_SECRET")  # previews can't sign production cookies
+
+
+def test_system_variables_are_exposed_and_production_rebuilt_with_them():
+    # /api/health reports VERCEL_GIT_COMMIT_SHA only if Vercel exposes it, and only to new deployments.
+    fake = FakeVercel(domains=["the-vault.vercel.app"], exposed=False)
+    state = vercel_setup.main(["--redeploy"], fake.transport)
+    assert "System Environment Variables (exposed)" in state["changed"] and state["redeployed"]
+    assert fake.twin.projects["the-vault"]["autoExposeSystemEnvs"] is True
+    again = vercel_setup.main(["--redeploy"], fake.transport)
+    assert again["changed"] == [] and again["redeployed"] is None
+
+
+def test_a_release_stamped_before_the_switch_is_rebuilt():
+    fake = FakeVercel(domains=["the-vault.vercel.app"], exposed=False)
+    vercel = vercel_setup.Vercel("twin-vercel-token", "the-vault", transport=fake.transport)
+    fake.twin.deploy("the-vault", {vercel_setup.FINGERPRINT: vercel.production_fingerprint()})  # stamped while off
+    state = vercel_setup.main(["--redeploy"], fake.transport)
+    assert state["redeployed"] and fake.serving()["meta"][vercel_setup.FINGERPRINT] == vercel.production_fingerprint()
 
 
 def test_after_first_deploy_sets_base_url_once_and_keeps_secrets(token):

@@ -299,6 +299,13 @@ class DeckIn(BaseModel):
     text: str = Field(max_length=50_000)
     source_url: str | None = Field(None, max_length=500, description="Where the deck came from (an http or https "
                                    "link). Left as it is when an update omits it; null clears it")
+    source_author: str | None = Field(None, max_length=200, description="Who made the deck at its source (for the "
+                                      "credit). Left as it is when an update omits it; null clears it")
+
+    @field_validator("source_author")
+    @classmethod
+    def _author(cls, author: str | None) -> str | None:
+        return (author or "").strip() or None
 
     @field_validator("source_url")
     @classmethod
@@ -310,6 +317,19 @@ class DeckIn(BaseModel):
         if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
             raise ValueError("source_url must be an http or https link")
         return url
+
+
+class DeckAuthorIn(BaseModel):
+    source_url: str = Field(max_length=500, description="The link the author was read from: the deck's current link")
+    source_author: str = Field(max_length=200, description="Who made the deck at that link (not blank)")
+
+    @field_validator("source_author")
+    @classmethod
+    def _not_blank(cls, author: str) -> str:
+        author = author.strip()
+        if not author:
+            raise ValueError("source_author must not be blank")
+        return author
 
 
 class TextIn(BaseModel):
@@ -381,6 +401,7 @@ class Deck(Hal):
     name: str
     text: str
     source_url: str | None = None
+    source_author: str | None = None
     created_at: str
     updated_at: str
     coverage: Coverage | None = None
@@ -390,6 +411,10 @@ class Deck(Hal):
 
 class DeckPage(Page):
     items: list[Deck]
+
+
+class AuthorRecorded(Deck):
+    recorded: bool = Field(description="False when the deck has another link or already has an author")
 
 
 class ShareIn(BaseModel):

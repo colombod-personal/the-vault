@@ -401,6 +401,25 @@ def test_mcp_deck_source_urls_are_checked_and_kept_by_updates(agent, bot):
     assert moved["structuredContent"]["source_url"] == "https://moxfield.com/decks/x"
 
 
+def test_mcp_a_saved_deck_keeps_its_author_for_the_credit(agent, bot):
+    write = make_token(agent, scopes=["read", "write"])
+    deck = call_tool(bot, write, "save_deck", name="d", text="1 Sol Ring", source_url="https://archidekt.com/decks/1",
+                     source_author="Michael")["structuredContent"]
+    assert deck["source_author"] == "Michael"
+    kept = call_tool(bot, write, "update_deck", deck_id=deck["id"], name="d2", text="2 Sol Ring")
+    assert kept["structuredContent"]["source_author"] == "Michael"
+    changed = call_tool(bot, write, "update_deck", deck_id=deck["id"], name="d2", text="2 Sol Ring", source_author="Ana")
+    assert changed["structuredContent"]["source_author"] == "Ana"
+    # null clears it, and the tool's schema says so (a strict client checks before sending).
+    tool = next(t for t in rpc(bot, "tools/list", {}, write).json()["result"]["tools"] if t["name"] == "update_deck")
+    assert {"type": "null"} in tool["inputSchema"]["properties"]["source_author"]["anyOf"]
+    cleared = call_tool(bot, write, "update_deck", deck_id=deck["id"], name="d2", text="2 Sol Ring", source_author=None)
+    assert cleared["isError"] is False and cleared["structuredContent"]["source_author"] is None
+    too_long = rpc(bot, "tools/call", {"name": "update_deck", "arguments": {
+        "deck_id": deck["id"], "name": "d2", "text": "2 Sol Ring", "source_author": "a" * 201}}, write).json()
+    assert too_long["error"]["code"] == -32602
+
+
 @pytest.mark.parametrize("name", [["x"], {"a": 1}, 5, None, True])
 def test_mcp_a_tool_name_that_is_not_text_is_invalid(agent, bot, name):
     read = make_token(agent)
