@@ -79,4 +79,4 @@ Constraints, recorded for #166 and the compliance gate (#62):
 - #165 deck independence (borrowed cards): design and API.
 - #166 functional equivalents: roles vocabulary, data sources, terms check.
 - #160 (Deck map bug) is superseded: the mode is removed, and "reset the view" is a requirement of #161.
-- A production visual pass of the current Graph and Lab at 1400 px and 390 px (screenshots saved with the review), because the review environment could not open mtgvault.cards.
+- #175: a production visual pass of the current Graph and Lab at 1400 px and 390 px (screenshots saved with the review), because the review environment could not open mtgvault.cards.
