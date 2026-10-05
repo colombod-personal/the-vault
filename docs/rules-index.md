@@ -43,3 +43,43 @@ life total", "protection from red", ...) against the live 2026-09-25 edition.
 
 Open points for the design: cold-start latency on Vercel (about 0.6 s extra, first call only), and a short retry
 with backoff when Wizards' server is slow.
+
+## Design (#145, agreed with the owner 2026-10-05)
+
+Owner: "store nothing, but store how to navigate it, or let the agent know how to read through it, so we always get
+fresh; the connector must have good tooling to navigate the rules, they are complex."
+
+**Stored: nothing.** No rule text, no index, no edition table in the database. Each server instance:
+
+1. reads Wizards' rules page (at most every 6 hours) to find the current edition's TXT link;
+2. fetches the TXT when a rules tool is first used, or when the edition changed, and parses it with
+   `vault/rules_parser.py` (the existing parser);
+3. builds in memory: the search index (BM25), and the **navigation map**:
+   - the hierarchy: sections ("7. Additional Rules"), subsections ("702. Keyword Abilities"), rules, subrules;
+   - headings: the title of each section, subsection and titled rule ("702.19. Trample");
+   - cross-references: every "rule 702.19" or "see rule 510" in the text, in both directions (cites / cited by);
+   - glossary terms and keyword abilities, each mapped to the rules that define them.
+
+If Wizards' site cannot be reached, the rules tools say so (503) and never answer from memory.
+
+**Tools (REST under `/api/v1/catalog/rules`, MCP for agents):**
+
+| Tool | What it gives |
+|---|---|
+| `rules_outline` | The table of contents: the nine sections, or one section's subsections, or a subsection's rules, with headings, to drill down |
+| `get_rule` | One rule (or `glossary:Term`): its text, parent, children, previous/next sibling, the rules it cites and the rules that cite it |
+| `search_rules` | Best matches for a question; a keyword ability or glossary term in the question puts its defining rule first |
+| `find_rules_term` | A glossary term or keyword ability ("trample", "state-based actions") → the defining rule(s) and the glossary definition |
+| `verify_citation`, `present_steps` | Unchanged for the agent; the text they check and attach comes from the live file |
+
+Every answer carries provenance: Wizards of the Coast, Comprehensive Rules, the edition date, the TXT link, the Fan
+Content notice.
+
+**Reading guide for agents** (the `rules-judge` skill, the judge agent and the MCP instructions): how the rules are
+organised (1 Game concepts, 2 Parts of a card, 3 Card types, 4 Zones, 5 Turn structure, 6 Spells, abilities and
+effects, 7 Additional rules incl. 702 keyword abilities and 704 state-based actions, 8 Multiplayer, 9 Casual variants
+incl. 903 Commander), and a strategy: find the term (`find_rules_term`) or search; open the defining rule; read its
+children; follow the references both ways; check exceptions in the parent and siblings; verify every quote.
+
+**Removed:** the `rules` and `rules_versions` tables (empty in production; dropped by a migration), the `rules`
+catalog source and `RULES_URL`.

@@ -4,13 +4,9 @@
 from datetime import date
 
 import pytest
-from sqlalchemy import func, select
 
 from jobs import sync_catalog
-from vault import catalog_sync as cs
 from vault import rules_parser as rp
-from vault.db import Database
-from vault.models import CatalogSource, Rule, RulesVersion
 
 SAMPLE = """Magic: The Gathering Comprehensive Rules
 
@@ -84,36 +80,8 @@ def test_text_that_is_not_the_rules_is_refused(bad):
         rp.parse(bad)
 
 
-@pytest.fixture
-def db(database_url):
-    database = Database(database_url)
-    with database.sessions() as session:
-        yield session
-    database.engine.dispose()
-
-
-def test_an_edition_is_stored_once_and_old_editions_are_pruned(db):
-    first = cs.sync_rules(db, rp.parse(SAMPLE), "https://example.test/cr.txt")
-    db.commit()
-    assert first["rows"] == 10 and db.scalar(select(func.count()).select_from(Rule)) == 10
-    assert cs.sync_rules(db, rp.parse(SAMPLE))["skipped"] == "already loaded"
-    for day in range(1, 10):
-        newer = rp.parse(SAMPLE.replace("March 3, 2027", f"April {day}, 2027"))
-        cs.sync_rules(db, newer)
-        db.commit()
-    kept = db.scalars(select(RulesVersion.version).order_by(RulesVersion.version)).all()
-    assert len(kept) == cs.KEEP_RULES_VERSIONS and "2027-03-03" not in kept
-    assert db.get(CatalogSource, "rules").version == "2027-04-09"
-    assert db.scalar(select(func.count()).select_from(Rule).where(Rule.version == "2027-03-03")) == 0  # cascade
-
-
-def test_the_job_loads_rules_from_a_file_and_needs_a_url_otherwise(database_url, monkeypatch, tmp_path):
+def test_the_catalog_job_no_longer_loads_the_rules(database_url, monkeypatch):
+    """The rules are read live from Wizards (vault/rules_live.py): the job refuses a "rules" source."""
     monkeypatch.setenv("DATABASE_URL", database_url)
-    monkeypatch.delenv("RULES_URL", raising=False)
-    path = tmp_path / "cr.txt"
-    path.write_text(SAMPLE, encoding="utf-8")
-    report = sync_catalog.main(["--sources", "rules", "--file", f"rules={path}"])
-    assert report["rules"]["rows"] == 10
-    assert "skipped" in sync_catalog.main(["--sources", "rules", "--file", f"rules={path}"])["rules"]
     with pytest.raises(SystemExit):
         sync_catalog.main(["--sources", "rules"])
