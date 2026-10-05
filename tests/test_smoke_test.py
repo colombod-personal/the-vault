@@ -87,3 +87,14 @@ def test_health_reports_the_deployed_commit(settings, monkeypatch):
         assert client.get("/api/health").json() == {"ok": True, "commit": None}
         monkeypatch.setenv("VERCEL_GIT_COMMIT_SHA", "abc123")
         assert client.get("/api/health").json() == {"ok": True, "commit": "abc123"}
+
+
+def test_the_public_site_not_configured_fails(monkeypatch):
+    """A preview without a database is reported, not failed; the public site answering 503 is an outage."""
+    down = httpx.MockTransport(lambda r: httpx.Response(503, json={"detail": "The Vault is not configured yet: x"}))
+    real_run = smoke_test.run
+    monkeypatch.setattr(smoke_test, "run", lambda base: real_run(base, down))
+    monkeypatch.delenv("SMOKE_EXPECT_PUBLIC", raising=False)
+    assert smoke_test.main(["https://preview.test"]) == 0
+    monkeypatch.setenv("SMOKE_EXPECT_PUBLIC", "1")
+    assert smoke_test.main(["https://mtgvault.cards"]) == 1

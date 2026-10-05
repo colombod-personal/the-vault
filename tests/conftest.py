@@ -51,13 +51,17 @@ def frozen_rate_limit_clock(monkeypatch):
     """Rate limits count in clock-aligned one-minute windows, so a burst that crossed a minute
     boundary would start a fresh window and miss its 429 (#112). Freeze the limiter's clock (its
     own ``time`` reference only, not ``time.time`` everywhere) at the test's start; a test that
-    moves time sets ``ratelimit.time.time`` itself."""
+    moves time sets ``ratelimit.time.time`` itself. The catalog and deck-analysis limiter
+    (``catalog_api.throttle``) keeps its own clock, so it is frozen at the same instant too."""
     import types
 
     from vault import ratelimit
+    from vault.api import catalog_api
 
     now = time.time()
-    monkeypatch.setattr(ratelimit, "time", types.SimpleNamespace(time=lambda: now))
+    frozen = types.SimpleNamespace(time=lambda: now)
+    monkeypatch.setattr(ratelimit, "time", frozen)
+    monkeypatch.setattr(catalog_api, "time", frozen)
 
 
 @pytest.fixture

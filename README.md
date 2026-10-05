@@ -354,8 +354,9 @@ Rules to keep (from [Scryfall's API terms](https://scryfall.com/docs/api) and
 [Archidekt's terms](https://archidekt.com/terms); Archidekt has not yet confirmed this use (see below).
 
 - It reads **one public deck at a time, only when you ask** (you paste a deck link, open a saved deck, or an
-  AI assistant calls `get_archidekt_deck` for you). There are no background jobs, no crawling, no deck search
-  and no stored collection of other people's decks.
+  AI assistant calls `get_archidekt_deck` for you). There are no background jobs, no crawling and no deck
+  search. A deck is kept only if you press Save: then the Vault stores your copy of its list and its link, in
+  your account, and you can remove it any time.
 - It **never writes to Archidekt**: it does not sign in to your Archidekt account, change your decks or sync
   anything. When the Vault suggests changes, it gives you a change list and a buying list, and **you apply
   them on Archidekt yourself**.

@@ -42,14 +42,12 @@ jobs:
               [ "$live" = "$EXPECT_COMMIT" ] && break
               sleep 10
             done
-            if [ -z "$live" ]; then
-              # A deployment made without Git metadata (the manual CLI fallback) reports no commit.
-              echo "::warning::$PUBLIC_URL reports no commit; cannot tell whether it serves the new deployment"
-            elif [ "$live" != "$EXPECT_COMMIT" ]; then
-              echo "::error::$PUBLIC_URL still serves commit $live after 5 minutes, not the deployed $EXPECT_COMMIT"
+            # Only Vercel's Git integration creates these deployment events, and it always sets the
+            # commit, so anything else (an older release, or one reporting no commit) is a failure.
+            if [ "$live" != "$EXPECT_COMMIT" ]; then
+              echo "::error::$PUBLIC_URL serves commit '${live:-none reported}' after 5 minutes, not the deployed $EXPECT_COMMIT"
               exit 1
-            else
-              echo "Serving the deployed commit $EXPECT_COMMIT" >> "$GITHUB_STEP_SUMMARY"
             fi
+            echo "Serving the deployed commit $EXPECT_COMMIT" >> "$GITHUB_STEP_SUMMARY"
           fi
           python -m jobs.smoke_test "$PUBLIC_URL"

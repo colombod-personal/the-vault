@@ -49,9 +49,10 @@ def run(base: str, transport: httpx.BaseTransport | None = None) -> tuple[list[t
         health = check("GET /api/health", "GET", "/api/health", 200)
         if health is not None and health.status_code == 503:
             # Not configured yet (no database): every path answers 503, so the other checks would
-            # only repeat it. Report that one finding; main() doesn't count it as broken.
+            # only repeat it. Report that one finding; main() doesn't count it as broken, except for
+            # the public site (SMOKE_EXPECT_PUBLIC=1), where it means production is down.
             results[-1] = ("GET /api/health", False, "503 not configured yet: " + health.text[:200])
-            return results, False
+            return results, os.environ.get("SMOKE_EXPECT_PUBLIC") == "1"
         home = check("GET / (web app)", "GET", "/", 200, lambda r: "The Vault" in r.text)
         check("GET /favicon.ico (site icon)", "GET", "/favicon.ico", 200, lambda r: r.content[:4] == b"\0\0\1\0")
         for page in ("/credits.html", "/privacy.html", "/llms.txt"):
