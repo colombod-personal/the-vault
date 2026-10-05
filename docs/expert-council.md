@@ -121,5 +121,4 @@ edition say so if asked again.
 2. **Visibility:** show the plan; offer a way to see the details (the disputed points and each view).
 3. **Order to build format experts:** Commander, then Limited, then Pauper, then Standard, then Pioneer, then
    Two-Headed Giant; the others (cEDH, Brawl, Modern, Legacy, Vintage, Cube, Oathbreaker) after.
-4. **Meta knowledge:** not answered yet; until #105 finds sources we may use, general meta knowledge is labelled as
-   opinion (default kept).
+4. **Meta knowledge:** agreed: until #105 finds sources we may use, general meta knowledge is labelled as opinion.
