@@ -51,3 +51,30 @@ real hosts (`docs/mcp-apps.md`).
   misspelled card name returns a 500. Use a full Postgres (Docker, or a normal install).
 - Docker Desktop on Windows can fail to start after an OS update; the smoke test needs only a Postgres, not Docker.
 - Name-only collection imports price an arbitrary printing (see `docs/usability-review.md`); use files with set and number.
+
+## Expert council: a real run (2026-10-05)
+
+Deck: Sliver Swarm tuned with rage (Archidekt 6803907, deck data Archidekt's), commander Sliver Overlord; goal "tune it".
+Run against production (card data and the live rules loaded that day) by six agents using only the Vault's tools:
+facts first (one agent), then five members in parallel (Commander expert, casual table, synergy analyst, collection
+analyst, judge), then the devil's advocate with the plan validated by `validate_deck_changes` (valid, 2 adds, 2 cuts,
+100 cards). A cold run cost about 100 seconds for the facts, 5 to 7 minutes for the members in parallel, and 5 minutes for
+the challenge.
+
+**What the council said (summary)**
+- **Plan:** cut Harmonic Sliver and Tempered Sliver; add Intruder Alarm (best add) and a protection or interaction spell
+  at instant speed; Heart Sliver is the weakest add (gives opponents' Slivers haste; Blur Sliver is tighter).
+- **Agreed:** legal in Commander; about Bracket 3 by play (repeatable tutor and steal, stacking lords), opinion; the steal
+  is permanent (rule 611.2a) but ends if the Sliver changes zones (400.7); Crystalline Sliver's shroud stops the commander's
+  steal (702.18a); Harmonic Sliver destroys the deck's own artifacts and enchantments (mandatory targeted trigger).
+- **Disputed:** how strong the token engine is. The synergy analyst called it unbounded; the devil's advocate showed one
+  multiplier only breaks even, net mana needs two, and haste (302.6) is the real gate.
+- **Not checked:** the Bracket 3 placement (no Game Changers tool), simulation numbers (`simulate_draws` was not deployed
+  to the connector yet), shop prices.
+
+**What the run found about the product** (each filed)
+- Production answered 500 / "server isn't responding" to parallel calls, most succeeded on retry (#169).
+- The synergy engine is real but `find_combos` cannot see it, so "no infinite combos" is unsafe to tell a pod: the tool
+  said 0 combos. The council now says so.
+- No Game Changers count in deck stats although Scryfall's data has the flag.
+- `get_deck_overlap` was not in members' tool lists (the connector's list predates it), so one member counted by hand.
