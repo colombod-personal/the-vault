@@ -67,7 +67,7 @@ Each row: the job, the overlap with something else, the verdict, and how an AI a
 Owner direction: build a Vault-owned layer of card roles that anyone can read and only the Vault's pipelines write and review. User experience can come in as suggestions that a pipeline reviews, never as direct edits.
 
 Constraints, recorded for #166 and the compliance gate (#62):
-- Scryfall's terms forbid simply republishing or proxying its data, so the layer must be the Vault's own vocabulary and mappings, with the Scryfall tag as a labelled input, not a mirror.
+- Scryfall's API terms say "You may not simply repackage, republish, or proxy Scryfall data. Your software must create additional value for end-users" ([scryfall.com/docs/api](https://scryfall.com/docs/api); recorded with how the Vault meets it in [docs/compliance.md](compliance.md), Scryfall section). So the layer must be the Vault's own vocabulary and mappings, with the Scryfall tag as a labelled input, not a mirror.
 - Tags that an AI adds are labelled as such (#126).
 - Scryfall tags are keyed by their stable `id`, never by slug or label, and each can be switched off.
 
