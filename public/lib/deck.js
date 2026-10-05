@@ -1,13 +1,21 @@
 // Deck source parsing — Archidekt URL, Moxfield URL, raw decklist text.
 window.DeckSrc = (() => {
 
+  // Which deck an address names, by its parsed host (in any case, subdomains too) and path:
+  // archidekt.com/decks/<id> or /api/decks/<id>, moxfield.com/decks/<publicId>. An address pasted
+  // without https:// works too. A look-alike host, or a deck path on another host, is not a deck.
   function parseId(url) {
-    // Archidekt: archidekt.com/decks/<id>/<slug>
-    let m = url.match(/archidekt\.com\/(?:decks|api\/decks)\/(\d+)/i);
-    if (m) return { kind: 'archidekt', id: m[1] };
-    // Moxfield: moxfield.com/decks/<publicId>
-    m = url.match(/moxfield\.com\/decks\/([A-Za-z0-9_-]+)/i);
-    if (m) return { kind: 'moxfield', id: m[1] };
+    let u;
+    try {
+      const text = String(url ?? '').trim();
+      u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `https://${text}`);
+    } catch { return null; }
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+    const host = u.hostname.toLowerCase();
+    const on = site => host === site || host.endsWith(`.${site}`);
+    let m;
+    if (on('archidekt.com') && (m = u.pathname.match(/^\/(?:api\/)?decks\/(\d+)(?:\/|$)/i))) return { kind: 'archidekt', id: m[1] };
+    if (on('moxfield.com') && (m = u.pathname.match(/^\/decks\/([A-Za-z0-9_-]+)(?:\/|$)/i))) return { kind: 'moxfield', id: m[1] };
     return null;
   }
 
@@ -81,16 +89,10 @@ window.DeckSrc = (() => {
     if (parsed.kind === 'moxfield') return await fetchMoxfield(parsed.id);
   }
 
-  // Is this an Archidekt deck's address? By its parsed host, in any case (ARCHIDEKT.COM too), and a deck
-  // path (/decks/<id> or /api/decks/<id>), so the Archidekt credit appears on every Archidekt deck and never
-  // on another Archidekt page or a page that only mentions archidekt.com.
+  // Is this an Archidekt deck's address? The same check that decides what is fetched, so the
+  // "deck list from Archidekt" credit appears exactly on the decks loaded from Archidekt.
   function isArchidekt(url) {
-    try {
-      const u = new URL(url);
-      const host = u.hostname.toLowerCase();
-      if (host !== 'archidekt.com' && !host.endsWith('.archidekt.com')) return false;
-      return /^\/(?:api\/)?decks\/\d+(?:\/|$)/i.test(u.pathname);
-    } catch { return false; }
+    return parseId(url)?.kind === 'archidekt';
   }
 
   return { parseId, fetchUrl, parseText, fetchArchidekt, fetchMoxfield, isArchidekt };
