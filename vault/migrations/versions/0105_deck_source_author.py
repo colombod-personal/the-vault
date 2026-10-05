@@ -1,8 +1,8 @@
 """Saved decks keep their source's author, so a saved copy shown while the source can't be reached is
 still credited to its author (Archidekt's attribution terms).
 
-Revision ID: 0104
-Revises: 0103
+Revision ID: 0105
+Revises: 0104
 Create Date: 2026-10-05 11:20:00
 """
 
@@ -11,8 +11,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = '0104'
-down_revision = '0103'
+revision = '0105'
+down_revision = '0104'
 branch_labels = None
 depends_on = None
 

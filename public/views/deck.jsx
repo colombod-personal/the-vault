@@ -55,7 +55,9 @@ const primaryType = (r) => {
 // opened from a link or a pasted list lives on screen until it's saved.
 function DeckView({ data, openCard, initialText, deckId, onOpenDeckId }) {
   const [myDecks, setMyDecks] = useStateD(null); // your saved decks, with summaries (null while loading, 'error' if that failed)
-  const [local, setLocalRaw] = useStateD(initialText ? { text: initialText, key: 1 } : null);
+  // A pasted list, or a shared deck ({ text, credit: { name, url, author } }) shown with its source's credit.
+  const [local, setLocalRaw] = useStateD(initialText ? (typeof initialText === 'string' ? { text: initialText, key: 1 }
+    : { text: initialText.text, credit: initialText.credit, key: 1 }) : null);
   const setLocal = (o) => setLocalRaw(o && { ...o, key: Date.now() });
   const refreshDecks = () => { setMyDecks((d) => (d === 'error' ? null : d));
     return window.VaultApi.decks(true).then((d) => { setMyDecks(d); return d; }).catch(() => { setMyDecks('error'); return 'error'; }); };
@@ -232,6 +234,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
       } else {
         d = await window.DeckSrc.parseText(source.text);
         if (source.saved) d = { ...d, title: source.saved.name };
+        if (source.credit) d = { ...d, title: source.credit.name || d.title, url: source.credit.url, author: source.credit.author };
       }
       if (!d.cards.length) throw new Error('No cards found. Use "4 Card Name" per line.');
       const merged = mergeDeckCards(d.cards);

@@ -27,7 +27,7 @@ from mtg_toolkits.formats import FORMATS
 from mtg_toolkits.archidekt import ArchidektClient
 from mtg_toolkits.normalize import SET_ALIAS_PREFIXES, set_alias_map
 from mtg_toolkits.http import ApiError
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -765,8 +765,12 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             values["source_url"] = body.source_url
         if "source_author" in body.model_fields_set:
             values["source_author"] = body.source_author
-        elif values.get("source_url", deck.source_url) != deck.source_url:
-            values["source_author"] = None  # a new source without its author: the old one isn't its author
+        elif "source_url" in values:
+            # A new source without its author: the old one isn't its author. Decided in the UPDATE against the
+            # row's link at that moment (SET reads the old row), so a concurrent change of link can't leave an
+            # author next to a link that isn't theirs.
+            values["source_author"] = case((Deck.source_url.is_not_distinct_from(body.source_url), Deck.source_author),
+                                           else_=None)
         # One UPDATE of the row as it is now: a deck deleted meanwhile is simply not found.
         done = db.execute(update(Deck).where(Deck.id == deck.id, Deck.user_id == user.id).values(**values))
         if done.rowcount != 1:

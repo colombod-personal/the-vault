@@ -535,6 +535,17 @@ def test_a_new_source_link_drops_the_old_author_unless_given(signed_in):
     assert given["source_author"] == "Ana"
 
 
+def test_a_stale_update_never_pairs_an_author_with_another_link(signed_in):
+    # The keep-or-clear decision is made in the UPDATE, against the link the row has at that moment.
+    deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring", "source_url": "https://archidekt.com/decks/1",
+                                               "source_author": "Michael"}).json()
+    path = f"{V1}/decks/{deck['id']}"
+    signed_in.put(path, json={"name": "x", "text": "1 Sol Ring", "source_url": "https://archidekt.com/decks/2", "source_author": "Ana"})
+    # A client that still thinks the deck is on link 1 sends link 1 without an author:
+    stale = signed_in.put(path, json={"name": "x", "text": "1 Sol Ring", "source_url": "https://archidekt.com/decks/1"}).json()
+    assert stale["source_url"] == "https://archidekt.com/decks/1" and stale["source_author"] is None  # not Ana's
+
+
 def test_recording_an_older_copys_author_never_overwrites_an_edit(signed_in):
     url = "https://archidekt.com/decks/1"
     deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring", "source_url": url}).json()
