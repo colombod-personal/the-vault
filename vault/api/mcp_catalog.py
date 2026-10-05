@@ -77,6 +77,18 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
         Tool("deck_stats", "Counts, mana curve, color identity, roles (ramp, draw, removal, sweepers...) and estimated cost of a decklist, "
              "computed by the Vault from the catalog.", {"text": deck}, ["text"], method="POST",
              path=lambda a: f"{V1}/decks/stats", body=lambda a: {"text": a["text"]}, provenance=("computed",), ui="deck"),
+        Tool("simulate_draws", "How a deck's mana curve plays: a few sample games of the first turns (opening hand, draws, land "
+             "drops, what gets cast) and the odds over many games: land drops made, mana by turn, cards in hand, the chance of "
+             "discarding to hand size, 'five mana by turn 5'. Says when discarding or a big hand is the deck's plan, and lists "
+             "what the simulation does not model. Explain the numbers in plain words; they are a hint, not a promise.",
+             {"text": deck, "format": fmt,
+              "on_the_play": {"type": "boolean", "default": True, "description": "Going first"},
+              "turns": {"type": "integer", "minimum": 1, "maximum": 10, "default": 6},
+              "samples": {"type": "integer", "minimum": 0, "maximum": 10, "default": 5, "description": "Games shown turn by turn"},
+              "seed": {"type": "integer", "minimum": 0, "maximum": 2147483647, "description": "Repeat a run exactly"}},
+             ["text", "format"], method="POST", path=lambda a: f"{V1}/decks/simulate",
+             body=lambda a: {k: a[k] for k in ("text", "format", "on_the_play", "turns", "samples", "seed") if a.get(k) is not None},
+             provenance=("computed",)),
         Tool("deck_legality", "Whether a decklist is legal in a format: banned or illegal cards, copy limits, deck size, commander color "
              "identity. Lists every issue, and says what it did not check.", {"text": deck, "format": fmt}, ["text", "format"],
              method="POST", path=lambda a: f"{V1}/decks/legality", body=lambda a: {"text": a["text"], "format": a["format"]},

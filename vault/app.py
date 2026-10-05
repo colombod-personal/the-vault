@@ -36,7 +36,7 @@ ACCOUNT_COOKIE = "vault_account"  # see account_marker
 CROSS_SITE_ALLOWED = ("/api/auth/callback/", "/api/facebook/data-deletion", "/oauth/token", "/oauth/register",
                       "/oauth/revoke")
 # POSTs a read-only token may call: they only compute an answer, or revoke the token itself.
-READ_ONLY_POSTS = {"/api/v1/decks/parse", "/api/v1/imports/preview", "/api/v1/decks/coverage", "/api/v1/auth/revoke", "/api/v1/cards/lookup",
+READ_ONLY_POSTS = {"/api/v1/decks/parse", "/api/v1/imports/preview", "/api/v1/decks/simulate", "/api/v1/decks/coverage", "/api/v1/auth/revoke", "/api/v1/cards/lookup",
                    # computations on a decklist the caller sends: nothing is stored
                    "/api/v1/decks/stats", "/api/v1/decks/legality", "/api/v1/decks/upgrades",
                    "/api/v1/decks/validate-changes", "/api/v1/decks/shopping-list", "/api/v1/decks/combos"}
