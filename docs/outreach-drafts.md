@@ -97,8 +97,8 @@ https://archidekt.com/terms first (last updated 2018-09-07 when this was drafted
 > deck from your API (server-side, `GET /api/decks/{id}/`, with a User-Agent naming the project) and shows which
 > cards they already own and what the rest would cost. Every deck is labelled as Archidekt's, with its author
 > and a link back. We never write to Archidekt, never sign in to anyone's account, and the person makes any
-> changes on Archidekt themselves. Reads are capped at 10 a minute per person and 60 a minute for the whole
-> service, and nothing is fetched without a person asking: no crawling, no search, no stored corpus.
+> changes on Archidekt themselves. Nothing is fetched without a person asking: no crawling, no search, no stored
+> corpus. We plan to cache each deck briefly so that opening the same deck again doesn't reach you.
 >
 > Your forum posts say the read API is open and that we're welcome to use it within your rate limits; we want to
 > be sure that still holds and that this use is fine with you.

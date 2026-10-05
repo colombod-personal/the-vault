@@ -77,8 +77,7 @@ def limited(bucket: str, *, verify: bool = False, setting: str | None = None) ->
     return [Depends(check)]
 
 
-def per_user(request: Request, bucket: str, user_id: int, allowed: int,
-             message: str = "Too many refreshes. Try again in a minute.") -> None:
+def per_user(request: Request, bucket: str, user_id: int, allowed: int) -> None:
     """Limit one signed-in user's calls to an expensive endpoint (e.g. a refresh that calls
     Scryfall) to ``allowed`` a minute, whichever device or token they come from. Counted like the
     sign-in limits, under a keyed hash of the bucket and user id, so the rows name no one."""
@@ -92,18 +91,5 @@ def per_user(request: Request, bucket: str, user_id: int, allowed: int,
             db.execute(delete(RateHit).where(RateHit.minute < minute - KEEP))
         db.commit()
     if count > allowed:
-        raise HTTPException(429, message, headers={"Retry-After": str(max(1, math.ceil((minute + 1) * WINDOW - now)))})
-
-
-def overall(request: Request, bucket: str, allowed: int, message: str) -> None:
-    """Limit everyone's calls together to ``allowed`` a minute: for calls the Vault makes to someone
-    else's service on a person's behalf (Archidekt), so the Vault as a whole stays a light user."""
-    settings: Settings = request.app.state.settings
-    now = time.time()
-    minute = int(now // WINDOW)
-    key = hmac.new(settings.session_secret.encode(), f"all:{bucket}".encode(), hashlib.sha256).hexdigest()
-    with request.app.state.db.sessions() as db:
-        count = hit(db, key, minute)
-        db.commit()
-    if count > allowed:
-        raise HTTPException(429, message, headers={"Retry-After": str(max(1, math.ceil((minute + 1) * WINDOW - now)))})
+        raise HTTPException(429, "Too many refreshes. Try again in a minute.",
+                            headers={"Retry-After": str(max(1, math.ceil((minute + 1) * WINDOW - now)))})

@@ -43,7 +43,7 @@ from ..native import LEEWAY as NATIVE_LEEWAY, NativeTokenError, NativeVerifier, 
 from ..passkeys import remove_passkey
 from ..prices import compute_values
 from ..privacy import export_archive, purge_user
-from ..ratelimit import limited, overall, per_user
+from ..ratelimit import limited, per_user
 from ..sharing import accept_invite, create_invite, display_name, incoming_share, invite_again, owned_deck
 from . import schemas as S
 from .hal import clamp_limit, decode_cursor, encode_cursor, etag_response, link, page_body, paginate
@@ -749,13 +749,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return {"deleted": True}
 
     @router.get("/archidekt/decks/{deck_id}", tags=["decks"], summary="A public Archidekt deck (fetched server-side)")
-    def archidekt_deck(request: Request, deck_id: Id, user: User = Depends(current_user)) -> dict:
-        # Read only, one public deck per request, rate-limited: Archidekt's terms forbid automated
-        # requests (docs/compliance.md). The person's limit first, so one person can't use up everyone's.
-        per_user(request, "archidekt", user.id, settings.archidekt_rate_limit,
-                 "Too many Archidekt decks in a minute. Try again shortly.")
-        overall(request, "archidekt", settings.archidekt_global_rate_limit,
-                "The Vault is reading a lot from Archidekt right now. Try again in a minute.")
+    def archidekt_deck(deck_id: Id, user: User = Depends(current_user)) -> dict:
         try:
             with ArchidektClient(client=httpx.Client(transport=transport, timeout=30, follow_redirects=True)) as client:
                 return client.get_deck(deck_id).raw

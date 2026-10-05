@@ -68,11 +68,6 @@ class Settings:
     # Calls per minute per user to POST /api/v1/collection/refresh (each fetches up to 300
     # printings from Scryfall, so a whole collection takes a few calls).
     refresh_rate_limit: int = field(default_factory=lambda: int(_env("REFRESH_RATE_LIMIT", "20")))
-    # Archidekt reads (docs/compliance.md): its terms forbid automated requests, so the Vault reads one public
-    # deck per request a person makes, at most this many a minute per person and, for everyone together,
-    # about one a second (the pace mtg_toolkits keeps).
-    archidekt_rate_limit: int = field(default_factory=lambda: int(_env("ARCHIDEKT_RATE_LIMIT", "10")))
-    archidekt_global_rate_limit: int = field(default_factory=lambda: int(_env("ARCHIDEKT_GLOBAL_RATE_LIMIT", "60")))
     # Behind Vercel's edge, which sets the client's address in x-forwarded-for / x-real-ip.
     on_vercel: bool = field(default_factory=lambda: bool(os.environ.get("VERCEL")))
 

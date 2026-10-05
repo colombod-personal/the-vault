@@ -86,11 +86,14 @@ What the Vault does, and keeps doing:
 - Reads **one public deck per request a person makes** (opening a link, the deck page, the graph overlay,
   or the `get_archidekt_deck` tool), server-side, with the toolkit's User-Agent naming the project.
   Private decks are not read (Archidekt answers 404 without sign-in).
-- **Rate limits** (`ARCHIDEKT_RATE_LIMIT`, `ARCHIDEKT_GLOBAL_RATE_LIMIT`): at most 10 Archidekt reads a
-  minute per person, and 60 a minute for the whole Vault (about one a second, the pace
-  `mtg_toolkits` keeps). A refused read never reaches Archidekt.
+- **No rate cap yet, by design.** A cap is added only if it is needed, and then only behind a cache, so
+  Archidekt is protected and people still get their deck: repeat reads of the same deck are served from
+  the cache, and an over-limit read gets the cached copy instead of an error (#133). Until then each read
+  is one request a person made.
 - No background jobs, crawling, deck search or deck corpus; nothing is fetched without a person asking.
 - Every Archidekt deck is labelled "Deck list from Archidekt", with its author and a link back.
+
+Code review that nothing writes to Archidekt, with a guard test: #132.
 
 Not decided yet: reading the list of a person's **own** public decks by their Archidekt username (#94).
 It is a read on that person's request, which the developer's statements cover, but it is a search

@@ -345,6 +345,25 @@ Rules to keep (from [Scryfall's API terms](https://scryfall.com/docs/api) and
 - When you add a service or library, add it to `public/credits.html` (and to the footer
   if users see its data).
 
+## Archidekt: read only
+
+**The Vault only reads from Archidekt, and keeps to [Archidekt's terms](https://archidekt.com/terms).**
+
+- It reads **one public deck at a time, only when you ask** (you paste a deck link, open a saved deck, or an
+  AI assistant calls `get_archidekt_deck` for you). There are no background jobs, no crawling, no deck search
+  and no stored collection of other people's decks.
+- It **never writes to Archidekt**: it does not sign in to your Archidekt account, change your decks or sync
+  anything. When the Vault suggests changes, it gives you a change list and a buying list, and **you apply
+  them on Archidekt yourself**.
+- Private decks are not read (Archidekt answers "not found" without your sign-in, and the Vault never asks
+  for it).
+- Every deck is credited to Archidekt and its author, with a link back.
+
+Why: Archidekt's terms forbid automated requests and building a competing site; its developers say the read
+API is open but offer no way for other apps to change decks. The decision and its sources are in
+[`docs/compliance.md`](docs/compliance.md#archidekt) (#79). Open work: a code review that nothing writes to
+Archidekt (#132), and a cache so repeat reads don't reach Archidekt, with a rate cap only if needed (#133).
+
 ## Next steps
 
 - TypeScript for the front end (the JSX is already compiled ahead of time by `web/build.mjs`).
