@@ -63,3 +63,13 @@ def test_a_ticket_works_only_for_its_owner_and_only_until_it_expires(app, agent,
 def test_a_made_up_ticket_gets_nothing(client):
     assert client.get("/upload?ticket=not-a-real-ticket").status_code == 404
     assert upload(client, "not-a-real-ticket").status_code == 404
+
+
+def test_the_upload_page_reads_as_text_and_warns_before_a_big_removal(agent, bot):
+    write = make_token(agent, scopes=["read", "write"])
+    started = call_tool(bot, write, "start_collection_upload")["structuredContent"]
+    smaller = b"\n".join(CSV.splitlines()[:3]) + b"\n"  # one card left: the rest would be removed
+    with TestClient(agent.app) as browser:
+        res = upload(browser, ticket_of(started["url"]), smaller)
+    assert "{" not in res.text.split("<body>")[1]  # no raw data on the page (found in a real run)
+    assert "would remove" in res.text and "Removed:" in res.text and "1 row," in res.text
