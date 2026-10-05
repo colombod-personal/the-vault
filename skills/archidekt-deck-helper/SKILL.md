@@ -19,8 +19,8 @@ every piece of Archidekt data.
 ## Procedure
 
 1. **Read the deck once.** Take the number from the link and call `get_archidekt_deck`. One deck per
-   request: do not fetch other decks, other users' decks or lists of decks. Archidekt's terms do not allow
-   automated searching, so stay with the single deck the person gave you. Say the deck data is Archidekt's
+   request: do not fetch other decks, other users' decks or lists of decks. Do not search or crawl Archidekt;
+   stay with the single deck the person gave you. Say the deck data is Archidekt's
    and give the link back.
 2. **Make a decklist.** Turn the cards into one line each (`1 Sol Ring`), the commander under a `Commander`
    header. Leave out cards in the sideboard, maybeboard or a "Considering" category unless the person wants
