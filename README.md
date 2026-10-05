@@ -356,8 +356,8 @@ Rules to keep (from [Scryfall's API terms](https://scryfall.com/docs/api) and
 
 ## Archidekt: read only
 
-**The Vault only reads from Archidekt.** That is the owner's policy, designed to respect
-[Archidekt's terms](https://archidekt.com/terms); Archidekt has not yet confirmed this use (see below).
+**The Vault only reads from Archidekt.** It keeps to [Archidekt's terms](https://archidekt.com/terms) and to the
+open, read-only API its developers describe on their forum.
 
 - It reads **one public deck at a time, only when you ask** (you paste a deck link, open a saved deck, or an
   AI assistant calls `get_archidekt_deck` for you). There are no background jobs, no crawling and no deck
@@ -369,14 +369,11 @@ Rules to keep (from [Scryfall's API terms](https://scryfall.com/docs/api) and
 - Private decks are not read (Archidekt answers "not found" without your sign-in, and the Vault never asks
   for it).
 - Every deck is credited to Archidekt and its author, with a link back.
+- It is gentle with Archidekt's rate limit (they start limiting at about 40 requests a minute): one request per
+  deck a person asks for, and repeat reads come from a cache (#133).
 
-Why: Archidekt's terms forbid automated requests and building a competing site. Its developers have said on
-their forum that the read API is open to use within their rate limits, but that is not a licence, and they offer
-no way for other apps to change decks. Because the Vault's server does make the request, we keep reads to one
-deck per person's request and are asking Archidekt to confirm this use (draft in
-[`docs/outreach-drafts.md`](docs/outreach-drafts.md#to-archidekt)); until they reply, treat it as unconfirmed. The decision and its sources are in
-[`docs/compliance.md`](docs/compliance.md#archidekt) (#79). Open work: a code review that nothing writes to
-Archidekt (#132), and a cache so repeat reads don't reach Archidekt, with a rate cap only if needed (#133).
+The details and sources are in [`docs/compliance.md`](docs/compliance.md#archidekt) (#79). Open work: a code
+review that nothing writes to Archidekt (#132), and the cache (#133).
 
 ## Next steps
 
