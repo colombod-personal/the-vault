@@ -174,3 +174,13 @@ def test_the_locks_cover_every_dependency():
     assert (ROOT / "requirements-vcs.txt").read_text().strip() == vcs
     assert vcs in (ROOT / "requirements.txt").read_text()
     assert "httpx==" in (ROOT / "jobs" / "requirements-ops.txt").read_text()
+
+
+def test_a_newer_production_deploy_cancels_the_older_public_site_check():
+    # An older run waits for a release a newer deployment replaced, so it could only fail. The
+    # group is on the job: preview deployment events skip the job and must not cancel the check.
+    data = load(ROOT / ".github" / "workflows" / "public-site.yml")
+    assert "concurrency" not in data
+    job = data["jobs"]["public"]["concurrency"]
+    assert job["cancel-in-progress"] is True
+    assert "github.event_name == 'deployment_status' && 'deploy' || github.run_id" in job["group"]
