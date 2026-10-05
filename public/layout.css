@@ -140,6 +140,10 @@ main { padding-left: max(28px, env(safe-area-inset-left)); padding-right: max(28
 /* .btn.xs.close-x so the phone rule for small buttons (min-height 34px) can't shrink it. */
 .btn.xs.close-x, .close-x { min-width: 44px; min-height: 44px; font-size: 18px; display: inline-grid; place-items: center; padding: 0; }
 .close-x:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+/* One target: the drawn × never takes the tap, the whole round button does; centred; no double-tap zoom. */
+.drawer .drawer-bar .close, .close-x { display: inline-grid; place-items: center; padding: 0; touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+.close-icon { pointer-events: none; display: block; }
+.drawer .drawer-bar .close .close-icon { width: 18px; height: 18px; }
 .nav button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
 /* A wide table scrolls inside its panel. Without this the whole page grew wider than the phone, which pushed

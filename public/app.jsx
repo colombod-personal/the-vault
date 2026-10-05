@@ -257,7 +257,7 @@ function App() {
   const noticeBanner = notice && (
     <div className="panel panel-tight" style={{ margin: '12px 24px 0', display: 'flex', justifyContent: 'space-between' }}>
       <span className="label-mono">{notice}</span>
-      <button className="btn xs ghost close-x" onClick={() => setNotice(null)} aria-label="Dismiss message" title="Dismiss">✕</button>
+      <button className="btn xs ghost close-x" onClick={() => setNotice(null)} aria-label="Dismiss message" title="Dismiss"><window.CloseIcon /></button>
     </div>
   );
   const accountPanel = accountOpen && (
@@ -583,7 +583,7 @@ function CardDrawer({ card, onClose, costsHidden }) {
             while the panel scrolls. The whole 44px square is the button; Esc and a click outside also close. */}
         <div className="drawer-bar">
           <button className="close" data-autofocus onClick={onClose} aria-label="Close card details" title="Close (Esc)">
-            <span aria-hidden="true">×</span>
+            <window.CloseIcon />
           </button>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 20, marginBottom: 24 }}>

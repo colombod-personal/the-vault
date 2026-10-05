@@ -50,3 +50,12 @@ def test_a_wide_table_scrolls_inside_its_panel_instead_of_widening_the_page():
 
 def test_the_current_section_is_announced():
     assert APP.count("aria-current={") == 6
+
+
+def test_the_x_of_a_close_button_never_takes_the_tap():
+    """The × is drawn lines that ignore taps, so a tap on it lands on the round button (a text × used to
+    catch taps on the card panel instead of its button)."""
+    assert "function CloseIcon" in ACCOUNT and "<CloseIcon />" in ACCOUNT
+    assert APP.count("<window.CloseIcon />") == 2 and '<span aria-hidden="true">×</span>' not in APP
+    assert "✕</button>" not in APP and "✕</button>" not in ACCOUNT
+    assert "pointer-events: none" in rule(".close-icon")
