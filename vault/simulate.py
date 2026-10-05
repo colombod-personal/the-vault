@@ -171,7 +171,9 @@ def _play_turn(g: _Game, turn: int, draws: bool) -> dict:
     g.discarded += len(discarded)
     return {"turn": turn, "drew": drew.name if drew else None, "land": land.name if land else None,
             "mana": available, "spent": available - mana, "cast": cast, "hand": len(g.hand),
-            "discarded": discarded, "stuck": available > 0 and not cast and spells_held > 0}
+            "discarded": discarded,
+            # every spell held cost more than the mana: a gap in the curve (normal on turn 1 with no one-drops)
+            "nothing_affordable": available > 0 and not cast and spells_held > 0}
 
 
 def _game(rng: random.Random, deck: list[SimCard], commander: SimCard | None, turns: int, skip_first_draw: bool):
@@ -203,7 +205,7 @@ def simulate(deck: list[SimCard], *, commander: SimCard | None = None, multiplay
             "mana_spent": round(sum(x["spent"] for x in rows) / games, 2),
             "cards_in_hand": round(sum(x["hand"] for x in rows) / games, 2),
             "discarded_by_now": _pct(sum(1 for r in results if any(x["discarded"] for x in r["turns"][: t + 1])), games),
-            "nothing_cast_while_holding_spells": _pct(sum(1 for x in rows if x["stuck"]), games),
+            "every_spell_in_hand_cost_too_much": _pct(sum(1 for x in rows if x["nothing_affordable"]), games),
         })
     headline = {"mulligan_rate": _pct(sum(1 for r in results if r["mulligans"]), games)}
     if turns >= 5:
