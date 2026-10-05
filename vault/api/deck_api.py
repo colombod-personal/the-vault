@@ -14,7 +14,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from mtg_toolkits import delta
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -24,7 +24,7 @@ from .. import deck_tools as dt
 from .. import provenance as prov
 from .. import simulate
 from ..importer import user_entries
-from ..models import Card, Entry, User
+from ..models import Card, Deck, Entry, User
 from .catalog_api import throttle
 from .hal import link
 
@@ -35,7 +35,15 @@ DECK_LIMIT = 30  # analyses a minute per person
 
 
 class DeckIn(BaseModel):
-    text: str = DECK
+    text: str | None = Field(default=None, min_length=1, max_length=50_000, description="The decklist, one card per line, e.g. '1 Sol Ring'; "
+                             "Commander cards under a 'Commander' header. Or give deck_id.")
+    deck_id: int | None = Field(default=None, ge=1, le=2_147_483_647, description="A saved deck's id (list_decks): used instead of text")
+
+    @model_validator(mode="after")
+    def _one_of(self):
+        if (self.text is None) == (self.deck_id is None):
+            raise ValueError("give either text (a decklist) or deck_id (a saved deck), not both and not neither")
+        return self
 
 
 class FormatIn(DeckIn):
@@ -91,6 +99,15 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
         return {"result": result, "provenance": [prov.computed(what, q.provenance_for(db, *used), as_of=date.today())],
                 "_links": {"self": link(f"{V1}/decks/{path}")}}
 
+    def text_of(db: Session, user: User, body: DeckIn) -> str:
+        """The decklist: sent as text, or a saved deck of this person's by id."""
+        if body.deck_id is None:
+            return body.text
+        deck = db.get(Deck, body.deck_id)
+        if deck is None or deck.user_id != user.id:
+            raise HTTPException(404, "No saved deck with that id (list_decks shows yours)")
+        return deck.text
+
     def prepared(request: Request, db: Session, user: User, text: str) -> dt.Resolved:
         throttle(request, settings, "deck analysis", f"user:{user.id}", DECK_LIMIT)
         if "oracle_cards" not in q.sources(db):
@@ -106,14 +123,14 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
     @router.post("/stats", response_model=Answer, response_model_by_alias=True,
                  summary="Counts, curve, color identity, roles and estimated cost of a decklist")
     def deck_stats(request: Request, body: DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-        resolved = prepared(request, db, user, body.text)
+        resolved = prepared(request, db, user, text_of(db, user, body))
         return answer(db, "deck statistics", dt.stats(db, resolved), ("oracle_cards", "oracle_tags", "oracle_prices"), "stats")
 
     @router.post("/simulate", response_model=Answer, response_model_by_alias=True,
                  summary="How the mana curve plays: sample opening turns and the odds behind them (a simple goldfish)")
     def deck_simulate(request: Request, body: SimulateIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         fmt = dt.check_format(body.format)
-        resolved = prepared(request, db, user, body.text)
+        resolved = prepared(request, db, user, text_of(db, user, body))
         cards, commander = [], None
         for e in resolved.played():
             if e.card is None or e.line.section == "companion":  # a companion starts outside the game
@@ -123,7 +140,7 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
                 commander = card  # in the command zone: castable once there is the mana
             else:
                 cards.extend([card] * e.line.quantity)
-        seed = body.seed if body.seed is not None else int(hashlib.sha256(body.text.encode()).hexdigest()[:8], 16)
+        seed = body.seed if body.seed is not None else int(hashlib.sha256(text_of(db, user, body).encode()).hexdigest()[:8], 16)
         try:
             result = simulate.simulate(cards, commander=commander, multiplayer=fmt in MULTIPLAYER, on_the_play=body.on_the_play,
                                        turns=body.turns, games=body.games, samples=body.samples, seed=seed)
@@ -136,7 +153,7 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
     @router.post("/legality", response_model=Answer, response_model_by_alias=True,
                  summary="Is the decklist legal in a format? Lists every issue, and what was not checked")
     def deck_legality(request: Request, body: FormatIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-        resolved = prepared(request, db, user, body.text)
+        resolved = prepared(request, db, user, text_of(db, user, body))
         try:
             result = dt.legality(resolved, body.format)
         except dt.DeckError as exc:
@@ -146,7 +163,7 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
     @router.post("/upgrades", response_model=Answer, response_model_by_alias=True,
                  summary="Upgrade candidates within a budget: legal, in the deck's colors, not already in it")
     def deck_upgrades(request: Request, body: UpgradesIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-        resolved = prepared(request, db, user, body.text)
+        resolved = prepared(request, db, user, text_of(db, user, body))
         loaded = q.sources(db)
         if "oracle_prices" not in loaded or "oracle_tags" not in loaded:
             raise HTTPException(503, "Prices and role tags have not been loaded yet, so upgrade candidates cannot be computed.")
@@ -160,9 +177,9 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
     @router.post("/validate-changes", response_model=Answer, response_model_by_alias=True,
                  summary="Check a proposed list of cuts and adds: legality, colors, resulting deck, and budget")
     def deck_validate(request: Request, body: ChangesIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-        prepared(request, db, user, body.text)
+        prepared(request, db, user, text_of(db, user, body))
         try:
-            result = dt.validate_changes(db, body.text, body.format, body.adds, body.cuts, body.budget_usd)
+            result = dt.validate_changes(db, text_of(db, user, body), body.format, body.adds, body.cuts, body.budget_usd)
         except dt.DeckError as exc:
             failing(exc)
         return answer(db, "validation of proposed changes", result, ("oracle_cards", "oracle_prices"), "validate-changes")
@@ -170,7 +187,7 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
     @router.post("/combos", response_model=Answer, response_model_by_alias=True,
                  summary="Combos in a decklist, and those one card short (asked of Commander Spellbook on demand)")
     def deck_combos(request: Request, body: DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-        resolved = prepared(request, db, user, body.text)
+        resolved = prepared(request, db, user, text_of(db, user, body))
         names = {e.name for e in resolved.played()}
         commanders = [e.name for e in resolved.section("commander")]
         main = [(e.name, e.line.quantity) for e in resolved.played() if e.line.section != "commander"]
@@ -187,8 +204,8 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
     @router.post("/shopping-list", response_model=Answer, response_model_by_alias=True,
                  summary="The cards of a decklist you do not own, with cheapest known prices, as a paste-ready list")
     def deck_shopping(request: Request, body: DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-        resolved = prepared(request, db, user, body.text)
-        deck = dt.parse(body.text)
+        resolved = prepared(request, db, user, text_of(db, user, body))
+        deck = dt.parse(text_of(db, user, body))
         owned = [r.to_collection_entry() for r in user_entries(db, user)]
         by_name = {e.line.name.strip().lower(): e.card for e in resolved.entries if e.card}
         prices = dt.prices_of(db, [c.oracle_id for c in by_name.values()])

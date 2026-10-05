@@ -39,6 +39,11 @@ Rules, cards and prices - how to answer:
 def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants of mcp.py
     from urllib.parse import quote
 
+    DECK_ID = {**ID, "description": "A saved deck's id (from list_decks); use this instead of sending the list again"}
+
+    def _deck_body(a: dict, *more: str) -> dict:
+        return {k: a[k] for k in ("text", "deck_id", *more) if a.get(k) is not None}
+
     deck = {"type": "string", "minLength": 1, "maxLength": 50_000,
             "description": "The decklist, one card per line (e.g. '1 Sol Ring'); put commander cards under a 'Commander' header"}
     fmt = {"type": "string", "maxLength": 20, "enum": list(__import__("vault.deck_tools", fromlist=["FORMATS"]).FORMATS),
@@ -86,44 +91,44 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              method="POST", path=lambda a: f"{V1}/catalog/verify-citation",
              body=lambda a: {k: a[k] for k in ("kind", "ref", "quote", "version") if a.get(k) is not None}, provenance=("catalog",)),
         Tool("deck_stats", "Counts, mana curve, color identity, roles (ramp, draw, removal, sweepers...), the Commander Game Changers "
-             "in the deck (with a bracket floor from them alone) and estimated cost of a decklist, computed by the Vault from the catalog.", {"text": deck}, ["text"], method="POST",
-             path=lambda a: f"{V1}/decks/stats", body=lambda a: {"text": a["text"]}, provenance=("computed",), ui="deck"),
+             "in the deck (with a bracket floor from them alone) and estimated cost of a decklist, computed by the Vault from the catalog." + " Give `deck_id` (a saved deck, from list_decks) or `text`.", {"text": deck, "deck_id": DECK_ID}, [], method="POST",
+             path=lambda a: f"{V1}/decks/stats", body=lambda a: _deck_body(a), provenance=("computed",), ui="deck"),
         Tool("simulate_draws", "How a deck's mana curve plays: a few sample games of the first turns (opening hand, draws, land "
              "drops, what gets cast) and the odds over many games: land drops made, mana by turn, cards in hand, the chance of "
              "discarding to hand size, 'five mana by turn 5'. Says when discarding or a big hand is the deck's plan, and lists "
-             "what the simulation does not model. Explain the numbers in plain words; they are a hint, not a promise.",
-             {"text": deck, "format": fmt,
+             "what the simulation does not model. Explain the numbers in plain words; they are a hint, not a promise." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
+             {"text": deck, "deck_id": DECK_ID, "format": fmt,
               "on_the_play": {"type": "boolean", "default": True, "description": "Going first"},
               "turns": {"type": "integer", "minimum": 1, "maximum": 10, "default": 6},
               "samples": {"type": "integer", "minimum": 0, "maximum": 10, "default": 5, "description": "Games shown turn by turn"},
               "seed": {"type": "integer", "minimum": 0, "maximum": 2147483647, "description": "Repeat a run exactly"}},
-             ["text", "format"], method="POST", path=lambda a: f"{V1}/decks/simulate",
-             body=lambda a: {k: a[k] for k in ("text", "format", "on_the_play", "turns", "samples", "seed") if a.get(k) is not None},
+             ["format"], method="POST", path=lambda a: f"{V1}/decks/simulate",
+             body=lambda a: _deck_body(a, "format", "on_the_play", "turns", "samples", "seed"),
              provenance=("computed",)),
         Tool("deck_legality", "Whether a decklist is legal in a format: banned or illegal cards, copy limits, deck size, commander color "
-             "identity. Lists every issue, and says what it did not check.", {"text": deck, "format": fmt}, ["text", "format"],
-             method="POST", path=lambda a: f"{V1}/decks/legality", body=lambda a: {"text": a["text"], "format": a["format"]},
+             "identity. Lists every issue, and says what it did not check." + " Give `deck_id` (a saved deck, from list_decks) or `text`.", {"text": deck, "deck_id": DECK_ID, "format": fmt}, ["format"],
+             method="POST", path=lambda a: f"{V1}/decks/legality", body=lambda a: _deck_body(a, "format"),
              provenance=("computed",)),
         Tool("find_upgrades", "Upgrade candidates for a deck within a budget: legal, inside the deck's colors, not already in it, each priced "
              "at or under budget_usd, for the roles the deck is short of (or the roles you name). Ordered by popularity, which is "
-             "not power. Also lists the deck's least-played untagged cards as cut candidates. Then call validate_deck_changes.",
-             {"text": deck, "format": fmt,
+             "not power. Also lists the deck's least-played untagged cards as cut candidates. Then call validate_deck_changes." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
+             {"text": deck, "deck_id": DECK_ID, "format": fmt,
               "budget_usd": {"type": "number", "minimum": 0, "maximum": 100000, "description": "The most any single added card may cost"},
               "roles": {"type": "array", "maxItems": 8, "items": {"type": "string", "enum": ["ramp", "draw", "removal", "sweeper", "counterspell", "tutor", "recursion", "sacrifice_outlet"]}},
               "limit": {"type": "integer", "minimum": 1, "maximum": 15, "default": 10},
               "use_collection": {"type": "boolean", "default": False, "description": "Also suggest cards the person already owns, "
-                                 "whatever their price, first, each with owned_copies (free to add)"}}, ["text", "format", "budget_usd"],
+                                 "whatever their price, first, each with owned_copies (free to add)"}}, ["format", "budget_usd"],
              method="POST", path=lambda a: f"{V1}/decks/upgrades",
-             body=lambda a: {k: a[k] for k in ("text", "format", "budget_usd", "roles", "limit", "use_collection") if a.get(k) is not None},
+             body=lambda a: _deck_body(a, "format", "budget_usd", "roles", "limit", "use_collection"),
              provenance=("computed",), ui="upgrades"),
         Tool("validate_deck_changes", "Check a proposed list of cuts and adds before presenting it: every card exists and is legal, adds are in "
              "the deck's colors, the resulting deck is still legal, and the adds' total price is within budget_usd. Present the plan only "
-             "if valid is true.",
-             {"text": deck, "format": fmt, "adds": {"type": "array", "maxItems": 60, "items": {"type": "string", "maxLength": 300}},
+             "if valid is true." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
+             {"text": deck, "deck_id": DECK_ID, "format": fmt, "adds": {"type": "array", "maxItems": 60, "items": {"type": "string", "maxLength": 300}},
               "cuts": {"type": "array", "maxItems": 60, "items": {"type": "string", "maxLength": 300}},
               "budget_usd": {"type": "number", "minimum": 0, "maximum": 100000, "description": "The most the adds may cost in total"}},
-             ["text", "format"], method="POST", path=lambda a: f"{V1}/decks/validate-changes",
-             body=lambda a: {k: a[k] for k in ("text", "format", "adds", "cuts", "budget_usd") if a.get(k) is not None},
+             ["format"], method="POST", path=lambda a: f"{V1}/decks/validate-changes",
+             body=lambda a: _deck_body(a, "format", "adds", "cuts", "budget_usd"),
              provenance=("computed",)),
         Tool("present_steps", "Show the person a step-by-step explanation (an interaction, a stack, a ruling) with each cited rule attached. "
              "Write the steps yourself, citing rule numbers you looked up with get_rule; the Vault attaches each rule's verbatim text and "
@@ -139,14 +144,14 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              body=lambda a: {k: a[k] for k in ("title", "cards", "steps", "version") if a.get(k) is not None},
              provenance=("catalog",), ui="steps"),
         Tool("find_combos", "Combos present in a decklist, and combos one card short (with the missing cards), asked of Commander Spellbook "
-             "on demand. Descriptions are theirs and are attributed; the Vault keeps no copy of their data.",
-             {"text": deck}, ["text"], method="POST", path=lambda a: f"{V1}/decks/combos", body=lambda a: {"text": a["text"]},
+             "on demand. Descriptions are theirs and are attributed; the Vault keeps no copy of their data." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
+             {"text": deck, "deck_id": DECK_ID}, [], method="POST", path=lambda a: f"{V1}/decks/combos", body=lambda a: _deck_body(a),
              provenance=("computed",)),
         Tool("shopping_list", "The cards of a decklist the person does not own, with the cheapest known price of each (dated, from Scryfall) "
              "and a paste-ready list to put into a store's own list or deck tool. The Vault never contacts stores or fills carts, "
-             "and knows no store's price: never say which store is cheapest.",
-             {"text": deck}, ["text"], method="POST", path=lambda a: f"{V1}/decks/shopping-list",
-             body=lambda a: {"text": a["text"]}, provenance=("computed",), ui="shopping"),
+             "and knows no store's price: never say which store is cheapest." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
+             {"text": deck, "deck_id": DECK_ID}, [], method="POST", path=lambda a: f"{V1}/decks/shopping-list",
+             body=lambda a: _deck_body(a), provenance=("computed",), ui="shopping"),
     ]
 
 
