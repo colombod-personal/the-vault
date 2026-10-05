@@ -20,10 +20,16 @@ challenged, and report. Follow `vault-attribution` (if installed) for every sour
 - Always: the **judge** (`vault-judge`) for any rules point, and the **devil's advocate** (`vault-devils-advocate`).
 - As needed: the **synergy analyst** (`vault-synergy-analyst`), the **collection and budget analyst**
   (`vault-collection-analyst`).
-- **Only the format expert for the format being discussed.** Commander: `vault-commander-expert` and the **casual
-  table** voice (`vault-casual-table`). Never seat an expert for another format: a Pioneer opinion in a Commander
-  discussion derails it. Experts for other formats are added in this order: Limited, Pauper, Standard, Pioneer,
-  Two-Headed Giant; if the format has no expert yet, say so and run without one.
+- **Only the format expert for the format being discussed.** Never seat an expert for another format: a Pioneer
+  opinion in a Commander discussion derails it. A second format expert joins only when the question is about both
+  formats.
+  - Commander: `vault-commander-expert` and the **casual table** voice (`vault-casual-table`)
+  - Draft or sealed: `vault-limited-expert`
+  - Pauper: `vault-pauper-expert`
+  - Standard: `vault-standard-expert`
+  - Pioneer: `vault-pioneer-expert`
+  - Two-Headed Giant: `vault-two-headed-giant-expert` (plus the expert for the deck format the team plays)
+  - Any other format: say there is no expert for it yet and run without one.
 - Call 4 to 6 members, not all of them. Say who you called and why.
 
 ## Procedure
