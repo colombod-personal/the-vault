@@ -9,6 +9,7 @@ caller's own collection (scoped to them, like every other collection endpoint).
 
 from __future__ import annotations
 
+import hashlib
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -21,6 +22,7 @@ from .. import catalog_queries as q
 from .. import combos
 from .. import deck_tools as dt
 from .. import provenance as prov
+from .. import simulate
 from ..importer import user_entries
 from ..models import Card, Entry, User
 from .catalog_api import throttle
@@ -52,6 +54,17 @@ class ChangesIn(FormatIn):
     adds: list[str] = Field(default_factory=list, max_length=60, description="Card names to add (one copy each)")
     cuts: list[str] = Field(default_factory=list, max_length=60, description="Card names to cut (one copy each)")
     budget_usd: float | None = Field(default=None, ge=0, le=100_000, description="The most the adds may cost in total")
+
+
+class SimulateIn(FormatIn):
+    on_the_play: bool = Field(default=True, description="Going first (no draw on turn 1 in two-player games)")
+    turns: int = Field(default=6, ge=1, le=simulate.MAX_TURNS)
+    games: int = Field(default=1000, ge=1, le=simulate.MAX_GAMES, description="Games behind the odds")
+    samples: int = Field(default=5, ge=0, le=simulate.MAX_SAMPLES, description="Games shown turn by turn")
+    seed: int | None = Field(default=None, ge=0, le=2**31 - 1, description="Same seed, same answer (default: from the deck)")
+
+
+MULTIPLAYER = {"commander", "oathbreaker", "paupercommander", "predh"}
 
 
 class Answer(BaseModel):
@@ -95,6 +108,30 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
     def deck_stats(request: Request, body: DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         resolved = prepared(request, db, user, body.text)
         return answer(db, "deck statistics", dt.stats(db, resolved), ("oracle_cards", "oracle_tags", "oracle_prices"), "stats")
+
+    @router.post("/simulate", response_model=Answer, response_model_by_alias=True,
+                 summary="How the mana curve plays: sample opening turns and the odds behind them (a simple goldfish)")
+    def deck_simulate(request: Request, body: SimulateIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        fmt = dt.check_format(body.format)
+        resolved = prepared(request, db, user, body.text)
+        cards, commander = [], None
+        for e in resolved.played():
+            if e.card is None or e.line.section == "companion":  # a companion starts outside the game
+                continue
+            card = simulate.from_oracle(e.card)
+            if e.line.section == "commander" and commander is None:
+                commander = card  # in the command zone: castable once there is the mana
+            else:
+                cards.extend([card] * e.line.quantity)
+        seed = body.seed if body.seed is not None else int(hashlib.sha256(body.text.encode()).hexdigest()[:8], 16)
+        try:
+            result = simulate.simulate(cards, commander=commander, multiplayer=fmt in MULTIPLAYER, on_the_play=body.on_the_play,
+                                       turns=body.turns, games=body.games, samples=body.samples, seed=seed)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        result["unmatched"] = resolved.unmatched
+        result["format"] = fmt
+        return answer(db, "mana curve simulation", result, ("oracle_cards",), "simulate")
 
     @router.post("/legality", response_model=Answer, response_model_by_alias=True,
                  summary="Is the decklist legal in a format? Lists every issue, and what was not checked")

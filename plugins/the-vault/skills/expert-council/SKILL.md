@@ -7,7 +7,7 @@ description: >-
   dispute settled, or a deep look at what a deck is trying to do.
 license: MIT
 metadata:
-  vault-tools: "whoami list_decks get_deck deck_stats deck_legality find_combos check_decklist get_deck_overlap validate_deck_changes verify_citation"
+  vault-tools: "whoami list_decks get_deck deck_stats simulate_draws deck_legality find_combos check_decklist get_deck_overlap validate_deck_changes verify_citation"
 ---
 
 # Expert council
@@ -36,7 +36,8 @@ challenged, and report. Follow `vault-attribution` (if installed) for every sour
 
 1. **Intake.** Find the deck: a saved deck by name (`list_decks`, then `get_deck`), a link, or a pasted list. Get the
    format, the goal (tune, legal?, explain, synergies) and any budget.
-2. **Facts first.** Gather the shared facts once: `deck_stats`, `deck_legality`, `find_combos`, `check_decklist`, and
+2. **Facts first.** Gather the shared facts once: `deck_stats`, `simulate_draws` (how the curve plays), `deck_legality`,
+   `find_combos`, `check_decklist`, and
    `get_deck_overlap` if the person has other saved decks. Give these facts to every member.
 3. **Independent views.** Ask each member for at most three points with the evidence for each. Where the host can
    run agents, run them in parallel and do not show one member another's view. Where it cannot, play each member in
