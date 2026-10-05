@@ -38,7 +38,7 @@ Each row: the job, the overlap with something else, the verdict, and how an AI a
 | Biggest stockpiles | Where I have the most copies | none | Keep and sharpen into spare copies: counted against what the saved decks need, not a playset of 4 | Numbers: `get_collection_stats` (most copies); spare-copy counts need #165 |
 | Spend by month | When I paid | The Vault's acquisition timeline plots **copies acquired**, not money paid, so it does not duplicate this chart | Cut as a separate chart (owner decision); amount paid by month remains available as numbers. Where it appears next, if anywhere, is a question for #162 | Numbers: `get_valuation` (paid by month), `get_acquisition_timeline` (copies) |
 | Colour, type and curve breakdowns | Composition | Graph modes and the Vault overview | Cut, except an optional colour by type heatmap | Numbers: `get_collection_breakdowns` |
-| Type's priciest cards | Top cards per type | Browse sorted by value, with a type filter if one exists | Cut, or link to Browse with the filter | Numbers: `search_cards` and `list_card_names` sorted by value |
+| Type's priciest cards | Top cards per type | Browse sorts by value but has no type filter (search, set and printing only), so this is **removed, not moved** | Cut. A type-filtered replacement, if wanted, is design work for #162 | Numbers: `list_card_names` sorted by value (it carries the main type); `search_cards` has no type filter |
 
 ## Owner decisions (2026-10-05)
 
