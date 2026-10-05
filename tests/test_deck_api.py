@@ -37,6 +37,7 @@ CARDS = [
     card(9, "Dull Bear", "Creature — Bear", ["G"], 2, rank=9000),
     card(10, "Other Rock", "Artifact", [], 2, rank=60),
     card(11, "Fire // Ice", "Instant // Instant", ["R", "U"], 2, rank=70, layout="split"),
+    card(12, "Test Changer", "Artifact", [], 1, rank=1, game_changer=True),
 ]
 PRICES = {3: 1.0, 4: 0.5, 7: 0.25, 8: 25.0, 9: 0.1, 10: 3.0}
 TAGS = {"ramp": [3, 7, 8, 10], "removal-burn": [4]}
@@ -273,3 +274,13 @@ def test_a_hidden_tag_gives_no_role_and_very_strong_outranks_strong(loaded, monk
     monkeypatch.setenv("HIDDEN_TAGS", "ramp")
     assert loaded.post(f"{V1}/stats", json={"text": text}).json()["result"]["roles"]["ramp"]["count"] == 0
     assert dt.hidden_tags() == {"ramp"}
+
+
+def test_stats_count_game_changers_and_give_a_bracket_floor_from_them_alone(loaded):
+    none = loaded.post(f"{V1}/stats", json={"text": "1 Test Rock
+1 Cheap Ramp"}).json()["result"]["game_changers"]
+    assert none["count"] == 0 and none["bracket_floor"] is None and none["cards"] == []
+    one = loaded.post(f"{V1}/stats", json={"text": "1 Test Changer
+1 Test Rock"}).json()["result"]["game_changers"]
+    assert one["count"] == 1 and one["bracket_floor"] == 3 and one["cards"] == [{"name": "Test Changer", "quantity": 1}]
+    assert "Wizards' own page was not readable" in one["note"]  # says what it did not check

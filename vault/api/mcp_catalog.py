@@ -85,8 +85,8 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
               "version": {"type": "string", "maxLength": 10}}, ["kind", "ref", "quote"],
              method="POST", path=lambda a: f"{V1}/catalog/verify-citation",
              body=lambda a: {k: a[k] for k in ("kind", "ref", "quote", "version") if a.get(k) is not None}, provenance=("catalog",)),
-        Tool("deck_stats", "Counts, mana curve, color identity, roles (ramp, draw, removal, sweepers...) and estimated cost of a decklist, "
-             "computed by the Vault from the catalog.", {"text": deck}, ["text"], method="POST",
+        Tool("deck_stats", "Counts, mana curve, color identity, roles (ramp, draw, removal, sweepers...), the Commander Game Changers "
+             "in the deck (with a bracket floor from them alone) and estimated cost of a decklist, computed by the Vault from the catalog.", {"text": deck}, ["text"], method="POST",
              path=lambda a: f"{V1}/decks/stats", body=lambda a: {"text": a["text"]}, provenance=("computed",), ui="deck"),
         Tool("simulate_draws", "How a deck's mana curve plays: a few sample games of the first turns (opening hand, draws, land "
              "drops, what gets cast) and the odds over many games: land drops made, mana by turn, cards in hand, the chance of "
