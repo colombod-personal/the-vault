@@ -6,37 +6,39 @@ Status: owner decisions of 2026-10-05 are applied. The designs that follow are #
 
 Which question does a collector or player answer here that they cannot answer faster elsewhere in the Vault?
 
-## Evidence
+## Evidence, and what could not be checked
 
-- The production collection, read through the Vault's own tools: 7,136 card names, 21,950 copies, 10,645 printings, 269 sets, about $30.2k market value, profit and loss known on 21,745 copies, card data complete (no unknown colour, type or mana value), four saved Commander decks of about 100 cards each.
-- The code of `public/views/graph.jsx` (seven modes) and `public/views/lab.jsx`.
-- Local browser runs at 1400 px and 390 px.
+- **Production data (checked).** The owner's real collection, read through the Vault's own tools: 7,136 card names, 21,950 copies, 10,645 printings, 269 sets, about $30.2k market value, profit and loss known on 21,745 copies, card data complete (no unknown colour, type or mana value), four saved Commander decks of about 100 cards each.
+- **Code (checked).** `public/views/graph.jsx` (seven modes), `public/views/lab.jsx`, `public/views/browse.jsx`, `public/views/dashboard.jsx`, `docs/ai-parity.md` and the MCP tool list in `vault/api/mcp.py`. Every claim below about what a view does cites the code.
+- **UI on screen (partly checked).** Each view was run in a browser at 1400 px and 390 px against local test data. Those screenshots were not saved, so this document does not link them. **The production UI at https://mtgvault.cards could not be opened from the browser available here (the network proxy blocks it), so no production screenshots exist.** A production visual pass at both widths is tracked as its own task (see the task map).
 
 An earlier suspicion that missing card data explained the broken Deck map was wrong: production data is complete. The Deck map is broken because it cannot be reset once a deck is loaded and shows less than the deck page (#160, superseded).
 
-## The Graph today: seven modes, none decides anything
+## The Graph today: seven modes
 
-| Mode | Question it answers | Already answered by | Verdict |
-|---|---|---|---|
-| Colour galaxy | Where my value sits by colour | Lab colour breakdown, Vault overview | Cut |
-| Type roster | Value and count by type | Lab "What's in your library" | Cut |
-| Set clusters | Which sets hold my value | Sets view, "Top sets" | Cut |
-| Hierarchy (colour by type) | Where the value pockets are | Server `breakdowns.matrix` | Cut as a graph; keep the colour by type heatmap in the Lab only if it helps a buy or sell decision |
-| Affinity web | Cards sharing set, type, colour, mana value, price, rarity | nothing | Cut: these similarities mean nothing to a player and are not synergy |
-| Mana / price | Expensive cards at each mana value | Browse sorted by value | Cut |
-| Deck map | Owned versus missing for a loaded deck | Deck page (coverage, cost to finish, buy list) | Cut: cannot be reset, shows less than the deck page |
+Each row: the job, the overlap with something else, the verdict, and how an AI assistant gets the same information today. "Numbers" means the underlying data is available through a tool; "picture" means the visualization itself is not.
 
-Finding: the seven modes are seven ways to draw the same breakdowns. With 7,136 names the graph can only show the top 50 to 400 cards, so it never shows the collection, only a slice.
+| Mode | Job | Overlap | Verdict | AI access today |
+|---|---|---|---|---|
+| Colour galaxy | Where my value sits by colour | Lab colour breakdown, Vault overview | Cut | Numbers: `get_collection_breakdowns` (colour). Picture: none |
+| Type roster | Value and count by type, top 4 names per type | Lab "What's in your library" | Cut | Numbers: `get_collection_breakdowns` (type, colour by type), `list_card_names` (top names). Picture: none |
+| Set clusters | Which sets hold my value | Sets view, "Top sets" | Cut | Numbers: `list_sets` (sort by value). Picture: none |
+| Hierarchy (colour by type) | Where value pockets are | Server `breakdowns.matrix` (whole collection) | Cut as a graph; keep a colour by type heatmap in the Lab only if it helps a buy or sell decision | Numbers: `get_collection_breakdowns` (the matrix). Picture: none |
+| Affinity web | Cards sharing set, type, colour, mana value, price, rarity | none | Cut: these similarities mean nothing to a player and are not synergy | None, and none needed |
+| Mana / price | Mana value against unit price | Not Browse: Browse has no mana value filter and sorts by total holding value (`browse.jsx`), so this comparison is **removed, not moved** | Cut | Numbers: `list_card_names` (mana value and unit price per name). Picture: none |
+| Deck map | Owned versus missing for a loaded deck | Deck page (coverage, cost to finish, buy list) | Cut: cannot be reset, shows less than the deck page | `get_deck_overlap`, `check_decklist`, `get_deck` (`docs/ai-parity.md` marks the Graph "partly: the clusters themselves stay visual") |
+
+**Finding.** The seven modes are seven ways to draw numbers that the server already returns and that assistants can already read. What the Graph adds is the picture, and none of the pictures leads to a decision. Coverage detail: Set clusters load every set; Type roster and Hierarchy use whole-collection totals from the server; the cards drawn as dots or listed as top names are a sample (the depth control offers 50 to 800 names, most valuable first, out of 7,136). So the totals are complete and the card-level detail is partial; the cut does not rest on the graph "only showing 50 to 400 cards", which was an earlier, incorrect claim.
 
 ## The Lab today
 
-| Section | Verdict |
-|---|---|
-| Profit and loss winners / losers | Keep, as a sell / hold decision (link to the card, the decks it is in, and the export) |
-| Biggest stockpiles | Keep and sharpen into spare copies: counted against what the saved decks need, not against a playset of 4 |
-| Spend by month | Cut (duplicate of the Vault's acquisition timeline) |
-| Colour, type and curve breakdowns | Cut (duplicate), except an optional colour by type heatmap |
-| Type's priciest cards | Cut, or link to Browse with the filter |
+| Section | Job | Overlap | Verdict | AI access today |
+|---|---|---|---|---|
+| Profit and loss winners / losers | What gained or lost against what I paid | none | Keep, as a sell / hold decision (link to the card, its decks and the export) | Numbers: `get_collection_stats` (biggest gains and losses), `get_collection_summary` (profit and loss) |
+| Biggest stockpiles | Where I have the most copies | none | Keep and sharpen into spare copies: counted against what the saved decks need, not a playset of 4 | Numbers: `get_collection_stats` (most copies); spare-copy counts need #165 |
+| Spend by month | When I paid | The Vault's acquisition timeline plots **copies acquired**, not money paid, so it does not duplicate this chart | Cut as a separate chart (owner decision); amount paid by month remains available as numbers. Where it appears next, if anywhere, is a question for #162 | Numbers: `get_valuation` (paid by month), `get_acquisition_timeline` (copies) |
+| Colour, type and curve breakdowns | Composition | Graph modes and the Vault overview | Cut, except an optional colour by type heatmap | Numbers: `get_collection_breakdowns` |
+| Type's priciest cards | Top cards per type | Browse sorted by value, with a type filter if one exists | Cut, or link to Browse with the filter | Numbers: `search_cards` and `list_card_names` sorted by value |
 
 ## Owner decisions (2026-10-05)
 
@@ -77,3 +79,4 @@ Constraints, recorded for #166 and the compliance gate (#62):
 - #165 deck independence (borrowed cards): design and API.
 - #166 functional equivalents: roles vocabulary, data sources, terms check.
 - #160 (Deck map bug) is superseded: the mode is removed, and "reset the view" is a requirement of #161.
+- A production visual pass of the current Graph and Lab at 1400 px and 390 px (screenshots saved with the review), because the review environment could not open mtgvault.cards.
