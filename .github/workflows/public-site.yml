@@ -23,11 +23,11 @@ jobs:
        startsWith(github.event.deployment.environment, 'Production')) ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main')
-    # A newer production deployment replaces the release an older run waits for, so that run could
-    # only fail: cancel it and check the newest. Set on the job, not the workflow, so preview
-    # deployment events (which skip this job) never cancel a production check.
+    # A newer production deployment (Git or manual) replaces the release an older run waits for, so
+    # that run could only fail: cancel it and check the newest. Set on the job, not the workflow, so
+    # preview deployment events and failed manual deploys (which skip this job) never cancel a check.
     concurrency:
-      group: public-site-${{ github.event_name == 'deployment_status' && 'deploy' || github.run_id }}
+      group: public-site-${{ (github.event_name == 'deployment_status' || github.event_name == 'workflow_run') && 'deploy' || github.run_id }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -51,10 +51,13 @@ jobs:
           echo "Public site: $PUBLIC_URL" >> "$GITHUB_STEP_SUMMARY"
           if [ -n "$EXPECT_COMMIT" ]; then
             # After a production deployment the domain moves to it a little later, and the old release
-            # also answers 200: wait until /api/health reports the deployed commit (up to 5 minutes).
-            for i in $(seq 30); do
-              live=$(curl -s "$PUBLIC_URL/api/health" | python -c 'import json,sys; print((json.load(sys.stdin) or {}).get("commit") or "")' 2>/dev/null || true)
+            # also answers 200: wait until /api/health reports the deployed commit (up to 5 minutes;
+            # each request gives up after 10 seconds, so a server that hangs can't use up the job).
+            deadline=$((SECONDS + 300))
+            while :; do
+              live=$(curl -s --connect-timeout 5 --max-time 10 "$PUBLIC_URL/api/health" | python -c 'import json,sys; print((json.load(sys.stdin) or {}).get("commit") or "")' 2>/dev/null || true)
               [ "$live" = "$EXPECT_COMMIT" ] && break
+              [ "$SECONDS" -ge "$deadline" ] && break
               sleep 10
             done
             # Only Vercel's Git integration creates these deployment events, and it always sets the

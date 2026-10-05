@@ -183,7 +183,14 @@ def test_a_newer_production_deploy_cancels_the_older_public_site_check():
     assert "concurrency" not in data
     job = data["jobs"]["public"]["concurrency"]
     assert job["cancel-in-progress"] is True
-    assert "github.event_name == 'deployment_status' && 'deploy' || github.run_id" in job["group"]
+    # Both production triggers share one group; daily and manual runs keep their own.
+    assert "(github.event_name == 'deployment_status' || github.event_name == 'workflow_run') && 'deploy' || github.run_id" in job["group"]
+
+
+def test_waiting_for_the_deployed_commit_is_bounded():
+    # A server that accepts the connection and then hangs must not use up the job's timeout.
+    script = load(ROOT / ".github" / "workflows" / "public-site.yml")["jobs"]["public"]["steps"][-1]["run"]
+    assert "--max-time" in script and "deadline=$((SECONDS + 300))" in script
 
 
 def test_the_public_site_is_checked_after_the_manual_deploy_too():
