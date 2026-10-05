@@ -19,6 +19,7 @@ from .identity import AppleTwin, FacebookTwin, GoogleTwin, IdentityTwin, Microso
 from .scryfall import ScryfallTwin
 from .spellbook import SpellbookTwin
 from .vercel import VercelTwin
+from .wizards import WizardsTwin
 
 
 class Universe:
@@ -31,9 +32,10 @@ class Universe:
         self.archidekt = ArchidektTwin(self.scryfall)
         self.vercel = VercelTwin()
         self.spellbook = SpellbookTwin(seed)
+        self.wizards = WizardsTwin()
         self.client_hosts = ClientHostTwin()  # where MCP clients publish their OAuth metadata documents
         self.twins: dict[str, Twin] = {t.name: t for t in (self.google, self.microsoft, self.apple, self.facebook,
-                                                           self.scryfall, self.archidekt, self.vercel, self.spellbook,
+                                                           self.scryfall, self.archidekt, self.vercel, self.spellbook, self.wizards,
                                                            self.client_hosts)}
         self.by_host: dict[str, Twin] = {h: t for t in self.twins.values() for h in t.hosts}
         self.escapes: list[str] = []

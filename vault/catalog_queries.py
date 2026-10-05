@@ -14,11 +14,10 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from . import provenance as prov
-from .models import CatalogSource, OracleCard, OraclePrice, OracleTag, OracleTagLink, Rule, Ruling, RulesVersion
+from .models import CatalogSource, OracleCard, OraclePrice, OracleTag, OracleTagLink, Ruling
 
 MAX_RULINGS = 25
 MAX_RULE_RESULTS = 10
-MAX_SUBRULES = 40
 SUGGESTIONS = 5
 SIMILARITY = 0.35  # pg_trgm: how close a misspelled name must be to be offered
 
@@ -93,58 +92,6 @@ def card_tags(db: Session, oracle_id: str) -> list[dict]:
     return [{"tag": slug, "label": label, "weight": weight} for slug, label, weight in rows]
 
 
-# -- rules --------------------------------------------------------------------------------------
-
-def latest_rules_version(db: Session) -> str | None:
-    return db.scalar(select(func.max(RulesVersion.version)))
-
-
-def rule_body(rule: Rule) -> dict:
-    return {"number": rule.number, "text": rule.text, "kind": rule.kind, "parent": rule.parent}
-
-
-def get_rule(db: Session, number: str, version: str | None = None) -> tuple[dict | None, list[dict], str | None]:
-    """One rule (or glossary term as ``glossary:Term``) with its direct subrules, capped."""
-    version = version or latest_rules_version(db)
-    if version is None:
-        return None, [], None
-    rule = db.get(Rule, (version, number))
-    if rule is None and not number.startswith("glossary:"):  # glossary terms are looked up case-insensitively
-        return None, [], version
-    if rule is None:
-        rule = db.scalars(select(Rule).where(Rule.version == version, func.lower(Rule.number) == number.lower())).first()
-        if rule is None:
-            return None, [], version
-    children = db.scalars(select(Rule).where(Rule.version == version, Rule.parent == rule.number)
-                          .order_by(Rule.number).limit(MAX_SUBRULES)).all()
-    return rule_body(rule), [rule_body(c) for c in children], version
-
-
-def search_rules(db: Session, query: str, version: str | None = None, limit: int = MAX_RULE_RESULTS) -> tuple[list[dict], str | None, str]:
-    """Full-text search of the rules, best matches first, capped. Headings are not returned.
-
-    A plain-language question rarely has every word in one rule ("protection from red damage prevented"),
-    so when no rule has all the words the search falls back to rules with any of them, best first. The
-    third value says which happened: ``"all words"`` or ``"any word"``."""
-    version = version or latest_rules_version(db)
-    if version is None or not query.strip():
-        return [], version, "all words"
-    limit = max(1, min(limit, MAX_RULE_RESULTS))
-    vector = func.to_tsvector("english", Rule.text)
-
-    def run(tsq):
-        return db.scalars(select(Rule).where(Rule.version == version, Rule.kind != "heading", vector.op("@@")(tsq))
-                          .order_by(func.ts_rank(vector, tsq).desc(), Rule.number).limit(limit)).all()
-
-    rows = run(func.websearch_to_tsquery("english", query))
-    mode = "all words"
-    words = list(dict.fromkeys(re.findall(r"[A-Za-z0-9]{2,}", query.lower())))[:12]
-    if not rows and len(words) > 1:
-        rows = run(func.to_tsquery("english", " | ".join(words)))
-        mode = "any word"
-    return [rule_body(r) for r in rows], version, mode
-
-
 # -- citations ----------------------------------------------------------------------------------
 
 def _squash(s: str) -> str:
@@ -160,12 +107,7 @@ def verify_citation(db: Session, kind: str, ref: str, quote: str, version: str |
     wanted = _squash(quote)
     if not wanted:
         return {"verified": False, "reason": "empty quote"}
-    if kind == "rule":
-        rule, _, version = get_rule(db, ref, version)
-        if rule is None:
-            return {"verified": False, "reason": "no such rule", "version": version}
-        ok = wanted in _squash(rule["text"])
-        return {"verified": ok, "version": version, "source_text": None if ok else rule["text"], "number": rule["number"]}
+    # kind "rule" is checked against the live rules (vault.rules_live) by the API
     card, suggestions = find_card(db, **({"oracle_id": ref} if re.fullmatch(r"[0-9a-f-]{36}", ref) else {"name": ref}))
     if card is None:
         return {"verified": False, "reason": "no such card", "suggestions": [c.name for c in suggestions]}

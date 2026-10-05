@@ -23,6 +23,7 @@ from .. import catalog_queries as q
 from .. import provenance as prov
 from ..models import User
 from ..ratelimit import WINDOW, client_ip, hit
+from ..rules_live import LiveRules, RulesUnavailable
 from .hal import link
 
 V1 = "/api/v1"
@@ -52,6 +53,23 @@ class RuleOut(BaseModel):
     version: str | None
     rule: dict | None
     subrules: list[dict] = Field(default_factory=list)
+    provenance: list[prov.Provenance]
+    links: dict = Field(default_factory=dict, alias="_links")
+
+
+class RuleOutlineOut(BaseModel):
+    version: str
+    under: dict | None
+    items: list[dict]
+    provenance: list[prov.Provenance]
+    links: dict = Field(default_factory=dict, alias="_links")
+
+
+class RuleTermOut(BaseModel):
+    version: str
+    term: str
+    glossary: dict | None
+    rules: list[dict]
     provenance: list[prov.Provenance]
     links: dict = Field(default_factory=dict, alias="_links")
 
@@ -137,8 +155,16 @@ class WhoamiOut(BaseModel):
     links: dict = Field(default_factory=dict, alias="_links")
 
 
-def build_router(get_db, optional_user, current_user, settings) -> APIRouter:
+def build_router(get_db, optional_user, current_user, settings, rules_live=None) -> APIRouter:
     router = APIRouter(prefix=V1 + "/catalog", tags=["catalog"])
+    live_rules = rules_live or LiveRules()
+
+    def rules_edition():
+        """The current Comprehensive Rules, read live from Wizards (docs/rules-index.md): nothing is stored."""
+        try:
+            return live_rules.edition()
+        except RulesUnavailable as exc:
+            raise HTTPException(503, str(exc), headers={"Retry-After": "300"}) from exc
     agent = APIRouter(prefix=V1 + "/agent", tags=["agents"])
 
     def access(request: Request, user: User | None = Depends(optional_user)) -> User | None:
@@ -153,7 +179,7 @@ def build_router(get_db, optional_user, current_user, settings) -> APIRouter:
     def status_body(db: Session) -> dict:
         rows = q.sources(db)
         out = {n: {"version": s.version, "as_of": s.fetched_at.date().isoformat(), "rows": s.rows} for n, s in rows.items()}
-        return {"sources": out, "rules_version": q.latest_rules_version(db),
+        return {"sources": out, "rules_version": live_rules.cached_version,
                 "provenance": q.provenance_for(db, *[n for n in prov.CATALOG_SOURCES if n in rows]),
                 "_links": {"self": link(f"{V1}/catalog/status")}}
 
@@ -200,12 +226,13 @@ def build_router(get_db, optional_user, current_user, settings) -> APIRouter:
     @router.post("/walkthrough", response_model=WalkthroughOut, response_model_by_alias=True,
                  summary="Present a step-by-step explanation with each cited rule looked up and attached verbatim")
     def walkthrough(body: WalkthroughIn, user=Depends(access), db: Session = Depends(get_db)) -> dict:
-        version = body.version or q.latest_rules_version(db)
+        edition = rules_edition()
+        version = edition.version
         steps, unknown = [], []
         for i, step in enumerate(body.steps, 1):
             cited = []
             for number in step.rules:
-                rule, _, _ = q.get_rule(db, number, version)
+                rule = edition.find(number)
                 if rule is None:
                     unknown.append({"step": i, "rule": number})
                 else:
@@ -214,7 +241,7 @@ def build_router(get_db, optional_user, current_user, settings) -> APIRouter:
         return {"title": body.title, "cards": body.cards, "version": version, "steps": steps, "unknown_rules": unknown,
                 "note": "Step text is written by the assistant; rule texts are Wizards' Comprehensive Rules, looked up by the Vault. "
                         "Steps citing an unknown rule number are flagged, not trusted.",
-                "provenance": q.provenance_for(db, "rules"), "_links": {"self": link(f"{V1}/catalog/walkthrough")}}
+                "provenance": edition.provenance(), "_links": {"self": link(f"{V1}/catalog/walkthrough")}}
 
     @router.get("/cards/{oracle_id}/rulings", response_model=RulingsOut, response_model_by_alias=True,
                 summary="A card's rulings (Wizards' text via Scryfall), newest first, at most 25")
@@ -231,27 +258,60 @@ def build_router(get_db, optional_user, current_user, settings) -> APIRouter:
     def rules_search(qs: str = Query(alias="q", min_length=2, max_length=200), limit: int = Query(default=5, ge=1, le=q.MAX_RULE_RESULTS),
                      version: str | None = Query(default=None, max_length=10), user=Depends(access),
                      db: Session = Depends(get_db)) -> dict:
-        results, used, matched = q.search_rules(db, qs, version, limit)
-        return {"version": used, "query": qs, "matched": matched, "results": results, "provenance": q.provenance_for(db, "rules"),
+        edition = rules_edition()
+        results, matched = edition.search(qs, limit)
+        return {"version": edition.version, "query": qs, "matched": matched, "results": results, "provenance": edition.provenance(),
                 "_links": {"self": link(f"{V1}/catalog/rules/search")}}
+
+    @router.get("/rules", response_model=RuleOutlineOut, response_model_by_alias=True,
+                summary="The Comprehensive Rules' table of contents: the sections, or what is directly under a number")
+    def rules_outline(under: str | None = Query(default=None, max_length=20, description="A section (7), subsection (702) or rule (702.19)"),
+                      user=Depends(access)) -> dict:
+        edition = rules_edition()
+        out = edition.outline(under)
+        if out.get("unknown"):
+            raise HTTPException(404, "No such rule in the current edition")
+        return {"version": edition.version, **out, "provenance": edition.provenance(), "_links": {"self": link(f"{V1}/catalog/rules")}}
+
+    @router.get("/rules/term/{name}", response_model=RuleTermOut, response_model_by_alias=True,
+                summary="A glossary term or keyword ability, and the rules that define it")
+    def rules_term(name: Annotated[str, Path(min_length=2, max_length=120)], user=Depends(access)) -> dict:
+        edition = rules_edition()
+        found = edition.term(name)
+        if found is None:
+            raise HTTPException(404, "No glossary term or keyword ability by that name; try search_rules")
+        return {"version": edition.version, **found, "provenance": edition.provenance(),
+                "_links": {"self": link(f"{V1}/catalog/rules/term/{name}")}}
 
     @router.get("/rules/{number}", response_model=RuleOut, response_model_by_alias=True,
                 summary="One rule by number (e.g. 613.1a) or glossary term (glossary:Trample), with its subrules")
     def rule(number: Annotated[str, Path(min_length=1, max_length=120)], version: str | None = Query(default=None, max_length=10),
              user=Depends(access), db: Session = Depends(get_db)) -> dict:
-        body, children, used = q.get_rule(db, number, version)
+        edition = rules_edition()
+        body = edition.rule(number)
         if body is None:
-            raise HTTPException(404, "No such rule in that edition")
-        return {"version": used, "rule": body, "subrules": children, "provenance": q.provenance_for(db, "rules"),
+            raise HTTPException(404, "No such rule in the current edition")
+        return {"version": edition.version, "rule": body, "subrules": body["children"], "provenance": edition.provenance(),
                 "_links": {"self": link(f"{V1}/catalog/rules/{number}")}}
 
     @router.post("/verify-citation", response_model=CitationOut, response_model_by_alias=True,
                  summary="Is this quote verbatim in the rule, Oracle text or ruling it is attributed to?")
     def verify(body: CitationIn, user=Depends(access), db: Session = Depends(get_db)) -> dict:
-        result = q.verify_citation(db, body.kind, body.ref, body.quote, body.version)
-        names = {"rule": "rules", "oracle_text": "oracle_cards", "ruling": "rulings"}
+        if body.kind == "rule":
+            edition = rules_edition()
+            rule = edition.find(body.ref)
+            wanted = q._squash(body.quote)
+            if rule is None:
+                result = {"verified": False, "reason": "no such rule", "version": edition.version}
+            else:
+                ok = bool(wanted) and wanted in q._squash(rule["text"])
+                result = {"verified": ok, "version": edition.version, "source_text": None if ok else rule["text"], "number": rule["number"]}
+            provenance = edition.provenance()
+        else:
+            result = q.verify_citation(db, body.kind, body.ref, body.quote, body.version)
+            provenance = q.provenance_for(db, {"oracle_text": "oracle_cards", "ruling": "rulings"}[body.kind])
         return {"verified": bool(result.pop("verified")), "detail": result,
-                "provenance": q.provenance_for(db, names[body.kind]),
+                "provenance": provenance,
                 "_links": {"self": link(f"{V1}/catalog/verify-citation")}}
 
     root = APIRouter()

@@ -27,7 +27,7 @@ from vault.config import Settings
 from vault.db import Database
 
 USER_AGENT = "the-vault/0.1 (+https://github.com/colombod-personal/the-vault)"
-SOURCES = ("oracle_cards", "rulings", "oracle_tags", "rules")  # "rules": the Comprehensive Rules, from RULES_URL or --file
+SOURCES = ("oracle_cards", "rulings", "oracle_tags")  # the Comprehensive Rules are read live (vault/rules_live.py), not stored
 OTHER_JOBS = ("oracle_prices",)  # loaded by jobs.sync_prices from the same CATALOG_SOURCES
 
 
@@ -53,29 +53,6 @@ def load(db, name: str, path: Path, version: str, entry: dict | None) -> dict:
     updated = datetime.fromisoformat(entry["updated_at"]) if entry and entry.get("updated_at") else None
     cs.record_source(db, name, version=version, rows=rows, source_updated_at=updated,
                      url=(entry or {}).get("uri") or None)
-    db.commit()
-    return result
-
-
-def load_rules(db, http: httpx.Client, path: str | None, *, force: bool = False) -> dict:
-    """The Comprehensive Rules plain text, from a file or from RULES_URL (the file name changes with
-    each edition, so the URL is configuration, never scraped)."""
-    from vault import rules_parser
-
-    url = None
-    if path:
-        text = Path(path).read_text(encoding="utf-8")
-    else:
-        url = os.environ.get("RULES_URL", "")
-        if not url.startswith("https://"):
-            raise SystemExit("rules: set RULES_URL to the https URL of the Comprehensive Rules .txt, or pass --file rules=PATH")
-        resp = http.get(url, headers={"User-Agent": USER_AGENT})
-        resp.raise_for_status()
-        text = resp.content.decode("utf-8-sig")
-    parsed = rules_parser.parse(text)
-    if not force and cs.source_is_current(db, "rules", parsed.version):
-        return {"skipped": f"{parsed.version} is already loaded"}
-    result = cs.sync_rules(db, parsed, url)
     db.commit()
     return result
 
@@ -107,10 +84,6 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
     report: dict = {}
     with tempfile.TemporaryDirectory() as tmp:
         http = httpx.Client(transport=transport or outbound.transport(settings), timeout=120, follow_redirects=True)
-        if "rules" in wanted:
-            with db.sessions() as session:
-                report["rules"] = load_rules(session, http, files.get("rules"), force=args.force)
-            wanted = [s for s in wanted if s != "rules"]
         with ScryfallClient(user_agent=USER_AGENT, client=http) as sf:
             scryfall_wanted = [s for s in wanted]
             entries = {} if (not scryfall_wanted or (files and set(scryfall_wanted) <= set(files))) else {b["type"]: b for b in sf.bulk_data()}
