@@ -55,7 +55,13 @@ def test_the_archidekt_twin_implements_reads_only():
 
 
 def test_skills_and_agents_never_offer_to_edit_sync_or_sign_in_to_archidekt():
+    """A line naming Archidekt with a write verb must be a prohibition: negated, under a "Do not" heading, or about the
+    person doing it themselves."""
+    negated = re.compile(r"(never|do not|don't|not allow|no tool|cannot|can't|without|nor|they can edit|the person applies|themselves)", re.IGNORECASE)
     for path in list((ROOT / "skills").rglob("SKILL.md")) + list((ROOT / "agents").glob("*.md")):
+        in_prohibitions = False
         for line in path.read_text(encoding="utf-8").splitlines():
-            if re.search(r"archidekt", line, re.IGNORECASE) and re.search(r"\b(sync|push|upload|write to|sign in|log in|edit)\b", line, re.IGNORECASE):
-                assert re.search(r"\b(never|do not|don't|not allow|no tool|cannot|can't|without|nor|they can edit|the person applies|themselves)\b", line, re.IGNORECASE), f"{path.name}: {line.strip()}"
+            if line.startswith("#"):
+                in_prohibitions = line.lstrip("# ").lower().startswith("do not")
+            if re.search(r"archidekt", line, re.IGNORECASE) and re.search(r"(sync|push|upload|write to|sign in|log in|edit)", line, re.IGNORECASE):
+                assert in_prohibitions or negated.search(line), f"{path.name}: {line.strip()}"
