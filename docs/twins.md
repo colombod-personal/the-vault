@@ -128,6 +128,7 @@ redirects to the twin page, and the handoff to `vault://auth?code=…` is the re
 - **Vercel:** the token checks run nightly with no secrets. The contract check
   (`test_vercel_contract_used_by_the_setup_job`) needs a scratch Vercel project with a
   production deployment and one variable: set the repository variable
-  `VERCEL_CONFORMANCE_PROJECT` to its name. It never touches `the-vault`.
+  `VERCEL_CONFORMANCE_PROJECT` to its name. It never touches `the-vault`. It switches the scratch
+  project's *Automatically expose System Environment Variables* on and then restores it.
 - **A new outside service** gets a twin (hosts, routes, error format, scenario knobs), is added to
   `Universe`, and gets conformance checks. Nothing reaches a real service from the tests.
