@@ -16,6 +16,7 @@ vault-tools:
 skills:
   - rules-judge
   - interaction-explainer
+  - expert-council
   - vault-attribution
 ---
 

@@ -25,8 +25,33 @@ def frontmatter(text: str):
     return yaml.safe_load(front), body
 
 
-def test_the_three_agents_exist():
-    assert NAMES == {"vault-judge", "vault-deckbuilder", "vault-buyer"}
+COUNCIL = {"vault-devils-advocate", "vault-synergy-analyst", "vault-collection-analyst", "vault-commander-expert",
+           "vault-casual-table"}
+
+
+def test_the_agents_exist():
+    assert NAMES == {"vault-judge", "vault-deckbuilder", "vault-buyer"} | COUNCIL
+
+
+def test_council_members_stay_in_their_lane_and_cite_evidence():
+    """docs/expert-council.md: members give at most three points with evidence; format experts and the casual table
+    speak only about their format (owner's rule: off-topic format experts derail the discussion)."""
+    by = {a["name"]: " ".join(a["body"].split()).lower() for a in AGENTS}
+    for name in COUNCIL:
+        assert "at most three" in by[name] and "expert-council" in {s for a in AGENTS if a["name"] == name for s in a["skills"]}
+    assert "commander only" in by["vault-commander-expert"] and "commander only" in by["vault-casual-table"]
+    assert "never object without a reason you can cite" in by["vault-devils-advocate"]
+    assert "never say which shop is cheapest" in by["vault-collection-analyst"]
+
+
+def test_the_council_skill_seats_only_on_topic_experts_and_validates_the_plan():
+    text = " ".join((ROOT / "skills" / "expert-council" / "SKILL.md").read_text(encoding="utf-8").split())
+    assert "Only the format expert for the format being discussed" in text and "Never seat an expert for another format" in text
+    for name in COUNCIL | {"vault-judge"}:
+        assert f"`{name}`" in text, name
+    assert "present a plan only when `valid` is true" in text
+    for section in ("**plan**", "**Agreed:**", "**Disputed:**", "**Not checked:**", "see the discussion"):
+        assert section in text, section
 
 
 @pytest.mark.parametrize("agent", AGENTS, ids=lambda a: a["name"])
