@@ -468,3 +468,26 @@ def test_mcp_write_tools_have_the_same_text_limits(agent, bot):
             del args["deck_id"]
         res = rpc(bot, "tools/call", {"name": tool, "arguments": args}, write)
         assert res.json()["error"]["code"] == -32602, res.text[:300]
+
+
+def test_many_parallel_tool_calls_do_not_exhaust_the_connection_pool(agent, bot):
+    """A real council run (five agents in parallel) got 500s from the production MCP server: each tool call holds one
+    connection and opens more for its in-process API call, and the pool was 2+2 (#169)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    token = make_token(agent)
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        results = list(pool.map(lambda _: rpc(bot, "tools/call", {"name": "get_collection_summary", "arguments": {}}, token).status_code,
+                                range(36)))
+    assert results == [200] * 36
+
+
+def test_a_busy_database_answers_503_with_retry_after_not_a_500(app, signed_in, monkeypatch):
+    from sqlalchemy.exc import TimeoutError as PoolTimeout
+
+    def busy(*args, **kwargs):
+        raise PoolTimeout("QueuePool limit of size 6 overflow 14 reached, connection timed out")
+
+    monkeypatch.setattr(app.state.db, "sessions", busy)
+    res = signed_in.get(f"{V1}/collection")
+    assert res.status_code == 503 and res.headers["retry-after"] == "5" and "busy" in res.json()["detail"]
