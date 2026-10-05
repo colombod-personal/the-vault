@@ -15,7 +15,7 @@ concurrency: vercel-production  # one at a time with sync-prices, which redeploy
 jobs:
   deploy:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19 (#180); move deliberately
     timeout-minutes: 20
     environment: vercel-production
     services:

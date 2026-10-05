@@ -222,3 +222,11 @@ def test_the_public_site_check_waits_for_the_deployment_itself_not_its_commit():
         "${{ github.event.deployment_status.environment_url || github.event.deployment_status.target_url }}")
     script = job["steps"][-1]["run"]
     assert '.get("deployment")' in script and '[ "$live" = "$expected" ]' in script
+
+
+def test_jobs_run_on_a_pinned_runner_image_not_ubuntu_latest():
+    """ubuntu-latest moves to a new Ubuntu on GitHub's schedule (26 from 2026-10-19): the lockfile install, the Postgres
+    service and the Node build must be moved to a new image deliberately (#180)."""
+    for path in WORKFLOWS:
+        for name, job in load(path)["jobs"].items():
+            assert job["runs-on"] != "ubuntu-latest", f"{path.name}: {name}"
