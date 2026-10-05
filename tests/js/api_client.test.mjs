@@ -237,3 +237,27 @@ for (const [what, opts] of [['blocked', { block: true }], ['never answers', { ha
     assert.equal(page.items[0].n, 'Sol Ring');
   });
 }
+
+test('an older copy keeps the author it recorded, never the author of a link it no longer has', async () => {
+  const A = 'https://archidekt.com/decks/1', B = 'https://archidekt.com/decks/2';
+  // Recorded: the answer still has this copy's link, so the copy now credits that author.
+  let answer = { id: 7, source_url: A, source_author: 'Michael', recorded: true, _links: {} };
+  const { api, calls } = load(async () => json(200, answer));
+  const saved = { id: 7, source_url: A, source_author: null };
+  await api.rememberDeckAuthor(saved, 'Michael');
+  assert.equal(calls.at(-1).url, '/api/v1/decks/7/source-author');
+  assert.deepEqual(calls.at(-1).body, { source_url: A, source_author: 'Michael' });
+  assert.equal(saved.source_author, 'Michael');
+  // Moved to another deck in another tab meanwhile: the server answers that deck and its author,
+  // which must not be copied onto the copy that still points at link A.
+  answer = { id: 8, source_url: B, source_author: 'Ana', recorded: false, _links: {} };
+  const stale = { id: 8, source_url: A, source_author: null };
+  await api.rememberDeckAuthor(stale, 'Michael');
+  assert.equal(stale.source_author, null);
+  // Nothing to record: no request at all.
+  const before = calls.length;
+  await api.rememberDeckAuthor({ id: 9, source_url: A, source_author: 'Kept' }, 'Other');
+  await api.rememberDeckAuthor({ id: 9, source_url: null, source_author: null }, 'Other');
+  await api.rememberDeckAuthor({ id: 9, source_url: A, source_author: null }, '   ');
+  assert.equal(calls.length, before);
+});

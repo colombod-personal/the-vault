@@ -508,7 +508,7 @@ def test_updating_a_deck_keeps_its_source_url_unless_given(signed_in):
     assert signed_in.get(path).json()["source_url"] is None
 
 
-def test_a_saved_deck_keeps_its_authors_credit(signed_in):
+def test_a_saved_deck_keeps_the_credit_of_its_author(signed_in):
     # A saved copy shown while Archidekt can't be reached still names the deck's author.
     deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring", "source_url": "https://archidekt.com/decks/1",
                                                "source_author": "  Michael  "}).json()
@@ -546,7 +546,7 @@ def test_a_stale_update_never_pairs_an_author_with_another_link(signed_in):
     assert stale["source_url"] == "https://archidekt.com/decks/1" and stale["source_author"] is None  # not Ana's
 
 
-def test_recording_an_older_copys_author_never_overwrites_an_edit(signed_in):
+def test_recording_the_author_of_an_older_copy_never_overwrites_an_edit(signed_in):
     url = "https://archidekt.com/decks/1"
     deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring", "source_url": url}).json()
     path = f"{V1}/decks/{deck['id']}"
