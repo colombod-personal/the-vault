@@ -234,7 +234,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
         catch (e) {
           if (!source.saved) throw e;
           d = await window.DeckSrc.parseText(source.saved.text); // the source is unreachable: the saved copy
-          d = { ...d, title: source.saved.name, url: source.saved.source_url, offline: e.message };
+          d = { ...d, title: source.saved.name, url: source.saved.source_url, author: source.saved.source_author || '', offline: e.message };
         }
       } else {
         d = await window.DeckSrc.parseText(source.text);
@@ -281,8 +281,10 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
   async function save() {
     const name = saved ? saved.name : deck.title === 'Pasted decklist' ? (prompt('Name this deck', 'My deck') || 'My deck') : deck.title;
     try {
-      const d = saved ? await window.VaultApi.updateDeck(saved.id, name, text, deck.url || null)
-        : await window.VaultApi.saveDeck(name, text, deck.url || null);
+      // The author goes with the copy, so it is still credited when the source can't be reached.
+      const author = (deck.url && (deck.author || (saved && saved.source_author))) || null;
+      const d = saved ? await window.VaultApi.updateDeck(saved.id, name, text, deck.url || null, author)
+        : await window.VaultApi.saveDeck(name, text, deck.url || null, author);
       setJustSaved(true); onSaved(d); // the caller refreshes what it needs
     } catch (e) { setError('Saving failed: ' + e.message); }
   }

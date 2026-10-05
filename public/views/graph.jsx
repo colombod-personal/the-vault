@@ -122,7 +122,7 @@ function GraphView({ data, openCard }) {
       else {
         // The deck as it is now on its site; your saved copy when the site can't be reached (or is Moxfield).
         try { d = await window.DeckSrc.fetchUrl(saved.source_url.trim()); }
-        catch (e) { d = { ...(await window.DeckSrc.parseText(saved.text)), title: saved.name, url: saved.source_url, savedCopy: true }; }
+        catch (e) { d = { ...(await window.DeckSrc.parseText(saved.text)), title: saved.name, url: saved.source_url, author: saved.source_author || '', savedCopy: true }; }
       }
       d.cards = mergeDeckCards(d.cards); // one line per card, as on the Decks page
       // What you own of it comes from the server's coverage; colours from the cards' data.

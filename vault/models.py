@@ -145,6 +145,8 @@ class Deck(Base):
     name: Mapped[str] = mapped_column(String(200))
     text: Mapped[str] = mapped_column(Text)
     source_url: Mapped[str | None] = mapped_column(String(500))
+    # Who made the deck at its source (e.g. the Archidekt author), so a saved copy is still credited.
+    source_author: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

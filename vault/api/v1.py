@@ -659,7 +659,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 "unparsed": deck.unparsed}
 
     def _deck(d: Deck, coverage: dict | None = None) -> dict:
-        out = {"id": d.id, "name": d.name, "text": d.text, "source_url": d.source_url,
+        out = {"id": d.id, "name": d.name, "text": d.text, "source_url": d.source_url, "source_author": d.source_author,
                "created_at": _iso(d.created_at), "updated_at": _iso(d.updated_at),
                "_links": {"self": link(f"{V1}/decks/{d.id}")}}
         if coverage is not None:
@@ -740,7 +740,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
         def run():
             deck = Deck(user_id=user.id, name=body.name.strip()[:200] or "Untitled deck", text=body.text,
-                        source_url=body.source_url)
+                        source_url=body.source_url, source_author=body.source_author)
             db.add(deck)
             db.flush()
             return _deck(deck)
@@ -763,6 +763,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                   "updated_at": datetime.now(timezone.utc)}
         if "source_url" in body.model_fields_set:  # omitted: keep it (null clears it)
             values["source_url"] = body.source_url
+        if "source_author" in body.model_fields_set:
+            values["source_author"] = body.source_author
         # One UPDATE of the row as it is now: a deck deleted meanwhile is simply not found.
         done = db.execute(update(Deck).where(Deck.id == deck.id, Deck.user_id == user.id).values(**values))
         if done.rowcount != 1:

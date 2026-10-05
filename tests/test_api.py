@@ -508,6 +508,20 @@ def test_updating_a_deck_keeps_its_source_url_unless_given(signed_in):
     assert signed_in.get(path).json()["source_url"] is None
 
 
+def test_a_saved_deck_keeps_its_authors_credit(signed_in):
+    # A saved copy shown while Archidekt can't be reached still names the deck's author.
+    deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring", "source_url": "https://archidekt.com/decks/1",
+                                               "source_author": "  Michael  "}).json()
+    assert deck["source_author"] == "Michael"
+    path = f"{V1}/decks/{deck['id']}"
+    assert signed_in.put(path, json={"name": "y", "text": "2 Sol Ring"}).json()["source_author"] == "Michael"  # kept
+    assert signed_in.get(path).json()["source_author"] == "Michael"
+    assert signed_in.put(path, json={"name": "y", "text": "2 Sol Ring", "source_author": "Ana"}).json()["source_author"] == "Ana"
+    assert signed_in.put(path, json={"name": "y", "text": "2 Sol Ring", "source_author": None}).json()["source_author"] is None
+    assert signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring", "source_author": "a" * 201}).status_code == 422
+    assert signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring"}).json()["source_author"] is None
+
+
 @pytest.mark.parametrize("text", ["", "no cards here", "9" * 5000 + " Sol Ring"], ids=["empty", "no-cards", "huge-quantity"])
 def test_updating_a_deck_needs_cards_like_creating_one(signed_in, text):
     deck = signed_in.post(f"{V1}/decks", json={"name": "x", "text": "1 Sol Ring"}).json()

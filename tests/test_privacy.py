@@ -22,7 +22,8 @@ def setup_user(client, email):
 
 def test_export_contains_all_personal_data(signed_in):
     signed_in.post("/api/v1/imports", files={"file": ("export.csv", CSV, "text/csv")})
-    signed_in.post("/api/v1/decks", json={"name": "Kenrith / EDH", "text": DECK})
+    signed_in.post("/api/v1/decks", json={"name": "Kenrith / EDH", "text": DECK,
+                                          "source_url": "https://archidekt.com/decks/1", "source_author": "Michael"})
     signed_in.patch("/api/v1/me", json={"name": "Alice"})
     res = signed_in.get("/api/v1/me/export")
     assert res.status_code == 200 and res.headers["content-type"] == "application/zip"
@@ -35,6 +36,7 @@ def test_export_contains_all_personal_data(signed_in):
     account = json.loads(z.read("account.json"))
     assert account["name"] == "Alice" and account["sign_in_methods"][0]["provider"] == "dev"
     assert json.loads(z.read("imports.json"))[0]["changes"]["added"] == 4
+    assert json.loads(z.read("decks.json"))[0]["source_author"] == "Michael"
 
 
 def test_delete_requires_confirmation_and_removes_everything(client, app):
