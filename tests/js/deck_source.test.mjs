@@ -20,9 +20,11 @@ test('Archidekt deck addresses, in any case and on its subdomains', () => {
   }
 });
 
-test('not Archidekt: other hosts, look-alikes, a mention in the path, and junk', () => {
+test('not an Archidekt deck: other Archidekt pages, other hosts, look-alikes, a mention in the path, and junk', () => {
   const isArchidekt = load();
-  for (const url of ['https://www.moxfield.com/decks/abc', 'https://evil.test/archidekt.com/decks/1',
+  for (const url of ['https://archidekt.com/terms', 'https://archidekt.com/', 'https://archidekt.com/decks',
+                     'https://archidekt.com/decks/abc', 'https://archidekt.com/forum/thread/40353',
+                     'https://www.moxfield.com/decks/abc', 'https://evil.test/archidekt.com/decks/1',
                      'https://archidekt.com.evil.test/decks/1', 'https://notarchidekt.com/decks/1', '', 'not a url', null]) {
     assert.equal(isArchidekt(url), false, String(url));
   }
