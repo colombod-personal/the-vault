@@ -2,9 +2,14 @@
 # check (vercel-check.yml) tests each deployment's own URL, which Vercel's Standard Protection keeps
 # behind its login, so it cannot see this. This tests the public domain, signed out, after every
 # production deployment and once a day; it fails if the domain is behind a Vercel login or broken.
+# Production deployments come from Vercel's Git integration (deployment_status) or, as a fallback,
+# from the manual "deploy (manual fallback)" workflow with the Vercel CLI (workflow_run).
 name: public-site
 on:
   deployment_status:
+  workflow_run:
+    workflows: ["deploy (manual fallback)"]
+    types: [completed]
   schedule:
     - cron: "17 6 * * *"
   workflow_dispatch:
@@ -13,8 +18,11 @@ permissions:
 jobs:
   public:
     if: >-
-      github.event_name != 'deployment_status' ||
-      (github.event.deployment_status.state == 'success' && startsWith(github.event.deployment.environment, 'Production'))
+      (github.event_name != 'deployment_status' && github.event_name != 'workflow_run') ||
+      (github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success' &&
+       startsWith(github.event.deployment.environment, 'Production')) ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
     # A newer production deployment replaces the release an older run waits for, so that run could
     # only fail: cancel it and check the newest. Set on the job, not the workflow, so preview
     # deployment events (which skip this job) never cancel a production check.
@@ -27,7 +35,8 @@ jobs:
       PUBLIC_URL: ${{ vars.PUBLIC_URL || 'https://mtgvault.cards' }}
       SMOKE_EXPECT_PUBLIC: "1"
       SMOKE_EXPECT_REGION: fra1
-      # On a deployment event, the commit that was deployed; empty for the daily and manual runs.
+      # On a deployment event, the commit that was deployed; empty for the daily and manual runs, and
+      # after a manual CLI deploy (its health may report no commit; the smoke test still runs).
       EXPECT_COMMIT: ${{ github.event.deployment.sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4

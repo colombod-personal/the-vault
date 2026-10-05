@@ -154,7 +154,8 @@ with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic
    provider's redirect URI.
 8. **Public access:** project → Settings → Deployment Protection → Vercel Authentication →
    *Standard Protection* (protects previews only) so visitors aren't sent to a Vercel login.
-   The **public-site** workflow checks this: after every production deployment and once a day it runs the
+   The **public-site** workflow checks this: after every production deployment (Git or the manual
+   *deploy* fallback) and once a day it runs the
    smoke test against the public domain (`https://mtgvault.cards`, or the `PUBLIC_URL` repository variable)
    signed out, with `SMOKE_EXPECT_PUBLIC=1`, and fails if the site is behind a Vercel login or broken.
    After a deployment it first waits for `/api/health` to report the deployed commit
