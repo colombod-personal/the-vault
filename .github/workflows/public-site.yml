@@ -46,6 +46,7 @@ jobs:
             # commit, so anything else (an older release, or one reporting no commit) is a failure.
             if [ "$live" != "$EXPECT_COMMIT" ]; then
               echo "::error::$PUBLIC_URL serves commit '${live:-none reported}' after 5 minutes, not the deployed $EXPECT_COMMIT"
+              [ -z "$live" ] && echo "::error::No commit reported: turn on Vercel → Settings → Environment Variables → Automatically expose System Environment Variables (sync-prices does), then redeploy"
               exit 1
             fi
             echo "Serving the deployed commit $EXPECT_COMMIT" >> "$GITHUB_STEP_SUMMARY"

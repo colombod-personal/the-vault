@@ -157,6 +157,10 @@ with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic
    The **public-site** workflow checks this: after every production deployment and once a day it runs the
    smoke test against the public domain (`https://mtgvault.cards`, or the `PUBLIC_URL` repository variable)
    signed out, with `SMOKE_EXPECT_PUBLIC=1`, and fails if the site is behind a Vercel login or broken.
+   After a deployment it first waits for `/api/health` to report the deployed commit
+   (`VERCEL_GIT_COMMIT_SHA`). Vercel gives functions that variable only with project → Settings →
+   Environment Variables → *Automatically expose System Environment Variables* on; *sync-prices*
+   turns it on and redeploys.
 
 ### Security
 

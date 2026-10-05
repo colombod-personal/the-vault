@@ -57,6 +57,16 @@ class Vercel:
         res.raise_for_status()
         return res.json()
 
+    def expose_system_envs(self) -> bool:
+        """Turn on "Automatically expose System Environment Variables", so the app can read
+        ``VERCEL_GIT_COMMIT_SHA`` (``/api/health`` reports it and the public-site check waits
+        for it). Returns True when it was off."""
+        if self._get(f"/v9/projects/{self.project}").get("autoExposeSystemEnvs"):
+            return False
+        res = self.http.patch(f"/v9/projects/{self.project}", params=self.params, json={"autoExposeSystemEnvs": True})
+        res.raise_for_status()
+        return True
+
     def envs(self) -> list[dict]:
         """The project's variables: id, key and target list (values are never read)."""
         out = []
@@ -106,6 +116,8 @@ class Vercel:
         """Which production variables exist, and when each last changed. Adding, editing, deleting
         or un-targeting one changes it; values are never read."""
         rows = sorted(f"{e['id']}:{e['key']}:{e['updated']}" for e in self.envs() if "production" in e["target"])
+        # The system variables also reach only new deployments.
+        rows.append(f"autoExposeSystemEnvs:{bool(self._get(f'/v9/projects/{self.project}').get('autoExposeSystemEnvs'))}")
         return hashlib.sha256("\n".join(rows).encode()).hexdigest()[:32]
 
     def redeploy_production(self) -> str | None:
@@ -152,6 +164,8 @@ def _session_secrets(v: Vercel) -> list[str]:
 
 def configure(v: Vercel) -> dict:
     changed = _session_secrets(v)
+    if v.expose_system_envs():
+        changed.append("System Environment Variables (exposed)")
     keys = v.env_keys()
     base_url = None
     domain = v.production_domain()

@@ -3,6 +3,8 @@
 - Environment variables: list (``/v10/projects/{p}/env``), create or upsert, change targets
   (``PATCH /v9/.../env/{id}``) and delete. Values are never listed, like the real API.
 - Domains: ``/v9/projects/{p}/domains``.
+- The project (``GET``/``PATCH /v9/projects/{p}``): only ``autoExposeSystemEnvs`` (off for a new
+  project here, so the setup has to turn it on), which gives functions ``VERCEL_GIT_COMMIT_SHA``.
 - Deployments: ``GET /v13/deployments/{id or host}`` answers the deployment a host serves now (so
   after a rollback, not the newest one), and ``POST /v13/deployments`` with ``deploymentId``
   redeploys it, which here goes live at once and takes over the project's production domains.
@@ -41,6 +43,8 @@ class VercelTwin(Twin):
         self._ids = itertools.count(1)
         self._last = 0
         r = self.route
+        r("GET", HOST, "/v9/projects/{project}", self._get_project)
+        r("PATCH", HOST, "/v9/projects/{project}", self._patch_project)
         r("GET", HOST, "/v10/projects/{project}/env", self._list_env)
         r("POST", HOST, "/v10/projects/{project}/env", self._add_env)
         r("PATCH", HOST, "/v9/projects/{project}/env/{env_id}", self._patch_env)
@@ -69,7 +73,8 @@ class VercelTwin(Twin):
     # -- scenario set-up -------------------------------------------------------------------
     def add_project(self, name: str, domains=(), envs=()) -> dict:
         """``envs``: ``{"key", "target", "value"?}`` dicts, stored as they would be by hand."""
-        project = {"id": f"prj_{next(self._ids)}", "name": name, "envs": [], "domains": []}
+        project = {"id": f"prj_{next(self._ids)}", "name": name, "envs": [], "domains": [],
+                   "autoExposeSystemEnvs": False}
         self.projects[name] = project
         for d in domains:
             self.add_domain(name, d)
@@ -131,6 +136,21 @@ class VercelTwin(Twin):
         if project is None:
             return None, self.error(404, "not_found", "Project not found")
         return project, None
+
+    @staticmethod
+    def _shown(project: dict) -> dict:
+        return {"id": project["id"], "name": project["name"], "autoExposeSystemEnvs": project["autoExposeSystemEnvs"]}
+
+    def _get_project(self, req: Request):
+        project, err = self._project(req)
+        return err or json_response(200, self._shown(project))
+
+    def _patch_project(self, req: Request):
+        project, err = self._project(req)
+        if err:
+            return err
+        project.update({k: v for k, v in req.json().items() if k == "autoExposeSystemEnvs"})
+        return json_response(200, self._shown(project))
 
     @staticmethod
     def _listed(env: dict) -> dict:
