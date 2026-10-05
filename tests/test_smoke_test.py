@@ -76,3 +76,14 @@ def test_the_public_site_behind_a_vercel_login_fails(monkeypatch, capsys):
     assert smoke_test.main(["https://mtgvault.cards"]) == 1
     monkeypatch.delenv("SMOKE_EXPECT_PUBLIC")
     assert smoke_test.main(["https://mtgvault.cards"]) == 0  # a preview: reported, not failed
+
+
+def test_health_reports_the_deployed_commit(settings, monkeypatch):
+    """public-site.yml waits until the domain reports the deployed commit, so the check tests the new release."""
+    from vault.app import create_app
+
+    monkeypatch.delenv("VERCEL_GIT_COMMIT_SHA", raising=False)
+    with TestClient(create_app(settings, serve_static=False)) as client:
+        assert client.get("/api/health").json() == {"ok": True, "commit": None}
+        monkeypatch.setenv("VERCEL_GIT_COMMIT_SHA", "abc123")
+        assert client.get("/api/health").json() == {"ok": True, "commit": "abc123"}

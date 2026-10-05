@@ -21,6 +21,8 @@ jobs:
       PUBLIC_URL: ${{ vars.PUBLIC_URL || 'https://mtgvault.cards' }}
       SMOKE_EXPECT_PUBLIC: "1"
       SMOKE_EXPECT_REGION: fra1
+      # On a deployment event, the commit that was deployed; empty for the daily and manual runs.
+      EXPECT_COMMIT: ${{ github.event.deployment.sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -32,9 +34,22 @@ jobs:
       - name: Smoke-test the public site, signed out
         run: |
           echo "Public site: $PUBLIC_URL" >> "$GITHUB_STEP_SUMMARY"
-          for i in 1 2 3 4 5 6; do  # the domain moves to a new deployment a few seconds after it is ready
-            code=$(curl -s -o /dev/null -w '%{http_code}' "$PUBLIC_URL/api/health" || true)
-            [ "$code" = "200" ] && break
-            sleep 10
-          done
+          if [ -n "$EXPECT_COMMIT" ]; then
+            # After a production deployment the domain moves to it a little later, and the old release
+            # also answers 200: wait until /api/health reports the deployed commit (up to 5 minutes).
+            for i in $(seq 30); do
+              live=$(curl -s "$PUBLIC_URL/api/health" | python -c 'import json,sys; print((json.load(sys.stdin) or {}).get("commit") or "")' 2>/dev/null || true)
+              [ "$live" = "$EXPECT_COMMIT" ] && break
+              sleep 10
+            done
+            if [ -z "$live" ]; then
+              # A deployment made without Git metadata (the manual CLI fallback) reports no commit.
+              echo "::warning::$PUBLIC_URL reports no commit; cannot tell whether it serves the new deployment"
+            elif [ "$live" != "$EXPECT_COMMIT" ]; then
+              echo "::error::$PUBLIC_URL still serves commit $live after 5 minutes, not the deployed $EXPECT_COMMIT"
+              exit 1
+            else
+              echo "Serving the deployed commit $EXPECT_COMMIT" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
           python -m jobs.smoke_test "$PUBLIC_URL"

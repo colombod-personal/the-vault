@@ -117,7 +117,7 @@ function GraphView({ data, openCard }) {
   async function loadDeck(saved) {
     try {
       let d;
-      if (saved && !saved.source_url) d = await window.DeckSrc.parseText(saved.text);
+      if (saved && !saved.source_url) d = { ...(await window.DeckSrc.parseText(saved.text)), title: saved.name }; // a pasted deck: its saved name
       else if (!saved) d = await window.DeckSrc.fetchUrl(deckUrl.trim());
       else {
         // The deck as it is now on its site; your saved copy when the site can't be reached (or is Moxfield).
