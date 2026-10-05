@@ -1,6 +1,8 @@
 # Expert council: design (issue #103)
 
-Status: **agreed with the owner on 2026-10-05** (answers recorded under "Decisions"). #104 builds it.
+Status: **agreed with the owner on 2026-10-05** (answers recorded under "Decisions"). Built (#104): the members, the
+skill and the prompt, with format experts for Commander (and the casual table), Limited, Pauper, Standard, Pioneer
+and Two-Headed Giant.
 
 ## What it is for
 
