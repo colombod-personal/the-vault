@@ -83,10 +83,12 @@ def test_health_reports_the_deployed_commit(settings, monkeypatch):
     from vault.app import create_app
 
     monkeypatch.delenv("VERCEL_GIT_COMMIT_SHA", raising=False)
+    monkeypatch.delenv("VERCEL_URL", raising=False)
     with TestClient(create_app(settings, serve_static=False)) as client:
-        assert client.get("/api/health").json() == {"ok": True, "commit": None}
+        assert client.get("/api/health").json() == {"ok": True, "commit": None, "deployment": None}
         monkeypatch.setenv("VERCEL_GIT_COMMIT_SHA", "abc123")
-        assert client.get("/api/health").json() == {"ok": True, "commit": "abc123"}
+        monkeypatch.setenv("VERCEL_URL", "the-vault-abc123.vercel.app")
+        assert client.get("/api/health").json() == {"ok": True, "commit": "abc123", "deployment": "the-vault-abc123.vercel.app"}
 
 
 def test_the_public_site_not_configured_fails(monkeypatch):

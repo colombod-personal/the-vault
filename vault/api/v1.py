@@ -785,13 +785,17 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                            db: Session = Depends(get_db)) -> dict:
         # Only the author, only if the deck still has that link and no author yet: an edit made meanwhile
         # (another tab, another device) is never overwritten, and the deck's updated time doesn't change.
-        deck = owned_deck(db, user, deck_id)
-        done = db.execute(update(Deck).where(Deck.id == deck.id, Deck.user_id == user.id,
-                                             Deck.source_url == body.source_url, Deck.source_author.is_(None))
-                          .values(source_author=body.source_author))
+        # One locked read of the caller's row: a deck that isn't theirs, or was deleted meanwhile, is 404,
+        # and nothing can change or delete it between this check and the write.
+        deck = db.execute(select(Deck).where(Deck.id == deck_id, Deck.user_id == user.id).with_for_update()
+                          .execution_options(populate_existing=True)).scalar_one_or_none()
+        if deck is None:
+            raise HTTPException(404, "Deck not found")
+        recorded = deck.source_url == body.source_url and deck.source_author is None
+        if recorded:
+            deck.source_author = body.source_author
         db.commit()
-        db.refresh(deck)
-        return {**_deck(deck), "recorded": done.rowcount == 1}  # the deck as it is now, with its links
+        return {**_deck(deck), "recorded": recorded}  # the deck as it is now, with its links
 
     @router.delete("/decks/{deck_id}", tags=["decks"])
     def delete_deck(deck_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:

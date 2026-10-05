@@ -35,9 +35,10 @@ jobs:
       PUBLIC_URL: ${{ vars.PUBLIC_URL || 'https://mtgvault.cards' }}
       SMOKE_EXPECT_PUBLIC: "1"
       SMOKE_EXPECT_REGION: fra1
-      # On a deployment event, the commit that was deployed; empty for the daily and manual runs, and
-      # after a manual CLI deploy (its health may report no commit; the smoke test still runs).
-      EXPECT_COMMIT: ${{ github.event.deployment.sha }}
+      # On a deployment event, that deployment's own address (as vercel-check.yml reads it). A commit
+      # isn't enough: a redeploy of the same commit (after a settings change) would match the old
+      # release. Empty for the daily and manual runs and after a manual CLI deploy.
+      EXPECT_DEPLOYMENT: ${{ github.event.deployment_status.environment_url || github.event.deployment_status.target_url }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -52,24 +53,27 @@ jobs:
       - name: Smoke-test the public site, signed out
         run: |
           echo "Public site: $PUBLIC_URL" >> "$GITHUB_STEP_SUMMARY"
-          if [ -n "$EXPECT_COMMIT" ]; then
+          if [ -n "$EXPECT_DEPLOYMENT" ]; then
+            # The deployment's host (https://the-vault-abc123.vercel.app/ → the-vault-abc123.vercel.app),
+            # which is what /api/health reports as "deployment" (Vercel's VERCEL_URL).
+            expected=$(python -c 'import sys, urllib.parse as u; print((u.urlsplit(sys.argv[1]).hostname or "").lower())' "$EXPECT_DEPLOYMENT")
             # After a production deployment the domain moves to it a little later, and the old release
-            # also answers 200: wait until /api/health reports the deployed commit (up to 5 minutes;
-            # each request gives up after 10 seconds, so a server that hangs can't use up the job).
+            # also answers 200: wait until /api/health reports this deployment (up to 5 minutes; each
+            # request gives up after 10 seconds, so a server that hangs can't use up the job).
             deadline=$((SECONDS + 300))
             while :; do
-              live=$(curl -s --connect-timeout 5 --max-time 10 "$PUBLIC_URL/api/health" | python -c 'import json,sys; print((json.load(sys.stdin) or {}).get("commit") or "")' 2>/dev/null || true)
-              [ "$live" = "$EXPECT_COMMIT" ] && break
+              live=$(curl -s --connect-timeout 5 --max-time 10 "$PUBLIC_URL/api/health" | python -c 'import json,sys; print(((json.load(sys.stdin) or {}).get("deployment") or "").lower())' 2>/dev/null || true)
+              [ -n "$expected" ] && [ "$live" = "$expected" ] && break
               [ "$SECONDS" -ge "$deadline" ] && break
               sleep 10
             done
-            # Only Vercel's Git integration creates these deployment events, and it always sets the
-            # commit, so anything else (an older release, or one reporting no commit) is a failure.
-            if [ "$live" != "$EXPECT_COMMIT" ]; then
-              echo "::error::$PUBLIC_URL serves commit '${live:-none reported}' after 5 minutes, not the deployed $EXPECT_COMMIT"
-              [ -z "$live" ] && echo "::error::No commit reported: turn on Vercel → Settings → Environment Variables → Automatically expose System Environment Variables (sync-prices does), then redeploy"
+            # Anything else (an older release, the same commit's previous deployment, or no deployment
+            # reported) is a failure.
+            if [ -z "$expected" ] || [ "$live" != "$expected" ]; then
+              echo "::error::$PUBLIC_URL serves deployment '${live:-none reported}' after 5 minutes, not $EXPECT_DEPLOYMENT"
+              [ -z "$live" ] && echo "::error::No deployment reported: turn on Vercel → Settings → Environment Variables → Automatically expose System Environment Variables (sync-prices does), then redeploy"
               exit 1
             fi
-            echo "Serving the deployed commit $EXPECT_COMMIT" >> "$GITHUB_STEP_SUMMARY"
+            echo "Serving the new deployment $expected" >> "$GITHUB_STEP_SUMMARY"
           fi
           python -m jobs.smoke_test "$PUBLIC_URL"

@@ -210,3 +210,15 @@ def test_the_public_site_check_runs_the_smoke_test_of_the_deployed_release():
     checkout = next(s for s in steps if s.get("uses", "").startswith("actions/checkout@"))
     assert checkout["with"]["ref"] == "${{ github.event.deployment.sha || github.event.workflow_run.head_sha || github.sha }}"
     assert checkout["with"]["persist-credentials"] is False
+
+
+def test_the_public_site_check_waits_for_the_deployment_itself_not_its_commit():
+    # A redeploy of the same commit (vercel_setup redeploys after a settings change) reports the same
+    # commit as the release it replaces; only the deployment's own address tells them apart.
+    data = load(ROOT / ".github" / "workflows" / "public-site.yml")
+    job = data["jobs"]["public"]
+    assert "EXPECT_COMMIT" not in job["env"]
+    assert job["env"]["EXPECT_DEPLOYMENT"] == (
+        "${{ github.event.deployment_status.environment_url || github.event.deployment_status.target_url }}")
+    script = job["steps"][-1]["run"]
+    assert '.get("deployment")' in script and '[ "$live" = "$expected" ]' in script
