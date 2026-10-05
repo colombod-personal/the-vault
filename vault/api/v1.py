@@ -781,12 +781,13 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                            db: Session = Depends(get_db)) -> dict:
         # Only the author, only if the deck still has that link and no author yet: an edit made meanwhile
         # (another tab, another device) is never overwritten, and the deck's updated time doesn't change.
-        owned_deck(db, user, deck_id)
-        done = db.execute(update(Deck).where(Deck.id == deck_id, Deck.user_id == user.id,
+        deck = owned_deck(db, user, deck_id)
+        done = db.execute(update(Deck).where(Deck.id == deck.id, Deck.user_id == user.id,
                                              Deck.source_url == body.source_url, Deck.source_author.is_(None))
                           .values(source_author=body.source_author))
         db.commit()
-        return {"recorded": done.rowcount == 1}
+        db.refresh(deck)
+        return {**_deck(deck), "recorded": done.rowcount == 1}  # the deck as it is now, with its links
 
     @router.delete("/decks/{deck_id}", tags=["decks"])
     def delete_deck(deck_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:

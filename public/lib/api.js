@@ -450,8 +450,11 @@ window.VaultApi = (() => {
     deck: (id) => call(V1 + '/decks/' + id),
     saveDeck: (name, text, source_url, source_author) => create(V1 + '/decks', { json: { name, text, source_url, source_author } }),
     // A copy saved before authors were kept: record the author it shows now that the source answered.
-    rememberDeckAuthor: (saved, author) => (saved && saved.source_url && !saved.source_author && author
-      ? create(V1 + '/decks/' + saved.id + '/source-author', { json: { source_url: saved.source_url, source_author: author } }).catch(() => null)
+    // The saved deck held by the view is updated too, so a later offline fallback in this session credits the author.
+    rememberDeckAuthor: (saved, author) => (saved && saved.source_url && !saved.source_author && author && author.trim()
+      ? create(V1 + '/decks/' + saved.id + '/source-author', { json: { source_url: saved.source_url, source_author: author } })
+        .then((deck) => { if (deck && deck.source_author) saved.source_author = deck.source_author; return deck; })
+        .catch(() => null)
       : Promise.resolve(null)),
     updateDeck: (id, name, text, source_url, source_author) => call(V1 + '/decks/' + id, { method: 'PUT', json: { name, text, source_url, source_author } }),
     deleteDeck: (id) => call(V1 + '/decks/' + id, { method: 'DELETE' }),

@@ -321,11 +321,15 @@ class DeckIn(BaseModel):
 
 class DeckAuthorIn(BaseModel):
     source_url: str = Field(max_length=500, description="The link the author was read from: the deck's current link")
-    source_author: str = Field(min_length=1, max_length=200, description="Who made the deck at that link")
+    source_author: str = Field(max_length=200, description="Who made the deck at that link (not blank)")
 
-
-class AuthorRecorded(BaseModel):
-    recorded: bool = Field(description="False when the deck has another link or already has an author")
+    @field_validator("source_author")
+    @classmethod
+    def _not_blank(cls, author: str) -> str:
+        author = author.strip()
+        if not author:
+            raise ValueError("source_author must not be blank")
+        return author
 
 
 class TextIn(BaseModel):
@@ -407,6 +411,10 @@ class Deck(Hal):
 
 class DeckPage(Page):
     items: list[Deck]
+
+
+class AuthorRecorded(Deck):
+    recorded: bool = Field(description="False when the deck has another link or already has an author")
 
 
 class ShareIn(BaseModel):

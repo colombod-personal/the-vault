@@ -542,16 +542,19 @@ def test_recording_an_older_copys_author_never_overwrites_an_edit(signed_in):
     # Edited elsewhere after the page loaded: recording the author must not bring the old name or text back.
     signed_in.put(path, json={"name": "renamed", "text": "2 Sol Ring"})
     edited = signed_in.get(path).json()
-    rec = signed_in.post(f"{path}/source-author", json={"source_url": url, "source_author": "Michael"})
-    assert rec.status_code == 200 and rec.json() == {"recorded": True}
+    rec = signed_in.post(f"{path}/source-author", json={"source_url": url, "source_author": "  Michael "})
+    assert rec.status_code == 200 and rec.json()["recorded"] is True
+    assert rec.json()["source_author"] == "Michael" and rec.json()["_links"]["self"]["href"].endswith(f"/decks/{deck['id']}")
     after = signed_in.get(path).json()
     assert (after["name"], after["text"], after["source_author"]) == ("renamed", "2 Sol Ring", "Michael")
     assert after["updated_at"] == edited["updated_at"]  # not an edit
     # Already credited, or moved to another link meanwhile: nothing is recorded.
-    assert signed_in.post(f"{path}/source-author", json={"source_url": url, "source_author": "Ana"}).json() == {"recorded": False}
+    assert signed_in.post(f"{path}/source-author", json={"source_url": url, "source_author": "Ana"}).json()["recorded"] is False
     signed_in.put(path, json={"name": "renamed", "text": "2 Sol Ring", "source_url": "https://archidekt.com/decks/2"})
-    assert signed_in.post(f"{path}/source-author", json={"source_url": url, "source_author": "Ana"}).json() == {"recorded": False}
+    assert signed_in.post(f"{path}/source-author", json={"source_url": url, "source_author": "Ana"}).json()["recorded"] is False
     assert signed_in.get(path).json()["source_author"] is None
+    for blank in ("", "   "):
+        assert signed_in.post(f"{path}/source-author", json={"source_url": url, "source_author": blank}).status_code == 422
     assert signed_in.post(f"{V1}/decks/999999/source-author", json={"source_url": url, "source_author": "A"}).status_code == 404
 
 
