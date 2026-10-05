@@ -64,3 +64,9 @@ React prototype as the front end (`public/`). Read `README.md` first.
   `provenance` (`vault/provenance.py`, `docs/compliance.md`); never present source material as the Vault's own.
   A new tool goes in `SCRYFALL_DATA` or `OWN_DATA_ONLY` (`vault/api/mcp.py`) or has its own `provenance=`.
   New data sources stay off until their terms are checked (`CATALOG_SOURCES`, `docs/data-sources.md`).
+- Picking up work (`docs/triage.md`): check issues and PRs updated since you last looked for overlap; claim an issue
+  (`in-progress`, assign yourself, comment) before working; pick only `status:ready` issues, highest priority first;
+  never implement `status:needs-refinement` (help refine it with research or a design PR instead) and skip
+  `status:blocked`; close with a comment saying what merged and how it was checked; file defects you find as issues.
+- The Comprehensive Rules are not stored: they are read live from Wizards (`vault/rules_live.py`, `docs/rules-index.md`).
+  Do not add a copy of the rules text to the database, the repository or a fixture that is not invented.
