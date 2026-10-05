@@ -89,11 +89,21 @@ window.DeckSrc = (() => {
     if (parsed.kind === 'moxfield') return await fetchMoxfield(parsed.id);
   }
 
+  // Which deck a link names, whatever its form (slug, /api/ path, case, no https://): "archidekt:123",
+  // "moxfield:abc", by the same host check as loading, so a look-alike never matches a real deck's
+  // saved copy. Any other link is its own key; no link, none.
+  function sourceKey(url) {
+    const text = String(url ?? '').trim();
+    if (!text) return null;
+    const parsed = parseId(text);
+    return parsed ? `${parsed.kind}:${parsed.id}` : text.toLowerCase();
+  }
+
   // Is this an Archidekt deck's address? The same check that decides what is fetched, so the
   // "deck list from Archidekt" credit appears exactly on the decks loaded from Archidekt.
   function isArchidekt(url) {
     return parseId(url)?.kind === 'archidekt';
   }
 
-  return { parseId, fetchUrl, parseText, fetchArchidekt, fetchMoxfield, isArchidekt };
+  return { parseId, sourceKey, fetchUrl, parseText, fetchArchidekt, fetchMoxfield, isArchidekt };
 })();

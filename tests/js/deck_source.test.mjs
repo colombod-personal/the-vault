@@ -57,3 +57,22 @@ test('nothing is loaded from a look-alike or a deck path on another host', () =>
     assert.equal(parseId(url), null, String(url));
   }
 });
+
+test('a saved deck matches the deck you open only through the same host check', () => {
+  const sandbox = { URL };
+  sandbox.window = sandbox;
+  vm.runInNewContext(readFileSync(new URL('../../public/lib/deck.js', import.meta.url), 'utf8'), sandbox);
+  const { sourceKey } = sandbox.window.DeckSrc;
+  const real = sourceKey('https://archidekt.com/decks/1/my-deck');
+  assert.equal(real, 'archidekt:1');
+  for (const same of ['https://ARCHIDEKT.COM/api/decks/1/', 'archidekt.com/decks/1', 'https://www.archidekt.com/decks/1']) {
+    assert.equal(sourceKey(same), real, same);
+  }
+  for (const lookalike of ['https://evil.test/archidekt.com/decks/1', 'https://archidekt.com.evil.test/decks/1',
+                           'https://notarchidekt.com/decks/1']) {
+    assert.notEqual(sourceKey(lookalike), real, lookalike);
+  }
+  assert.equal(sourceKey('https://moxfield.com/decks/aB_1'), 'moxfield:aB_1');
+  assert.equal(sourceKey(''), null);
+  assert.equal(sourceKey(null), null);
+});

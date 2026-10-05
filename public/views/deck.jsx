@@ -7,15 +7,6 @@ const { useState: useStateD, useMemo: useMemoD, useEffect: useEffectD } = React;
 // Only the deck's actual Commander category, not user categories like "Commander Synergy".
 const isCommander = (c) => c.section === 'commander' || (c.categories || []).some((x) => String(x).trim().toLowerCase() === 'commander');
 
-// The deck a link points at, whatever its form (slug, /api/ path): "archidekt:123", "moxfield:abc".
-function sourceKey(url) {
-  if (!url) return null;
-  let m = url.match(/archidekt\.com\/(?:api\/)?decks\/(\d+)/i);
-  if (m) return 'archidekt:' + m[1];
-  m = url.match(/moxfield\.com\/decks\/([A-Za-z0-9_-]+)/i);
-  return m ? 'moxfield:' + m[1] : url.trim().toLowerCase();
-}
-
 // A deck's cards as a decklist the server parses ("4 Name (SET) 123" per line); commanders go under
 // a "Commander" header so stats, legality and combos know them.
 function deckListText(cards) {
@@ -267,7 +258,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
   useEffectD(() => { load(); }, [reload]);
 
   const text = useMemoD(() => (deck ? deckListText(deck.cards) : ''), [deck]);
-  const saved = source.saved || (deck && deck.url && Array.isArray(myDecks) ? myDecks.find((d) => sourceKey(d.source_url) === sourceKey(deck.url)) : null);
+  const saved = source.saved || (deck && deck.url && Array.isArray(myDecks) ? myDecks.find((d) => window.DeckSrc.sourceKey(d.source_url) === window.DeckSrc.sourceKey(deck.url)) : null);
   const summary = useMemoD(() => {
     if (!rows || !coverage) return null;
     let total = 0, ownedQty = 0, missingQty = 0, ownedFully = 0, ownedPartial = 0, missingAll = 0;
