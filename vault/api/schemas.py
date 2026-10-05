@@ -319,6 +319,15 @@ class DeckIn(BaseModel):
         return url
 
 
+class DeckAuthorIn(BaseModel):
+    source_url: str = Field(max_length=500, description="The link the author was read from: the deck's current link")
+    source_author: str = Field(min_length=1, max_length=200, description="Who made the deck at that link")
+
+
+class AuthorRecorded(BaseModel):
+    recorded: bool = Field(description="False when the deck has another link or already has an author")
+
+
 class TextIn(BaseModel):
     text: str = Field(max_length=50_000, description="A pasted decklist in any common format")
 

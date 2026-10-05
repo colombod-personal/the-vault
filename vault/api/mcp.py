@@ -90,7 +90,7 @@ class Tool:
 
 
 JSON_TYPES = {"string": (str,), "integer": (int,), "number": (int, float), "boolean": (bool,),
-              "array": (list,), "object": (dict,)}
+              "array": (list,), "object": (dict,), "null": (type(None),)}
 
 
 def _invalid(schema: dict, value: Any, where: str) -> str | None:
@@ -155,9 +155,12 @@ ID = {"type": "integer", "minimum": 1, "maximum": MAX_ID}
 SHARE = {"share_id": {**ID, "description": "Read a collection someone shared with you (from list_shared_with_me) instead of your own"}}
 DECKLIST = {"type": "string", "maxLength": 50_000}  # as the API's TextIn and DeckIn
 CONFIRM = {"type": "boolean", "description": "true only after the person agreed to this exact change"}
-SOURCE_URL = {"type": "string", "maxLength": 500, "description": "Where the deck came from (an http or https link)"}
-SOURCE_AUTHOR = {"type": "string", "maxLength": 200,
-                 "description": "Who made the deck at its source (e.g. the Archidekt author), kept for the credit"}
+# null clears them on update_deck (as on the API), so it is advertised as allowed.
+SOURCE_URL = {"anyOf": [{"type": "string", "maxLength": 500}, {"type": "null"}],
+              "description": "Where the deck came from (an http or https link); null clears it"}
+SOURCE_AUTHOR = {"anyOf": [{"type": "string", "maxLength": 200}, {"type": "null"}],
+                 "description": "Who made the deck at its source (e.g. the Archidekt author), kept for the credit; "
+                                "null clears it"}
 SET_SORTS = ["-value", "value", "-quantity", "quantity", "-unique", "unique", "name", "code", "release", "-release"]
 PAGING = {
     "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25, "description": "Items per page"},
