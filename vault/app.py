@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from fastapi.exceptions import RequestValidationError
+from sqlalchemy.exc import TimeoutError as SATimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import auth as auth_module
@@ -80,6 +81,13 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
         res = problem(exc.status_code, str(exc.detail))
         for k, v in (exc.headers or {}).items():
             res.headers[k] = v
+        return res
+
+    @app.exception_handler(SATimeoutError)
+    async def busy(request: Request, exc: SATimeoutError):
+        """Every database connection of this instance was busy for the whole wait: say so (and when to retry)."""
+        res = problem(503, "The Vault is busy right now. Try again in a few seconds.")
+        res.headers["Retry-After"] = "5"
         return res
 
     @app.exception_handler(RequestValidationError)
