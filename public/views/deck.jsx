@@ -304,8 +304,8 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
           {deck && (
             <p className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', marginTop: 6 }}>
               {deck.author && <>by {deck.author} · </>}
-              {deck.url && <a href={deck.url} target="_blank" rel="noopener noreferrer">{/archidekt\.com/.test(deck.url) ? 'on Archidekt' : 'original'} ↗</a>}
-              {deck.url && /archidekt\.com/.test(deck.url) && <> · deck list from Archidekt, thanks to its author</>}
+              {deck.url && <a href={deck.url} target="_blank" rel="noopener noreferrer">{window.DeckSrc.isArchidekt(deck.url) ? 'on Archidekt' : 'original'} ↗</a>}
+              {deck.url && window.DeckSrc.isArchidekt(deck.url) && <> · deck list from Archidekt, thanks to its author</>}
             </p>
           )}
           {deck && deck.offline && <p style={{ fontSize: 12, color: 'var(--gold)', marginTop: 6 }}>Couldn't reach the deck's site ({deck.offline}), so this is your saved copy.</p>}

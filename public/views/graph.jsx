@@ -647,7 +647,7 @@ function GraphView({ data, openCard }) {
             {deck && (
               <p className="muted deck-credit" style={{ fontSize: 11, fontFamily: 'var(--mono)', marginTop: 6, lineHeight: 1.5 }}>
                 Showing <strong style={{ color: 'var(--text)' }}>{deck.title}</strong>
-                {deck.url && /archidekt\.com/.test(deck.url) && <>
+                {deck.url && window.DeckSrc.isArchidekt(deck.url) && <>
                   {' · '}{deck.savedCopy ? 'your saved copy of a deck list from Archidekt' : 'deck list from Archidekt'}
                   {deck.author && <> by {deck.author}</>}
                   {' · '}<a href={deck.url} target="_blank" rel="noopener noreferrer">view on Archidekt ↗</a>

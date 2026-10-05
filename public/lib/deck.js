@@ -81,5 +81,14 @@ window.DeckSrc = (() => {
     if (parsed.kind === 'moxfield') return await fetchMoxfield(parsed.id);
   }
 
-  return { parseId, fetchUrl, parseText, fetchArchidekt, fetchMoxfield };
+  // Is this an Archidekt deck's address? By its parsed host, in any case (ARCHIDEKT.COM too), so the
+  // Archidekt credit appears on every Archidekt deck and never on a page that only mentions archidekt.com.
+  function isArchidekt(url) {
+    try {
+      const host = new URL(url).hostname.toLowerCase();
+      return host === 'archidekt.com' || host.endsWith('.archidekt.com');
+    } catch { return false; }
+  }
+
+  return { parseId, fetchUrl, parseText, fetchArchidekt, fetchMoxfield, isArchidekt };
 })();
