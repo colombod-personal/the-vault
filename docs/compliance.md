@@ -8,7 +8,7 @@ The Vault depends on other people's data and says so, always. Two rules sit abov
    Vault computes (a legality check, a budget, a deck count) is labelled as computed by the Vault, from
    which inputs. The Vault is not produced or endorsed by Scryfall, Wizards, Moxfield or Archidekt.
 
-Status of this document: written 2026-10-04 from public pages that were reachable then. Several
+Status of this document: written 2026-10-04 from public pages that were reachable then; Scryfall's terms read first-hand on 2026-10-05. Several
 primary pages returned errors (marked **unverified**). Nothing marked unverified may be relied on
 until someone has read the primary text. This is engineering diligence, not legal advice.
 
@@ -31,20 +31,24 @@ The policy does not address software tools or rules text specifically.
 
 ### Scryfall (API terms)
 
-The primary pages ([scryfall.com/docs/api](https://scryfall.com/docs/api),
-[scryfall.com/docs/terms](https://scryfall.com/docs/terms)) returned **403** to my fetches, so the
-following comes from secondary quotations and is **unverified**. Someone must read the primary text.
+Read directly from [scryfall.com/docs/api](https://scryfall.com/docs/api) and
+[scryfall.com/docs/api/tags](https://scryfall.com/docs/api/tags) in a browser on **2026-10-05** (the scripted fetch
+on 2026-10-04 was refused with 403). Scryfall provides its data and images "free of charge for the primary purpose of
+creating additional Magic software", under the Fan Content Policy, with these guidelines:
 
-| Requirement | Source | What it means for us |
+| Requirement (Scryfall's wording, shortened) | What it means for us | Status |
 |---|---|---|
-| No paywalling; free accounts are fine | quoted in a GitHub issue | Fine today; a hard rule for any future AI tier |
-| "You may not simply repackage, republish, or proxy Scryfall data. Your software must create additional value for end-users." | quoted in a GitHub issue | **Risk** for raw lookup tools. Every tool must add value (collection context, validation, citation, comparison). No bulk dumps |
-| No Scryfall logo, and no implying Scryfall endorses us | search summary | Keep "not produced or endorsed by Scryfall" (exists) |
-| `User-Agent` and `Accept` headers on every API request; accurate User-Agent | search summary | Already done in `jobs/sync_prices.py`; apply to every new job |
-| Cache 24 hours or more; prices refresh daily | Scryfall docs, via search | Matches the daily job |
-| Images: do not crop, cover, stretch, recolour or watermark; keep artist and copyright | README (earlier work) | Applies inside MCP Apps UIs too |
-| Rate limits (about 10 requests a second) | Scryfall docs, via search | One rate-limited client per process (exists) |
-| Oracle tags and rulings in answers | not found | **Open question** for Scryfall |
+| No Scryfall logos; do not imply Scryfall endorses you | "Not produced or endorsed by Scryfall" in the footer, MCP instructions and plugin | done |
+| No paywall: no payments, surveys, subscriptions, ratings, chat servers or follows in exchange for the data. "If you have an account system, end-users should be able to access card data anonymously or with free accounts." | The Vault is free; free accounts are explicitly fine. Optional anonymous access exists (`PUBLIC_CATALOG`) | done |
+| Do not use the data to create new games or imply it is from another game | Magic only | done |
+| "You may not simply repackage, republish, or proxy Scryfall data. Your software must create additional value for end-users." | Tools answer for the person's collection and decks, check legality and budgets, verify citations, simulate curves; card lookups serve that grounding. No bulk dumps or raw search proxy | done; keep in review |
+| `User-Agent` (accurate, the app's name) and `Accept` on every API request | `jobs/sync_prices.py`, `jobs/sync_catalog.py` | done |
+| Rate limits per endpoint; bulk files for large data | Daily bulk downloads, one rate-limited client | done |
+| Images: do not crop the copyright or artist, distort, recolour, watermark or misattribute; with `art_crop`, show artist and copyright in the same view | Applies to the web app and MCP Apps views | done; keep in review |
+| Tags (Tagger, community-maintained, moderated): track tags by `id`, not slug; be able to **temporarily hide individual tags** | `HIDDEN_TAGS` setting (ids or slugs) removes a tag and its children from roles; weights read as `very_strong` > `strong` > `median` > `weak` | done (2026-10-05) |
+| Rulings and Oracle tags | Offered as bulk files for this purpose; shown with provenance | done |
+
+No email to Scryfall is needed to load the card data on these terms.
 
 ### Moxfield
 
