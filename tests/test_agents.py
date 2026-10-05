@@ -152,6 +152,9 @@ def test_mcp_tools_page_and_answer(agent, bot):
     assert card["copies"]
     coverage = call_tool(bot, read, "check_decklist", text="1 Sol Ring\n1 Rhystic Study")["structuredContent"]
     assert {c["name"]: c["status"] for c in coverage["cards"]} == {"Sol Ring": "owned", "Rhystic Study": "missing"}
+    repeats = call_tool(bot, read, "check_decklist", text="1 Sol Ring (c21) 263\n1 Sol Ring (cmm) 400\n1 Rhystic Study")["structuredContent"]
+    sol = [c for c in repeats["cards"] if c["name"] == "Sol Ring"]
+    assert len(sol) == 1 and sol[0]["need"] == 2 and (sol[0]["set"], sol[0]["number"]) == (None, None)
 
     denied = call_tool(bot, read, "save_deck", name="x", text="1 Sol Ring")
     assert denied["isError"] is True and "read-only" in denied["content"][0]["text"]

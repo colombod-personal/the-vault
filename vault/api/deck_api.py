@@ -14,6 +14,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Request
 from mtg_toolkits import delta
 from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import catalog_queries as q
@@ -21,7 +22,7 @@ from .. import combos
 from .. import deck_tools as dt
 from .. import provenance as prov
 from ..importer import user_entries
-from ..models import User
+from ..models import Card, Entry, User
 from .catalog_api import throttle
 from .hal import link
 
@@ -43,6 +44,8 @@ class UpgradesIn(FormatIn):
     budget_usd: float = Field(ge=0, le=100_000, description="The most any single added card may cost")
     roles: list[str] | None = Field(default=None, max_length=len(dt.ROLE_TAGS), description=f"Roles to search ({', '.join(dt.ROLE_TAGS)}); default: the roles the deck is short of")
     limit: int = Field(default=10, ge=1, le=dt.MAX_CANDIDATES)
+    use_collection: bool = Field(default=False, description="Also suggest cards you already own, whatever their price, "
+                                 "first, each with owned_copies")
 
 
 class ChangesIn(FormatIn):
@@ -55,6 +58,15 @@ class Answer(BaseModel):
     result: dict
     provenance: list[prov.Provenance]
     links: dict = Field(default_factory=dict, alias="_links")
+
+
+def owned_by_oracle(db: Session, user: User) -> dict[str, int]:
+    """Copies of each card (by oracle id) in the person's collection."""
+    rows = db.execute(select(Card.oracle_id, func.sum(Entry.quantity))
+                      .join(Card, Card.scryfall_id == Entry.scryfall_id)
+                      .where(Entry.user_id == user.id, Card.oracle_id.is_not(None)).group_by(Card.oracle_id)
+                      .having(func.sum(Entry.quantity) > 0)).all()  # a row of 0 copies isn't owning the card
+    return {oid: int(n) for oid, n in rows}
 
 
 def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
@@ -102,7 +114,8 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
         if "oracle_prices" not in loaded or "oracle_tags" not in loaded:
             raise HTTPException(503, "Prices and role tags have not been loaded yet, so upgrade candidates cannot be computed.")
         try:
-            result = dt.find_upgrades(db, resolved, body.format, body.budget_usd, body.roles, body.limit)
+            owned = owned_by_oracle(db, user) if body.use_collection else None
+            result = dt.find_upgrades(db, resolved, body.format, body.budget_usd, body.roles, body.limit, owned=owned)
         except dt.DeckError as exc:
             failing(exc)
         return answer(db, "upgrade candidates", result, ("oracle_cards", "oracle_tags", "oracle_prices"), "upgrades")

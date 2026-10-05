@@ -263,6 +263,16 @@ function useDialogFocus(ref) {
   }, []);
 }
 
+// The × of every close button: drawn lines that never take a tap (pointer-events: none), so a tap
+// anywhere on the round button, the × included, lands on the button itself.
+function CloseIcon() {
+  return (
+    <svg className="close-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+      <path d="M3 3 L13 13 M13 3 L3 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" fill="none" />
+    </svg>
+  );
+}
+
 function Modal({ title, onClose, children }) {
   const box = useRefAcc(null);
   useDialogFocus(box);
@@ -278,7 +288,7 @@ function Modal({ title, onClose, children }) {
         onClick={(e) => e.stopPropagation()} style={{ width: 'min(720px, 100%)', outline: 'none' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <h2 className="h1" style={{ fontSize: 28, margin: 0 }}>{title}</h2>
-          <button className="btn xs ghost close-x" data-autofocus onClick={onClose} aria-label={`Close ${title}`} title="Close (Esc)">✕</button>
+          <button className="btn xs ghost close-x" data-autofocus onClick={onClose} aria-label={`Close ${title}`} title="Close (Esc)"><CloseIcon /></button>
         </div>
         {children}
       </div>
@@ -404,7 +414,7 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged }) {
           <div key={d.id} style={rowStyle}>
             <span>{d.name}</span>
             <span style={{ display: 'flex', gap: 6 }}>
-              <button className="btn xs" onClick={() => onOpenDeck(d.text)}>Open</button>
+              <button className="btn xs" onClick={() => onOpenDeck(d)}>Open</button>
               <button className="btn xs" onClick={() => share('deck', d.id)}>Share</button>
               <button className="btn xs ghost" onClick={() => removeDeck(d.id)}>Delete</button>
             </span>
@@ -497,7 +507,7 @@ function VaultFooter() {
   );
 }
 
-Object.assign(window, { AccountPanel, VaultFooter, useDialogFocus });
+Object.assign(window, { AccountPanel, VaultFooter, useDialogFocus, CloseIcon });
 
 
 // Personal access tokens: let people connect their own AI agents and scripts (MCP or HTTP API).

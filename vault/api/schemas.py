@@ -331,6 +331,11 @@ class ParsedDeck(BaseModel):
     unparsed: list[str]
 
 
+class NamedQuantity(BaseModel):
+    name: str
+    quantity: int
+
+
 class OwnedPrinting(BaseModel):
     set: str
     collector_number: str
@@ -352,11 +357,21 @@ class CoverageLine(BaseModel):
                                      "printing when it names one the Vault knows), any finish; null when unknown")
     missing_cost: float | None = Field(None, description="unit_price times missing; null when no price is known")
     owned_printings: list[OwnedPrinting] = Field([], description="The card's printings in the collection (first 50)")
+    maybe_owned: list[NamedQuantity] = Field([], description="On a line you own none of: cards in the collection whose "
+                                             "name differs only in accents, punctuation, case or an Alchemy 'A-' prefix")
 
 
 class Coverage(BaseModel):
     cards: list[CoverageLine]
     unparsed: list[str]
+    missing_cost: float | None = Field(None, description="What the missing copies cost at the cheapest known prices")
+    missing_unpriced: int | None = Field(None, description="Lines with missing copies and no known price")
+
+
+class DeckSummary(BaseModel):
+    need: int = Field(description="Copies the deck needs")
+    have: int = Field(description="Of those, copies you own (at most what each line needs)")
+    missing: int = Field(description="Copies missing")
     missing_cost: float | None = Field(None, description="What the missing copies cost at the cheapest known prices")
     missing_unpriced: int | None = Field(None, description="Lines with missing copies and no known price")
 
@@ -369,6 +384,7 @@ class Deck(Hal):
     created_at: str
     updated_at: str
     coverage: Coverage | None = None
+    summary: DeckSummary | None = Field(None, description="With ?summary=true on the list: owned, missing and cost to finish, against your collection")
     from_: str | None = Field(None, alias="from", description="Who shared it (shared decks only)")
 
 

@@ -9,15 +9,17 @@ every answer (``not_checked``), and every answer carries ``provenance`` built by
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 from mtg_toolkits import decklist
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, false, func, or_, select
 from sqlalchemy.orm import Session
 
 from .catalog_queries import card_priority
 from .models import OracleCard, OraclePrice, OracleTag, OracleTagLink
+from .prices import plausible_price
 
 FORMATS = ("commander", "standard", "pioneer", "modern", "legacy", "vintage", "pauper", "brawl", "standardbrawl",
            "historic", "timeless", "oathbreaker", "paupercommander", "premodern", "penny", "duel", "predh",
@@ -69,6 +71,16 @@ class Resolved:
 
     def section(self, name: str) -> list[Entry]:
         return [e for e in self.entries if e.line.section == name]
+
+
+def loose_name(name: str) -> str:
+    """A card name with what differs between sources removed: the back face, an Alchemy "A-" prefix,
+    accents, case, punctuation and spaces ("Lim-Dûl's Vault" and "Lim-Dul's Vault" both become
+    "limdulsvault"). For pointing out near matches, never for counting a card as owned."""
+    front = name.split(" // ")[0].strip()
+    front = re.sub(r"^a-(?=\S)", "", front, flags=re.IGNORECASE)
+    ascii_name = unicodedata.normalize("NFKD", front).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]", "", ascii_name.lower())
 
 
 def parse(text: str) -> decklist.Decklist:
@@ -256,11 +268,11 @@ def legality(resolved: Resolved, fmt: str) -> dict:
 # -- upgrades -----------------------------------------------------------------------------------
 
 def _price_fields(p: OraclePrice | None) -> dict:
-    return {"price_usd": p.usd if p else None, "price_date": p.day.isoformat() if p else None, "price_source": p.source if p else None}
+    return {"price_usd": plausible_price(p.usd) if p else None, "price_date": p.day.isoformat() if p else None, "price_source": p.source if p else None}
 
 
 def find_upgrades(db: Session, resolved: Resolved, fmt: str, budget_usd: float, roles: list[str] | None = None,
-                  limit: int = 10, targets: dict[str, int] | None = None) -> dict:
+                  limit: int = 10, targets: dict[str, int] | None = None, owned: dict[str, int] | None = None) -> dict:
     """Candidates to add for the roles the deck is short of, all legal, in the deck's colors, not
     already in it, and each priced within the budget. Ordered by popularity (EDHREC rank), which is
     popularity and not power. Also lists the deck's least popular untagged cards as cut candidates."""
@@ -275,13 +287,13 @@ def find_upgrades(db: Session, resolved: Resolved, fmt: str, budget_usd: float, 
     commanders = resolved.section("commander")
     if fmt in COMMANDER_STYLE and commanders:
         ident = set(identity(commanders))
-    wanted = list(roles) if roles else [r for r, n in (targets or (COMMANDER_TARGETS if fmt in SIZE_100 else {})).items()
-                                        if st["roles"][r]["count"] < n]
+    guide = targets or (COMMANDER_TARGETS if fmt in SIZE_100 else {})  # the usual counts exist for 100-card decks only
+    wanted = list(roles) if roles else [r for r, n in guide.items() if st["roles"][r]["count"] < n]
     unknown = [r for r in wanted if r not in ROLE_TAGS]
     if unknown:
         raise DeckError(f"Unknown role(s) {unknown}; use: {', '.join(ROLE_TAGS)}")
     tag_ids = role_tag_ids(db)
-    gaps = {r: {"have": st["roles"][r]["count"], "guideline": (targets or COMMANDER_TARGETS).get(r)} for r in wanted}
+    gaps = {r: {"have": st["roles"][r]["count"], "guideline": guide.get(r)} for r in wanted}
     candidates: dict[str, list[dict]] = {}
     for role in wanted:
         if not tag_ids.get(role):
@@ -290,16 +302,22 @@ def find_upgrades(db: Session, resolved: Resolved, fmt: str, budget_usd: float, 
         not_in_identity = [c for c in COLORS if c not in ident]
         query = (select(OracleCard, OraclePrice, func.count(OracleTagLink.tag_id))
                  .join(OracleTagLink, OracleTagLink.oracle_id == OracleCard.oracle_id)
-                 .join(OraclePrice, OraclePrice.oracle_id == OracleCard.oracle_id)
+                 .outerjoin(OraclePrice, OraclePrice.oracle_id == OracleCard.oracle_id)
                  .where(OracleTagLink.tag_id.in_(list(tag_ids[role])), OracleCard.digital.is_(False),
-                        OracleCard.legalities[fmt].astext.in_(LEGAL), OraclePrice.usd.is_not(None), OraclePrice.usd <= budget_usd,
+                        OracleCard.legalities[fmt].astext.in_(LEGAL),
+                        # within the budget, or already in your collection (free, whatever its price)
+                        or_(and_(OraclePrice.usd.is_not(None), OraclePrice.usd <= budget_usd),
+                            OracleCard.oracle_id.in_(list(owned)) if owned else false()),
                         OracleCard.oracle_id.not_in(in_deck or [""]),
                         *[~OracleCard.color_identity.contains([c]) for c in not_in_identity])
                  .group_by(OracleCard.oracle_id, OraclePrice.oracle_id)
-                 .order_by(OracleCard.edhrec_rank.asc().nulls_last(), OraclePrice.usd, OracleCard.name).limit(limit))
+                 .order_by(*([OracleCard.oracle_id.in_(list(owned)).desc()] if owned else []),
+                           OracleCard.edhrec_rank.asc().nulls_last(), OraclePrice.usd, OracleCard.name).limit(limit))
         candidates[role] = [{"name": c.name, "oracle_id": c.oracle_id, "type_line": c.type_line, "mana_cost": c.mana_cost,
                              "edhrec_rank": c.edhrec_rank, **_price_fields(p),
-                             "why": f"tagged {role} by Scryfall Tagger; legal in {fmt}; within the deck's colors; priced within the budget"}
+                             **({"owned_copies": owned.get(c.oracle_id, 0)} if owned is not None else {}),
+                             "why": f"tagged {role} by Scryfall Tagger; legal in {fmt}; within the deck's colors; "
+                                    + ("already in your collection" if owned and c.oracle_id in owned else "priced within the budget")}
                             for c, p, _ in db.execute(query).all()]
     oids = [e.card.oracle_id for e in played if e.card and not is_land(e.card)]
     roles_map = roles_of(db, oids)

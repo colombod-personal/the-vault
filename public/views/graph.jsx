@@ -51,7 +51,6 @@ function artUrl(scry) {
   return scry.img_art || (scry.img_normal ? scry.img_normal.replace('/normal/', '/art_crop/') : null);
 }
 
-const ART_ASPECT = 626 / 457; // Scryfall's art_crop: a card is drawn as a tile of this shape, never cut
 const MAX_ART_NODES = 60; // art for the most valuable cards only: a big graph would download hundreds of images
 const MAX_LINKS_SHOWN = 5; // a popular card can be picked by many peers: list the strongest
 // No hover on touch screens: the graph previews a card on the first tap (see the tap handler).
@@ -71,7 +70,7 @@ function GraphView({ data, openCard }) {
   // The input last used on the graph (kept across rebuilds); the legend names its gesture.
   const lastPointer = useRefG(TOUCH ? 'touch' : 'mouse');
   const [touchUI, setTouchUI] = useStateG(TOUCH);
-  const [showArt, setShowArt] = useStateG(true); // each card drawn as its whole art
+  const [showArt, setShowArt] = useStateG(true); // card art inside each circle
   const tipRef = useRefG(null);
   // Keep the whole hover card inside the graph, however tall it is (it grows with the links it lists).
   // Measured again when the card image arrives, since that sets most of its height.
@@ -82,7 +81,9 @@ function GraphView({ data, openCard }) {
   }
   useLayoutEffectG(placeTip, [hover]);
   const [deck, setDeck] = useStateG(null); // {title, rows}
-  const [deckUrl, setDeckUrl] = useStateG('https://archidekt.com/decks/5292775/the_dragon_in_the_night');
+  const [deckUrl, setDeckUrl] = useStateG('');
+  const [savedDecks, setSavedDecks] = useStateG([]); // the decks you saved on the Decks tab, to overlay in one pick
+  useEffectG(() => { window.VaultApi.decks().then(setSavedDecks).catch(() => setSavedDecks([])); }, []);
 
   // The nodes: the server's top names by value, filtered there by colour and price (min value),
   // as many as the depth asks for (GET /collection/names).
@@ -112,9 +113,18 @@ function GraphView({ data, openCard }) {
     return s;
   }, [deck]);
 
-  async function loadDeck() {
+  // From the URL box, or a saved deck: its link when it has one (the deck as it is now), else its saved list.
+  async function loadDeck(saved) {
     try {
-      const d = await window.DeckSrc.fetchUrl(deckUrl.trim());
+      let d;
+      if (saved && !saved.source_url) d = await window.DeckSrc.parseText(saved.text);
+      else if (!saved) d = await window.DeckSrc.fetchUrl(deckUrl.trim());
+      else {
+        // The deck as it is now on its site; your saved copy when the site can't be reached (or is Moxfield).
+        try { d = await window.DeckSrc.fetchUrl(saved.source_url.trim()); }
+        catch (e) { d = { ...(await window.DeckSrc.parseText(saved.text)), title: saved.name }; }
+      }
+      d.cards = mergeDeckCards(d.cards); // one line per card, as on the Decks page
       // What you own of it comes from the server's coverage; colours from the cards' data.
       const [cov, scry] = await Promise.all([
         window.VaultApi.deckCoverage(deckListText(d.cards)),
@@ -184,7 +194,7 @@ function GraphView({ data, openCard }) {
           shape,
           inDeck: inDeck === true ? 'yes' : inDeck === false ? 'no' : '',
           card: n,
-          ...(artIds.has(n.id) && artUrl(n.scry) ? { art: artUrl(n.scry), artW: Math.round(radius * ART_ASPECT) } : {})
+          ...(artIds.has(n.id) && artUrl(n.scry) ? { art: artUrl(n.scry) } : {})
         }
       };
     }
@@ -318,7 +328,8 @@ function GraphView({ data, openCard }) {
       // Group by color (from the card data) else by 'unknown'
       const groups = { W: [], U: [], B: [], R: [], G: [], M: [], C: [], '?': [] };
       for (const r of deckRows) groups[r.color in groups ? r.color : '?'].push(r);
-      let deckArt = 0;
+      // Art for the most valuable cards of the deck (up to MAX_ART_NODES), wherever their colour group is.
+      const artNames = new Set(deckRows.slice().sort((a, b) => (b.unit || 0) - (a.unit || 0)).slice(0, MAX_ART_NODES).map((r) => r.name));
       for (const k of Object.keys(groups)) {
         if (groups[k].length === 0) continue;
         const pid = 'p_' + k;
@@ -327,8 +338,7 @@ function GraphView({ data, openCard }) {
         for (const r of groups[k]) {
           const id = 'dk_' + r.name.replace(/[^a-z0-9]/gi, '_');
           const radius = Math.max(8, Math.min(60, Math.sqrt(r.unit || 1) * 5 + 8));
-          const art = showArt && deckArt < MAX_ART_NODES ? artUrl(r.node?.scry || r.scry) : null;
-          if (art) deckArt++;
+          const art = showArt && artNames.has(r.name) ? artUrl(r.node?.scry || r.scry) : null;
           elements.push({
             data: {
               id, label: r.name, parent: pid,
@@ -338,7 +348,7 @@ function GraphView({ data, openCard }) {
               card: r.node || { name: r.name, scry: r.scry, qty: r.owned, value: null },
               deckQty: r.qty,
               owned: r.owned,
-              ...(art ? { art, artW: Math.round(radius * ART_ASPECT) } : {})
+              ...(art ? { art } : {})
             }
           });
         }
@@ -367,13 +377,11 @@ function GraphView({ data, openCard }) {
         }
       },
       {
-        // The card's whole art (never cut: a tile in the art's own shape); its color identity is the border.
+        // The card's art, cut by the circle; its color identity becomes the ring.
         selector: 'node[art]',
         style: {
-          'shape': 'round-rectangle',
-          'width': 'data(artW)',
           'background-image': 'data(art)',
-          'background-fit': 'contain',
+          'background-fit': 'cover',
           'background-clip': 'node',
           'background-image-crossorigin': 'anonymous',
           'border-color': 'data(color)',
@@ -575,7 +583,7 @@ function GraphView({ data, openCard }) {
           </div>
           {ART_MODES.has(mode) ?
           <button className={`chip ${showArt ? 'active' : ''}`} aria-pressed={showArt} onClick={() => setShowArt((v) => !v)}
-          title="Show each card as its art" style={{ marginLeft: 'auto' }}>Card art</button> :
+          title="Show each card's art inside its circle" style={{ marginLeft: 'auto' }}>Card art</button> :
           <span style={{ marginLeft: 'auto' }} />}
           <div className="row" style={{ gap: 6 }}>
             <span className="label-mono" style={{ marginRight: 4 }}>Colors</span>
@@ -625,9 +633,15 @@ function GraphView({ data, openCard }) {
           </div>
           <div>
             <p className="label-mono" style={{ marginBottom: 6 }}>Overlay a deck</p>
+            {savedDecks.length > 0 &&
+            <select className="select" aria-label="Your saved decks" value="" style={{ width: '100%', marginBottom: 6 }}
+              onChange={(e) => { const s = savedDecks.find((x) => String(x.id) === e.target.value); if (s) { setDeckUrl(s.source_url || ''); loadDeck(s); } }}>
+                <option value="">Your decks…</option>
+                {savedDecks.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>}
             <div style={{ display: 'flex', gap: 6 }}>
-              <input className="input" style={{ fontSize: 11, padding: '7px 8px' }} value={deckUrl} onChange={(e) => setDeckUrl(e.target.value)} placeholder="archidekt or moxfield url" />
-              <button className="btn sm primary" onClick={loadDeck}>Load</button>
+              <input className="input" style={{ fontSize: 11, padding: '7px 8px' }} value={deckUrl} onChange={(e) => setDeckUrl(e.target.value)} placeholder="Paste an Archidekt or Moxfield link" />
+              <button className="btn sm primary" onClick={() => loadDeck()} disabled={!deckUrl.trim()}>Load</button>
             </div>
           </div>
         </div>

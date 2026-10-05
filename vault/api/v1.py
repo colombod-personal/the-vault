@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 from .. import analytics, oauth_server, outbound, tokens
 from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
+from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, import_days, view_version
 from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, export_collection, import_collection,
                         preview_import as preview_collection_import, user_entries)
@@ -633,9 +634,28 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     def _coverage(text: str, owned_rows) -> dict:
         deck = _parse(text)
-        lines = delta.coverage(deck.to_entries(), [r.to_collection_entry() for r in owned_rows])
-        return {"cards": [{"name": c.entry.name, "set": c.entry.set_code, "number": c.entry.collector_number,
-                           "need": c.need, "have": c.have, "missing": c.missing, "status": c.status} for c in lines],
+        needed = deck.to_entries()
+        lines = delta.coverage(needed, [r.to_collection_entry() for r in owned_rows])
+        # Repeats of a card are one line; it names a printing only when every repeat names the same
+        # one, so the copies are priced by name rather than all as the first printing.
+        printings: dict[str, set] = {}
+        for e in needed:
+            printings.setdefault(e.name.strip().lower(), set()).add(((e.set_code or "").lower(), (e.collector_number or "").lower()))
+        mixed = {k for k, v in printings.items() if len(v) > 1}
+        # A card you own none of may still be in the collection under a name written a little
+        # differently (accents, punctuation, an Alchemy "A-" prefix): say so instead of only "missing".
+        similar: dict[str, Counter] = {}
+        if any(not c.have for c in lines):
+            for r in owned_rows:
+                if r.quantity > 0:  # a row of 0 copies isn't owning the card
+                    similar.setdefault(loose_name(r.name), Counter())[r.name] += r.quantity
+        return {"cards": [{"name": c.entry.name,
+                           **({"set": None, "number": None} if c.entry.name.strip().lower() in mixed
+                              else {"set": c.entry.set_code, "number": c.entry.collector_number}),
+                           "need": c.need, "have": c.have, "missing": c.missing, "status": c.status,
+                           "maybe_owned": [] if c.have else [{"name": n, "quantity": q} for n, q in
+                                                             sorted(similar.get(loose_name(c.entry.name), {}).items())]}
+                          for c in lines],
                 "unparsed": deck.unparsed}
 
     def _deck(d: Deck, coverage: dict | None = None) -> dict:
@@ -661,11 +681,26 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return analytics.price_coverage(db, user.id, _coverage(body.text, user_entries(db, user)))
 
     @router.get("/decks", tags=["decks"], response_model=S.DeckPage)
-    def list_decks(request: Request, cursor: str | None = None, limit: int | None = None,
+    def list_decks(request: Request, cursor: str | None = None, limit: int | None = None, summary: bool = False,
                    user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         rows = list(db.scalars(select(Deck).where(Deck.user_id == user.id)))
         page, nxt = paginate(rows, lambda d: (d.name.lower(),), lambda d: d.id, cursor=cursor, limit=limit)
-        return page_body(request, [_deck(d) for d in page], nxt, len(rows), limit=limit)
+        items = [_deck(d) for d in page]
+        if summary and page:  # each deck against your collection; the collection and prices read once for the page
+            owned = user_entries(db, user)
+            readable = []
+            for item, d in zip(items, page):
+                try:
+                    readable.append((item, _coverage(d.text, owned)))
+                except HTTPException:  # a saved list the parser can no longer read
+                    continue
+            priced = analytics.price_coverages(db, user.id, [c for _, c in readable], owned_printings=False)
+            for (item, _), cov in zip(readable, priced):
+                need = sum(c["need"] for c in cov["cards"])
+                have = sum(min(c["have"], c["need"]) for c in cov["cards"])
+                item["summary"] = {"need": need, "have": have, "missing": need - have,
+                                   "missing_cost": cov.get("missing_cost"), "missing_unpriced": cov.get("missing_unpriced")}
+        return page_body(request, items, nxt, len(rows), limit=limit, summary="true" if summary else None)
 
     @router.post("/decks", tags=["decks"], response_model=S.Deck, status_code=201)
     def create_deck(request: Request, body: S.DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)):

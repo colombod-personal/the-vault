@@ -75,10 +75,13 @@ const VAULT_VIEWS = ['dashboard', 'browse', 'sets', 'decks', 'lab', 'graph', 'va
 function vaultRouteFromHash(fallback) {
   const [view, arg] = location.hash.replace(/^#\/?/, '').split('/').map((p) => decodeURIComponent(p || ''));
   if (view === 'sets' && arg) return { view: 'setdetail', code: arg };
+  if (view === 'decks' && arg) return { view: 'decks', deckId: arg };
   return { view: VAULT_VIEWS.includes(view) ? view : fallback };
 }
 function vaultHashFor(route) {
-  return route.view === 'setdetail' ? `#/sets/${encodeURIComponent(route.code)}` : `#/${route.view}`;
+  if (route.view === 'setdetail') return `#/sets/${encodeURIComponent(route.code)}`;
+  if (route.view === 'decks' && route.deckId) return `#/decks/${encodeURIComponent(route.deckId)}`;
+  return `#/${route.view}`;
 }
 const vaultUrlFor = (route) => location.pathname + location.search + vaultHashFor(route);
 
@@ -244,15 +247,17 @@ function App() {
     setData(null);
     await loadCollection();
   };
-  const openDeck = (text) => {
+  // A deck from Account: your own saved deck opens at its address (#/decks/{id}); a shared one by its list.
+  const openDeck = (deck) => {
     setAccountOpen(false);
-    setDeckText(text);
+    if (deck && typeof deck === 'object') { setDeckText(null); setRoute({ view: 'decks', deckId: String(deck.id) }); return; }
+    setDeckText(deck);
     setRoute({ view: 'decks' });
   };
   const noticeBanner = notice && (
     <div className="panel panel-tight" style={{ margin: '12px 24px 0', display: 'flex', justifyContent: 'space-between' }}>
       <span className="label-mono">{notice}</span>
-      <button className="btn xs ghost close-x" onClick={() => setNotice(null)} aria-label="Dismiss message" title="Dismiss">✕</button>
+      <button className="btn xs ghost close-x" onClick={() => setNotice(null)} aria-label="Dismiss message" title="Dismiss"><window.CloseIcon /></button>
     </div>
   );
   const accountPanel = accountOpen && (
@@ -411,7 +416,7 @@ function App() {
             <button aria-current={route.view === 'dashboard' ? 'page' : undefined} className={route.view === 'dashboard' ? 'active' : ''} onClick={() => nav('dashboard')}>Vault</button>
             <button aria-current={route.view === 'browse' ? 'page' : undefined} className={route.view === 'browse' ? 'active' : ''} onClick={() => nav('browse')}>Browse</button>
             <button aria-current={route.view === 'sets' || route.view === 'setdetail' ? 'page' : undefined} className={route.view === 'sets' || route.view === 'setdetail' ? 'active' : ''} onClick={() => nav('sets')}>Sets</button>
-            <button aria-current={route.view === 'decks' ? 'page' : undefined} className={route.view === 'decks' ? 'active' : ''} onClick={() => nav('decks')}>Decks</button>
+            <button aria-current={route.view === 'decks' ? 'page' : undefined} className={route.view === 'decks' ? 'active' : ''} onClick={() => { setDeckText(null); nav('decks'); }}>Decks</button>
             <button aria-current={route.view === 'lab' ? 'page' : undefined} className={route.view === 'lab' ? 'active' : ''} onClick={() => nav('lab')}>Lab</button>
             <button aria-current={route.view === 'graph' ? 'page' : undefined} className={route.view === 'graph' ? 'active' : ''} onClick={() => nav('graph')}>Graph</button>
           </nav>
@@ -452,7 +457,8 @@ function App() {
             <SetDetail data={data} code={route.code} onBack={() => nav('sets')} openCard={openCard} />
           )}
           {route.view === 'decks' && (
-            <DeckView key={deckText || 'deck'} data={data} openCard={openCard} initialText={deckText} />
+            <DeckView key={deckText || 'deck'} data={data} openCard={openCard} initialText={deckText}
+              deckId={route.deckId} onOpenDeckId={(id) => { setDeckText(null); nav('decks', id ? { deckId: String(id) } : {}); }} />
           )}
           {route.view === 'lab' && (
             <Lab data={data} openCard={openCard} />
@@ -577,7 +583,7 @@ function CardDrawer({ card, onClose, costsHidden }) {
             while the panel scrolls. The whole 44px square is the button; Esc and a click outside also close. */}
         <div className="drawer-bar">
           <button className="close" data-autofocus onClick={onClose} aria-label="Close card details" title="Close (Esc)">
-            <span aria-hidden="true">×</span>
+            <window.CloseIcon />
           </button>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 20, marginBottom: 24 }}>

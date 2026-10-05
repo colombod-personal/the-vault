@@ -86,6 +86,15 @@ def test_each_new_tool_answers_with_provenance_even_to_a_read_only_token(agent, 
     assert blocks and all(b["kind"] in ("source", "computed") and b["source"] for b in blocks)
 
 
+def test_find_upgrades_can_use_the_persons_collection(agent, bot):
+    read = make_token(agent)
+    args = {**SAMPLE_ARGS["find_upgrades"], "use_collection": True}
+    result = call_tool(bot, read, "find_upgrades", **args)
+    assert result["isError"] is False, result["content"][0]["text"]
+    ramp = result["structuredContent"]["result"]["candidates"]["ramp"]
+    assert ramp and all("owned_copies" in c for c in ramp)  # asked for: each says how many the person owns
+
+
 def test_tools_that_return_scryfall_data_get_a_provenance_block(agent, bot):
     read = make_token(agent)
     page = call_tool(bot, read, "search_cards", limit=1)["structuredContent"]

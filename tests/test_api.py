@@ -212,16 +212,83 @@ def test_sync_keeps_imported_finish_and_does_not_lock_in_name_guesses(app, signe
     assert sources["Sol Ring"] == "scryfall" and sources["A Killer Among Us"] == "file"
 
 
+def near_qty(client, name):
+    return sum(c["quantity"] for c in all_cards(client) if c["name"] == name)
+
+
 def test_deck_coverage_and_parsing(signed_in):
     upload(signed_in)
     res = signed_in.post(f"{V1}/decks/coverage", json={"text": "1 Sol Ring\n4 A Killer Among Us\n1 Rhystic Study"})
     status = {c["name"]: (c["status"], c["missing"]) for c in res.json()["cards"]}
     assert status == {"Sol Ring": ("owned", 0), "A Killer Among Us": ("owned", 0), "Rhystic Study": ("missing", 1)}
+    assert all(c["maybe_owned"] == [] for c in res.json()["cards"])
+    # Written a little differently in the deck (case, punctuation, accents, an Alchemy "A-"): still
+    # missing by name, but the near match is pointed out with the copies owned.
+    res = signed_in.post(f"{V1}/decks/coverage", json={"text": "1 a-Sol-Ring\n1 a killer among üs\n1 Rhystic Study"})
+    near = {c["name"]: (c["status"], c["maybe_owned"]) for c in res.json()["cards"]}
+    assert near["a-Sol-Ring"][1] == [{"name": "Sol Ring", "quantity": near_qty(signed_in, "Sol Ring")}]
+    assert near["a killer among üs"][1] == [{"name": "A Killer Among Us", "quantity": near_qty(signed_in, "A Killer Among Us")}]
+    assert near["Rhystic Study"] == ("missing", [])
+    # Two printings of one card: one line, all its copies counted once, priced by name.
+    cards = signed_in.post(f"{V1}/decks/coverage", json={"text": "1 Sol Ring (c21) 263\n2 Sol Ring (cmm) 400"}).json()["cards"]
+    assert len(cards) == 1 and cards[0]["need"] == 3 and (cards[0]["set"], cards[0]["number"]) == (None, None)
+    assert cards[0]["have"] == min(3, near_qty(signed_in, "Sol Ring"))
+    same = signed_in.post(f"{V1}/decks/coverage", json={"text": "1 Sol Ring (c21) 263\n1 Sol Ring (C21) 263"}).json()["cards"]
+    assert len(same) == 1 and (same[0]["set"], same[0]["number"]) == ("c21", "263")
     text = "1x Sol Ring (c21) 263 [Ramp]\n1x Duress [Sideboard]\n1 Kenrith, the Returned King (CMM) 1 *F*"
     cards = signed_in.post(f"{V1}/decks/parse", json={"text": text}).json()["cards"]
     assert [(c["name"], c["set"], c["collector_number"], c["section"]) for c in cards] == [
         ("Sol Ring", "c21", "263", "main"), ("Duress", "", "", "sideboard"), ("Kenrith, the Returned King", "cmm", "1", "main"),
     ]
+
+
+def test_deck_list_can_carry_each_decks_summary(signed_in):
+    upload(signed_in)
+    assert signed_in.post(f"{V1}/decks", json={"name": "B", "text": "2 Sol Ring\n1 Rhystic Study"}).status_code == 201
+    plain = signed_in.get(f"{V1}/decks").json()["items"]
+    assert plain[0].get("summary") is None  # only when asked: it reads the collection
+    deck = signed_in.get(f"{V1}/decks?summary=true").json()["items"][0]
+    owned = near_qty(signed_in, "Sol Ring")
+    have = min(owned, 2)
+    assert deck["summary"]["need"] == 3 and deck["summary"]["have"] == have and deck["summary"]["missing"] == 3 - have
+    assert deck["summary"]["missing_unpriced"] >= 0
+    # Paged: the next link keeps the option, so every page carries summaries.
+    assert signed_in.post(f"{V1}/decks", json={"name": "C", "text": "1 Sol Ring"}).status_code == 201
+    first = signed_in.get(f"{V1}/decks?summary=true&limit=1").json()
+    nxt = first["_links"]["next"]["href"]
+    assert "summary=true" in nxt
+    assert signed_in.get(nxt).json()["items"][0]["summary"]["need"] == 1
+
+
+def test_owned_printings_leave_out_rows_of_no_copies(app, signed_in):
+    upload(signed_in)
+    from vault.models import Entry, User
+    with app.state.db.sessions() as db:
+        uid = db.query(User.id).order_by(User.id.desc()).first()[0]
+        db.add(Entry(user_id=uid, name="Rhystic Study", set_code="pcy", collector_number="45", quantity=0))
+        db.commit()
+    cards = {c["name"]: c for c in signed_in.post(f"{V1}/decks/coverage", json={"text": "1 Rhystic Study\n1 Sol Ring"}).json()["cards"]}
+    assert cards["Rhystic Study"]["owned_printings"] == [] and cards["Rhystic Study"]["status"] == "missing"
+    assert cards["Sol Ring"]["owned_printings"] and all(o["quantity"] > 0 for o in cards["Sol Ring"]["owned_printings"])
+
+
+def test_deck_list_summaries_take_the_same_queries_for_one_deck_or_many(app, signed_in):
+    from sqlalchemy import event
+    upload(signed_in)
+    engine = app.state.db.engine
+    statements, counts = [], []
+    listen = lambda *args: statements.append(args[2])  # noqa: E731
+    for n in (1, 4):
+        while len(signed_in.get(f"{V1}/decks").json()["items"]) < n:
+            signed_in.post(f"{V1}/decks", json={"name": "D", "text": "2 Sol Ring\n1 Rhystic Study"})
+        event.listen(engine, "before_cursor_execute", listen)
+        try:
+            statements.clear()
+            assert len(signed_in.get(f"{V1}/decks?summary=true").json()["items"]) == n
+            counts.append(len(statements))
+        finally:
+            event.remove(engine, "before_cursor_execute", listen)
+    assert counts[0] == counts[1], counts
 
 
 def test_openapi_documents_the_api(client):

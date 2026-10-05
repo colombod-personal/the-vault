@@ -87,9 +87,11 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              {"text": deck, "format": fmt,
               "budget_usd": {"type": "number", "minimum": 0, "maximum": 100000, "description": "The most any single added card may cost"},
               "roles": {"type": "array", "maxItems": 8, "items": {"type": "string", "enum": ["ramp", "draw", "removal", "sweeper", "counterspell", "tutor", "recursion", "sacrifice_outlet"]}},
-              "limit": {"type": "integer", "minimum": 1, "maximum": 15, "default": 10}}, ["text", "format", "budget_usd"],
+              "limit": {"type": "integer", "minimum": 1, "maximum": 15, "default": 10},
+              "use_collection": {"type": "boolean", "default": False, "description": "Also suggest cards the person already owns, "
+                                 "whatever their price, first, each with owned_copies (free to add)"}}, ["text", "format", "budget_usd"],
              method="POST", path=lambda a: f"{V1}/decks/upgrades",
-             body=lambda a: {k: a[k] for k in ("text", "format", "budget_usd", "roles", "limit") if a.get(k) is not None},
+             body=lambda a: {k: a[k] for k in ("text", "format", "budget_usd", "roles", "limit", "use_collection") if a.get(k) is not None},
              provenance=("computed",), ui="upgrades"),
         Tool("validate_deck_changes", "Check a proposed list of cuts and adds before presenting it: every card exists and is legal, adds are in "
              "the deck's colors, the resulting deck is still legal, and the adds' total price is within budget_usd. Present the plan only "
