@@ -91,3 +91,13 @@ def test_the_preview_lists_rows_it_cannot_match_so_the_file_can_be_fixed_first(a
     assert preview["matched_rows"] + preview["unmatched_rows"] == preview["rows"]
     assert {"row": preview["rows"], "name": "Not A Real Card", "set": "zzz", "number": "9999", "quantity": 1} in preview["unmatched"]
     assert "Fix the set code and collector number" in preview["note"]
+
+
+def test_deck_overlap_finds_cards_several_decks_need_and_the_copies_short(agent, bot):
+    for name, text in (("Ramp", "1 Sol Ring\n1 Accursed Marauder\n10 Forest"), ("Artifacts", "1 Sol Ring\n10 Forest\n1 Belfry Spirit")):
+        assert agent.post(f"{V1}/decks", json={"name": name, "text": text}).status_code == 201
+    overlap = call_tool(bot, make_token(agent), "get_deck_overlap")["structuredContent"]
+    assert overlap["decks_checked"] == 2 and overlap["shared_cards"] == 1  # Forest is a basic land: left out
+    sol = overlap["cards"][0]
+    assert sol["name"] == "Sol Ring" and sol["need_for_all"] == 2 and sol["have"] == 1 and sol["short"] == 1
+    assert {d["deck"] for d in sol["decks"]} == {"Ramp", "Artifacts"}
