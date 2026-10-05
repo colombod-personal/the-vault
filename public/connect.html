@@ -59,7 +59,7 @@
 
   <div class="card">
     <h3>Claude Code: the tools only</h3>
-    <div class="code"><button class="copy" type="button">Copy</button><pre><code>claude mcp add --transport http vault https://the-vault-puce-one.vercel.app/api/mcp --header "Authorization: Bearer vault_pat_..."</code></pre></div>
+    <div class="code"><button class="copy" type="button">Copy</button><pre><code>claude mcp add --transport http vault https://mtgvault.cards/api/mcp --header "Authorization: Bearer vault_pat_..."</code></pre></div>
   </div>
 
   <div class="card">
@@ -70,7 +70,7 @@
   "mcpServers": {
     "vault": {
       "type": "http",
-      "url": "https://the-vault-puce-one.vercel.app/api/mcp",
+      "url": "https://mtgvault.cards/api/mcp",
       "headers": {
         "Authorization": "Bearer vault_pat_..."
       }
@@ -82,7 +82,7 @@
   <div class="card">
     <h3>Claude.ai, Claude Desktop and ChatGPT (connect by address)</h3>
     <p>These connect by signing in with OAuth, which is not switched on yet (it is being built and checked). Until then, use the options above, or check back here.</p>
-    <div class="code"><button class="copy" type="button">Copy</button><pre><code>https://the-vault-puce-one.vercel.app/api/mcp</code></pre></div>
+    <div class="code"><button class="copy" type="button">Copy</button><pre><code>https://mtgvault.cards/api/mcp</code></pre></div>
   </div>
 
   <h2>3. Check it works</h2>
@@ -108,6 +108,13 @@
   </div>
 </main>
 <script>
+  // Show the address this page is served from (a preview or a local copy), but never a *.vercel.app address:
+  // the production address is the one to give out.
+  (function () {
+    var origin = location.origin, shown = "https://mtgvault.cards";
+    if (!/^https?:/.test(origin) || /\.vercel\.app$/.test(location.hostname)) return;
+    document.querySelectorAll('code').forEach(function (c) { c.textContent = c.textContent.split(shown).join(origin); });
+  })();
   document.querySelectorAll('.copy').forEach(function (b) {
     b.addEventListener('click', function () {
       var text = b.parentNode.querySelector('code').textContent;

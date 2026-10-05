@@ -33,7 +33,7 @@ MARKETPLACE = ROOT / ".claude-plugin" / "marketplace.json"
 
 NAME = "the-vault"
 VERSION = "0.1.0"
-HOST = "https://the-vault-puce-one.vercel.app"
+HOST = "https://mtgvault.cards"
 REPO = "https://github.com/colombod-personal/the-vault"
 DESCRIPTION = ("Magic: The Gathering rules, cards, decks and collection tools for your AI assistant, grounded in "
                "Scryfall and the Comprehensive Rules, with sources shown. Free and unofficial.")
@@ -213,6 +213,13 @@ def connect_page() -> str:
   </div>
 </main>
 <script>
+  // Show the address this page is served from (a preview or a local copy), but never a *.vercel.app address:
+  // the production address is the one to give out.
+  (function () {{
+    var origin = location.origin, shown = {json.dumps(HOST)};
+    if (!/^https?:/.test(origin) || /\\.vercel\\.app$/.test(location.hostname)) return;
+    document.querySelectorAll('code').forEach(function (c) {{ c.textContent = c.textContent.split(shown).join(origin); }});
+  }})();
   document.querySelectorAll('.copy').forEach(function (b) {{
     b.addEventListener('click', function () {{
       var text = b.parentNode.querySelector('code').textContent;
