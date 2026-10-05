@@ -4,7 +4,7 @@ These are for the owner to review, edit and send. Nothing has been sent. They be
 (`docs/compliance.md`, issue #62): the Vault does not ingest or serve a source until its terms are checked.
 
 Facts to have to hand: the Vault is a free, non-commercial, open-source (MIT) tool at
-https://github.com/colombod-personal/the-vault; production is https://the-vault-puce-one.vercel.app; it needs
+https://github.com/colombod-personal/the-vault; production is https://mtgvault.cards; it needs
 sign-in only to protect each person's private collection; it shows the Fan Content notice, credits every source,
 and presents every answer with its provenance.
 

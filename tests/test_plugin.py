@@ -77,3 +77,16 @@ def test_the_connect_page_has_each_install_path_and_is_honest_about_oauth():
 def test_the_connect_page_is_served(client):
     res = client.get("/connect.html")
     assert res.status_code in (200, 404)  # the test app may not serve static files; the file itself is checked above
+
+
+def test_no_page_or_plugin_file_names_a_vercel_address():
+    """The address to give out is mtgvault.cards; a *.vercel.app address is the old deployment (#157)."""
+    roots = [ROOT / "public", ROOT / "plugins", ROOT / ".claude-plugin", ROOT / "docs", ROOT / "scripts"]
+    offenders = []
+    for root in roots:
+        for path in root.rglob("*"):
+            if not path.is_file() or path.suffix in {".png", ".ico", ".jpg", ".woff2", ".pyc"} or path.name == "app.bundle.js":
+                continue
+            if re.search(r"https?://[\w.-]+\.vercel\.app", path.read_text(encoding="utf-8", errors="ignore")):
+                offenders.append(str(path.relative_to(ROOT)))
+    assert offenders == []

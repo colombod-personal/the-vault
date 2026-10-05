@@ -3,7 +3,7 @@
   "mcpServers": {
     "the-vault": {
       "type": "streamable-http",
-      "url": "https://the-vault-puce-one.vercel.app/api/mcp"
+      "url": "https://mtgvault.cards/api/mcp"
     }
   }
 }

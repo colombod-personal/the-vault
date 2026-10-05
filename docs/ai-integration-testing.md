@@ -9,7 +9,7 @@ the way an agent would, on real cards and rules, and exits non-zero if an answer
 
 ```bash
 VAULT_URL=http://localhost:8010 VAULT_TOKEN=vault_pat_... python scripts/ai_smoke.py
-python scripts/ai_smoke.py --url https://the-vault-puce-one.vercel.app --token vault_pat_... --only rules
+python scripts/ai_smoke.py --url https://mtgvault.cards --token vault_pat_... --only rules
 ```
 
 A read-only personal access token is enough (Account → Agents & API); nothing is written. Groups: `connection`, `cards`,

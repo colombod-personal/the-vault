@@ -3,7 +3,7 @@ the answers a skill's procedure depends on. Not a unit test (those use small syn
 bugs); this needs a Vault with the catalog loaded and a personal access token.
 
     VAULT_URL=http://localhost:8010 VAULT_TOKEN=vault_pat_... python scripts/ai_smoke.py
-    python scripts/ai_smoke.py --url https://the-vault-puce-one.vercel.app --token vault_pat_... --only rules
+    python scripts/ai_smoke.py --url https://mtgvault.cards --token vault_pat_... --only rules
 
 It prints each check and exits 1 if any fails. Read-only: a read token is enough, nothing is written.
 Checks use well-known cards and rules (Lightning Bolt, Sol Ring, protection, trample) so they hold on any catalog

@@ -22,7 +22,7 @@
     "vault_url": {
       "type": "string",
       "title": "Vault address",
-      "default": "https://the-vault-puce-one.vercel.app",
+      "default": "https://mtgvault.cards",
       "description": "Where The Vault runs (the default is the public one)"
     },
     "vault_token": {
