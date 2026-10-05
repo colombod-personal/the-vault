@@ -45,9 +45,21 @@ def _preview_html(preview: dict) -> str:
     rows = "".join(f"<li>Row {esc(u['row'])}: {esc(u['name'])} ({esc(u['set'] or '?')} {esc(u['number'] or '?')})</li>"
                    for u in preview["unmatched"][:20])
     more = preview["unmatched_rows"] - min(20, len(preview["unmatched"]))
-    return (f"<p>{esc(preview['rows'])} rows, {esc(preview['copies'])} copies ({esc(preview['source'])}).</p>"
-            f"<p>Changes against your collection: {esc(changes)}</p>"
-            f"<p>{esc(preview['matched_rows'])} rows match a known printing; {esc(preview['unmatched_rows'])} do not.</p>"
+    n = lambda count, one, many: f"{count:,} {one if count == 1 else many}"  # noqa: E731
+    removed = changes.get("removed", 0)
+    warning = (f"<p><strong>Importing this file would remove {n(removed, 'card', 'cards')} "
+               f"({n(changes.get('copies_out', 0), 'copy', 'copies')}) from your collection.</strong> "
+               "An import replaces the whole collection.</p>") if removed else ""
+    return (f"<p>{n(preview['rows'], 'row', 'rows')}, {n(preview['copies'], 'copy', 'copies')} "
+            f"({esc(preview['source'])}).</p>" + warning +
+            "<ul>"
+            f"<li>Added: {n(changes.get('added', 0), 'card', 'cards')}</li>"
+            f"<li>Removed: {n(removed, 'card', 'cards')}</li>"
+            f"<li>More copies: {n(changes.get('increased', 0), 'card', 'cards')}; "
+            f"fewer copies: {n(changes.get('decreased', 0), 'card', 'cards')}</li>"
+            f"<li>Unchanged: {n(changes.get('unchanged', 0), 'card', 'cards')}</li></ul>"
+            f"<p>{n(preview['matched_rows'], 'row matches', 'rows match')} a known printing; "
+            f"{n(preview['unmatched_rows'], 'row does', 'rows do')} not.</p>"
             + (f"<ul>{rows}</ul>" + (f"<p>and {more} more.</p>" if more > 0 else "") if rows else ""))
 
 
