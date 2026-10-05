@@ -6,7 +6,7 @@ description: >-
   build, a tune-up, or help with a weak role (ramp, draw, removal, sweepers).
 license: MIT
 metadata:
-  vault-tools: "deck_stats deck_legality find_upgrades validate_deck_changes find_combos get_card_oracle"
+  vault-tools: "deck_stats simulate_draws deck_legality find_upgrades validate_deck_changes find_combos get_card_oracle"
 ---
 
 # Deck upgrader
@@ -23,19 +23,24 @@ the candidates it returns, explain why, and present only a plan that the validat
 2. **Read the deck.** Call `deck_stats` and `deck_legality`. Report what they say: size, lands, curve,
    color identity, the roles it counted, any legality issues. Fix legality problems first, and say if any
    card was not found (`unmatched`).
-3. **Find the plan.** Ask the user what the deck is trying to do if it is not obvious from the cards;
+3. **Feel the curve.** Call `simulate_draws` and explain in plain words what the numbers mean for this deck: how
+   often it misses land drops, reaches its key mana (for example five mana by turn 5), or ends up discarding to hand
+   size. Show one or two of the sample games. If the answer lists `discard_may_be_the_plan`, say that a full hand or
+   discarding may be what the deck wants, not a flaw. The numbers are a hint from a simple simulation: repeat its
+   `assumptions` that matter (colours are not checked).
+4. **Find the plan.** Ask the user what the deck is trying to do if it is not obvious from the cards;
    suggestions must serve that plan. Do not assume a strategy the cards do not show.
-4. **Get candidates.** Call `find_upgrades` with the budget (and `roles` if the user named a weak area).
+5. **Get candidates.** Call `find_upgrades` with the budget (and `roles` if the user named a weak area).
    Candidates are legal, inside the deck's colors, not already in the deck, and priced within budget. They are
    ordered by popularity (EDHREC rank). **Popularity is not power or fit**: say that once, and choose by
    how a card serves the plan.
-5. **Choose swaps.** For each swap name the card to cut and the card to add, the price (with its date) and
+6. **Choose swaps.** For each swap name the card to cut and the card to add, the price (with its date) and
    the reason in one sentence tied to the plan. Cut candidates from the tool are the least-played
    untagged cards: a starting point, not a verdict. Prefer fewer, better swaps over many.
-6. **Validate.** Call `validate_deck_changes` with the exact `cuts`, `adds`, format and budget. If `valid`
+7. **Validate.** Call `validate_deck_changes` with the exact `cuts`, `adds`, format and budget. If `valid`
    is false, read `issues`, fix the plan and validate again. **Present the plan only when `valid` is true.**
    Show `added_cost_usd` against the budget. Cuts are not refunded: the total is the adds.
-7. **Optionally check combos.** If the user cares, call `find_combos` and mention combos the new cards
+8. **Optionally check combos.** If the user cares, call `find_combos` and mention combos the new cards
    complete, attributed to Commander Spellbook.
 
 ## Say plainly

@@ -9,7 +9,7 @@ Cursor, GitHub Copilot, OpenCode and many other agents read.
 |---|---|
 | `rules-judge` | Rules questions: look up cards and rulings, find rules, verify every quote, answer step by step |
 | `interaction-explainer` | How cards interact: the stack and timing walked through with rule citations |
-| `deck-upgrader` | Swaps within a budget: candidates from the Vault, then `validate_deck_changes` before presenting a plan |
+| `deck-upgrader` | Swaps within a budget: how the curve plays (`simulate_draws`), candidates from the Vault, then `validate_deck_changes` before presenting a plan |
 | `shopping-assistant` | What a deck still needs from your collection, with dated prices and a list to paste into a store |
 | `expert-council` | A council of on-topic experts reviews a deck or a rules question: independent views, a devil's advocate, then a checked plan with the discussion on request (Commander first) |
 | `archidekt-deck-helper` | A public Archidekt deck checked against your collection: legality, budget upgrades, a change list to apply on Archidekt, what to buy, and shop search links |

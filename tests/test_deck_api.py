@@ -244,3 +244,32 @@ def test_the_shopping_list_is_what_you_do_not_own_with_dated_prices(loaded):
 def test_analyses_are_rate_limited_per_person(loaded, app):
     codes = [post(loaded, "legality", text=DECK, format="commander").status_code for _ in range(32)]
     assert codes.count(200) == 30 and codes[-1] == 429
+
+
+def test_simulate_plays_the_curve_with_the_commander_in_the_command_zone(loaded):
+    text = "Commander\n1 Test Commander\nDeck\n37 Test Mountain\n30 Dull Bear\n31 Cheap Ramp\n1 Unknown Card"
+    res = loaded.post(f"{V1}/simulate", json={"text": text, "format": "commander", "games": 200, "samples": 2})
+    assert res.status_code == 200, res.text
+    out = res.json()["result"]
+    assert out["multiplayer"] is True and out["games"] == 200 and len(out["samples"]) == 2
+    assert out["unmatched"] == ["Unknown Card"] and out["assumptions"]
+    assert out["per_turn"][0]["land_drop"] > 80 and "five_mana_by_turn_5" in out["headline"]
+    assert any("Test Commander" in t["cast"] for s in out["samples"] for t in s["turns"])
+    assert res.json()["provenance"][0]["kind"] == "computed"
+    again = loaded.post(f"{V1}/simulate", json={"text": text, "format": "commander", "games": 200, "samples": 2}).json()
+    assert again["result"] == out  # the default seed comes from the deck: same deck, same answer
+
+
+def test_simulate_needs_enough_cards(loaded):
+    assert loaded.post(f"{V1}/simulate", json={"text": "3 Test Mountain", "format": "modern"}).status_code == 400
+
+
+def test_a_hidden_tag_gives_no_role_and_very_strong_outranks_strong(loaded, monkeypatch):
+    """Scryfall: tags are community data; apps should be able to hide one (HIDDEN_TAGS). Weights are written
+    very_strong / strong / median / weak (scryfall.com/docs/api/tags)."""
+    from vault import deck_tools as dt
+    text = "1 Test Rock\n1 Cheap Ramp"
+    assert loaded.post(f"{V1}/stats", json={"text": text}).json()["result"]["roles"]["ramp"]["count"] == 2
+    monkeypatch.setenv("HIDDEN_TAGS", "ramp")
+    assert loaded.post(f"{V1}/stats", json={"text": text}).json()["result"]["roles"]["ramp"]["count"] == 0
+    assert dt.hidden_tags() == {"ramp"}
