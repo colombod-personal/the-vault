@@ -25,8 +25,10 @@ def frontmatter(text: str):
     return yaml.safe_load(front), body
 
 
-COUNCIL = {"vault-devils-advocate", "vault-synergy-analyst", "vault-collection-analyst", "vault-commander-expert",
-           "vault-casual-table"}
+FORMAT_EXPERTS = {"vault-commander-expert": "commander", "vault-limited-expert": "draft and sealed",
+                  "vault-pauper-expert": "pauper", "vault-standard-expert": "standard", "vault-pioneer-expert": "pioneer",
+                  "vault-two-headed-giant-expert": "two-headed giant"}
+COUNCIL = {"vault-devils-advocate", "vault-synergy-analyst", "vault-collection-analyst", "vault-casual-table"} | set(FORMAT_EXPERTS)
 
 
 def test_the_agents_exist():
@@ -39,7 +41,10 @@ def test_council_members_stay_in_their_lane_and_cite_evidence():
     by = {a["name"]: " ".join(a["body"].split()).lower() for a in AGENTS}
     for name in COUNCIL:
         assert "at most three" in by[name] and "expert-council" in {s for a in AGENTS if a["name"] == name for s in a["skills"]}
-    assert "commander only" in by["vault-commander-expert"] and "commander only" in by["vault-casual-table"]
+    assert "commander only" in by["vault-casual-table"]
+    for name, fmt in FORMAT_EXPERTS.items():
+        assert f"{fmt} only" in by[name], name  # speaks about its own format only
+        assert "only when the question is about" in " ".join(next(a for a in AGENTS if a["name"] == name)["description"].split()).lower()
     assert "never object without a reason you can cite" in by["vault-devils-advocate"]
     assert "never say which shop is cheapest" in by["vault-collection-analyst"]
 
