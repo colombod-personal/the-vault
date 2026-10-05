@@ -526,30 +526,6 @@ class Ruling(Base):
     comment: Mapped[str] = mapped_column(Text)
 
 
-class RulesVersion(Base):
-    """One edition of the Comprehensive Rules. Old editions are kept so a cited rule stays reproducible."""
-
-    __tablename__ = "rules_versions"
-
-    version: Mapped[str] = mapped_column(String(10), primary_key=True)  # effective date, YYYY-MM-DD
-    effective_date: Mapped[date] = mapped_column(Date)
-    source_url: Mapped[str | None] = mapped_column(String(500))
-    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
-class Rule(Base):
-    __tablename__ = "rules"
-    __table_args__ = (
-        Index("ix_rules_fts", text("to_tsvector('english', text)"), postgresql_using="gin"),
-    )
-
-    version: Mapped[str] = mapped_column(ForeignKey("rules_versions.version", ondelete="CASCADE"), primary_key=True)
-    number: Mapped[str] = mapped_column(String(120), primary_key=True)  # "613.1a"; glossary terms use "glossary:<term>"
-    text: Mapped[str] = mapped_column(Text)
-    parent: Mapped[str | None] = mapped_column(String(20))
-    kind: Mapped[str] = mapped_column(String(12))  # "rule" or "glossary"
-
-
 class OracleTag(Base):
     """A functional tag from Scryfall's Tagger (community opinion, not a rule)."""
 
@@ -607,7 +583,7 @@ class CatalogSource(Base):
 
     __tablename__ = "catalog_sources"
 
-    name: Mapped[str] = mapped_column(String(40), primary_key=True)  # "oracle_cards", "rulings", "oracle_tags", "rules"
+    name: Mapped[str] = mapped_column(String(40), primary_key=True)  # "oracle_cards", "rulings", "oracle_tags", "oracle_prices"
     version: Mapped[str] = mapped_column(String(60))
     source_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

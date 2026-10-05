@@ -15,8 +15,9 @@ V1 = "/api/v1"
 GROUNDING = """\
 Rules, cards and prices - how to answer:
 - Never answer a rules or card question from memory. Call get_card_oracle (and get_rulings), then
-  search_rules / get_rule, and answer from what they return. Say which rule number and which edition
-  (version) you used.
+  find the rules: find_rules_term for a named game term, search_rules for a question, rules_outline to
+  browse; open each with get_rule and read its children, siblings and references. Say which rule number
+  and which edition (version) you used. The rules are read live from Wizards of the Coast.
 - Quote only text a tool returned. Before you present a quote as an official rule, ruling or card
   text, call verify_citation; if it fails, use the source_text it returns instead of your wording.
 - If the sources do not settle a question, say you are not sure and point to the official rules or a judge.
@@ -57,15 +58,25 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
               "limit": {"type": "integer", "minimum": 1, "maximum": 25, "default": 25}}, ["oracle_id"],
              path=lambda a: f"{V1}/catalog/cards/{quote(a['oracle_id'], safe='')}/rulings", query=("limit",), provenance=("catalog",)),
         Tool("search_rules", "Search the Comprehensive Rules for a topic (e.g. 'replacement effect damage'); best matches "
-             "first, at most 10, each with its number and the edition (version).",
+             "first, at most 10, each with its number and the edition. A keyword ability or glossary term in the query puts "
+             "its defining rules first. The rules are read live from Wizards of the Coast's current edition.",
              {"query": {"type": "string", "minLength": 2, "maxLength": 200},
-              "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5},
-              "version": {"type": "string", "maxLength": 10, "description": "Rules edition YYYY-MM-DD; default latest"}}, ["query"],
-             path=lambda a: f"{V1}/catalog/rules/search", query=("q", "limit", "version"), provenance=("catalog",)),
-        Tool("get_rule", "One rule by number (e.g. '613.1a') or a glossary term ('glossary:Trample'), with its direct subrules.",
-             {"number": {"type": "string", "minLength": 1, "maxLength": 120},
-              "version": {"type": "string", "maxLength": 10, "description": "Rules edition YYYY-MM-DD; default latest"}}, ["number"],
-             path=lambda a: f"{V1}/catalog/rules/{quote(a['number'], safe='')}", query=("version",), provenance=("catalog",)),
+              "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5}}, ["query"],
+             path=lambda a: f"{V1}/catalog/rules/search", query=("q", "limit"), provenance=("catalog",)),
+        Tool("rules_outline", "The Comprehensive Rules' table of contents, to find your way: with no argument the nine sections; "
+             "with a section (7), subsection (702) or rule (702.19), what is directly under it, with headings. Drill down, then "
+             "open a rule with get_rule.",
+             {"under": {"type": "string", "maxLength": 20, "description": "A section, subsection or rule number"}},
+             path=lambda a: f"{V1}/catalog/rules", query=("under",), provenance=("catalog",)),
+        Tool("find_rules_term", "A glossary term or keyword ability ('trample', 'state-based actions', 'commander') and the rules "
+             "that define it, with the glossary definition. Start here when a question names a game term.",
+             {"name": {"type": "string", "minLength": 2, "maxLength": 120}}, ["name"],
+             path=lambda a: f"{V1}/catalog/rules/term/{quote(a['name'], safe='')}", provenance=("catalog",)),
+        Tool("get_rule", "One rule by number (e.g. '613.1a') or a glossary term ('glossary:Trample'), with where it sits: its "
+             "parent, children, previous and next rule, the rules it cites and the rules that cite it. Follow those to read "
+             "around a rule (exceptions often sit in a sibling or a later subrule).",
+             {"number": {"type": "string", "minLength": 1, "maxLength": 120}}, ["number"],
+             path=lambda a: f"{V1}/catalog/rules/{quote(a['number'], safe='')}", provenance=("catalog",)),
         Tool("verify_citation", "Check that a quote is verbatim in the rule, Oracle text or ruling you attribute it to. Whitespace "
              "and typographic quotes are forgiven; nothing else. If it fails you get the true text back.",
              {"kind": {"type": "string", "enum": ["rule", "oracle_text", "ruling"]},

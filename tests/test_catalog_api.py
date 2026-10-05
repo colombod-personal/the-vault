@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 from tests.test_rules_parser import SAMPLE
 from vault import catalog_sync as cs
 from vault import provenance as prov
-from vault import rules_parser
 from vault.app import create_app
 from vault.config import Settings
 
@@ -37,11 +36,21 @@ def load(app):
         cs.sync_oracle_tags(db, [{"id": "t-1", "slug": "removal-burn", "label": "removal-burn", "parent_ids": [], "child_ids": [],
                                   "taggings": [{"oracle_id": BOLT, "weight": "strong"}]},
                                  {"id": "t-0", "slug": "removal", "label": "removal", "parent_ids": [], "child_ids": ["t-1"], "taggings": []}])
-        cs.sync_rules(db, rules_parser.parse(SAMPLE), "https://example.test/cr.txt")
         cs.sync_oracle_prices(db, [{"oracle_id": BOLT, "scryfall_id": "p-1111", "usd": 0.69, "usd_foil": 2.5, "eur": 0.5, "day": date(2026, 10, 4), "source": "scryfall"}])
         for name in ("oracle_cards", "rulings", "oracle_tags", "oracle_prices"):
             cs.record_source(db, name, version=name + "-1", rows=1)
         db.commit()
+    serve_rules(app)
+
+
+def serve_rules(app, text=SAMPLE):
+    """The rules are read live from Wizards (nothing stored): point the app at the Wizards twin serving ``text``."""
+    from twins.universe import Universe
+    universe = Universe(seed=False)
+    universe.wizards.publish(text)
+    app.state.rules_live.reset(universe.transport)
+    app.state.rules_live.edition()
+    return universe
 
 
 @pytest.fixture

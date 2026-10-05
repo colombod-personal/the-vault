@@ -33,7 +33,8 @@ be revoked (Account → Connected apps for OAuth).
     `get_shared_deck`, `list_my_shares`, `accept_share`, `stop_sharing` (asks first)
   - connection check: `whoami` (who you are, your scopes, and which data versions the Vault holds)
   - rules and cards, from the Comprehensive Rules and Oracle data: `get_card_oracle`, `get_rulings`,
-    `search_rules`, `get_rule`, `verify_citation`, `present_steps`
+    `find_rules_term`, `search_rules`, `rules_outline`, `get_rule` (with parent, children, siblings and
+    references), `verify_citation`, `present_steps`; the rules are read live from Wizards (no copy kept)
   - deck analysis, computed by the Vault: `deck_stats`, `simulate_draws`, `deck_legality`, `find_upgrades`,
     `validate_deck_changes`, `find_combos`, `shopping_list`
 - MCP prompts (`prompts/list`): `rules_judge`, `explain_interaction`, `upgrade_deck`, `shopping_help`, `council_review`.
