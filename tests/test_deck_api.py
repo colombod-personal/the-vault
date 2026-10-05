@@ -277,10 +277,8 @@ def test_a_hidden_tag_gives_no_role_and_very_strong_outranks_strong(loaded, monk
 
 
 def test_stats_count_game_changers_and_give_a_bracket_floor_from_them_alone(loaded):
-    none = loaded.post(f"{V1}/stats", json={"text": "1 Test Rock
-1 Cheap Ramp"}).json()["result"]["game_changers"]
+    none = loaded.post(f"{V1}/stats", json={"text": "1 Test Rock\n1 Cheap Ramp"}).json()["result"]["game_changers"]
     assert none["count"] == 0 and none["bracket_floor"] is None and none["cards"] == []
-    one = loaded.post(f"{V1}/stats", json={"text": "1 Test Changer
-1 Test Rock"}).json()["result"]["game_changers"]
+    one = loaded.post(f"{V1}/stats", json={"text": "1 Test Changer\n1 Test Rock"}).json()["result"]["game_changers"]
     assert one["count"] == 1 and one["bracket_floor"] == 3 and one["cards"] == [{"name": "Test Changer", "quantity": 1}]
     assert "Wizards' own page was not readable" in one["note"]  # says what it did not check
