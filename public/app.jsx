@@ -234,7 +234,7 @@ function App() {
       } else {
         const d = await window.VaultApi.sharedDeck(s.id);
         // The shared copy, still credited to its source and author (Archidekt's attribution terms).
-        setDeckText({ text: d.text, credit: { name: d.name, url: d.source_url || '', author: d.source_author || '' } });
+        setDeckText({ shareId: s.id, text: d.text, credit: { name: d.name, url: d.source_url || '', author: d.source_author || '' } });
         setNotice(`${d.from}'s deck “${d.name}”, checked against your collection.`);
         if (viewing) await backToMine();
         setRoute({ view: 'decks' });
@@ -458,7 +458,7 @@ function App() {
             <SetDetail data={data} code={route.code} onBack={() => nav('sets')} openCard={openCard} />
           )}
           {route.view === 'decks' && (
-            <DeckView key={(deckText && deckText.text) || deckText || 'deck'} data={data} openCard={openCard} initialText={deckText}
+            <DeckView key={deckText && deckText.shareId ? 'share' + deckText.shareId : deckText || 'deck'} data={data} openCard={openCard} initialText={deckText}
               deckId={route.deckId} onOpenDeckId={(id) => { setDeckText(null); nav('decks', id ? { deckId: String(id) } : {}); }} />
           )}
           {route.view === 'lab' && (
