@@ -1,7 +1,6 @@
 # Expert council: design (issue #103)
 
-Status: **draft for the owner's review**. Nothing here is implemented; #104 builds it once this is agreed
-(`status:ready`).
+Status: **agreed with the owner on 2026-10-05** (answers recorded under "Decisions"). #104 builds it.
 
 ## What it is for
 
@@ -20,8 +19,12 @@ Three jobs:
 
 ## The members
 
-A council run picks the **chair**, the **judge**, the **devil's advocate**, one or two **format experts** for the
-deck's format, and the **analysts** the question needs. Typically 4 to 6 members, never all of them.
+A council run picks the **chair**, the **judge**, the **devil's advocate**, the **format expert for the format being
+discussed**, and the **analysts** the question needs. Typically 4 to 6 members, never all of them.
+
+**Only on-topic experts sit on the panel** (owner's rule): a Commander design discussion has the Commander expert and
+no Pioneer, Modern or Limited voice. A second format expert joins only when the question is about both formats
+(for example "port this Pioneer deck to Brawl").
 
 | Member | Role | Main tools |
 |---|---|---|
@@ -35,13 +38,14 @@ deck's format, and the **analysts** the question needs. Typically 4 to 6 members
 
 | Expert | Knows |
 |---|---|
-| Commander | 100-card singleton, colour identity, the Commander Brackets, multiplayer politics, social contract |
+| Commander | 100-card singleton, colour identity, the Commander Brackets, multiplayer politics, and how a deck plays at a casual table (power level fit, fun to play against, the social contract) |
 | cEDH | Fast mana, interaction density, win lines, turn-by-turn speed |
 | Brawl / Standard Brawl | 60/100-card variants, rotation |
 | Standard, Pioneer, Modern, Legacy, Vintage | 60-card constructed: curve, interaction, sideboard plans, rotation and bans |
 | Pauper | Commons only; format-specific staples |
 | Limited (draft and sealed) | Curve, removal count, two-colour discipline, signals, set mechanics |
 | Two-Headed Giant | Shared turns and life total (30), team attacks, which effects scale with two opponents, team synergies |
+| Cube | Cube design and drafting: balance across colours and archetypes, power level, pick orders inside a cube |
 | Oathbreaker and other variants | The variant's own rules (`deck_legality` lists what it checks) |
 
 Format experts do not invent meta knowledge. Until #105 finds sources we may use, metagame claims ("this is the best
@@ -79,7 +83,8 @@ points to a judge.
 - Members never write to the collection or decks. Only the person can approve a change, through the normal
   preview-then-confirm tools.
 - Popularity (EDHREC rank) is not power; Scryfall Tagger roles are community opinion. Say so once.
-- The answer is short. The full transcript of views is available on request, not dumped by default.
+- The answer leads with the plan. The disputed points and each member's view are offered as "see the discussion"
+  (expandable where the host can show it, or on request), not dumped by default.
 
 ## Hosts
 
@@ -108,10 +113,13 @@ edition say so if asked again.
   presented only when `validate_deck_changes` is valid.
 - A real run on a saved Commander deck and a rulings question, recorded in docs/ai-integration-testing.md.
 
-## Open questions for the owner
+## Decisions (owner, 2026-10-05)
 
-1. **Members:** is the list right? Add or drop experts (e.g. a separate "casual table" voice for Commander, or a
-   cube expert)?
-2. **Visibility:** show the disputed points by default (current proposal) or only the final plan?
-3. **Two-Headed Giant and Limited first,** or Commander first? (Commander has the most data in the Vault today.)
-4. **Meta knowledge:** acceptable to label general knowledge as opinion until #105 finds licensed sources?
+1. **Members:** no separate "casual table" member; its concerns belong to the Commander expert. A **cube** expert is
+   added. Format experts are essential but **only the expert for the topic's format is on the panel**; off-topic format
+   opinions derail the discussion.
+2. **Visibility:** show the plan; offer a way to see the details (the disputed points and each view).
+3. **Order to build format experts:** Commander, then Limited, then Pauper, then Standard, then Pioneer, then
+   Two-Headed Giant; the others (cEDH, Brawl, Modern, Legacy, Vintage, Cube, Oathbreaker) after.
+4. **Meta knowledge:** not answered yet; until #105 finds sources we may use, general meta knowledge is labelled as
+   opinion (default kept).
