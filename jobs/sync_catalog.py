@@ -28,6 +28,7 @@ from vault.db import Database
 
 USER_AGENT = "the-vault/0.1 (+https://github.com/colombod-personal/the-vault)"
 SOURCES = ("oracle_cards", "rulings", "oracle_tags", "rules")  # "rules": the Comprehensive Rules, from RULES_URL or --file
+OTHER_JOBS = ("oracle_prices",)  # loaded by jobs.sync_prices from the same CATALOG_SOURCES
 
 
 def bulk_version(entry: dict) -> str:
@@ -88,7 +89,8 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
     parser.add_argument("--force", action="store_true", help="load even when this file version is already loaded")
     args = parser.parse_args(argv)
 
-    wanted = [s.strip() for s in args.sources.split(",") if s.strip()]
+    # CATALOG_SOURCES is shared with jobs.sync_prices: the sources it loads are skipped here, not refused.
+    wanted = [s.strip() for s in args.sources.split(",") if s.strip() and s.strip() not in OTHER_JOBS]
     unknown = [s for s in wanted if s not in SOURCES]
     if unknown:
         parser.error(f"unknown source(s): {', '.join(unknown)}")
