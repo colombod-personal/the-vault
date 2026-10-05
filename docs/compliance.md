@@ -76,7 +76,9 @@ What the sources say (re-read 2026-10-05):
   "You're more than welcome to use our API for whatever you want", with the warning that heavy use hits
   their rate limiter and that they may lock the API down if it is hammered
   ([thread 2832338](https://archidekt.com/forum/thread/2832338)). Both posts are years old: good evidence
-  of intent, not a licence.
+  of intent, not a licence. More recently (early 2026) the same developer wrote "I believe we start rate
+  limiting people at 40 requests per minute" ([thread 19112643](https://archidekt.com/forum/thread/19112643)):
+  any cap the Vault adds (#133) must keep the whole Vault well under that, paced rather than in bursts.
 - **Writing:** none. There are no API docs, no OAuth or token scheme for other apps, and nothing that
   permits another app to change a person's deck. So there is no sanctioned write path, and the Vault
   will not build one.
