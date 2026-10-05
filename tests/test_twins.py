@@ -108,6 +108,26 @@ def test_archidekt_decks_through_the_twin(database_url, tmp_path, universe):
         assert client.get(f"/api/v1/archidekt/decks/{public['id']}").status_code == 502
 
 
+def test_archidekt_reads_are_rate_limited_per_person_and_for_everyone(database_url, universe):
+    """Archidekt's terms forbid automated requests, so the Vault reads one public deck per request,
+    at most a few a minute per person and a capped number for everyone; a refused read never reaches
+    Archidekt."""
+    deck = universe.archidekt.add_deck("Elves", "ann", [(1, "Sol Ring")])
+    settings = Settings(database_url=database_url, session_secret="t", base_url="http://testserver", dev_login=True,
+                        archidekt_rate_limit=3, archidekt_global_rate_limit=5)
+    url = f"/api/v1/archidekt/decks/{deck['id']}"
+    reads = lambda: len([c for c in universe.archidekt.calls if c.path.startswith("/api/decks/")])  # noqa: E731
+    with TestClient(create_app(settings, serve_static=False, transport=universe.transport)) as client:
+        client.post("/api/auth/dev-login?email=ann@example.com")
+        assert [client.get(url).status_code for _ in range(4)] == [200, 200, 200, 429]
+        assert reads() == 3
+        refused = client.get(url)
+        assert "Archidekt" in refused.json()["detail"] and int(refused.headers["Retry-After"]) >= 1
+        client.post("/api/auth/dev-login?email=bo@example.com")  # someone else: their own allowance, until the shared cap
+        assert [client.get(url).status_code for _ in range(3)] == [200, 200, 429]
+        assert reads() == 5
+
+
 def test_archidekt_search_pages_like_drf(universe):
     for i in range(60):
         universe.archidekt.add_deck(f"Deck {i}", "bo", [(1, "Sol Ring")])

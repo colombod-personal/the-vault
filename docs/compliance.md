@@ -59,11 +59,42 @@ before building anything automated.
 
 ### Archidekt
 
-Read directly from [archidekt.com/terms](https://archidekt.com/terms) on 2026-10-04: personal,
-non-commercial licence; no automated searches, requests or queries; no building a similar or
-competing site. The Vault already fetches single public decks on a user's request and links back
-(credits page). Keep it to one deck per user action, labelled and linked. Do not add crawling or a
-deck corpus.
+**Decision (owner, 2026-10-05, issue #79): the Vault only reads from Archidekt, and keeps to its terms.**
+It never writes to Archidekt, never signs in to anyone's Archidekt account, and never "syncs" a deck.
+When the Vault suggests changes, the person applies them on Archidekt themselves; the Vault gives the
+change list and the buying list.
+
+What the sources say (re-read 2026-10-05):
+
+- **Terms** ([archidekt.com/terms](https://archidekt.com/terms), last updated 2018-09-07): a personal,
+  non-commercial licence; no software, agents or scripts that "generate automated searches, requests,
+  or queries"; no accessing the site "to build a similar or competitive website"; no harvesting
+  information about other users without their consent; no reverse engineering. The terms do not mention
+  an API or a developer programme.
+- **Reading:** an Archidekt developer (Michael) said on Archidekt's forum that the API is "open and
+  public (as far as reading is concerned)" ([thread 40353](https://archidekt.com/forum/thread/40353)) and
+  "You're more than welcome to use our API for whatever you want", with the warning that heavy use hits
+  their rate limiter and that they may lock the API down if it is hammered
+  ([thread 2832338](https://archidekt.com/forum/thread/2832338)). Both posts are years old: good evidence
+  of intent, not a licence.
+- **Writing:** none. There are no API docs, no OAuth or token scheme for other apps, and nothing that
+  permits another app to change a person's deck. So there is no sanctioned write path, and the Vault
+  will not build one.
+
+What the Vault does, and keeps doing:
+
+- Reads **one public deck per request a person makes** (opening a link, the deck page, the graph overlay,
+  or the `get_archidekt_deck` tool), server-side, with the toolkit's User-Agent naming the project.
+  Private decks are not read (Archidekt answers 404 without sign-in).
+- **Rate limits** (`ARCHIDEKT_RATE_LIMIT`, `ARCHIDEKT_GLOBAL_RATE_LIMIT`): at most 10 Archidekt reads a
+  minute per person, and 60 a minute for the whole Vault (about one a second, the pace
+  `mtg_toolkits` keeps). A refused read never reaches Archidekt.
+- No background jobs, crawling, deck search or deck corpus; nothing is fetched without a person asking.
+- Every Archidekt deck is labelled "Deck list from Archidekt", with its author and a link back.
+
+Not decided yet: reading the list of a person's **own** public decks by their Archidekt username (#94).
+It is a read on that person's request, which the developer's statements cover, but it is a search
+endpoint; ask Archidekt first (draft in `outreach-drafts.md`).
 
 ### Other sources (to read before ingestion)
 
