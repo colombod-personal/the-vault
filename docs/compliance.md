@@ -85,8 +85,9 @@ What the Vault does:
 - Reads **one public deck per request a person makes** (opening a link, the deck page, the graph overlay, or the
   `get_archidekt_deck` tool), server-side, with the toolkit's User-Agent naming the project. Private decks are not
   read (Archidekt answers 404 without sign-in).
-- **No rate cap yet, by design.** A cap is added only if it is needed, and then only behind a cache: repeat reads of
-  the same deck come from the cache, and an over-limit read gets the cached copy instead of an error (#133).
+- **No cache and no rate cap yet.** Today every read reaches Archidekt, one request per deck a person asks for.
+  The plan (#133) is a cache for repeat reads, and a cap only if it is needed, and then only behind the cache so an
+  over-limit read gets the cached copy instead of an error.
 - No background jobs, crawling or deck search; nothing is fetched without a person asking. Decks are stored only
   when a person presses Save: their copy of that one deck's list, link and author's public username (for the
   credit), in their account, removable any time.
@@ -94,8 +95,10 @@ What the Vault does:
 
 Code review that nothing writes to Archidekt, with a guard test: #132.
 
-Listing a person's **own** public decks by their Archidekt username (#94) follows the same pattern: one read on that
-person's request, paced and cached.
+Planned (#94): listing a person's **own** public decks by their Archidekt username, as one read on that person's
+request, paced and cached. It is not built. Today's support is the single deck a person gives, and the
+`archidekt-deck-helper` skill (and its generated plugin copy) tells agents to fetch only that one deck; they will need
+updating together with #94.
 
 ### Other sources (to read before ingestion)
 

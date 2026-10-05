@@ -370,7 +370,7 @@ open, read-only API its developers describe on their forum.
   for it).
 - Every deck is credited to Archidekt and its author, with a link back.
 - It is gentle with Archidekt's rate limit (they start limiting at about 40 requests a minute): one request per
-  deck a person asks for, and repeat reads come from a cache (#133).
+  deck a person asks for. Today every read reaches Archidekt; a cache for repeat reads is planned (#133).
 
 The details and sources are in [`docs/compliance.md`](docs/compliance.md#archidekt) (#79). Open work: a code
 review that nothing writes to Archidekt (#132), and the cache (#133).
