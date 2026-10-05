@@ -8,6 +8,7 @@ every answer (``not_checked``), and every answer carries ``provenance`` built by
 
 from __future__ import annotations
 
+import os
 import re
 import unicodedata
 from collections import Counter, defaultdict
@@ -130,9 +131,18 @@ def is_land(card: OracleCard | None) -> bool:
     return bool(card and "Land" in (card.type_line or "").split("//")[0])
 
 
+def hidden_tags() -> set[str]:
+    """Tag ids or slugs switched off (``HIDDEN_TAGS``, comma separated). Tags are community-maintained; Scryfall asks
+    downstream apps to be able to hide one temporarily (scryfall.com/docs/api/tags). A hidden tag and its children
+    give no roles."""
+    return {t.strip() for t in os.environ.get("HIDDEN_TAGS", "").split(",") if t.strip()}
+
+
 def role_tag_ids(db: Session) -> dict[str, set[str]]:
     """Tag ids behind each role, with all descendants (``removal`` has none of its own links)."""
-    tags = db.execute(select(OracleTag.id, OracleTag.slug, OracleTag.child_ids)).all()
+    hidden = hidden_tags()
+    tags = [t for t in db.execute(select(OracleTag.id, OracleTag.slug, OracleTag.child_ids)).all()
+            if t.id not in hidden and t.slug not in hidden]
     by_id = {t.id: t for t in tags}
     by_slug = {t.slug: t for t in tags}
     out: dict[str, set[str]] = {}
@@ -152,7 +162,7 @@ def roles_of(db: Session, oracle_ids: list[str]) -> dict[str, dict[str, str | No
     """For each card: the roles it has, with the best Tagger weight (strong > median > weak)."""
     if not oracle_ids:
         return {}
-    rank = {"very strong": 4, "strong": 3, "median": 2, "weak": 1, "very weak": 0}
+    rank = {"very_strong": 4, "very strong": 4, "strong": 3, "median": 2, "weak": 1, "very_weak": 0, "very weak": 0}
     wanted = role_tag_ids(db)
     tag_role = {tid: role for role, tids in wanted.items() for tid in tids}
     out: dict[str, dict[str, str | None]] = defaultdict(dict)

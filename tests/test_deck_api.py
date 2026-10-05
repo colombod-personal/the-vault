@@ -262,3 +262,14 @@ def test_simulate_plays_the_curve_with_the_commander_in_the_command_zone(loaded)
 
 def test_simulate_needs_enough_cards(loaded):
     assert loaded.post(f"{V1}/simulate", json={"text": "3 Test Mountain", "format": "modern"}).status_code == 400
+
+
+def test_a_hidden_tag_gives_no_role_and_very_strong_outranks_strong(loaded, monkeypatch):
+    """Scryfall: tags are community data; apps should be able to hide one (HIDDEN_TAGS). Weights are written
+    very_strong / strong / median / weak (scryfall.com/docs/api/tags)."""
+    from vault import deck_tools as dt
+    text = "1 Test Rock\n1 Cheap Ramp"
+    assert loaded.post(f"{V1}/stats", json={"text": text}).json()["result"]["roles"]["ramp"]["count"] == 2
+    monkeypatch.setenv("HIDDEN_TAGS", "ramp")
+    assert loaded.post(f"{V1}/stats", json={"text": text}).json()["result"]["roles"]["ramp"]["count"] == 0
+    assert dt.hidden_tags() == {"ramp"}
