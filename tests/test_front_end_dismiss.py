@@ -31,7 +31,8 @@ def test_the_card_panels_close_button_is_named_focused_first_and_in_its_own_stic
 def test_the_other_close_buttons_are_named_and_finger_sized():
     assert 'aria-label="Dismiss message"' in APP and 'aria-label={`Close ${title}`}' in ACCOUNT
     assert "close-x" in APP and "close-x" in ACCOUNT
-    assert "min-width: 40px" in rule(".close-x") and "min-height: 40px" in rule(".close-x")
+    # 44px everywhere, and specific enough that the phone rule for small buttons (min-height 34px) can't shrink it
+    assert "min-width: 44px" in rule(".btn.xs.close-x, .close-x") and "min-height: 44px" in rule(".btn.xs.close-x, .close-x")
 
 
 def test_dialogs_move_focus_in_keep_it_inside_and_give_it_back():
