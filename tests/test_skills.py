@@ -25,7 +25,7 @@ def parse(folder: Path):
 
 
 def test_the_expected_skills_exist():
-    assert {p.name for p in FOLDERS} == {"rules-judge", "interaction-explainer", "deck-upgrader", "shopping-assistant", "archidekt-deck-helper",
+    assert {p.name for p in FOLDERS} == {"rules-judge", "interaction-explainer", "deck-upgrader", "shopping-assistant", "archidekt-deck-helper", "expert-council",
                                          "collection-analyst", "vault-attribution"}
 
 

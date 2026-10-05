@@ -36,7 +36,7 @@ be revoked (Account → Connected apps for OAuth).
     `search_rules`, `get_rule`, `verify_citation`, `present_steps`
   - deck analysis, computed by the Vault: `deck_stats`, `deck_legality`, `find_upgrades`,
     `validate_deck_changes`, `find_combos`, `shopping_list`
-- MCP prompts (`prompts/list`): `rules_judge`, `explain_interaction`, `upgrade_deck`, `shopping_help`.
+- MCP prompts (`prompts/list`): `rules_judge`, `explain_interaction`, `upgrade_deck`, `shopping_help`, `council_review`.
 - A read-only token doesn't list the write tools; all of the above are read-only.
 
 ## How to answer (rules, cards, decks)
