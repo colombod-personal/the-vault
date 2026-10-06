@@ -36,7 +36,7 @@ from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
 from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, import_days, view_version
-from .. import archidekt_cache, deck_import, deck_match, deck_overview, owned_changes
+from .. import archidekt_cache, deck_import, deck_match, deck_overview, experts, owned_changes
 from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, export_collection, import_collection,
                         preview_import as preview_collection_import, user_entries)
 from ..models import AccessToken, ApiSession, Card, Deck, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
@@ -893,6 +893,35 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             return {"created": True, "updated": False, "deck": _deck(deck), "counts": parsed["counts"]}
 
         return idempotent(request, db, user, 201, run)
+
+    # -- the expert council for connectors (vault.experts, #220) ------------------------------
+    @router.get("/council", tags=["decks"],
+                summary="The expert council's panel for a format and goal, with every member's brief and the chair's procedure")
+    def council_brief(format: str | None = Query(None, max_length=40, description="commander, limited, pauper, standard, "
+                                                 "pioneer, two-headed-giant ... (read from the deck when deck_id is given)"),
+                      goal: str | None = Query(None, max_length=300, description="Tune, check, explain, synergies, budget ..."),
+                      deck_id: int | None = Query(None, ge=1, le=2**31 - 1),
+                      team_format: str | None = Query(None, max_length=40, description="Two-Headed Giant: the format the team plays"),
+                      budget: bool = False, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        note = None
+        if deck_id is not None and not format:
+            deck = owned_deck(db, user, deck_id)
+            seen = deck_overview.overview(deck.text, deck.format)
+            format = seen["format"]
+            note = (f"Format from the deck '{deck.name}': {format or 'unknown'} ({seen['format_from'] or 'not set'})"
+                    + (f"; commander(s): {', '.join(seen['commanders'])}" if seen["commanders"] else ""))
+        return experts.council(format, goal, team_format, budget, note)
+
+    @router.get("/experts", tags=["decks"], summary="The council's experts: who they are")
+    def list_experts(user: User = Depends(current_user)) -> dict:
+        return {"experts": experts.roster()}
+
+    @router.get("/experts/{expert}", tags=["decks"], summary="One expert's brief, to answer as that expert")
+    def get_expert(expert: str = Path(max_length=60, pattern=r"^[a-z0-9-]+$"), user: User = Depends(current_user)) -> dict:
+        found = experts.brief(expert)
+        if found is None:
+            raise HTTPException(404, "No such expert: list them with GET /experts")
+        return found
 
     # -- card catalog (Scryfall data, served by the Vault) ---------------------------------------
     catalog = Catalog(transport, rewrite_image=(lambda url: outbound.browser_url(settings, url)) if settings.twins_url else None)
