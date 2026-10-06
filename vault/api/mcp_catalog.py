@@ -53,8 +53,9 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              "(Comprehensive Rules edition, card data, rulings, tags, prices). Call this first to check the connection.",
              path=lambda a: f"{V1}/agent/whoami", title="Check the connection", provenance=("catalog",)),
         Tool("get_card_oracle", "A card's official Oracle text, types, legalities and Scryfall Tagger tags, by exact name "
-             "(either face of a double-faced card) or Oracle id. A misspelled name returns suggestions, never a guess. "
-             "Works for any card, owned or not.",
+             "(either face of a double-faced card) or Oracle id. For a card with two faces, each face's mana cost, text and "
+             "stats are under `faces`; the top-level fields can be empty. A misspelled name returns suggestions, never "
+             "a guess. Works for any card, owned or not.",
              {"name": {"type": "string", "minLength": 1, "maxLength": 300, "description": "Exact card name"},
               "oracle_id": {"type": "string", "minLength": 36, "maxLength": 36}},
              path=lambda a: f"{V1}/catalog/cards", query=("name", "oracle_id"), provenance=("catalog",), ui="card"),

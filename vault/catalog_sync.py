@@ -63,8 +63,20 @@ def _faces(obj: dict) -> list | None:
     faces = obj.get("card_faces")
     if not faces:
         return None
-    keep = ("name", "mana_cost", "type_line", "oracle_text", "power", "toughness", "loyalty", "defense")
+    keep = ("name", "mana_cost", "colors", "type_line", "oracle_text", "power", "toughness", "loyalty", "defense")
     return [{k: f[k] for k in keep if f.get(k) is not None} for f in faces]
+
+
+def _colors(obj: dict) -> list:
+    """The card's colours. Scryfall omits them at the top level of a card with faces that have their own (a
+    transform or modal double-faced card), so then they are the faces' colours, front face first."""
+    top = obj.get("colors")
+    if top is not None:
+        return list(top)
+    out: list = []
+    for face in obj.get("card_faces") or []:
+        out.extend(c for c in face.get("colors") or [] if c not in out)
+    return out
 
 
 def _artist(obj: dict) -> str | None:
@@ -82,7 +94,7 @@ def oracle_card_row(obj: dict) -> dict:
         "oracle_id": obj["oracle_id"], "name": obj["name"], "layout": obj.get("layout"),
         "mana_cost": obj.get("mana_cost"), "cmc": obj.get("cmc"), "type_line": obj.get("type_line"),
         "oracle_text": obj.get("oracle_text"), "power": obj.get("power"), "toughness": obj.get("toughness"),
-        "loyalty": obj.get("loyalty"), "defense": obj.get("defense"), "colors": obj.get("colors") or [],
+        "loyalty": obj.get("loyalty"), "defense": obj.get("defense"), "colors": _colors(obj),
         "color_identity": obj.get("color_identity") or [], "keywords": obj.get("keywords") or [],
         "produced_mana": obj.get("produced_mana") or [], "legalities": obj.get("legalities") or {},
         "faces": _faces(obj), "game_changer": obj.get("game_changer"), "edhrec_rank": obj.get("edhrec_rank"),
