@@ -22,12 +22,12 @@ Counted by card name (basic lands left out), the same way `get_deck_overlap` and
 
 For each card in a deck, with `need` copies in that deck, and `need_for_all` and `have` for the whole set of saved decks:
 - **free**: the collection holds enough copies for every deck that uses the card (`have >= need_for_all`). Most shared cards are this.
-- **contested**: `have < need_for_all`. The allocation below decides how many copies each deck is given (`gets`).
+- **contested**: `0 < have < need_for_all`: some copies exist and some deck has to go without. The allocation below decides how many copies each deck is given (`gets`). A card owned zero times (`have = 0`) is not contested: there is no copy to give or move, so every deck that needs it simply lacks it (`not_owned`).
 - A deck **holds** `gets` copies of a contested card whenever `gets` is above zero (another deck wants those copies too), and **lacks** `lacking = need - gets` copies when that is above zero. Both can be true of the same card: with A and B each needing 2 and 3 owned, A holds 2, B holds 1 and lacks 1. Each lacking copy is one of two kinds, defined against this deck's own demand and the total owned: `not_owned` copies are those the collection could not supply even if this deck were given every owned copy (`max(0, need - have)`), so they must be bought whatever the other decks do; `held_by_other_deck` copies are the rest (`lacking - not_owned`): they exist in the collection but were given to another deck, so they are available by moving. A mixed shortage is split, not labelled with one reason.
 
 A deck is **complete** when it lacks nothing under the allocation (`stands_alone` is true), and **independent** when it also holds no contested card, so that no other deck's completeness depends on it.
 
-The **global deficit** of a contested card is `need_for_all - have`. Under the allocation the decks' `lacking` copies of that card add up to exactly the global deficit, whatever the order: the order only decides *which* deck lacks. So the cost to finish every deck is the global deficit times the price, counted once, and the per-deck costs below are shares of it and must never be added to a separate total.
+The **global deficit** of a contested card (or of a card owned zero times, where it is the whole demand) is `need_for_all - have`. Under the allocation the decks' `lacking` copies of that card add up to exactly the global deficit, whatever the order: the order only decides *which* deck lacks. So the cost to finish every deck is the global deficit times the price, counted once, and the per-deck costs below are shares of it and must never be added to a separate total.
 
 ## The allocation rule (who gets a contested copy)
 
@@ -59,7 +59,7 @@ and per **contested card**, once, because that is the decision:
 card, have, need_for_all, global_deficit
 decks: [{ deck, need, gets: N, lacking: N }]
 options:
-  - move:  "give the copy to <deck>; <other deck> then lacks one" (what changes; the global deficit does not)
+  - move:  "give the copy to <deck>; <other deck> then lacks one" (what changes; the global deficit does not). Offered only when the target deck lacks a copy and another deck holds a positive allocation; every contested card has one, because `have > 0`. Never offered for a card owned zero times, which has no copy to move.
   - buy:   "buy global_deficit copies at $X (Scryfall's cheapest price, dated)" (the cost to finish every deck for this card, counted once)
 ```
 
@@ -69,7 +69,7 @@ The server computes every number; the web view and assistants only show them. Pr
 
 ## API and tools
 
-- **Extend** `GET /api/v1/decks/overlap` (as the issue says): keep the existing fields (`decks_checked`, `shared_cards`, `short_cards`, `cards`) so nothing that reads them breaks, and add `decks` (the per-deck answer above), `contested` (the per-card decisions) and `allocation` (the rule used and the order). New optional query parameter `priority`.
+- **Extend** `GET /api/v1/decks/overlap` (as the issue says): keep the existing fields (`decks_checked`, `shared_cards`, `short_cards`, `cards`) so nothing that reads them breaks, and add `decks` (the per-deck answer above), `contested` (the per-card decisions), `allocation` (the rule used and the order), `decks_analysed` (a count) and `decks_skipped` (`[{ deck_id, name, reason }]` for each saved deck that could not be read, so a caller or the view never presents a partial check as complete). New optional query parameter `priority`.
 - HAL `_links` to each deck, a response model (`S.DeckOverlap`), the usual rate limit, and the tenancy rule: a deck id in `priority` that is not one of the caller's decks answers 404, like every other deck route (no way to tell another person's deck from a missing one).
 - **MCP:** the same data through the existing `get_deck_overlap` tool (output grows, input gains `priority`), so no new tool to classify; the tool description says what contested means. `docs/ai-parity.md` and `public/llms.txt` updated.
 - **Paging:** the new lists (`decks` and `contested`) are cursor-paged with `limit`, `cursor` and a HAL `next` link, like the other lists. The allocation is computed across **all** decks first and then sliced, so the page size never changes an answer. The legacy `cards` field keeps its existing 200-card cap for compatibility.
@@ -79,7 +79,7 @@ The server computes every number; the web view and assistants only show them. Pr
 ## The web view
 
 A section of the Lab (#162), phone-first, "Do your decks stand on their own?":
-- **Nothing contested:** one line, "All N decks can be built at the same time from what you own", and the list collapsed.
+- **Nothing contested:** one line, "All N analysed decks can be built at the same time from what you own" (and only when `decks_skipped` is empty), with the list collapsed. When a deck could not be checked the line is qualified: "N of M decks checked; K could not be read", naming them and linking to each, because an empty contested list says nothing about a deck that was skipped.
 - **Contested:** one row per contested card (the decision), with the two options and their prices; below it one row per deck (name, a complete tick or the number of lacking cards) that expands to the cards it holds and lacks. Each deck row links to the deck page and its buy list.
 - At 390 px the contested rows come first and are full width; at 1400 px the contested cards and the deck rows sit side by side.
 
@@ -91,13 +91,14 @@ A section of the Lab (#162), phone-first, "Do your decks stand on their own?":
 - Paging: `limit` and `cursor` return all decks across pages with the same answers as one page; the page size never changes who lacks what.
 - Provenance: the tool carries Scryfall provenance and the price date.
 - Owned in enough copies for all decks (Sol Ring): not contested, held and lacked by no deck.
-- A card owned zero times: all its lacking copies are `not_owned`.
+- A card owned zero times: all its lacking copies are `not_owned`, it is not in `contested`.
 - A mixed shortage: A and B each need 2, 3 owned: B lacks 1, and it is `held_by_other_deck` (available by moving); with only 1 owned and A and B each needing 2, A (first) gets it and lacks 1 (`not_owned` 1), while B gets none and lacks 2 (`not_owned` 1, `held_by_other_deck` 1).
 - Basic lands never appear; a deck of only basic lands has need 0, independence 1.0, `stands_alone` and `independent` true, and no error.
 - Partial allocation: A and B each need 2, 3 owned: A holds 2; B holds 1 and lacks 1 (the same card in both `holds` and `lacking`).
 - Deck order: the default order, and `priority` overriding it; an id in `priority` that is not the caller's (another person's or missing) answers 404 and reveals nothing.
 - A fully independent set of decks: `stands_alone` for all, `contested` empty.
-- An unreadable saved deck is skipped, as today.
+- An unreadable saved deck is skipped, as today, and reported in `decks_skipped`; with one complete readable deck and one unreadable deck the view never says all decks are buildable.
+- A card owned zero times is not contested and has no `move` option; every contested card has one.
 - Cross-tenant: another person's decks and collection never appear.
 - Existing `get_deck_overlap` fields unchanged.
 - Real data: the owner's four decks give 27 not contested and 1 contested (The World Tree), checked against the collection.

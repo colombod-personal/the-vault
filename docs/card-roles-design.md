@@ -29,7 +29,8 @@ Starting set, from the owner's examples and the roles the Vault already uses: ra
 `card_roles(oracle_id, role_id, strength, source, evidence, reviewed_at)`.
 
 - `strength`: `core` (the card exists to do this), `incidental` (does it on the side), matching how Scryfall weights are used today.
-- `source`: `vault_rule` (a deterministic rule over oracle text), `scryfall_tag` (mapped from a Tagger tag), `suggestion` (accepted from a person), `ai` (labelled, per #126).
+- `source`: `vault_rule` (a deterministic rule over oracle text), `scryfall_tag` (mapped from a Tagger tag), `suggestion` (a proposal that the reviewer pipeline accepted).
+- `origin` and `author`, kept separately from `source` and from whether a row was reviewed: `origin` is `person`, `assistant` or `pipeline`, and for an assistant `author` names the app or model that wrote it and when. A row accepted from an assistant's suggestion keeps `origin = assistant` and its `author`, so it is always shown labelled as AI-written (per #126 and #174), even after it has been reviewed and accepted; review does not launder origin.
 - `evidence`: for `vault_rule` the matched text; for `scryfall_tag` the tag `id` (never the slug); for `suggestion` the suggestion id.
 - Read: like the card catalogue, it is readable by **every signed-in account**; there is no anonymous access (owner decision on #62, 2026-10-06: free accounts, no anonymous catalog, `PUBLIC_CATALOG` removed). Opening it to people without an account would be a separate product decision about a page that adds value, not part of this design. Write: only the pipeline's database role; no API route writes it. A test fails if any route does.
 
@@ -42,7 +43,7 @@ Starting set, from the owner's examples and the roles the Vault already uses: ra
 
 ### 4. Experience from users: suggestions, reviewed
 
-A person (or their assistant) can submit "card X does role Y, because Z" to a `role_suggestions` table that is writable only through a rate-limited endpoint and readable only by the pipeline and the submitter. The reviewer pipeline accepts or rejects it (accepted ones become `source = suggestion` rows) and records why. Nobody edits `card_roles` directly. Design details and abuse limits are a separate task.
+A person (or their assistant) can submit "card X does role Y, because Z" to a `role_suggestions` table that is writable only through a rate-limited endpoint and readable only by the pipeline and the submitter. The reviewer pipeline accepts or rejects it (accepted ones become `source = suggestion` rows that keep the suggester's `origin` and `author`, so an assistant-written row stays labelled as AI) and records why. Nobody edits `card_roles` directly. Design details and abuse limits are a separate task.
 
 ### 5. The questions it answers
 
