@@ -385,7 +385,7 @@ function App() {
                 </p>
               </div>
             </div>
-          ) : <EmptyVault onImported={onImported} />}
+          ) : <><div className="help-row"><HelpHint view="dashboard" /></div><EmptyVault onImported={onImported} /></>}
         </main>
         <VaultFooter />
       </div>

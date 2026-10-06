@@ -187,6 +187,28 @@ html, body { max-width: 100%; overflow-x: clip; }
 .deck-glance { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; margin-top: 12px; }
 .deck-badge { margin-left: 8px; padding: 1px 6px; border-radius: 3px; font-family: var(--mono); font-size: 10px; color: var(--good); border: 1px solid var(--good); white-space: nowrap; }
 
+/* ---- In-app help: the "?" on each view, the Help view and the first-visit welcome ---- */
+.help-row { display: flex; justify-content: flex-end; margin-bottom: 4px; }
+.help-hint {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 44px; min-height: 44px; border: 1px solid var(--border-2); border-radius: 50%;
+  color: var(--gold); font-family: var(--mono); font-size: 14px; text-decoration: none;
+}
+.help-hint:hover { border-color: var(--gold); }
+.help-hint:focus-visible, .help-toc a:focus-visible, .help a:focus-visible, .welcome a:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.help { max-width: 720px; overflow-wrap: anywhere; }
+.help-toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 20px; }
+.help-toc a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; border: 1px solid var(--border-2); border-radius: var(--radius); color: inherit; text-decoration: none; }
+.help-toc a[aria-current="true"] { border-color: var(--gold); color: var(--gold); }
+.help-section { margin: 0 0 24px; scroll-margin-top: 72px; }
+.help-section h2:focus { outline: none; }
+.help-section p { line-height: 1.55; }
+.welcome { margin: 12px 24px 0; padding: 12px 16px; border: 1px solid var(--gold); border-radius: var(--radius); }
+.welcome ol { margin: 6px 0; padding-left: 20px; }
+.welcome p { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin: 6px 0 0; }
+.welcome a { display: inline-flex; align-items: center; min-height: 44px; }
+.welcome .btn { min-height: 44px; }
+
 /* ==== Phone layout (up to 760px wide) ====
    Everything from here to the end of the file is inside phone-width media queries (only .m-only,
    phone-only elements, is hidden outside them), so wider screens render exactly as before; a test

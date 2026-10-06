@@ -8,7 +8,7 @@ PUBLIC = Path(__file__).parent.parent / "public"
 HELP = (PUBLIC / "views" / "help.jsx").read_text(encoding="utf-8")
 APP = (PUBLIC / "app.jsx").read_text(encoding="utf-8")
 ACCOUNT = (PUBLIC / "views" / "account.jsx").read_text(encoding="utf-8")
-CSS = (PUBLIC / "styles.css").read_text(encoding="utf-8") + (PUBLIC / "layout.css").read_text(encoding="utf-8")
+CSS = (PUBLIC / "layout.css").read_text(encoding="utf-8")
 BUILD = (Path(__file__).parent.parent / "web" / "build.mjs").read_text(encoding="utf-8")
 
 SECTION_IDS = re.findall(r"^\s*id: '([a-z]+)', title:", HELP, re.M)
@@ -32,6 +32,7 @@ def test_every_link_into_the_help_lands_on_a_section():
 
 def test_the_question_mark_is_on_every_view_and_the_help_is_reachable_and_routed():
     assert "<HelpHint view={route.view} />" in APP and "<Help section={route.section} />" in APP
+    assert 'HelpHint view="dashboard"' in APP  # the empty vault has one too
     assert "view === 'help'" in APP and "helpHashFor(route.section)" in APP
     assert 'href="#/help"' in ACCOUNT
     assert "'views/help.jsx'," in BUILD and BUILD.index("views/help.jsx") < BUILD.index("'app.jsx'")
