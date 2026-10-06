@@ -46,7 +46,9 @@ URL. The threat model, with the tests that prove each mitigation, is in
    `WWW-Authenticate: Bearer realm="the-vault", resource_metadata="https://<host>/.well-known/oauth-protected-resource/api/mcp"`
    (RFC 9728; also served at `/.well-known/oauth-protected-resource`).
 2. The server metadata (RFC 8414) is at `/.well-known/oauth-authorization-server`: S256 only,
-   `client_id_metadata_document_supported: true`, a `registration_endpoint`, public clients only.
+   `client_id_metadata_document_supported: true`, a `registration_endpoint`. Clients are public (PKCE, like
+   Claude) or, with a metadata document, `private_key_jwt`: a signed assertion at the token endpoint with a key from
+   a `jwks_uri` on the client_id's host (like ChatGPT; `vault/client_auth.py`). Registered (DCR) clients are public.
 3. **Identify**: use an https URL as `client_id` (a Client ID Metadata Document with `client_id`,
    `client_name` and `redirect_uris`), or register with `POST /oauth/register` (RFC 7591). Metadata URLs
    are fetched with SSRF protection (https on 443, public addresses only, no redirects, 32 KB, 5 s).
