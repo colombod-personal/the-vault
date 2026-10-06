@@ -112,3 +112,12 @@ def test_view_scripts_are_valid_javascript(view, tmp_path):
 
 def test_the_protocol_version_is_the_stable_one():
     assert mcp_ui.PROTOCOL == "2026-01-26" and mcp_ui.MIME == "text/html;profile=mcp-app"
+
+
+@pytest.mark.parametrize("view", ["deck", "upgrades", "shopping"])
+def test_deck_panels_lead_with_the_deck_not_with_card_counts(view):
+    """#216: the panel opens with the deck's name, format and commander(s) (deckHeader), before its own statistics."""
+    page = mcp_ui.html(view)
+    assert "deckHeader(" in page and "var head = deckHeader(env.deck)" in page
+    assert page.index("deckHeader(env.deck)") < page.index('h("h2"')  # the deck comes before the panel's own title
+    assert "Commander: " in page and "Format not given" in page and "Format read from the list" in page

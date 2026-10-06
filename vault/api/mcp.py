@@ -422,6 +422,12 @@ OWN_DATA_ONLY = {"get_acquisition_timeline", "parse_decklist", "save_deck", "upd
                  "list_my_shares", "accept_share", "stop_sharing", "start_collection_upload",
                  "get_staged_upload", "confirm_staged_upload", "get_deck_overlap", "council_brief", "expert_brief",
                  "confirm_owned_cards_update", "undo_owned_cards_update"}
+DECK_ANALYSIS = {"deck_stats", "simulate_draws", "deck_legality", "find_upgrades", "validate_deck_changes", "find_combos",
+                 "shopping_list"}
+for _tool in TOOLS:
+    if _tool.name in DECK_ANALYSIS:  # #216: the answer says which deck it is about, before any card
+        _tool.description += (" The answer's `deck` block names the deck (its name when saved, format, commander(s), card "
+                              "count, colour identity): say which deck this is first.")
 for _tool in TOOLS:
     if not _tool.provenance:
         _tool.provenance = ("scryfall",) if _tool.name in SCRYFALL_DATA else ("archidekt",) if _tool.name == "get_archidekt_deck" else ()

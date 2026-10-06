@@ -115,6 +115,18 @@ function provenanceFooter(blocks) {
   f.appendChild(h("p", { text: "Shown by The Vault, a free fan tool. It is not produced or endorsed by Scryfall, Wizards of the Coast or any source named above." }));
   return f;
 }
+function deckHeader(deck) {
+  // Which deck this is: its name, then format, commander(s), card count and colour identity (text only, #216).
+  if (!deck) { return null; }
+  var o = deck.overview || {}, cmd = o.commanders || [], bits = [];
+  bits.push(o.format ? o.format.charAt(0).toUpperCase() + o.format.slice(1) : "Format not given");
+  if (cmd.length) { bits.push((cmd.length > 1 ? "Commanders: " : "Commander: ") + cmd.join(" & ")); }
+  if (o.cards !== null && o.cards !== undefined) { bits.push(o.cards + " cards"); }
+  if (o.color_identity) { bits.push("colour identity " + o.color_identity); }
+  var box = h("div", { class: "box" }, [h("h1", { text: deck.name || (cmd.length ? cmd.join(" & ") : "Pasted deck") }), h("div", { text: bits.join(" \u00b7 ") })]);
+  if (o.format_from && o.format_from !== "set on the deck") { box.appendChild(h("div", { class: "small muted", text: "Format read from the list (" + o.format_from + "): confirm it if it matters." })); }
+  return box;
+}
 function reportSize() {
   var send_ = function () { notify("ui/notifications/size-changed", { width: Math.ceil(document.documentElement.scrollWidth), height: Math.ceil(document.documentElement.scrollHeight) }); };
   if (window.ResizeObserver) { new ResizeObserver(send_).observe(document.body); }
@@ -197,7 +209,8 @@ DECK_JS = r"""
 var FORMATS = ["commander", "standard", "pioneer", "modern", "legacy", "vintage", "pauper", "brawl", "historic", "oathbreaker", "paupercommander", "premodern", "penny", "duel", "predh"];
 function render(root, env) {
   var r = env.result || env;
-  root.appendChild(h("h1", { text: "Deck: " + r.cards + " cards (" + r.unique + " unique)" }));
+  var head = deckHeader(env.deck); if (head) { root.appendChild(head); }
+  root.appendChild(h("h2", { text: "Statistics: " + r.cards + " cards (" + r.unique + " unique)" }));
   root.appendChild(h("div", { class: "muted", text: r.lands + " lands, " + r.nonland + " other cards, average mana value " + r.average_mana_value_nonland + ", color identity " + ((r.color_identity || []).join("") || "colorless") }));
   root.appendChild(h("h2", { text: "Mana curve (non-land)" }));
   var max = Math.max.apply(null, Object.keys(r.curve).map(function (k) { return r.curve[k]; }).concat([1]));
@@ -237,7 +250,8 @@ UPGRADES_JS = r"""
 var picked = { adds: {}, cuts: {} };
 function render(root, env) {
   var r = env.result || env, args = lastInput || {};
-  root.appendChild(h("h1", { text: "Upgrade candidates (" + r.format + ")" }));
+  var head = deckHeader(env.deck); if (head) { root.appendChild(head); }
+  root.appendChild(h("h2", { text: "Upgrade candidates (" + r.format + ")" }));
   var budget = h("input", { type: "range", min: "0", max: String(Math.max(50, Math.ceil(r.budget_usd * 3))), step: "1", value: String(r.budget_usd) });
   var label = h("span", { text: " budget per card: $" + r.budget_usd });
   budget.addEventListener("input", function () { label.textContent = " budget per card: $" + budget.value; });
@@ -308,7 +322,8 @@ function render(root, r) {
 SHOPPING_JS = r"""
 function render(root, env) {
   var r = env.result || env;
-  root.appendChild(h("h1", { text: r.lines.length ? "To buy: " + r.lines.length + " card(s), about " + usd(r.total_usd) : "You own everything in this list" }));
+  var head = deckHeader(env.deck); if (head) { root.appendChild(head); }
+  root.appendChild(h("h2", { text: r.lines.length ? "To buy: " + r.lines.length + " card(s), about " + usd(r.total_usd) : "You own everything in this list" }));
   if (r.lines.length) {
     var t = h("table", {}, [h("tr", {}, [h("th", { class: "num", text: "Qty" }), h("th", { text: "Card" }), h("th", { class: "num", text: "Each" }), h("th", { text: "Price date" })])]);
     r.lines.forEach(function (l) {

@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from .. import catalog_queries as q
 from .. import combos
+from .. import deck_overview
 from .. import deck_tools as dt
 from .. import provenance as prov
 from .. import simulate
@@ -76,6 +77,8 @@ MULTIPLAYER = {"commander", "oathbreaker", "paupercommander", "predh"}
 
 
 class Answer(BaseModel):
+    deck: dict | None = Field(None, description="Which deck this is about: its name (saved decks), format, commander(s), "
+                              "card count and colour identity (vault.deck_overview). Lead with it")
     result: dict
     provenance: list[prov.Provenance]
     links: dict = Field(default_factory=dict, alias="_links")
@@ -93,11 +96,23 @@ def owned_by_oracle(db: Session, user: User) -> dict[str, int]:
 def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
     router = APIRouter(prefix=V1 + "/decks", tags=["decks"])
 
-    def answer(db: Session, what: str, result: dict, inputs: tuple[str, ...], path: str) -> dict:
+    def answer(db: Session, what: str, result: dict, inputs: tuple[str, ...], path: str, deck: dict | None = None) -> dict:
         loaded = q.sources(db)
         used = [n for n in inputs if n in loaded]
-        return {"result": result, "provenance": [prov.computed(what, q.provenance_for(db, *used), as_of=date.today())],
+        return {"deck": deck, "result": result,
+                "provenance": [prov.computed(what, q.provenance_for(db, *used), as_of=date.today())],
                 "_links": {"self": link(f"{V1}/decks/{path}")}}
+
+    def identity(db: Session, user: User, body: DeckIn) -> dict:
+        """Which deck an answer is about (#216): a saved deck's id and name, and for any list its overview (format,
+        commander(s), card count, colour identity), so answers and views lead with it rather than with card lines."""
+        if body.deck_id is not None:
+            deck = db.get(Deck, body.deck_id)
+            text, name, stored = deck.text, deck.name, deck.format  # text_of has already checked it is theirs
+        else:
+            text, name, stored = body.text, None, None
+        known = deck_overview.identities(db, deck_overview.read(text)["commanders"])
+        return {"id": body.deck_id, "name": name, "overview": deck_overview.overview(text, stored, known)}
 
     def text_of(db: Session, user: User, body: DeckIn) -> str:
         """The decklist: sent as text, or a saved deck of this person's by id."""
@@ -124,7 +139,8 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
                  summary="Counts, curve, color identity, roles and estimated cost of a decklist")
     def deck_stats(request: Request, body: DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         resolved = prepared(request, db, user, text_of(db, user, body))
-        return answer(db, "deck statistics", dt.stats(db, resolved), ("oracle_cards", "oracle_tags", "oracle_prices"), "stats")
+        return answer(db, "deck statistics", dt.stats(db, resolved), ("oracle_cards", "oracle_tags", "oracle_prices"), "stats",
+                      identity(db, user, body))
 
     @router.post("/simulate", response_model=Answer, response_model_by_alias=True,
                  summary="How the mana curve plays: sample opening turns and the odds behind them (a simple goldfish)")
@@ -148,7 +164,7 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
             raise HTTPException(400, str(exc)) from exc
         result["unmatched"] = resolved.unmatched
         result["format"] = fmt
-        return answer(db, "mana curve simulation", result, ("oracle_cards",), "simulate")
+        return answer(db, "mana curve simulation", result, ("oracle_cards",), "simulate", identity(db, user, body))
 
     @router.post("/legality", response_model=Answer, response_model_by_alias=True,
                  summary="Is the decklist legal in a format? Lists every issue, and what was not checked")
@@ -158,7 +174,7 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
             result = dt.legality(resolved, body.format)
         except dt.DeckError as exc:
             failing(exc)
-        return answer(db, "legality check", result, ("oracle_cards",), "legality")
+        return answer(db, "legality check", result, ("oracle_cards",), "legality", identity(db, user, body))
 
     @router.post("/upgrades", response_model=Answer, response_model_by_alias=True,
                  summary="Upgrade candidates within a budget: legal, in the deck's colors, not already in it")
@@ -172,7 +188,8 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
             result = dt.find_upgrades(db, resolved, body.format, body.budget_usd, body.roles, body.limit, owned=owned)
         except dt.DeckError as exc:
             failing(exc)
-        return answer(db, "upgrade candidates", result, ("oracle_cards", "oracle_tags", "oracle_prices"), "upgrades")
+        return answer(db, "upgrade candidates", result, ("oracle_cards", "oracle_tags", "oracle_prices"), "upgrades",
+                      identity(db, user, body))
 
     @router.post("/validate-changes", response_model=Answer, response_model_by_alias=True,
                  summary="Check a proposed list of cuts and adds: legality, colors, resulting deck, and budget")
@@ -182,7 +199,8 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
             result = dt.validate_changes(db, text_of(db, user, body), body.format, body.adds, body.cuts, body.budget_usd)
         except dt.DeckError as exc:
             failing(exc)
-        return answer(db, "validation of proposed changes", result, ("oracle_cards", "oracle_prices"), "validate-changes")
+        return answer(db, "validation of proposed changes", result, ("oracle_cards", "oracle_prices"), "validate-changes",
+                      identity(db, user, body))
 
     @router.post("/combos", response_model=Answer, response_model_by_alias=True,
                  summary="Combos in a decklist, and those one card short (asked of Commander Spellbook on demand)")
@@ -201,7 +219,8 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
                          "no infinite combos, so never tell a player it is combo-free from this alone.")
         spellbook = prov.source("Commander Spellbook", origin="combos written by its community", url="https://commanderspellbook.com",
                                 as_of=date.today(), wizards_material=True)
-        return {"result": out, "provenance": [spellbook, prov.computed("combo lookup", [spellbook], as_of=date.today())],
+        return {"deck": identity(db, user, body), "result": out,
+                "provenance": [spellbook, prov.computed("combo lookup", [spellbook], as_of=date.today())],
                 "_links": {"self": link(f"{V1}/decks/combos")}}
 
     @router.post("/shopping-list", response_model=Answer, response_model_by_alias=True,
@@ -229,6 +248,6 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
                   "total_usd": round(total, 2), "unpriced_lines": unpriced,
                   "notes": ["Prices are the cheapest priced paper printing, from Scryfall (sourced from TCGplayer and Cardmarket), not any store's price today.",
                             "Paste the text into a store's own list or deck tool (for example Card Kingdom's Deck Builder); check how it matches names. The Vault does not contact stores or fill carts."]}
-        return answer(db, "shopping list", result, ("oracle_cards", "oracle_prices"), "shopping-list")
+        return answer(db, "shopping list", result, ("oracle_cards", "oracle_prices"), "shopping-list", identity(db, user, body))
 
     return router
