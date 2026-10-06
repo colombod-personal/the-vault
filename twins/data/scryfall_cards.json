@@ -537,9 +537,6 @@
   "highres_image": true,
   "image_status": "highres_scan",
   "cmc": 1.0,
-  "colors": [
-   "U"
-  ],
   "color_identity": [
    "U"
   ],
@@ -592,6 +589,9 @@
     "object": "card_face",
     "name": "Delver of Secrets",
     "mana_cost": "{U}",
+    "colors": [
+     "U"
+    ],
     "type_line": "Creature \u2014 Human Wizard",
     "oracle_text": "At the beginning of your upkeep, look at the top card of your library. You may reveal that card. If an instant or sorcery card is revealed this way, transform Delver of Secrets.",
     "power": "1",
@@ -610,6 +610,9 @@
     "object": "card_face",
     "name": "Insectile Aberration",
     "mana_cost": "",
+    "colors": [
+     "U"
+    ],
     "type_line": "Creature \u2014 Human Insect",
     "oracle_text": "Flying",
     "power": "3",

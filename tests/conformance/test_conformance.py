@@ -188,9 +188,13 @@ def test_scryfall_ruling_and_tag_shapes(real, twin):
 
 
 def test_scryfall_requires_headers(real, twin):
+    """Scryfall's published rules require a User-Agent and an Accept header, so the twin refuses requests without
+    them: that is what keeps the Vault's own client honest. The real API stopped rejecting such requests (it
+    answered 200 on 2026-10-06), so the two are no longer compared; the Vault still sends accurate headers."""
     url = "https://api.scryfall.com/sets/c21"
     bare = {"User-Agent": "", "Accept": ""}
-    assert real.get(url, headers=bare).status_code == twin.get(url, headers=bare).status_code
+    assert twin.get(url, headers=bare).status_code == 400
+    assert real.get(url, headers=bare).status_code in (200, 400)
 
 
 # -- Archidekt --------------------------------------------------------------------------------
@@ -211,8 +215,11 @@ def test_archidekt_search_and_deck(real, twin):
     assert missing(card["card"], ["uid", "edition", "oracleCard", "collectorNumber"]) == []
     assert invented(t_deck, r_deck) == []
 
-    gone = real.get("https://archidekt.com/api/decks/1/")
-    assert gone.status_code == twin.get("https://archidekt.com/api/decks/1/").status_code
+    missing_id = 2_147_483_647  # beyond any real deck (deck 1 exists on the real site)
+    gone = real.get(f"https://archidekt.com/api/decks/{missing_id}/")
+    t_gone = twin.get(f"https://archidekt.com/api/decks/{missing_id}/")
+    assert gone.status_code == t_gone.status_code == 404
+    assert t_gone.json() == gone.json() == {"error": "Deck not found."}  # the whole body, not only its shape
 
 
 # -- Vercel (jobs/vercel_setup.py) ------------------------------------------------------------
