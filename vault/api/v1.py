@@ -845,10 +845,24 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return {"deleted": True}
 
     @router.get("/archidekt/decks/{deck_id}", tags=["decks"],
-                summary="A public Archidekt deck (fetched server-side; repeat reads within 10 minutes come from a cache)")
+                summary="A public Archidekt deck, read for you (fetched server-side; repeat reads within 10 minutes come from a cache)")
     def archidekt_deck(deck_id: Id, refresh: bool = False, user: User = Depends(current_user),
                        db: Session = Depends(get_db)) -> dict:
-        return archidekt_cache.read(db, deck_id, fetch_archidekt, refresh=refresh)
+        """The deck as the Vault saves it: name, author, format, commander(s), counts and the list with its sections, and
+        Archidekt's own bracket tag. Archidekt's raw answer is 300 KB for 100 cards, mostly other shops' prices per card
+        (Card Kingdom, Cardmarket, ...), which the Vault does not pass on: it quotes only Scryfall's dated prices (#219)."""
+        raw = archidekt_cache.read(db, deck_id, fetch_archidekt, refresh=refresh)
+        parsed = deck_import.to_decklist(raw)
+        known = deck_overview.identities(db, deck_overview.read(parsed["text"])["commanders"])
+        url = deck_import.canonical_url(deck_id)
+        return {"deck": {"id": deck_id, "name": parsed["name"], "author": parsed["author"], "url": url, "source": "archidekt",
+                         "overview": deck_overview.overview(parsed["text"], parsed["format"], known)},
+                "archidekt_bracket": raw.get("edhBracket"), "counts": parsed["counts"], "text": parsed["text"],
+                "credit": {"source": "Archidekt", "url": url, "author": parsed["author"],
+                           "notice": "Deck list from Archidekt" + (f" by {parsed['author']}" if parsed["author"] else "")
+                                     + ". The deck is theirs, not the Vault's."},
+                "note": "Archidekt's per-card shop prices are not passed on: the Vault quotes only Scryfall's dated prices.",
+                "vault_cache": raw.get("vault_cache")}
 
     def fetch_archidekt(deck: int) -> dict:
         try:

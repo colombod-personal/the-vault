@@ -312,6 +312,8 @@ TOOLS = [
          write=True, destructive=True, provenance=("archidekt",)),
     Tool("get_archidekt_deck", "A public deck from Archidekt by its id (the number in archidekt.com/decks/<id>). "
          "One deck per request, only the one the person gave you. Check list_decks first: the deck may be saved. "
+         "Returns the deck's name, author, format and commander(s) (`overview`), card counts, the list with its "
+         "sections and Archidekt's own bracket tag; not Archidekt's per-card shop prices. "
          "The deck is Archidekt's: credit Archidekt and link the deck when you use it. Read-only: nothing can "
          "change Archidekt, so the person applies any changes there themselves.",
          {"deck_id": ID}, ["deck_id"], path=lambda a: f"{V1}/archidekt/decks/{int(a['deck_id'])}"),
