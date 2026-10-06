@@ -1,0 +1,44 @@
+{
+  "name": "the-vault",
+  "version": "0.1.0",
+  "description": "Magic: The Gathering rules, cards, decks and your collection for ChatGPT and Codex, grounded in Scryfall and the Comprehensive Rules, with sources shown, and an expert council for deck reviews. Free and unofficial.",
+  "author": {
+    "name": "The Vault",
+    "url": "https://github.com/colombod-personal/the-vault"
+  },
+  "homepage": "https://mtgvault.cards",
+  "repository": "https://github.com/colombod-personal/the-vault",
+  "license": "MIT",
+  "keywords": [
+    "magic-the-gathering",
+    "mtg",
+    "commander",
+    "decks",
+    "rules",
+    "collection",
+    "scryfall"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./mcp.json",
+  "interface": {
+    "displayName": "The Vault",
+    "shortDescription": "Your Magic collection, decks and the rules, with sources",
+    "longDescription": "Ask about the cards you own and what they are worth, check a deck against your collection, find upgrades on a budget, get rules answers with cited rule numbers, and have an expert council (Commander expert, casual table, judge, devil's advocate) review a deck. Card data and prices are Scryfall's, rules are Wizards of the Coast's, shown with their sources. Free, unofficial Fan Content.",
+    "developerName": "The Vault",
+    "category": "Lifestyle",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://mtgvault.cards",
+    "privacyPolicyURL": "https://mtgvault.cards/privacy.html",
+    "defaultPrompt": [
+      "What are my most valuable cards?",
+      "Review my Commander deck with the expert council",
+      "What am I missing for this deck, and what will it cost?"
+    ],
+    "brandColor": "#C9A227",
+    "logo": "./assets/logo.png",
+    "composerIcon": "./assets/logo.png"
+  }
+}

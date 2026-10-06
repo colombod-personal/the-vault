@@ -29,6 +29,9 @@ SKILLS = ROOT / "skills"
 AGENTS = ROOT / "agents"
 DEFS = ROOT / "agent-definitions"
 PLUGIN = ROOT / "plugins" / "the-vault"
+# ChatGPT and Codex plugin (#225): .codex-plugin/plugin.json, the skills, the experts as skills (no subagents there),
+# and the Vault's MCP server. Uploaded as a ZIP: python scripts/build_plugin.py --zip
+OPENAI = ROOT / "plugins" / "the-vault-openai"
 MARKETPLACE = ROOT / ".claude-plugin" / "marketplace.json"
 
 NAME = "the-vault"
@@ -313,6 +316,87 @@ def experts_module() -> str:
             'never this file."""\n\n# fmt: off\nDATA = ' + data + "\n")
 
 
+OPENAI_MANIFEST = {
+    "name": NAME,
+    "version": "0.1.0",
+    "description": ("Magic: The Gathering rules, cards, decks and your collection for ChatGPT and Codex, grounded in "
+                    "Scryfall and the Comprehensive Rules, with sources shown, and an expert council for deck reviews. "
+                    "Free and unofficial."),
+    "author": {"name": "The Vault", "url": "https://github.com/colombod-personal/the-vault"},
+    "homepage": HOST,
+    "repository": "https://github.com/colombod-personal/the-vault",
+    "license": "MIT",
+    "keywords": ["magic-the-gathering", "mtg", "commander", "decks", "rules", "collection", "scryfall"],
+    "skills": "./skills/",
+    "mcpServers": "./mcp.json",
+    "interface": {
+        "displayName": "The Vault",
+        "shortDescription": "Your Magic collection, decks and the rules, with sources",
+        "longDescription": ("Ask about the cards you own and what they are worth, check a deck against your collection, "
+                            "find upgrades on a budget, get rules answers with cited rule numbers, and have an expert "
+                            "council (Commander expert, casual table, judge, devil's advocate) review a deck. Card data "
+                            "and prices are Scryfall's, rules are Wizards of the Coast's, shown with their sources. "
+                            "Free, unofficial Fan Content."),
+        "developerName": "The Vault",
+        "category": "Lifestyle",
+        "capabilities": ["Read", "Write"],
+        "websiteURL": HOST,
+        "privacyPolicyURL": f"{HOST}/privacy.html",
+        "defaultPrompt": ["What are my most valuable cards?",
+                          "Review my Commander deck with the expert council",
+                          "What am I missing for this deck, and what will it cost?"],
+        "brandColor": "#C9A227",
+        "logo": "./assets/logo.png",
+        "composerIcon": "./assets/logo.png",
+    },
+}
+OPENAI_MCP = {"mcpServers": {NAME: {"type": "streamable-http", "url": f"{HOST}/api/mcp"}}}
+# Experts that work on a deck or a question: each becomes a skill where hosts have no subagents (the council skill
+# calls them; a person can also ask for one directly). The buyer and deckbuilder stay agents for plugin hosts.
+EXPERT_SKILLS = ("vault-commander-expert", "vault-casual-table", "vault-limited-expert", "vault-pauper-expert",
+                 "vault-standard-expert", "vault-pioneer-expert", "vault-two-headed-giant-expert", "vault-judge",
+                 "vault-devils-advocate", "vault-synergy-analyst", "vault-collection-analyst")
+
+
+def expert_skill(agent: dict) -> str:
+    """An expert agent as a skill (SKILL.md): the same brief, for ChatGPT and Codex, which load skills, not subagents."""
+    import yaml
+
+    front = {"name": agent["name"],
+             "description": agent["description"] + " Use when the expert council seats this member, or when the person "
+                            "asks for this expert's view.",
+             "license": "MIT", "metadata": {"vault-tools": " ".join(agent["tools"])}}
+    return ("---\n" + yaml.safe_dump(front, sort_keys=False, allow_unicode=True, width=1000) + "---\n\n"
+            + agent["body"] + "\n\nAnswer as this one member: at most three points, each tied to a tool result. The "
+            "chair (the expert-council skill) gathers the shared facts and runs the challenge.\n")
+
+
+def openai_files() -> dict[Path, str | Path]:
+    files: dict[Path, str | Path] = {
+        OPENAI / ".codex-plugin" / "plugin.json": dump(OPENAI_MANIFEST),
+        OPENAI / "mcp.json": dump(OPENAI_MCP),
+        OPENAI / "assets" / "logo.png": ROOT / "public" / "apple-touch-icon.png",
+    }
+    for source in sorted(SKILLS.rglob("*")):
+        if source.is_file():
+            files[OPENAI / "skills" / source.relative_to(SKILLS)] = source
+    for agent in load_agents():
+        if agent["name"] in EXPERT_SKILLS:
+            files[OPENAI / "skills" / agent["name"] / "SKILL.md"] = expert_skill(agent)
+    return files
+
+
+def write_zip(target: Path) -> Path:
+    """The ChatGPT/Codex plugin as a ZIP (plugin root at the top), for upload or directory submission."""
+    import zipfile
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
+        for path, value in sorted(openai_files().items()):
+            z.writestr(str(path.relative_to(OPENAI)).replace("\\", "/"), _read(value))
+    return target
+
+
 def expected() -> dict[Path, str | Path]:
     """Every file the plugin should contain: text content, or the skill file it copies."""
     files: dict[Path, str | Path] = {
@@ -334,11 +418,17 @@ def expected() -> dict[Path, str | Path]:
         files[DEFS / "copilot" / f"{agent['name']}.agent.md"] = copilot_agent(agent)
     files[DEFS / "README.md"] = DEFS_README
     files[ROOT / "vault" / "experts_data.py"] = experts_module()
+    files.update(openai_files())
     return files
+
+
+BINARY = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico"}
 
 
 def _read(value: str | Path) -> bytes:
     data = value.read_bytes() if isinstance(value, Path) else value.encode("utf-8")
+    if isinstance(value, Path) and value.suffix.lower() in BINARY:
+        return data  # an image is copied byte for byte
     return data.replace(b"\r\n", b"\n")  # checkouts differ in line endings; the content is what matters
 
 
@@ -346,9 +436,12 @@ def stale() -> list[str]:
     want = expected()
     problems = []
     for path, value in want.items():
-        if not path.exists() or path.read_bytes().replace(b"\r\n", b"\n") != _read(value):
+        on_disk = path.read_bytes() if path.exists() else None
+        if on_disk is not None and path.suffix.lower() not in BINARY:
+            on_disk = on_disk.replace(b"\r\n", b"\n")
+        if on_disk != _read(value):
             problems.append(f"out of date: {path.relative_to(ROOT)}")
-    for folder in (PLUGIN, DEFS):
+    for folder in (PLUGIN, DEFS, OPENAI):
         if folder.exists():
             for path in folder.rglob("*"):
                 if path.is_file() and path not in want:
@@ -357,7 +450,7 @@ def stale() -> list[str]:
 
 
 def build() -> None:
-    for folder in (PLUGIN, DEFS):
+    for folder in (PLUGIN, DEFS, OPENAI):
         if folder.exists():
             shutil.rmtree(folder)
     for path, value in expected().items():
@@ -368,6 +461,7 @@ def build() -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true", help="fail if the generated files are out of date")
+    parser.add_argument("--zip", action="store_true", help="also write dist/the-vault-openai.zip (ChatGPT/Codex upload)")
     args = parser.parse_args(argv)
     if args.check:
         problems = stale()
@@ -377,7 +471,9 @@ def main(argv: list[str] | None = None) -> int:
             print("run: python scripts/build_plugin.py")
         return 1 if problems else 0
     build()
-    print(f"wrote {PLUGIN.relative_to(ROOT)}, {MARKETPLACE.relative_to(ROOT)} and public/connect.html")
+    print(f"wrote {PLUGIN.relative_to(ROOT)}, {OPENAI.relative_to(ROOT)}, {MARKETPLACE.relative_to(ROOT)} and public/connect.html")
+    if args.zip:
+        print(f"wrote {write_zip(ROOT / 'dist' / 'the-vault-openai.zip').relative_to(ROOT)}")
     return 0
 
 
