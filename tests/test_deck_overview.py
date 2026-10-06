@@ -141,3 +141,56 @@ def test_every_deck_tool_description_says_to_lead_with_the_deck(agent, bot):
     from vault.api import mcp
     for name in mcp.DECK_ANALYSIS:
         assert "names the deck" in mcp.BY_NAME[name].description, name
+
+
+def test_get_deck_for_assistants_leads_with_the_deck_and_stays_small(agent, bot, catalog):
+    """#232: get_deck answered 74,617 characters for one deck, 95% of it per-card ownership, with the identity after it."""
+    import json
+    write = make_token(agent, scopes=["read", "write"])
+    saved = call_tool(bot, write, "save_deck", name="Sliver Swarm", text=SLIVERS)["structuredContent"]
+    lean = call_tool(bot, write, "get_deck", deck_id=saved["id"])["structuredContent"]
+    keys = list(lean)
+    assert keys[:5] == ["_links", "id", "name", "format", "overview"] and keys.index("text") > keys.index("coverage")
+    assert lean["overview"]["commanders"] == ["Sliver Overlord", "The First Sliver"] and lean["text"] == SLIVERS
+    assert lean["summary"]["need"] == 100 and lean["summary"]["have"] + lean["summary"]["missing"] == 100
+    assert lean["coverage"]["cards_total"] == len(lean["coverage"]["cards"]) + lean["coverage"]["fully_owned"] or lean["coverage"]["shown"]
+    assert len(lean["coverage"]["cards"]) <= 40 and not any(c["owned_printings"] for c in lean["coverage"]["cards"])
+    assert len(json.dumps(lean)) < 15_000, len(json.dumps(lean))
+    full = call_tool(bot, write, "get_deck", deck_id=saved["id"], all_cards=True)["structuredContent"]
+    assert len(full["coverage"]["cards"]) >= len(lean["coverage"]["cards"]) and full["coverage"].get("cards_total") is None
+
+
+def test_the_websites_deck_answer_is_unchanged(agent):
+    deck = agent.post(f"{V1}/decks", json={"name": "Slivers", "text": SLIVERS}).json()
+    web = agent.get(f"{V1}/decks/{deck['id']}").json()  # no detail: every card, as the website reads it
+    assert len(web["coverage"]["cards"]) >= 4 and "cards_total" not in web["coverage"] or web["coverage"]["cards_total"] is None
+    assert web["summary"] is None
+
+
+def test_the_simulation_warns_when_a_deck_has_three_or_more_colours_it_does_not_check(agent, bot, catalog):
+    write = make_token(agent, scopes=["read", "write"])
+    five = call_tool(bot, write, "save_deck", name="Five", text=SLIVERS)["structuredContent"]
+    out = call_tool(bot, write, "simulate_draws", deck_id=five["id"], format="commander", samples=0)["structuredContent"]
+    assert "5 colours (WUBRG)" in out["result"]["colour_warning"] and "any land pays for any spell" in out["result"]["colour_warning"]
+    green = call_tool(bot, write, "save_deck", name="Green", text="Commander\n1 Sol Ring\n\nDeck\n99 Forest")["structuredContent"]
+    quiet = call_tool(bot, write, "simulate_draws", deck_id=green["id"], format="commander", samples=0)["structuredContent"]
+    assert "colour_warning" not in quiet["result"]
+
+
+def test_a_hundred_card_deck_with_nothing_owned_stays_under_the_cap(agent, bot, app):
+    """The size that mattered: 95 different cards, none owned (the biggest answer a deck can make)."""
+    import json
+    with app.state.db.sessions() as db:
+        cs.sync_oracle_cards(db, [oracle(f"{i:08d}-0000-0000-0000-000000000000", f"Test Card {i:02d}", ["G"], "Creature")
+                                  for i in range(1, 96)])
+        for source in ("oracle_cards", "oracle_tags", "oracle_prices"):
+            cs.record_source(db, source, version=source + "-1", rows=95)
+        db.commit()
+    text = "Commander\n1 Test Card 01\n\nDeck\n" + "\n".join(f"1 Test Card {i:02d}" for i in range(2, 96))
+    write = make_token(agent, scopes=["read", "write"])
+    saved = call_tool(bot, write, "save_deck", name="Big", text=text)["structuredContent"]
+    lean = call_tool(bot, write, "get_deck", deck_id=saved["id"])["structuredContent"]
+    full = call_tool(bot, write, "get_deck", deck_id=saved["id"], all_cards=True)["structuredContent"]
+    assert len(lean["coverage"]["cards"]) == 40 and lean["coverage"]["cards_total"] == 95 and lean["coverage"]["fully_owned"] == 0
+    assert "the 40 dearest of the 95 cards not fully owned" in lean["coverage"]["shown"]
+    assert len(json.dumps(lean)) < 15_000 < len(json.dumps(full)), (len(json.dumps(lean)), len(json.dumps(full)))

@@ -274,9 +274,13 @@ TOOLS = [
     Tool("get_deck_overlap", "Cards that are in more than one of the person's saved decks, how many copies building "
          "every deck at once needs, how many they own, and how many they are short. Basic lands are left out.",
          path=lambda a: f"{V1}/decks/overlap"),
-    Tool("get_deck", "A saved deck: its name, `overview` (format, commander(s), card count, colour identity), its text and "
-         "coverage against the collection. Lead with the name, format and commander(s); show card lines only when asked.",
-         {"deck_id": ID}, ["deck_id"], path=lambda a: f"{V1}/decks/{int(a['deck_id'])}"),
+    Tool("get_deck", "A saved deck: its name, `overview` (format, commander(s), card count, colour identity), a `summary` "
+         "of how much of it the person owns (copies needed, owned, missing, cost to finish), the cards not fully owned "
+         "(the dearest 40), and the decklist. all_cards adds every card's ownership with the printings owned (about 80 KB "
+         "for 100 cards).",
+         {"deck_id": ID, "all_cards": {"type": "boolean", "default": False,
+                                       "description": "Every card's ownership and owned printings (large)"}}, ["deck_id"],
+         path=lambda a: f"{V1}/decks/{int(a['deck_id'])}?detail={'cards' if a.get('all_cards') else 'summary'}"),
     Tool("save_deck", "Save a decklist to the person's decks.",
          {"name": {"type": "string"}, "text": DECKLIST, "source_url": SOURCE_URL, "source_author": SOURCE_AUTHOR,
           "format": DECK_FORMAT},
