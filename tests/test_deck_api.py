@@ -282,3 +282,29 @@ def test_stats_count_game_changers_and_give_a_bracket_floor_from_them_alone(load
     one = loaded.post(f"{V1}/stats", json={"text": "1 Test Changer\n1 Test Rock"}).json()["result"]["game_changers"]
     assert one["count"] == 1 and one["bracket_floor"] == 3 and one["cards"] == [{"name": "Test Changer", "quantity": 1}]
     assert "Wizards' own page was not readable" in one["note"]  # says what it did not check
+
+
+def test_every_analysis_takes_a_saved_deck_by_id_instead_of_the_list(loaded):
+    """A person names a deck; the AI finds it (list_decks ?q=) and analyses it by id, not by sending 100 lines each time (#96)."""
+    text = "Commander\n1 Test Commander\nDeck\n37 Test Mountain\n30 Dull Bear\n31 Cheap Ramp"
+    saved = loaded.post("/api/v1/decks", json={"name": "Elves", "text": text}).json()
+    by_text = loaded.post(f"{V1}/stats", json={"text": text}).json()["result"]
+    assert loaded.post(f"{V1}/stats", json={"deck_id": saved["id"]}).json()["result"] == by_text
+    assert loaded.post(f"{V1}/legality", json={"deck_id": saved["id"], "format": "commander"}).status_code == 200
+    assert loaded.post(f"{V1}/shopping-list", json={"deck_id": saved["id"]}).status_code == 200
+    assert loaded.post(f"{V1}/combos", json={"deck_id": saved["id"]}).status_code in (200, 502, 503)
+    assert loaded.post(f"{V1}/simulate", json={"deck_id": saved["id"], "format": "commander", "games": 50, "samples": 1}).status_code == 200
+    assert loaded.post(f"{V1}/validate-changes", json={"deck_id": saved["id"], "format": "commander", "adds": [], "cuts": []}).status_code == 200
+    assert loaded.post(f"{V1}/upgrades", json={"deck_id": saved["id"], "format": "commander", "budget_usd": 5}).status_code == 200
+
+
+def test_a_deck_id_must_be_the_callers_and_exactly_one_of_text_or_id_is_needed(loaded, app):
+    from fastapi.testclient import TestClient
+
+    mine = loaded.post("/api/v1/decks", json={"name": "Mine", "text": "1 Test Rock"}).json()
+    with TestClient(app) as other:
+        other.post("/api/auth/dev-login", params={"email": "bob@example.com"})
+        assert other.post(f"{V1}/stats", json={"deck_id": mine["id"]}).status_code == 404  # someone else's deck
+    assert loaded.post(f"{V1}/stats", json={"deck_id": 999999}).status_code == 404
+    assert loaded.post(f"{V1}/stats", json={}).status_code == 422
+    assert loaded.post(f"{V1}/stats", json={"text": "1 Test Rock", "deck_id": mine["id"]}).status_code == 422
