@@ -31,8 +31,10 @@ def test_every_link_into_the_help_lands_on_a_section():
 
 
 def test_the_question_mark_is_on_every_view_and_the_help_is_reachable_and_routed():
-    assert "<HelpHint view={route.view} />" in APP and "<Help section={route.section} />" in APP
+    assert "<HelpHint view={route.view} shared={!!viewing} />" in APP and "<Help section={route.section} />" in APP
     assert 'HelpHint view="dashboard"' in APP  # the empty vault has one too
+    assert "shared={!!viewing}" in APP and "<HelpHint view=\"dashboard\" shared />" in APP  # a shared collection's hint opens Sharing
+    assert "shared && view === 'dashboard' ? 'sharing'" in HELP
     assert "view === 'help'" in APP and "helpHashFor(route.section)" in APP
     assert 'href="#/help"' in ACCOUNT
     assert "'views/help.jsx'," in BUILD and BUILD.index("views/help.jsx") < BUILD.index("'app.jsx'")

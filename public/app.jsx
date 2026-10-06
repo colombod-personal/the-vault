@@ -376,7 +376,7 @@ function App() {
         <main>
           {route.view === 'help' ? <Help section={route.section} /> : viewing ? (
             // Someone else's collection, shared but empty: nothing to import here.
-            <div style={{ display: 'grid', placeItems: 'center', minHeight: '60vh' }}>
+            <><div className="help-row"><HelpHint view="dashboard" shared /></div><div style={{ display: 'grid', placeItems: 'center', minHeight: '60vh' }}>
               <div className="panel" style={{ width: 'min(460px, 100%)', textAlign: 'center' }}>
                 <p className="eyebrow">Shared collection</p>
                 <h1 className="h1" style={{ margin: '8px 0 12px' }}>{viewing.from}'s collection is empty</h1>
@@ -384,7 +384,7 @@ function App() {
                   There are no cards in it yet. When {viewing.from} imports a collection, it shows up here.
                 </p>
               </div>
-            </div>
+            </div></>
           ) : <><div className="help-row"><HelpHint view="dashboard" /></div><EmptyVault onImported={onImported} /></>}
         </main>
         <VaultFooter />
@@ -440,7 +440,7 @@ function App() {
         {welcomeBanner}
 
         <main>
-          {route.view !== 'help' && <div className="help-row"><HelpHint view={route.view} /></div>}
+          {route.view !== 'help' && <div className="help-row"><HelpHint view={route.view} shared={!!viewing} /></div>}
           {route.view === 'help' && <Help section={route.section} />}
           {route.view === 'dashboard' && (
             <Dashboard

@@ -10,20 +10,20 @@ const HELP_SECTIONS = [
     id: 'import', title: 'Import your collection', views: ['dashboard'],
     body: [
       'Export a CSV from the Dragon Shield Card Manager (Inventory, Export) or from Moxfield (Collection, More, Export CSV) and choose it with Import. The format is detected for you, and only the file you choose is read: the Vault never connects to your accounts there.',
-      'Import again any time. Each import replaces the collection with the new file and records what changed, so you can see copies added, removed and changed. Cards the Vault could not match to a printing are kept and marked, so nothing is silently dropped.',
+      'Import again any time. Each import replaces the collection with the new file and records what changed, so you can see copies added, removed and changed.',
     ],
   },
   {
     id: 'collection', title: 'Your collection and prices', views: ['browse', 'valuation'],
     body: [
-      'Browse lists every printing you own. Search by name or set and sort by value. Open a card to see its copies, its price history and its card text.',
-      'Prices are Scryfall\'s market prices in US dollars, refreshed daily and dated. "Paid" is what you paid, and profit and loss counts only the copies where a price paid is known. The Value view shows how your collection\'s value has moved over time.',
+      'Browse lists every printing you own. Search by name or set and sort by value. Open a card to see your copies of it, every printing you own, its text and live Scryfall prices.',
+      'Prices are Scryfall\'s market prices in US dollars, refreshed daily and dated. "Paid" is what you paid, and profit and loss counts only the copies where a price paid is known. The Value view charts your collection\'s value by month.',
     ],
   },
   {
     id: 'sets', title: 'Sets', views: ['sets'],
     body: [
-      'Sets shows how much of each set you own and what it is worth. Open a set to see its cards, owned and not owned.',
+      'Sets shows how much of each set you own and what it is worth. Open a set to see the cards you own from it, most valuable first.',
     ],
   },
   {
@@ -80,8 +80,9 @@ const helpHashFor = (id) => '#/help' + (id ? '/' + encodeURIComponent(id) : '');
 
 // "?" on a main view: opens that view's help section. A real link, so it works by keyboard and touch
 // and the browser's Back button returns to the view.
-function HelpHint({ view }) {
-  const id = HELP_FOR_VIEW[view];
+function HelpHint({ view, shared }) {
+  // Someone else's collection is read-only: its page explains Sharing, not Import.
+  const id = shared && view === 'dashboard' ? 'sharing' : HELP_FOR_VIEW[view];
   if (!id) return null;
   return (
     <a className="help-hint" href={helpHashFor(id)} aria-label="Help for this page" title="Help for this page">?</a>
