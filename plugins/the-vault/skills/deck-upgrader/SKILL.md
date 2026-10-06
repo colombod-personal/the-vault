@@ -6,7 +6,7 @@ description: >-
   build, a tune-up, or help with a weak role (ramp, draw, removal, sweepers).
 license: MIT
 metadata:
-  vault-tools: "deck_stats simulate_draws deck_legality find_upgrades validate_deck_changes find_combos get_card_oracle"
+  vault-tools: "list_decks deck_stats simulate_draws deck_legality find_upgrades validate_deck_changes find_combos get_card_oracle"
 ---
 
 # Deck upgrader
@@ -17,9 +17,10 @@ the candidates it returns, explain why, and present only a plan that the validat
 
 ## Procedure
 
-1. **Get the deck and the constraints.** You need the decklist, the format, and a budget in USD (the
-   most any single added card may cost; ask whether there is also a total cap). If the deck has a
-   commander, make sure it is under a `Commander` header.
+1. **Get the deck and the constraints.** People name their decks: call `list_decks` with `query` set to their
+   words and use the matching deck's `id` (`closest` lists near names if nothing matches; otherwise ask for the list
+   or an Archidekt link). You need the format and a budget in USD (the most any single added card may cost; ask
+   whether there is also a total cap). Every deck tool below takes `deck_id`, so the list is never resent.
 2. **Read the deck.** Call `deck_stats` and `deck_legality`. Report what they say: size, lands, curve,
    color identity, the roles it counted, any legality issues. Fix legality problems first, and say if any
    card was not found (`unmatched`).
