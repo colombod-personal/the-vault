@@ -13,7 +13,7 @@ SKILLS = Path(__file__).parent.parent / "skills"
 FOLDERS = sorted(p for p in SKILLS.iterdir() if p.is_dir())
 TOOLS = set(mcp.BY_NAME)
 # Words in backticks that are fields of tool answers or arguments, not tools.
-FIELDS = {"oracle_id", "source_text", "discard_may_be_the_plan", "budget_usd", "added_cost_usd", "known_card", "next_cursor", "share_id", "total_usd",
+FIELDS = {"oracle_id", "source_text", "discard_may_be_the_plan", "deck_id", "budget_usd", "added_cost_usd", "known_card", "next_cursor", "share_id", "total_usd",
           "not_checked", "include_sideboard"}
 
 

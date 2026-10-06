@@ -6,7 +6,7 @@ description: >-
   asks what they still need to buy for it, wants it upgraded, or wants to find the missing cards in a shop.
 license: MIT
 metadata:
-  vault-tools: "get_archidekt_deck deck_legality find_upgrades validate_deck_changes shopping_list"
+  vault-tools: "list_decks get_deck import_deck_from_link get_archidekt_deck deck_legality find_upgrades validate_deck_changes shopping_list"
 ---
 
 # Archidekt deck helper
@@ -18,21 +18,24 @@ every piece of Archidekt data.
 
 ## Procedure
 
-1. **Read the deck once.** Take the number from the link and call `get_archidekt_deck`. One deck per
-   request: do not fetch other decks, other users' decks or lists of decks. Archidekt's terms do not allow
-   automated searching, so stay with the single deck the person gave you. Say the deck data is Archidekt's
-   and give the link back.
-2. **Make a decklist.** Turn the cards into one line each (`1 Sol Ring`), the commander under a `Commander`
-   header. Leave out cards in the sideboard, maybeboard or a "Considering" category unless the person wants
-   them. If Archidekt marks a card as owned or not, ignore it: the Vault's collection is the source here.
-3. **Check it.** Call `deck_legality` with the format. Report problems and cards that were not found; fix
-   those first.
+1. **Find the deck the way the person names it.** People say "my sliver deck", not a number. Call `list_decks`
+   with `query` set to the words they used; if it matches, that is the deck (use its `id` below). If nothing
+   matches, `closest` lists near names: ask which one. Only if the deck is not saved, ask for its Archidekt link.
+2. **If it is not saved, save it from the link.** Ask the person first, then call `import_deck_from_link` with the
+   link: the server reads the one deck, keeps its sections and credits its author. Do not convert the deck yourself.
+   One deck per request: never fetch other decks, other people's decks or lists of decks (Archidekt's terms do not
+   allow automated searching). For a quick look without saving, `get_archidekt_deck` reads the one deck.
+   Say the deck is Archidekt's (the saved deck's `credit` has the notice to repeat) and give the link back.
+3. **Check it.** `get_deck` shows the saved deck with, for each card, its section and how many copies the person owns. Call
+   `deck_legality` with the saved deck's `deck_id` and the format (no need to send the list).
+   Report problems and cards that were not found; fix those first. The sideboard and maybeboard are not part of
+   the deck unless the person asks.
 4. **Ask what they want**, if not clear: upgrades within a budget, only what to buy, or both. Get a budget
    in USD (the most any one added card may cost) before suggesting anything.
 5. **Upgrades (optional).** Call `find_upgrades` with the budget, choose swaps that serve the deck's plan,
    and call `validate_deck_changes` with the exact cuts and adds. Present a plan only when `valid` is true,
    with the added cost against the budget.
-6. **What is missing.** Call `shopping_list` with the decklist (with the swaps applied, if any). It lists
+6. **What is missing.** Call `shopping_list` with the `deck_id` (or the list with the swaps applied, if any). It lists
    each card the person does not own, the quantity, the cheapest known price with its date, the total and a
    paste-ready `text`.
 7. **Give them two things to copy.**
