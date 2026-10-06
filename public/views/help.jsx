@@ -30,7 +30,7 @@ const HELP_SECTIONS = [
     id: 'decks', title: 'Decks', views: ['decks'],
     body: [
       'Add a deck from an Archidekt link or by pasting a list, then press Save deck to keep it. The Vault reads a public Archidekt deck only when you ask; it never searches or crawls Archidekt, and it never changes anything there.',
-      'A deck shows which cards you own, partly own or are missing, with copy counts. The tabs cover stats and roles, legality, upgrade ideas, combos and a buy list. The buy list is plain text you can paste into a shop\'s own list tool: the Vault does not contact shops and shows prices as Scryfall\'s, with their date.',
+      'A deck shows which cards you own, partly own or are missing, with copy counts. The tabs cover stats and roles, legality, upgrade ideas, combos and a buy list. The buy list is plain text you can paste into a shop\'s own list tool: the Vault does not contact shops and shows prices as Scryfall\'s.',
     ],
   },
   {
@@ -55,7 +55,7 @@ const HELP_SECTIONS = [
   {
     id: 'assistant', title: 'Connect an AI assistant', views: [],
     body: [
-      'You can let your own AI assistant read your collection and decks, with sources shown. Sign-in is either OAuth in your assistant or a personal access token you create under Account, Agents & API, and either can be read-only and revoked.',
+      'You can let your own AI assistant read your collection and decks, with sources shown. Sign in with a personal access token you create under Account, Agents & API; it can be read-only and you can revoke it at any time.',
       'Setup steps for each assistant are on the connect page.',
     ],
     links: [{ href: '/connect.html', label: 'Open the connect page' }],
