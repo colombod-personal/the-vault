@@ -110,7 +110,9 @@ change.
 
 1. A re-import applies only the changes made in the person's app since the last import and keeps edits made in the
    Vault; conflicts are asked about in the preview; "replace everything" remains available.
-2. Caps: as proposed (50 lines; at most 25 copies or 10% removed at once) unless revisited.
+2. Caps: as proposed (50 lines; at most 25 copies or 10% removed at once) unless revisited. Implementation note
+   (#83): removing up to 5 copies is never refused by the 10% rule, or a new person with a handful of cards could not
+   record selling one.
 3. The assistant must understand the card and confirm the printing with the person; "printing not specified" only when
    the person does not know.
 4. Buckets: designed in now, a default bucket until #118 lands.

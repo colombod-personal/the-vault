@@ -288,10 +288,35 @@ class ImportItem(Hal):
     copies: int
     changes: dict[str, int]
     created_at: str
+    kind: str = Field("import", description="import (a file), assistant (edits made through an assistant) or undo")
+    app: str | None = Field(None, description="For assistant edits: the app that made them")
+    lines: list[dict] | None = Field(None, description="For assistant edits: each printing, copies before and after")
 
 
 class ImportPage(Page):
     items: list[ImportItem]
+
+
+class OwnedChangeLine(BaseModel):
+    action: Literal["add", "remove", "set"] = Field(description="add or remove copies, or set the number owned")
+    name: str = Field(min_length=1, max_length=300, description="The card's name")
+    quantity: int = Field(ge=0, le=999)
+    set: str | None = Field(None, max_length=20, description="The printing's set code, with number")
+    number: str | None = Field(None, max_length=30, description="The printing's collector number, with set")
+    finish: Literal["nonfoil", "foil", "etched"] | None = None
+    printing_unknown: bool = Field(False, description="Only when the person does not know the printing (adds only)")
+
+
+class OwnedChangesIn(BaseModel):
+    lines: list[OwnedChangeLine] = Field(min_length=1, max_length=50)
+
+
+class OwnedChangesApplyIn(OwnedChangesIn):
+    confirmation: str = Field(min_length=8, max_length=400, description="From the preview the person agreed to")
+
+
+class OwnedUndoIn(BaseModel):
+    confirmation: str | None = Field(None, max_length=400, description="Omit to preview the undo; give it to apply")
 
 
 class ImportLinkIn(BaseModel):
