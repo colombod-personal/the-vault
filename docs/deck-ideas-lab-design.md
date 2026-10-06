@@ -19,12 +19,12 @@ Owner direction (2026-10-05, `docs/graph-and-lab-review.md`): the Graph's seven 
 - **Its own view, "Ideas", replacing the Graph in the navigation.** Not a section of the Lab: the Lab (#162) is where a person decides to buy or sell; this is where they explore a deck. `#/graph` redirects to `#/ideas`.
 - **From the Lab:** a Buy row for a missing card gets **Find a substitute**, which opens Ideas on that card in that deck.
 - **From the deck page:** a missing row in the cards tab gets the same link.
-- **Back to them:** an owned alternative links to the card; **Swap into the deck** opens the deck page's change flow; a missing card's **Buy** links to the deck's buy list and the card's Scryfall page. The lab never reimplements those screens.
-- **Read-only in v1.** The lab proposes. Applying a swap goes through the existing `validate_deck_changes` then `update_deck` (write scope, asks first), on the deck page or through the assistant.
+- **Back to them:** an owned alternative links to the card; **Swap into the deck** opens the deck page's change flow, which does **not exist yet** (today the deck page only saves the loaded list and its upgrades tab shows suggestions without applying them), so #163 includes it: a cut and add proposal, `validate_deck_changes` to check it, and a confirmation step before `update_deck`; a missing card's **Buy** links to the deck's buy list and the card's Scryfall page. The lab never reimplements those screens.
+- **Read-only in v1.** The lab proposes. Applying a swap goes through the existing `validate_deck_changes` then `update_deck` (write scope, asks first), on the deck page (once #163 builds that flow) or through the assistant, which already has both tools.
 
 ## The flow
 
-1. **Pick a deck.** v1 starts from a saved deck (default: the most recently edited) or an Archidekt link (read-only, the Vault's existing link import). Starting from a commander or a theme (tokens, treasure) needs the finer roles and is phase 2 (below).
+1. **Pick a deck.** v1 starts from a saved deck (default: the most recently edited) or an Archidekt link, which must be **saved first**: the lab asks "Save this deck to explore it" and uses the existing link import (`/decks/import-link`, which creates a saved deck the person can delete). The Vault still only reads Archidekt; nothing is analysed without a saved deck id, so the routes, pagination and `#/ideas/{deck}/{card}` URLs all work on a saved id. Transient analysis of an unsaved list is not offered. Starting from a commander or a theme (tokens, treasure) needs the finer roles and is phase 2 (below).
 2. **See what the collection covers.** The deck's cards in role lanes (ramp, draw, removal, and so on), not by colour. Each card is a node: owned, partly owned, borrowed by another deck (#165), or missing. A header says "92 of 100 cards covered; 8 missing; 3 borrowed". Lines join cards that form a combo you already own (from `find_combos`).
 3. **Select a missing card.** A panel lists owned alternatives, best first, each with the card image, mana cost, copies owned, **why it matches** ("both: treasure generation, core") and a flag when it is borrowed or outside the deck's colour identity or format (those are filtered out before ranking, per #166).
 4. **Decide.** Use the alternative (**Swap into the deck**), move a copy from another deck (offered only when #165 says a donor copy exists), or buy (cheapest known price, dated, with a link).
@@ -87,26 +87,40 @@ Or buy Cloudstone Curio: $1.20 (Scryfall, 6 Oct) [Open on Scryfall]
 ### 4. A missing card with no alternative
 
 ```
-Cloudstone Curio   role: token doubling (core)
-You own nothing else that does this job in this deck's colours and format.
-[Buy for $1.20, Scryfall, 6 Oct]   [See upgrades on the deck page]   [Back]
+1400 px                                                   390 px
+[? Cloudstone Curio]  role: token doubling (core)         Cloudstone Curio    [Back]
+You own nothing else that does this job in this           token doubling (core)
+deck's colours and format.                                You own nothing else that
+[Buy for $1.20 (Scryfall, 6 Oct)] [Open on Scryfall]      does this job here.
+[See upgrades on the deck page]            [Back]         [Buy $1.20, 6 Oct]
+                                                          [Scryfall] [Upgrades]
 ```
 
 ### 5. A fully covered deck
 
 ```
+1400 px
 Avatar Aang   100 of 100 covered | 0 missing | 0 borrowed        [Clear]
-Every card is in your collection and no copy is borrowed.
-Nothing to decide here. [Open the deck page]  [See upgrades]
+Every card is in your collection and no copy is borrowed.  Nothing to decide here.
+[Open the deck page]  [See upgrades]
+RAMP   (o)(o)(o)(o)   DRAW (o)(o)(o)   REMOVAL (o)(o)   OTHER (o)(o)   LANDS (o)...
 (the role lanes stay visible so the deck can still be explored)
+
+390 px
+Avatar Aang  100/100 covered  [Clear]
+Nothing to decide here.
+[Deck page] [Upgrades]
+RAMP (4) >   DRAW (3) >   REMOVAL (2) >
+OTHER (2) >  LANDS (36) >
+(tap a lane to open it; Clear sits at the top right)
 ```
 
 ## The data (every number from the server)
 
-- **`GET /decks/{id}/ideas`**: the deck's cards grouped by role lane with `have`, `need`, `status` (`owned`, `partial`, `borrowed`, `missing`), counts for the header, and the combos already owned as edges. Lanes are cursor-paged (`limit`, `cursor`, HAL `next`) so no response grows with the deck; the header counts are computed over the whole deck first.
-- **`GET /decks/{id}/ideas/alternatives?card=NAME`** (cursor-paged): owned alternatives for a missing card, from `equivalents(card, deck_id)` in `docs/card-roles-design.md`: shared `core` role, colour identity and format applied as filters before ranking, owned first, then mana value difference. Each row: card, copies owned, `borrowed_from` (a deck name, from #165), `why` (the shared roles and their strength), `legal` and `in_colours`, price and its date for a card that would have to be bought, and the `move` option when #165 offers one.
+- **`GET /decks/{id}/ideas`**: the deck's cards grouped by primary lane (one lane per card, see Tests) with `have`, `need`, `status` (`owned`, `partial`, `borrowed`, `missing`), counts for the header, and the combos already owned as edges. Lanes are cursor-paged (`limit`, `cursor`, HAL `next`) so no response grows with the deck; the header counts are computed over the whole deck first.
+- **`GET /decks/{id}/ideas/alternatives?card=NAME&format=commander`** (cursor-paged; `format` is validated against the formats the Vault supports, default `commander` as the deck tools already assume, because a saved deck stores no format; the Ideas header shows the chosen format as a chip, remembered per browser, the same selector the deck page uses; the assistant tool takes the same `format` argument): owned alternatives for a missing card, from `equivalents(card, deck_id)` in `docs/card-roles-design.md`: shared `core` role, colour identity and format applied as filters before ranking, owned first, then mana value difference. Each row: card, copies owned, `borrowed_from` (a deck name, from #165), `why` (the shared roles and their strength), `legal` and `in_colours`, price and its date for a card that would have to be bought, and the `move` option when #165 offers one.
 - **Assistant tools (parity):** `get_deck_ideas` and `get_card_alternatives`, read-only; they return prices, so they are classified as Scryfall data with provenance and the Fan Content notice. A test fails if a tool that returns prices is classified own-data-only.
-- **Tenancy and sharing:** own account only. A shared collection has no decks of the owner's to explore, so both routes answer 404 under `/shared/{id}/...` (decks and collections are separate share kinds). Archidekt-link decks are read from the public link and never stored (the Vault only reads them).
+- **Tenancy and sharing:** own account only. A shared collection has no decks of the owner's to explore, so both routes answer 404 under `/shared/{id}/...` (decks and collections are separate share kinds). An Archidekt deck is explored only after the person saves it (see the flow); the Vault only reads Archidekt.
 - **Positions:** the lanes are a deterministic grid computed in the browser from the server's order. There is no physics layout.
 
 ## Phasing, so it ships before the finer roles exist
@@ -133,7 +147,7 @@ All seven Graph modes and `public/views/graph.jsx`, the `cytoscape` script tag i
 - Clear, Esc and Back each return to the start or the previous selection and leave no stale selection.
 - A missing card with a shared core role lists the owned card; one outside the colour identity or format never appears; with none, the empty message shows.
 - A card held by another deck shows as borrowed with that deck's name, and `move` appears only when #165 says a donor copy exists.
-- Header counts equal the sum over all lanes whatever the page size; lanes page independently.
+- Lanes: every card copy is placed in **exactly one primary lane**, chosen by a fixed priority over the card's roles (ramp, draw, removal, sweeper, counterspell, tutor, recursion, sacrifice outlet); a card with no role goes to an **Other** lane and lands to a **Lands** lane, so nothing is dropped; a multi-role card shows its other roles as tags and is counted once. Header counts equal the sum over all lanes whatever the page size; lanes page independently. Tests: a multi-role card (counted once, one lane, tags for the rest), an untagged card (Other), basic lands (Lands), and the sum equal to the deck's card count.
 - Own account only: 404 under `/shared/...`, no other person's decks.
 - Provenance: both tools carry Scryfall provenance; prices carry their date.
 - Performance: the budget above is a test with a recorded result, run on a 100-card deck.
@@ -149,7 +163,8 @@ All seven Graph modes and `public/views/graph.jsx`, the `cytoscape` script tag i
 
 ## Tasks that follow (under #163)
 
-1. Server: `GET /decks/{id}/ideas` and `/ideas/alternatives`, tools `get_deck_ideas` and `get_card_alternatives`, tests above (alternatives use `equivalents` from #166; on the coarse roles for phase 1).
+0. Web (deck page): the cut and add change flow with `validate_deck_changes` and a confirmation before `update_deck` (needed by Swap into the deck; it does not exist today).
+1. Server: `GET /decks/{id}/ideas` and `/ideas/alternatives` (with the validated `format` input), tools `get_deck_ideas` and `get_card_alternatives`, tests above (alternatives use `equivalents` from #166; on the coarse roles for phase 1).
 2. Web: the Ideas view with the five states, Clear, Esc and Back, lazy images and windowed lanes, the performance test.
 3. Remove the Graph modes, `graph.jsx`, the cytoscape script and the dead styles; redirect `#/graph`.
 4. Links: Lab Buy rows and deck-page missing rows to Ideas.
