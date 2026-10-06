@@ -39,7 +39,7 @@ creating additional Magic software", under the Fan Content Policy, with these gu
 | Requirement (Scryfall's wording, shortened) | What it means for us | Status |
 |---|---|---|
 | No Scryfall logos; do not imply Scryfall endorses you | "Not produced or endorsed by Scryfall" in the footer, MCP instructions and plugin | done |
-| No paywall: no payments, surveys, subscriptions, ratings, chat servers or follows in exchange for the data. "If you have an account system, end-users should be able to access card data anonymously or with free accounts." | The Vault is free; free accounts are explicitly fine. Optional anonymous access exists (`PUBLIC_CATALOG`) | done |
+| No paywall: no payments, surveys, subscriptions, ratings, chat servers or follows in exchange for the data. "If you have an account system, end-users should be able to access card data anonymously or with free accounts." | The Vault is free; free accounts are explicitly fine. No anonymous access (see Decisions) | done |
 | Do not use the data to create new games or imply it is from another game | Magic only | done |
 | "You may not simply repackage, republish, or proxy Scryfall data. Your software must create additional value for end-users." | Tools answer for the person's collection and decks, check legality and budgets, verify citations, simulate curves; card lookups serve that grounding. No bulk dumps or raw search proxy | done; keep in review |
 | `User-Agent` (accurate, the app's name) and `Accept` on every API request | `jobs/sync_prices.py`, `jobs/sync_catalog.py` | done |
@@ -193,3 +193,14 @@ block looks like this:
 2. Approval to email Scryfall and Moxfield (drafts to follow) and to contact Wizards about rules text.
 3. A decision on the registration question: public minimal tools without an account (recommended)
    or free accounts only.
+
+## Decisions
+
+- **Free accounts, no anonymous catalog (owner, 2026-10-06, #62).** The Vault stays free; every feature needs a free
+  account because it serves the person's own collection, decks and questions. There is no anonymous card or rules API:
+  it would add nothing beyond Scryfall's own data and would amount to the "repackage, republish, or proxy" that
+  Scryfall's terms forbid, and it would spend the free database on traffic that is not a player's. The `PUBLIC_CATALOG`
+  switch was removed from the code so it cannot be turned on by mistake. If people should ever look up cards without an
+  account, that is a product decision about a page that adds value, not a switch on a raw API.
+- **Comprehensive Rules (owner, 2026-10-05, #142):** cited live from Wizards' current edition; the Vault stores no copy
+  (docs/rules-index.md).
