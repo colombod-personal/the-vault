@@ -1,7 +1,8 @@
 """Twin of Archidekt's (unofficial) read API: ``/api/decks/{id}/`` and ``/api/decks/v3/``.
 
-Archidekt is a Django REST Framework site, so errors are ``{"detail": "..."}`` and lists are
-``{"count", "next", "previous", "results"}`` with absolute ``next`` links. Private decks
+Errors are ``{"error": "..."}`` (a missing deck is ``{"error": "Deck not found."}``, checked against the real site
+on 2026-10-06) and lists are
+``{"count", "next", "results"}`` with absolute ``next`` links. Private decks
 answer 404, like a missing deck. The deck shape is what ``mtg_toolkits.archidekt`` reads,
 plus the fields around it.
 """
@@ -43,7 +44,7 @@ class ArchidektTwin(Twin):
         self.route("GET", "archidekt.com", "/api/decks/{id}/", self._deck)
 
     def error(self, status, code, details):
-        return json_response(status, {"detail": details})
+        return json_response(status, {"error": details})
 
     def add_deck(self, name: str, owner: str, cards: list[tuple], *, deck_id: int | None = None,
                  private: bool = False, unlisted: bool = False, deck_format: int = 3, description: str = "") -> dict:
@@ -80,10 +81,10 @@ class ArchidektTwin(Twin):
             "id": deck_id, "name": name, "createdAt": now, "updatedAt": now, "deckFormat": deck_format,
             "edhBracket": None, "game": None, "description": description, "viewCount": 0, "featured": "",
             "customFeatured": "", "private": private, "unlisted": unlisted, "theorycrafted": False, "points": 0,
-            "userInput": 0, "ownerId": _num(owner),
+            "userInput": 0,
             "owner": {"id": _num(owner), "username": owner, "avatar": "", "frame": None,
                       "ckAffiliate": "", "tcgAffiliate": "", "referrerEnum": None},
-            "commentRoot": deck_id, "editors": [], "parentFolder": None, "bookmarked": False, "tags": [],
+            "commentRoot": deck_id, "editors": [], "parentFolder": None, "bookmarked": False,
             "playgroupDeckUrl": None, "cardPackage": None,
             "categories": [{"id": deck_id * 10 + i, **c} for i, c in enumerate(DEFAULT_CATEGORIES)],
             "cards": entries,
@@ -121,13 +122,15 @@ class ArchidektTwin(Twin):
         return json_response(200, {
             "count": len(decks),
             "next": page_url(page + 1) if page * PAGE < len(decks) else None,
-            "previous": page_url(page - 1) if page > 1 else None,
             "results": [{
                 "id": d["id"], "name": d["name"], "size": sum(c["quantity"] for c in d["cards"]),
                 "updatedAt": d["updatedAt"], "createdAt": d["createdAt"], "deckFormat": d["deckFormat"],
                 "edhBracket": d["edhBracket"], "featured": d["featured"], "customFeatured": d["customFeatured"],
                 "viewCount": d["viewCount"], "private": d["private"], "unlisted": d["unlisted"],
-                "theorycrafted": d["theorycrafted"], "game": d["game"], "hasDescription": bool(d["description"]),
-                "tags": d["tags"], "parentFolderId": None, "owner": d["owner"], "colors": {}, "cardPackage": None,
+                "theorycrafted": d["theorycrafted"], "game": d["game"],
+                "tags": [], "parentFolderId": None, "colors": {}, "cardPackage": None,
+                # a search result's owner has other fields than the deck page's owner (checked against the real site)
+                "owner": {"id": d["owner"]["id"], "username": d["owner"]["username"], "avatar": d["owner"]["avatar"],
+                          "moderator": False, "pledgeLevel": 0, "roles": []},
             } for d in chunk],
         })
