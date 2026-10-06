@@ -271,6 +271,15 @@ TOOLS = [
          ["deck_id", "name", "text"], method="PUT", path=lambda a: f"{V1}/decks/{int(a['deck_id'])}",
          body=lambda a: {"name": a["name"], "text": a["text"],
                          **{k: a[k] for k in ("source_url", "source_author") if k in a}}, write=True),
+    Tool("import_deck_from_link", "Save a public Archidekt deck to the person's decks from its link: the server reads the deck and keeps "
+         "its sections (commander, main, sideboard, maybeboard) and credits its author; do not convert the deck yourself. If the "
+         "link is already saved nothing changes unless update is true. Only Archidekt links work; the deck stays Archidekt's: "
+         "credit it. Ask the person before saving.",
+         {"url": {"type": "string", "minLength": 8, "maxLength": 500, "description": "An Archidekt deck link"},
+          "name": {"type": "string", "maxLength": 200, "description": "Name to save it under (default: its name on Archidekt)"},
+          "update": {"type": "boolean", "default": False, "description": "Replace an already-saved copy's list with Archidekt's current one"}},
+         ["url"], method="POST", path=lambda a: f"{V1}/decks/import-link",
+         body=lambda a: {k: a[k] for k in ("url", "name", "update") if a.get(k) is not None}, write=True, provenance=("archidekt",)),
     Tool("get_archidekt_deck", "A public deck from Archidekt by its id (the number in archidekt.com/decks/<id>). "
          "One deck per request, only the one the person gave you. Check list_decks first: the deck may be saved. "
          "The deck is Archidekt's: credit Archidekt and link the deck when you use it. Read-only: nothing can "
