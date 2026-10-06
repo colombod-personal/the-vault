@@ -112,8 +112,18 @@ def verify_citation(db: Session, kind: str, ref: str, quote: str, version: str |
     if card is None:
         return {"verified": False, "reason": "no such card", "suggestions": [c.name for c in suggestions]}
     if kind == "oracle_text":
-        ok = wanted in _squash(card.oracle_text or "")
-        return {"verified": ok, "card": card.name, "source_text": None if ok else card.oracle_text}
+        # A card with faces keeps its text on the faces (the top-level text is empty for a transform or modal double-faced
+        # card), so a quote is verbatim when it is in one face's text, never when it spans two faces (#249).
+        faces = [f for f in (card.faces or []) if f.get("oracle_text")]
+        texts = [f["oracle_text"] for f in faces] if faces else [card.oracle_text or ""]
+        found = next((i for i, t in enumerate(texts) if wanted in _squash(t)), None)
+        if found is not None:
+            out = {"verified": True, "card": card.name, "source_text": None}
+            if faces:
+                out["face"] = faces[found].get("name")
+            return out
+        source = ([{"face": f.get("name"), "oracle_text": f["oracle_text"]} for f in faces] if faces else card.oracle_text)
+        return {"verified": False, "card": card.name, "source_text": source}
     rulings, _ = rulings_for(db, card.oracle_id)
     hit = next((r for r in rulings if wanted in _squash(r["comment"])), None)
     return {"verified": hit is not None, "card": card.name, "ruling": hit,
