@@ -22,9 +22,9 @@ Maybeboard
 2 Opt"""
 
 
-def oracle(oracle_id, name, identity):
+def oracle(oracle_id, name, identity, type_line="Legendary Creature"):
     return {"object": "card", "id": "p-" + oracle_id[:4], "oracle_id": oracle_id, "name": name, "layout": "normal",
-            "mana_cost": "", "cmc": 0.0, "type_line": "Legendary Creature", "oracle_text": "", "colors": identity,
+            "mana_cost": "", "cmc": 0.0, "type_line": type_line, "oracle_text": "", "colors": identity,
             "color_identity": identity, "keywords": [], "legalities": {"commander": "legal"}, "digital": False}
 
 
@@ -32,7 +32,11 @@ def oracle(oracle_id, name, identity):
 def catalog(app):
     with app.state.db.sessions() as db:
         cs.sync_oracle_cards(db, [oracle("55555555-5555-5555-5555-555555555555", "Sliver Overlord", ["U", "B"]),
-                                  oracle("66666666-6666-6666-6666-666666666666", "The First Sliver", ["W", "U", "B", "R", "G"])])
+                                  oracle("66666666-6666-6666-6666-666666666666", "The First Sliver", ["W", "U", "B", "R", "G"]),
+                                  oracle("77777777-7777-7777-7777-777777777777", "Sol Ring", [], "Artifact"),
+                                  oracle("88888888-8888-8888-8888-888888888888", "Forest", ["G"], "Basic Land — Forest")])
+        for source in ("oracle_cards", "oracle_tags", "oracle_prices"):  # the analysis tools refuse to run on an unloaded catalog
+            cs.record_source(db, source, version=source + "-1", rows=2)
         db.commit()
 
 
@@ -107,3 +111,33 @@ def test_archidekt_commander_decks_store_their_format():
                      {"quantity": 1, "categories": ["Ramp"], "card": {"oracleCard": {"name": "Sol Ring"}}}]}
     assert deck_import.to_decklist(raw)["format"] == "commander"
     assert deck_import.to_decklist({**raw, "deckFormat": 99})["format"] is None  # unchecked numbers are not guessed
+
+
+ANALYSIS = {  # tool -> the arguments that make it run on a saved deck
+    "deck_stats": {}, "simulate_draws": {"format": "commander", "samples": 1}, "deck_legality": {"format": "commander"},
+    "find_upgrades": {"format": "commander", "budget_usd": 50}, "validate_deck_changes": {"format": "commander", "adds": [], "cuts": []},
+    "shopping_list": {},
+}
+
+
+def test_every_analysis_answer_names_the_deck_its_format_and_its_commanders(agent, bot, catalog):
+    """#216: deck_stats and the rest used to answer 'Deck: 100 cards' with no name, format or commander."""
+    write = make_token(agent, scopes=["read", "write"])
+    saved = call_tool(bot, write, "save_deck", name="Sliver Swarm", text=SLIVERS)["structuredContent"]
+    for tool, args in ANALYSIS.items():
+        out = call_tool(bot, write, tool, deck_id=saved["id"], **args)
+        body = out.get("structuredContent") or {}
+        deck = body.get("deck")
+        assert deck, (tool, out["content"][0]["text"][:300])
+        assert deck["id"] == saved["id"] and deck["name"] == "Sliver Swarm", tool
+        assert deck["overview"]["format"] == "commander" and deck["overview"]["commanders"] == ["Sliver Overlord", "The First Sliver"], tool
+        assert deck["overview"]["cards"] == 100 and deck["overview"]["color_identity"] == "WUBRG", tool
+        assert list(body)[0] == "deck", tool  # first in the answer, so it is read first
+    pasted = call_tool(bot, write, "deck_stats", text="4 Lightning Bolt\n20 Mountain")["structuredContent"]["deck"]
+    assert pasted["name"] is None and pasted["id"] is None and pasted["overview"]["cards"] == 24  # a pasted list has no name
+
+
+def test_every_deck_tool_description_says_to_lead_with_the_deck(agent, bot):
+    from vault.api import mcp
+    for name in mcp.DECK_ANALYSIS:
+        assert "names the deck" in mcp.BY_NAME[name].description, name
