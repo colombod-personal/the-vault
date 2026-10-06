@@ -32,7 +32,7 @@ Owner direction (2026-10-05, `docs/graph-and-lab-review.md`): the Graph's seven 
 
 ## Mockups
 
-`[...]` is a control. Card art is cut by the circle mask and credited (artist and Scryfall) in the card panel.
+`[...]` is a control. **Text first, light on graphics (owner direction, 2026-10-06):** the lanes are plain text rows (name, status, a small coloured dot), not an art grid. Images are small thumbnails (about 40 px) shown only for the selected card and its alternatives, never full card art; a larger image opens only when the person taps the thumbnail. Where art does appear it keeps the circle mask and is credited (artist and Scryfall) in the card panel.
 
 ### 1. The start (nothing picked)
 
@@ -133,9 +133,13 @@ OTHER (2) >  LANDS (36) >
 For a 100-card Commander deck and the owner's real collection (7,136 card names, four saved decks):
 
 - **Server:** `ideas` first page under 400 ms at the 95th percentile on production; `alternatives` under 300 ms.
-- **Payload:** the first `ideas` page under 60 KB gzipped (no images in the payload; images load lazily, small size, only for the lane in view).
+- **Payload:** the first `ideas` page under 60 KB gzipped (no images in the payload; only the selected card's panel loads thumbnails of about 40 px, lazily, and the lane rows carry none).
 - **First render under 2 s on a mid-range phone**, measured with a throttled run (4x CPU slowdown, a 4G network profile) in a browser test that opens the deck and asserts the lanes are drawn and the main thread has no task over 200 ms.
 - **No frozen tab:** no force simulation; at most a few dozen combo lines; lanes with more than 40 cards render windowed. The cytoscape script (loaded from unpkg today) is removed with the old graph, which also removes a third-party load from every page.
+
+## Weight rule
+
+The view stays light: no full-size art, no animation, no physics. A test fails if the first render requests more than 12 images or any image larger than the thumbnail size.
 
 ## What is removed
 
