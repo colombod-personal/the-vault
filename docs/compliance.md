@@ -69,9 +69,12 @@ them on Archidekt themselves; the Vault gives the change list and the buying lis
 
 Sources (re-read 2026-10-05):
 
-- **Terms:** [archidekt.com/terms](https://archidekt.com/terms), last updated 2018-09-07. The Vault is a personal,
-  non-commercial tool that reads public decks a person points it to, credits Archidekt and the author, and does not
-  harvest other users' information, build a competing site or reverse engineer anything.
+- **Terms:** [archidekt.com/terms](https://archidekt.com/terms), last updated 2018-09-07. The licence is personal and
+  non-commercial and excludes software that "generates automated searches, requests, or queries", building a similar
+  or competitive site, harvesting other users' information, and reverse engineering. The terms do not mention an API.
+  The owner's position is that the Vault is within them, because it is a personal, non-commercial tool that makes
+  one request when a person points it at a public deck (no searching, crawling or background requests), credits
+  Archidekt and the author, harvests nothing, builds no competing site and reverse engineers nothing.
 - **Reading:** an Archidekt developer said on Archidekt's forum that the API is "open and public (as far as reading
   is concerned)" ([thread 40353](https://archidekt.com/forum/thread/40353)) and "You're more than welcome to use our
   API for whatever you want", asking only that it not be hammered
