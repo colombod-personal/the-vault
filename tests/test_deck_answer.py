@@ -9,8 +9,8 @@ def test_each_card_says_which_section_it_is_in_and_the_prices_say_their_day(sign
     saved = signed_in.post(f"{V1}/decks", json={"name": "Elves", "text": TEXT}).json()
     deck = signed_in.get(f"{V1}/decks/{saved['id']}").json()
     sections = {c["name"]: c["section"] for c in deck["coverage"]["cards"]}
-    assert sections == {"Sliver Overlord": "commander", "Sol Ring": "main", "Llanowar Elves": "main",
-                        "Pearl Medallion": "sideboard", "Heart Sliver": "maybeboard"}
+    # coverage is of the played cards only: the sideboard and maybeboard are not part of what the deck needs
+    assert sections == {"Sliver Overlord": "commander", "Sol Ring": "main", "Llanowar Elves": "main"}
     assert "priced_as_of" in deck["coverage"] and "credit" not in deck  # a pasted deck has no source to credit
 
 
