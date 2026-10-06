@@ -24,6 +24,16 @@ Microsoft's `amplifier-bundle-digital-twin-universe`.
   - `set_price()` on Scryfall
   - `private` decks on Archidekt
   - `deploy()`, `promote()` (an Instant Rollback) and `add_domain()` on Vercel
+- **ChatGPT, as it really behaves** (`ChatGptClient` in `twins/mcp_client.py`, from the production logs of 2026-10-06):
+  a `private_key_jwt` client whose document and keys sit at `chatgpt.com/oauth/client.json` and `/oauth/jwks.json`;
+  every token request goes out unsigned first (refused) and then signed with an RS256 assertion; it asks for `read write`;
+  it scans `tools/list` once when the app is added and keeps that list (`add_app`, `cached_tools`); and its safety check
+  flags tool descriptions that steer the approver (`flagged`). `tests/test_chatgpt_twin.py` runs it, and the nightly
+  conformance run compares its document and keys with the real ones. A twin simpler than the real client is how
+  ChatGPT could not connect while every OAuth test passed (#210).
+- **Archidekt decks are as heavy as real ones**: the twin sends every field of the real API (captured 2026-10-06 in
+  `tests/fixtures/archidekt_real_keys.json`: 30 deck fields, 36 card-analysis fields, 27 price fields from Card Kingdom,
+  Cardmarket and other shops), about 2 KB a card, so tests meet the size and the shop prices real answers carry.
 - **Clients too.** `twins/mcp_client.py` is the twin of an MCP client such as ChatGPT or Claude: it hosts
   Client ID Metadata Documents (and hostile ones: documents about another client, redirects to the cloud metadata
   address, oversized or slow answers, names that resolve to private addresses) and drives the whole OAuth flow

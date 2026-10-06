@@ -20,9 +20,13 @@ import base64
 import hashlib
 import re
 import secrets
+import time
+import uuid
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
+from joserfc import jwt
+from joserfc.jwk import RSAKey
 
 from .base import Twin, json_response
 
@@ -34,7 +38,13 @@ HOSTS = {  # host -> the addresses its name resolves to
     "internal.example": ["10.0.0.5"], "metadata.example": ["169.254.169.254"], "loopback.example": ["127.0.0.1"],
     "mixed.example": [PUBLIC, "10.0.0.8"], "mapped.example": ["::ffff:127.0.0.1"],
     "аpple.example": [PUBLIC], "shared.example": ["100.64.0.9"],  # (a Cyrillic "a": looks like apple.example)
+    "chatgpt.com": [PUBLIC],
 }
+CHATGPT_REDIRECT = "https://chatgpt.com/connector_platform_oauth_redirect"
+JWT_BEARER = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+# What ChatGPT's safety check flagged on 2026-10-06 (#221): a tool description that tells the approver when to approve.
+STEERING = re.compile(r"only after|after (the person|they) say|said yes|say yes|ask the person|call again with|show (it|that|this) to",
+                      re.IGNORECASE)
 
 
 class ClientHostTwin(Twin):
@@ -78,6 +88,16 @@ class ClientHostTwin(Twin):
                "token_endpoint_auth_method": "none", **fields}
         self.documents[(host, path)] = {k: v for k, v in doc.items() if v is not None}
         return url
+
+    def publish_chatgpt(self, key: RSAKey) -> str:
+        """ChatGPT's client document and key set, as chatgpt.com serves them (checked against the real ones on 2026-10-06:
+        a ``private_key_jwt`` client with RS256 and a ``jwks_uri``, not a public client; tests/conformance keeps it true)."""
+        self.documents[("chatgpt.com", "/oauth/jwks.json")] = {"keys": [key.as_dict(private=False)]}
+        return self.publish("chatgpt.com", "/oauth/client.json", name="ChatGPT", redirect_uris=(CHATGPT_REDIRECT,),
+                            client_uri="https://chatgpt.com/", token_endpoint_auth_method="private_key_jwt",
+                            token_endpoint_auth_methods_supported=["none", "private_key_jwt"],
+                            token_endpoint_auth_signing_alg="RS256", jwks_uri="https://chatgpt.com/oauth/jwks.json",
+                            logo_uri="https://persistent.oaistatic.com/sonic/misc/openai-logo.png")
 
     def serve(self, host: str, path: str, handler) -> str:
         """Serve whatever ``handler(request)`` answers at ``https://host/path``."""
@@ -181,3 +201,57 @@ class McpClient:
     def tool(self, tool_name: str, /, **arguments) -> dict:
         res = self.mcp("tools/call", {"name": tool_name, "arguments": arguments})
         return res.json()
+
+
+class ChatGptClient(McpClient):
+    """ChatGPT, as it behaved against production on 2026-10-06 (#210, #221):
+
+    * it is a ``private_key_jwt`` client: its document sits at ``chatgpt.com/oauth/client.json`` and its keys at
+      ``/oauth/jwks.json``;
+    * **every token request goes out unsigned first**, is refused (401), and goes out again with a signed RS256
+      ``client_assertion`` (``attempts`` records both);
+    * it scans the server's ``tools/list`` **once**, when the app is added (``add_app``), and keeps that list:
+      later changes to the server's tools are invisible to it until the app is added again;
+    * its safety check flags tool descriptions that steer the approver (``flagged``).
+    """
+
+    def __init__(self, app_client_factory, hosts: ClientHostTwin, key: RSAKey | None = None):
+        self.key = key or RSAKey.generate_key(2048, parameters={"kid": "chatgpt-1"}, private=True)
+        super().__init__(app_client_factory, hosts.publish_chatgpt(self.key), CHATGPT_REDIRECT)
+        self.attempts: list[tuple[bool, int]] = []  # (signed?, status) for every token request, in order
+        self.cached_tools: list[dict] | None = None
+
+    def authorize_params(self, **override) -> dict:
+        return super().authorize_params(**{"scope": "read write", **override})  # ChatGPT asks for both, as seen in production
+
+    def assertion(self, **claims) -> str:
+        now = int(time.time())
+        body = {"iss": self.client_id, "sub": self.client_id, "aud": f"{self.base}/oauth/token", "iat": now, "exp": now + 300,
+                "jti": uuid.uuid4().hex, **claims}
+        return jwt.encode({"alg": "RS256", "kid": self.key.kid}, {k: v for k, v in body.items() if v is not None}, self.key)
+
+    def _unsigned_then_signed(self, send) -> httpx.Response:
+        first = send({})
+        self.attempts.append((False, first.status_code))
+        if first.status_code != 401:
+            return first
+        second = send({"client_assertion_type": JWT_BEARER, "client_assertion": self.assertion()})
+        self.attempts.append((True, second.status_code))
+        return second
+
+    def redeem(self, code: str, **override) -> httpx.Response:
+        return self._unsigned_then_signed(lambda extra: McpClient.redeem(self, code, **{**override, **extra}))
+
+    def refresh(self, refresh_token: str | None = None, **override) -> httpx.Response:
+        return self._unsigned_then_signed(lambda extra: McpClient.refresh(self, refresh_token, **{**override, **extra}))
+
+    def add_app(self, write: bool = True, email: str = "dev@localhost") -> list[dict]:
+        """Add the Vault as an app: connect, then scan the tools once and keep what was found."""
+        self.connect(write=write, email=email)
+        self.cached_tools = self.mcp("tools/list").json()["result"]["tools"]
+        return self.cached_tools
+
+    def flagged(self) -> dict[str, list[str]]:
+        """Tools whose description would draw ChatGPT's 'Suspicious Instruction' warning (from the cached scan)."""
+        return {t["name"]: STEERING.findall(t["description"]) for t in (self.cached_tools or [])
+                if STEERING.search(t["description"])}

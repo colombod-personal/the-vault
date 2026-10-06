@@ -200,3 +200,19 @@ def test_repeat_reads_of_a_deck_reach_archidekt_once_and_say_how_old_they_are(da
         client.get(f"/api/v1/archidekt/decks/{other['id']}")
         with app.state.db.sessions() as db:
             assert db.get(ArchidektDeckCache, deck["id"]) is None
+
+
+def test_the_archidekt_twin_has_every_field_the_real_api_sends():
+    """#231: the twin was a third the size of a real deck and lacked 5 deck fields, 22 card-analysis fields and 25 price
+    fields, so tests never met the shop prices or the size that real Archidekt answers carry. The key sets come from a
+    real deck captured on 2026-10-06 (tests/fixtures/archidekt_real_keys.json); the nightly conformance run keeps it honest."""
+    import json
+    from pathlib import Path
+    real = json.loads((Path(__file__).parent / "fixtures" / "archidekt_real_keys.json").read_text(encoding="utf-8"))
+    deck = Universe().archidekt.add_deck("Elves", "ann", [(1, "Llanowar Elves", None, None, "Ramp"), (1, "Sol Ring")])
+    entry = deck["cards"][0]
+    got = {"deck": deck, "entry": entry, "card": entry["card"], "oracleCard": entry["card"]["oracleCard"],
+           "edition": entry["card"]["edition"], "prices": entry["card"]["prices"]}
+    for part, keys in got.items():
+        assert set(keys) == set(real[part]), (part, sorted(set(real[part]) ^ set(keys)))
+    assert len(json.dumps(deck["cards"])) // len(deck["cards"]) > 2000  # real: 3,318 bytes a card, so size limits are exercised

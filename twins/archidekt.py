@@ -27,6 +27,24 @@ DEFAULT_CATEGORIES = [
 ]
 
 
+# Archidekt's per-card price block as the real API sends it (captured 2026-10-06, tests/fixtures/archidekt_real_keys.json):
+# prices from Card Kingdom (ck), Cardmarket (cm), TCGplayer (tcg), Star City Games (scg), Cardhoarder (mtgo), ManaPool (mp),
+# CardTrader and CardSphere (cs). They are other shops' prices, not Scryfall's: the Vault must never pass them on (#219).
+PRICE_KEYS = ("ck", "ckfoil", "ckMinimum", "cm", "cmfoil", "cmMinimum", "mtgo", "mtgofoil", "mtgoMinimum", "tcg", "tcgfoil",
+              "tcgMinimum", "scg", "scgfoil", "scgMinimum", "mp", "mpfoil", "mpMinimum", "tcgLand", "tcgLandFoil",
+              "tcgLandMinimum", "cardTrader", "cardTraderFoil", "cardTraderMinimum", "cs", "csfoil", "csMinimum")
+
+
+def _prices(usd: float) -> dict:
+    out = {k: 0 for k in PRICE_KEYS}
+    for k in ("ck", "cm", "tcg", "scg", "mp", "cardTrader", "cs", "mtgo"):
+        out[k] = round(usd * 1.0, 2)
+        out[k + "Minimum"] = round(usd * 0.8, 2)
+        out[k + "foil" if k != "cardTrader" else "cardTraderFoil"] = round(usd * 1.2, 2)
+    out.update({"tcgLand": 89, "tcgLandMinimum": 57})
+    return out
+
+
 def _num(*parts) -> int:
     return zlib.crc32(repr(parts).encode()) % 10**6
 
@@ -72,9 +90,22 @@ class ArchidektTwin(Twin):
                     "oracleCard": {"id": _num(cname), "name": cname, "cmc": sf and sf.get("cmc"),
                                    "colorIdentity": [], "colors": [], "layout": "normal", "manaCost": sf and sf.get("mana_cost"),
                                    "text": sf and sf.get("oracle_text"), "types": [], "subTypes": [], "superTypes": [],
-                                   "faces": [], "legalities": {}, "uid": sf and sf.get("oracle_id")},
+                                   "faces": [], "legalities": {}, "uid": sf and sf.get("oracle_id"),
+                                   # Archidekt's own analysis fields, as sent by the real API
+                                   "atomicCombos": [], "canlanderPoints": None, "defaultCategory": category or "",
+                                   "edhrecRank": _num("rank", cname) % 20000, "extraTurns": False, "gameChanger": False,
+                                   "inheritedTags": [], "isPDHCommander": False, "keywords": [], "lang": "en", "loyalty": None,
+                                   "manaProduction": {c: None for c in "WUBRGC"}, "massLandDenial": False, "oTags": [],
+                                   "potentialCombos": [], "power": (sf and sf.get("power")) or "", "salt": 0.0, "tokens": [],
+                                   "toughness": (sf and sf.get("toughness")) or "", "tutor": False, "twoCardComboIds": [],
+                                   "twoCardComboSingelton": False},
                     "owned": 0, "pinnedStatus": 0, "rarity": sf and sf.get("rarity"), "globalCategories": [],
-                    "collectorNumber": number, "prices": {"tcg": float((sf and sf["prices"].get("usd")) or 0), "ck": 0},
+                    "collectorNumber": number, "prices": _prices(float((sf and sf["prices"].get("usd")) or 0)),
+                    # the shops' own ids and SKUs, as the real API sends them
+                    "cardTraderSku": str(_num("ct", cname)), "ckFoilId": _num("ckf", cname), "ckNormalId": _num("ckn", cname),
+                    "cmEd": "", "contentWarning": False, "mtgoFoilId": 0, "mtgoNormalId": _num("mtgo", cname),
+                    "multiverseid": _num("mv", cname), "scgFoilSku": f"SGL-MTG-{set_code.upper()}-{number}-ENF",
+                    "scgSku": f"SGL-MTG-{set_code.upper()}-{number}-ENN", "tcgProductId": _num("tcg", cname),
                 },
             })
         deck = {
@@ -85,7 +116,8 @@ class ArchidektTwin(Twin):
             "owner": {"id": _num(owner), "username": owner, "avatar": "", "frame": None,
                       "ckAffiliate": "", "tcgAffiliate": "", "referrerEnum": None},
             "commentRoot": deck_id, "editors": [], "parentFolder": None, "bookmarked": False,
-            "playgroupDeckUrl": None, "cardPackage": None,
+            "playgroupDeckUrl": None, "cardPackage": None, "customCards": [], "deckHelp": None, "deckTags": [],
+            "hasPrimer": False, "intentionallySkippedCardData": False,
             "categories": [{"id": deck_id * 10 + i, **c} for i, c in enumerate(DEFAULT_CATEGORIES)],
             "cards": entries,
         }
