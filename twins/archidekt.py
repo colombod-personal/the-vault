@@ -98,7 +98,7 @@ class ArchidektTwin(Twin):
         except ValueError:
             deck = None
         if deck is None or deck["private"]:
-            return self.error(404, "not_found", "Not found.")
+            return self.error(404, "not_found", "Deck not found.")
         return json_response(200, deck)
 
     def _search(self, req: Request) -> httpx.Response:

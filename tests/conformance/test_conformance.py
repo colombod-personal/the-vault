@@ -219,7 +219,7 @@ def test_archidekt_search_and_deck(real, twin):
     gone = real.get(f"https://archidekt.com/api/decks/{missing_id}/")
     t_gone = twin.get(f"https://archidekt.com/api/decks/{missing_id}/")
     assert gone.status_code == t_gone.status_code == 404
-    assert invented(t_gone.json(), gone.json()) == [] and missing(gone.json(), ["error"]) == []
+    assert t_gone.json() == gone.json() == {"error": "Deck not found."}  # the whole body, not only its shape
 
 
 # -- Vercel (jobs/vercel_setup.py) ------------------------------------------------------------
