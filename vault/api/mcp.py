@@ -498,7 +498,13 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
                 "protocolVersion": asked if asked in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
                 "capabilities": {"tools": {"listChanged": False}, "prompts": {"listChanged": False},
                                  "resources": {"listChanged": False, "subscribe": False}},
-                "serverInfo": {"name": "the-vault", "title": "The Vault", "version": "1"},
+                # icons and websiteUrl (MCP 2025-11-25): hosts show the Vault's own gold V instead of a placeholder
+                "serverInfo": {"name": "the-vault", "title": "The Vault", "version": "1",
+                               "websiteUrl": request.app.state.settings.base_url,
+                               "icons": [{"src": f"{request.app.state.settings.base_url}/apple-touch-icon.png",
+                                          "mimeType": "image/png", "sizes": ["180x180"]},
+                                         {"src": f"{request.app.state.settings.base_url}/favicon.svg",
+                                          "mimeType": "image/svg+xml", "sizes": ["any"]}]},
                 "instructions": INSTRUCTIONS,
             })
         if method == "ping":

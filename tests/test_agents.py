@@ -133,6 +133,8 @@ def test_mcp_handshake_and_tools(agent, bot):
     init = rpc(bot, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                                       "clientInfo": {"name": "test", "version": "0"}}, read).json()["result"]
     assert init["protocolVersion"] == "2025-06-18" and init["serverInfo"]["name"] == "the-vault"
+    icons = init["serverInfo"]["icons"]  # hosts show the Vault's own icon, not a placeholder
+    assert icons[0] == {"src": "http://testserver/apple-touch-icon.png", "mimeType": "image/png", "sizes": ["180x180"]}
     assert "search_cards" in init["instructions"]
     note = bot.post("/api/mcp", json={"jsonrpc": "2.0", "method": "notifications/initialized"}, headers=auth(read))
     assert note.status_code == 202
