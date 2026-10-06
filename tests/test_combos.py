@@ -71,3 +71,13 @@ def test_a_failing_upstream_is_a_502_and_the_rest_still_works(client, universe):
 def test_a_malformed_answer_is_a_502_not_a_crash(client, universe):
     universe.spellbook.fail_next("/find-my-combos", 200, body={"unexpected": True})
     assert client.post(f"{V1}/combos", json={"text": DECK}).status_code == 502
+
+
+def test_the_answer_says_it_lists_only_combos_commander_spellbook_knows(client, universe):
+    """A real council run (2026-10-05) told a pod a deck had 'no infinite combos' because this found none, while the deck held a
+    token engine Spellbook does not list (#172)."""
+    result = client.post(f"{V1}/combos", json={"text": "Deck\n1 Test Rock\n"}).json()["result"]
+    assert result["included"] == [] and "Only combos known to Commander Spellbook" in result["limits"]
+    assert "never tell a player it is combo-free" in result["limits"]
+    from vault.api import mcp
+    assert "finding none does not mean the deck has no infinite combos" in mcp.BY_NAME["find_combos"].description

@@ -144,7 +144,7 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              body=lambda a: {k: a[k] for k in ("title", "cards", "steps", "version") if a.get(k) is not None},
              provenance=("catalog",), ui="steps"),
         Tool("find_combos", "Combos present in a decklist, and combos one card short (with the missing cards), asked of Commander Spellbook "
-             "on demand. Descriptions are theirs and are attributed; the Vault keeps no copy of their data." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
+             "on demand. Descriptions are theirs and are attributed; the Vault keeps no copy of their data. It lists only combos Commander Spellbook knows: finding none does not mean the deck has " "no infinite combos." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
              {"text": deck, "deck_id": DECK_ID}, [], method="POST", path=lambda a: f"{V1}/decks/combos", body=lambda a: _deck_body(a),
              provenance=("computed",)),
         Tool("shopping_list", "The cards of a decklist the person does not own, with the cheapest known price of each (dated, from Scryfall) "
