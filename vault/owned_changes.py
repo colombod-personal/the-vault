@@ -29,6 +29,7 @@ from .models import Card, Entry, Import, OraclePrice, PriceSnapshot, User
 MAX_LINES = 50
 MAX_REMOVED_COPIES = 25
 MAX_REMOVED_SHARE = 0.10
+REMOVAL_FLOOR = 5  # removing this many copies is never refused by the share cap (a small collection can still sell one)
 TOKEN_SECONDS = 15 * 60
 MAX_CANDIDATES = 20
 
@@ -181,8 +182,10 @@ def preview(db: Session, user: User, lines: list[dict], secret: str, lookup_prin
     added = sum(max(0, r.after - r.before) for r in resolved if r.status == "ready")
     total = db.scalar(select(func.coalesce(func.sum(Entry.quantity), 0)).where(Entry.user_id == user.id)) or 0
     refusal = None
-    if not undo and (removed > MAX_REMOVED_COPIES or (total and removed > MAX_REMOVED_SHARE * total)):
-        refusal = (f"This removes {removed} copies at once; the limit is {MAX_REMOVED_COPIES} copies or 10% of the collection. "
+    if not undo and (removed > MAX_REMOVED_COPIES
+                     or (removed > REMOVAL_FLOOR and total and removed > MAX_REMOVED_SHARE * total)):
+        refusal = (f"This removes {removed} copies at once; the limit is {MAX_REMOVED_COPIES} copies, or 10% of the collection "
+                   f"once more than {REMOVAL_FLOOR} are removed. "
                    "Larger removals go through an import or a reset, which have their own previews.")
     value = sum(((r.after - r.before) * r.unit_price) for r in resolved if r.status == "ready" and r.unit_price)
     ready = refusal is None and all(r.status == "ready" for r in resolved)

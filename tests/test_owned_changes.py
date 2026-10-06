@@ -135,7 +135,7 @@ def test_the_printing_is_the_persons_choice(app, bot, write):
 
 
 def test_unknown_cards_and_wrong_printings_are_refused_with_suggestions(app, bot, write):
-    typo = preview(bot, write, {"action": "add", "name": "Sol Rnig", "quantity": 1, "printing_unknown": True})
+    typo = preview(bot, write, {"action": "add", "name": "Sol Rings", "quantity": 1, "printing_unknown": True})
     assert not typo["ready"] and typo["lines"][0]["status"] == "refused" and "Sol Ring" in typo["lines"][0]["did_you_mean"]
     wrong = preview(bot, write, {"action": "add", "name": "Sol Ring", "quantity": 1, "set": "mkm", "number": "167"})
     assert not wrong["ready"] and wrong["lines"][0]["status"] == "refused"
@@ -143,10 +143,21 @@ def test_unknown_cards_and_wrong_printings_are_refused_with_suggestions(app, bot
     assert not too_many["ready"] and "own 1" in too_many["lines"][0]["reason"]
 
 
-def test_big_removals_and_long_change_sets_are_refused(app, bot, write):
-    # the fixture collection is small: removing 3 of its copies is over 10% of it
-    big = preview(bot, write, {"action": "set", "name": "A Killer Among Us", "quantity": 0, "set": "mkm", "number": "167"})
-    assert not big["ready"] and "limit" in big["refused"]
+REMOVE_ALL_KILLERS = {"action": "set", "name": "A Killer Among Us", "quantity": 0, "set": "mkm", "number": "167"}
+
+
+def test_a_small_collection_can_still_remove_a_few_cards(app, bot, write):
+    # 4 of the fixture's 7 copies: over 10%, but within the floor, so a new person can record selling cards
+    assert preview(bot, write, REMOVE_ALL_KILLERS)["ready"]
+
+
+def test_big_removals_and_long_change_sets_are_refused(app, bot, write, monkeypatch):
+    monkeypatch.setattr(owned_changes, "REMOVAL_FLOOR", 1)  # the 10% share cap, on the small fixture collection
+    share = preview(bot, write, REMOVE_ALL_KILLERS)
+    assert not share["ready"] and "limit" in share["refused"] and "confirmation" not in share
+    monkeypatch.setattr(owned_changes, "REMOVAL_FLOOR", 5)
+    monkeypatch.setattr(owned_changes, "MAX_REMOVED_COPIES", 3)  # the copies cap
+    assert not preview(bot, write, REMOVE_ALL_KILLERS)["ready"]
     long = call_tool(bot, write, "update_owned_cards", lines=[ADD_CMR] * 51)
     assert long.get("isError")
 
@@ -160,10 +171,9 @@ def test_a_read_only_connection_cannot_edit(agent, cards, bot):
 
 def test_undo_previews_then_restores_and_only_the_last_change(app, agent, bot, write):
     before = total(app)
-    seen = preview(bot, write, ADD_CMR, {"action": "add", "name": "Sol Ring", "quantity": 1, "printing_unknown": True})
-    assert not confirm(bot, write, seen["lines"] and [ADD_CMR, {"action": "add", "name": "Sol Ring", "quantity": 1,
-                                                                "printing_unknown": True}],
-                       seen["confirmation"]).get("isError")
+    lines = [ADD_CMR, {"action": "add", "name": "Sol Ring", "quantity": 1, "printing_unknown": True}]
+    seen = preview(bot, write, *lines)
+    assert not confirm(bot, write, lines, seen["confirmation"]).get("isError")
     assert total(app) == before + 3
     shown = call_tool(bot, write, "undo_owned_cards_update")["structuredContent"]
     assert shown["ready"] and shown["copies_removed"] == 3 and total(app) == before + 3  # a preview changes nothing
