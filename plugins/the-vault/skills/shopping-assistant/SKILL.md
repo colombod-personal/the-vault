@@ -6,7 +6,7 @@ description: >-
   them, or wants a list to paste into Card Kingdom, Cardmarket or another store.
 license: MIT
 metadata:
-  vault-tools: "list_decks shopping_list validate_deck_changes"
+  vault-tools: "list_decks shopping_list validate_deck_changes update_owned_cards confirm_owned_cards_update"
 ---
 
 # Shopping assistant
@@ -32,6 +32,9 @@ prices. Follow `vault-attribution` (if installed) when you show prices.
 5. **Budget help.** If the person has a budget, use `validate_deck_changes` to check changes against it,
    or suggest cheaper alternatives only from tool results. Do not invent cheaper cards.
 6. **If a card is not found**, the line says `known_card: false`: ask for the correct name rather than guessing.
+7. **When the cards arrive**, offer to add them: `update_owned_cards` with the printings they actually got (ask;
+   they may not know, then `printing_unknown`), show the preview, and `confirm_owned_cards_update` only after
+   they say yes. Never add cards because they were on a shopping list: only what they say they received.
 
 ## Do not
 

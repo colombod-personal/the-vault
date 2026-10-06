@@ -201,3 +201,23 @@ def authenticate_pat(db: Session, bearer: str) -> tuple[User, set[str]] | None:
         if not _touch(db, AccessToken, row.id, now):
             return None  # revoked meanwhile
     return db.get(User, row.user_id), set(row.scopes.split())
+
+
+def app_label(db: Session, bearer: str | None) -> str:
+    """Who is acting, for the record a change carries (an assistant change set names its app): an OAuth app by its
+    host, a personal access token by its name, otherwise the Vault's own web or native app."""
+    from urllib.parse import urlsplit
+
+    from . import oauth_server
+    from .models import OAuthGrant
+
+    if not bearer:
+        return "the Vault web app"
+    if oauth_server.is_access_token(bearer):
+        grant = db.scalar(select(OAuthGrant).where(OAuthGrant.access_hash == oauth_server._hash(bearer)))
+        host = urlsplit(grant.client_id).hostname if grant and grant.client_id.startswith("https://") else None
+        return host or "a connected app"
+    if is_pat(bearer):
+        row = db.scalar(select(AccessToken).where(AccessToken.token_hash == _hash(bearer)))
+        return f"token '{row.name}'" if row is not None else "a personal access token"
+    return "the Vault app"

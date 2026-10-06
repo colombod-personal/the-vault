@@ -36,10 +36,10 @@ from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
 from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, import_days, view_version
-from .. import archidekt_cache, deck_import, deck_match
+from .. import archidekt_cache, deck_import, deck_match, owned_changes
 from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, export_collection, import_collection,
                         preview_import as preview_collection_import, user_entries)
-from ..models import AccessToken, ApiSession, Deck, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
+from ..models import AccessToken, ApiSession, Card, Deck, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
 from ..native import LEEWAY as NATIVE_LEEWAY, NativeTokenError, NativeVerifier, ProviderUnavailable
 from ..passkeys import remove_passkey
 from ..prices import compute_values
@@ -582,9 +582,12 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     # -- imports ------------------------------------------------------------------------------
     def _import(i: Import) -> dict:
-        return {"id": i.id, "filename": i.filename, "source": i.source, "rows": i.rows, "copies": i.copies,
-                "changes": i.summary,
-                "created_at": _iso(i.created_at), "_links": {"self": link(f"{V1}/imports/{i.id}")}}
+        out = {"id": i.id, "filename": i.filename, "source": i.source, "rows": i.rows, "copies": i.copies,
+               "changes": i.summary, "kind": i.kind or "import",
+               "created_at": _iso(i.created_at), "_links": {"self": link(f"{V1}/imports/{i.id}")}}
+        if i.kind in ("assistant", "undo"):
+            out |= {"app": i.app, "lines": (i.changes or {}).get("lines")}
+        return out
 
     @router.post("/imports", tags=["imports"], response_model=S.ImportItem, status_code=201,
                  summary="Upload a collection file: Dragon Shield, Moxfield or generic CSV, detected automatically "
@@ -883,6 +886,72 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     # -- card catalog (Scryfall data, served by the Vault) ---------------------------------------
     catalog = Catalog(transport, rewrite_image=(lambda url: outbound.browser_url(settings, url)) if settings.twins_url else None)
+
+    # -- assistant edits to owned cards (vault.owned_changes, docs/owned-cards-updates.md) ---------
+    def lookup_printing(db: Session, set_code: str, number: str):
+        """A printing the Vault does not know yet, looked up at Scryfall by set and number (and kept, as lookups are)."""
+        try:
+            catalog.lookup(db, [{"set": set_code, "collector_number": number}])
+        except (ApiError, httpx.HTTPError):
+            return None
+        return db.scalar(select(Card).where(func.lower(Card.set_code) == set_code.lower(),
+                                            func.lower(Card.collector_number) == number.lower()))
+
+    def changes_answer(out: dict) -> dict:
+        out.pop("_resolved", None)
+        return out
+
+    @router.post("/collection/changes/preview", tags=["collection"],
+                 summary="Preview small edits to the cards owned (add, remove, set): changes nothing; returns a confirmation")
+    def preview_owned_changes(request: Request, body: S.OwnedChangesIn, user: User = Depends(current_user),
+                              db: Session = Depends(get_db)) -> dict:
+        per_user(request, "owned changes preview", user.id, 30)
+        try:
+            return changes_answer(owned_changes.preview(db, user, [line.model_dump() for line in body.lines],
+                                                        settings.session_secret, lambda s, n: lookup_printing(db, s, n)))
+        except owned_changes.ChangeError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.post("/collection/changes/apply", tags=["collection"], status_code=201,
+                 summary="Apply exactly the previewed edits, with the preview's confirmation, after the person said yes")
+    def apply_owned_changes(request: Request, body: S.OwnedChangesApplyIn, user: User = Depends(current_user),
+                            db: Session = Depends(get_db)):
+        per_user(request, "owned changes", user.id, 10)
+        label = tokens.app_label(db, getattr(request.state, "bearer", None))
+
+        def run():
+            try:
+                imp = owned_changes.apply(db, user, [line.model_dump() for line in body.lines], body.confirmation,
+                                          settings.session_secret, lambda s, n: lookup_printing(db, s, n), label)
+            except owned_changes.ChangeError as exc:
+                raise HTTPException(409, str(exc)) from exc
+            return {"applied": True, "change_set": imp.id, "summary": imp.summary, "app": imp.app,
+                    "value_change_usd": imp.changes["value_change_usd"],
+                    "undo": "undo_owned_cards_update reverts it until the collection changes again"}
+
+        return idempotent(request, db, user, 201, run)
+
+    @router.post("/collection/changes/undo", tags=["collection"],
+                 summary="Undo the last assistant change set: without a confirmation, preview; with it, apply")
+    def undo_owned_changes(request: Request, body: S.OwnedUndoIn, user: User = Depends(current_user),
+                           db: Session = Depends(get_db)) -> dict:
+        per_user(request, "owned changes", user.id, 10)
+        imp = owned_changes.last_undoable(db, user)
+        if imp is None:
+            raise HTTPException(409, "Nothing to undo: only the last change made through an assistant, and only until the "
+                                     "collection changes again")
+        lines = owned_changes.undo_lines(imp)
+        lookup = lambda s, n: lookup_printing(db, s, n)  # noqa: E731
+        try:
+            if not body.confirmation:
+                return {**changes_answer(owned_changes.preview(db, user, lines, settings.session_secret, lookup, undo=True)),
+                        "undoes": imp.id}
+            done = owned_changes.apply(db, user, lines, body.confirmation, settings.session_secret, lookup,
+                                       tokens.app_label(db, getattr(request.state, "bearer", None)), undo_of=imp)
+        except owned_changes.ChangeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        db.commit()
+        return {"undone": imp.id, "change_set": done.id, "summary": done.summary}
 
     @router.post("/cards/lookup", tags=["cards"], response_model=S.CardLookup, response_model_by_alias=True,
                  summary="Card data, images and prices for up to 75 printings (Scryfall's collection lookup, via the Vault)")

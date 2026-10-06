@@ -80,6 +80,11 @@ class Import(Base):
     copies: Mapped[int] = mapped_column(Integer)
     summary: Mapped[dict] = mapped_column(JSON, default=dict)  # delta.CollectionDiff.summary()
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # "import" (a file), "assistant" (a change set made through an assistant, vault.owned_changes) or "undo"
+    kind: Mapped[str] = mapped_column(String(20), default="import", server_default="import")
+    app: Mapped[str | None] = mapped_column(String(200))  # who made an assistant change set (OAuth app, token name)
+    # an assistant change set: {"lines": [printing, before, after, folders], "value_change_usd", "version_after", ...}
+    changes: Mapped[dict | None] = mapped_column(JSON)
 
 
 class Entry(Base):

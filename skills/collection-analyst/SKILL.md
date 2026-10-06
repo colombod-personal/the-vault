@@ -4,10 +4,10 @@ description: >-
   Answer questions about a person's own Magic card collection in The Vault - value, gains and losses,
   what they own, what is shared with them, and how a deck fits it. Use for "what is my collection
   worth", "my most valuable cards", "do I own the cards for this deck", price changes, sets or colors
-  in the collection.
+  in the collection, and small edits when they bought, sold or traded cards.
 license: MIT
 metadata:
-  vault-tools: "get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline list_card_names check_decklist list_shared_with_me lookup_cards refresh_prices whoami"
+  vault-tools: "get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline list_card_names check_decklist list_shared_with_me lookup_cards refresh_prices whoami update_owned_cards confirm_owned_cards_update undo_owned_cards_update"
 ---
 
 # Collection analyst
@@ -33,6 +33,21 @@ estimate or fill gaps. Follow `vault-attribution` (if installed) for card data a
    tools to read one. Never mix someone else's collection into the person's own totals.
 5. **Report with dates and limits.** Prices are USD market prices from Scryfall on the stated date. "Paid"
    is what the person recorded; unknown costs are not zero. P&L covers only copies with a known price.
+
+## Editing what they own
+
+When the person says they bought, sold, traded or found cards:
+
+1. Send their words as lines to `update_owned_cards` (add, remove, or set how many). It changes nothing.
+2. A line with `choose_printing` lists the printings (theirs first): ask which one, in their words, and never
+   pick for them. For an add they may say they do not know; then send `printing_unknown`. A line with
+   `did_you_mean` names a card that does not exist: ask which they meant.
+3. Show the preview: each card and printing, copies before and after, the value change. Apply with
+   `confirm_owned_cards_update` (the same lines and the preview's `confirmation`) only after they say yes.
+   If it is refused (expired, or the collection changed), preview again and ask again.
+4. Say it is in their import history under this app's name and can be undone with `undo_owned_cards_update`
+   (which also previews first). A later re-import from their app keeps these edits.
+5. More than 50 lines or a big removal is refused: suggest importing a fresh export from their app instead.
 
 ## Privacy
 

@@ -19,6 +19,7 @@ Scopes: **read**, **write** (changes the collection or decks; off by default on 
 | Sets view | `GET /collection/sets`, `/catalog/sets` | `list_sets` | read | no |
 | Refresh prices | `POST /collection/refresh` | `refresh_prices` | write | no |
 | **Upload a collection file (CSV)** | `POST /imports` (multipart) | `import_collection_csv` (shows what would change; replaces only with `confirm`); big files: `start_collection_upload`, `get_staged_upload`, `confirm_staged_upload` | write | no |
+| **Edit the cards owned** (bought, sold, traded) | `POST /collection/changes/preview`, `/apply`, `/undo` | `update_owned_cards` (preview; asks for the printing), `confirm_owned_cards_update` (exactly the preview, after a yes), `undo_owned_cards_update`; docs/owned-cards-updates.md | write | no (the web UI has no single-card edit yet) |
 | See past imports and what changed | `GET /imports`, `GET /imports/{id}` | `list_imports`, `get_import` | read | no |
 | Export the collection to another app | `GET /collection/exports` | `list_export_formats` (download links) | read | no |
 | Graph view (clusters, deck map) | computed in the browser from the collection | `get_deck_overlap` (cards shared by several decks, and copies short) | read | partly: the clusters themselves stay visual |

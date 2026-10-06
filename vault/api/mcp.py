@@ -155,6 +155,15 @@ ID = {"type": "integer", "minimum": 1, "maximum": MAX_ID}
 SHARE = {"share_id": {**ID, "description": "Read a collection someone shared with you (from list_shared_with_me) instead of your own"}}
 DECKLIST = {"type": "string", "maxLength": 50_000}  # as the API's TextIn and DeckIn
 CONFIRM = {"type": "boolean", "description": "true only after the person agreed to this exact change"}
+OWNED_LINES = {"type": "array", "minItems": 1, "maxItems": 50, "items": {
+    "type": "object", "required": ["action", "name", "quantity"], "additionalProperties": False, "properties": {
+        "action": {"type": "string", "enum": ["add", "remove", "set"], "description": "add or remove copies, or set how many"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 300, "description": "The card's name"},
+        "quantity": {"type": "integer", "minimum": 0, "maximum": 999},
+        "set": {"type": "string", "maxLength": 20, "description": "The printing's set code (with number)"},
+        "number": {"type": "string", "maxLength": 30, "description": "The printing's collector number (with set)"},
+        "finish": {"type": "string", "enum": ["nonfoil", "foil", "etched"]},
+        "printing_unknown": {"type": "boolean", "description": "Only when the person says they do not know (adds only)"}}}}
 # null clears them on update_deck (as on the API), so it is advertised as allowed.
 SOURCE_URL = {"anyOf": [{"type": "string", "maxLength": 500}, {"type": "null"}],
               "description": "Where the deck came from (an http or https link); null clears it"}
@@ -307,6 +316,29 @@ TOOLS = [
          method=lambda a: "POST" if a.get("confirm") is True else "GET",
          path=lambda a: f"{V1}/uploads/{int(a['upload_id'])}" + ("/apply" if a.get("confirm") is True else ""),
          write=True, destructive=True),
+    Tool("update_owned_cards", "Small edits to the cards the person owns, as they tell you (bought, sold, traded, "
+         "found): add or remove copies, or set how many they own. Changes nothing: it shows each card, the printing, "
+         "copies before and after and the value change. A line needing a printing comes back as choose_printing with "
+         "the choices: ask the person (never guess); for an add they can say they do not know (printing_unknown). Show "
+         "the preview and, only after they say yes, call confirm_owned_cards_update with the same lines and its "
+         "confirmation. At most 50 lines and 25 copies removed (or 10% of the collection); larger changes are an import.",
+         {"lines": OWNED_LINES}, ["lines"], method="POST", path=lambda a: f"{V1}/collection/changes/preview",
+         body=lambda a: {"lines": a["lines"]}, write=True),
+    Tool("confirm_owned_cards_update", "Apply exactly the edits update_owned_cards previewed, after the person said "
+         "yes: the same lines and the preview's confirmation. Refused if anything differs, the confirmation expired (15 "
+         "minutes) or the collection changed since; then preview again. The change shows in the import history with "
+         "this app's name, and undo_owned_cards_update can revert it.",
+         {"lines": OWNED_LINES, "confirmation": {"type": "string", "minLength": 8, "maxLength": 400,
+                                                 "description": "From the preview the person agreed to"}},
+         ["lines", "confirmation"], method="POST", path=lambda a: f"{V1}/collection/changes/apply",
+         body=lambda a: {"lines": a["lines"], "confirmation": a["confirmation"]}, write=True, destructive=True),
+    Tool("undo_owned_cards_update", "Revert the last edits made through an assistant, while nothing else changed the "
+         "collection since. Without a confirmation it shows what the undo would change: show the person, then call "
+         "again with that confirmation after they say yes.",
+         {"confirmation": {"type": "string", "minLength": 8, "maxLength": 400,
+                           "description": "From this tool's preview, once the person agreed"}},
+         method="POST", path=lambda a: f"{V1}/collection/changes/undo",
+         body=lambda a: {"confirmation": a.get("confirmation")}, write=True, destructive=True),
     Tool("list_export_formats", "Formats the collection can be exported in to move it to another app (Dragon "
          "Shield, Moxfield, Archidekt, generic CSV, text list), each with a download link. The files can be "
          "large; give the person the link rather than reading the whole file.",
@@ -347,7 +379,8 @@ SCRYFALL_DATA = {"get_collection_summary", "search_cards", "get_card", "list_set
 OWN_DATA_ONLY = {"get_acquisition_timeline", "parse_decklist", "list_decks", "save_deck", "update_deck", "list_imports",
                  "import_collection_csv", "list_export_formats", "list_shared_with_me", "get_import", "delete_deck",
                  "list_my_shares", "accept_share", "stop_sharing", "start_collection_upload",
-                 "get_staged_upload", "confirm_staged_upload", "get_deck_overlap"}
+                 "get_staged_upload", "confirm_staged_upload", "get_deck_overlap", "update_owned_cards",
+                 "confirm_owned_cards_update", "undo_owned_cards_update"}
 for _tool in TOOLS:
     if not _tool.provenance:
         _tool.provenance = ("scryfall",) if _tool.name in SCRYFALL_DATA else ("archidekt",) if _tool.name == "get_archidekt_deck" else ()
