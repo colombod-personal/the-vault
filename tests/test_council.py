@@ -92,3 +92,20 @@ def test_another_persons_deck_is_not_read(agent, bot):
         bob.post("/api/auth/dev-login", params={"email": "bob@example.com"})
         bob_read = make_token(bob)
     assert call_tool(bot, bob_read, "council_brief", deck_id=deck["id"]).get("isError")
+
+
+RULES = ("exactly as", "no power score", "does not check colours", "from memory")  # #235: what keeps a review grounded
+
+
+def test_every_payload_the_assistant_reads_carries_the_grounding_rules():
+    """#235: in ChatGPT the council review called the deck 'low and weak' and misquoted numbers: nothing told it not to.
+    The rules are in the server instructions, the council brief the connector hands over, and the expert-council skill
+    (the Claude plugin and the ChatGPT plugin copy it)."""
+    from vault.api import mcp
+    skill = (bp.ROOT / "skills" / "expert-council" / "SKILL.md").read_text(encoding="utf-8")
+    brief = json.dumps(experts.council("commander", "tune it"))
+    for where, text in {"server instructions": mcp.INSTRUCTIONS, "council_brief": brief, "expert-council skill": skill}.items():
+        lowered = " ".join(text.lower().split())
+        for rule in RULES:
+            assert rule in lowered or (rule == "no power score" and "has no power score" in lowered), (where, rule)
+    assert "exactly as" in (bp.OPENAI / "skills" / "expert-council" / "SKILL.md").read_text(encoding="utf-8").lower()
