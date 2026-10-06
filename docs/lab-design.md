@@ -16,7 +16,7 @@ Each section names (1) the decision it supports, (2) where the person acts on it
 
 ### 0. The decision strip (top of the page)
 
-Three server-computed counters, each a link that scrolls to its section: **decks that need a purchase** (and what finishing them costs, counted once per #165), **cards you could sell** (spare copies, with their market value), **biggest known loss and gain**. Each counter is the `total` or `value` field of the section response below, never a separate calculation. Phone: three stacked rows. If a section has nothing to say, its counter reads "nothing to decide" instead of 0.
+Three server-computed counters, each a link that scrolls to its section: **decks that need a purchase** (and what finishing them costs, counted once per #165), **cards you could sell** (spare copies, with their market value), **biggest known loss and gain**. Each counter reads named fields the server already returns or will return (never a browser calculation): **purchase counter** = `summary.decks_needing_purchase` and `summary.finish_all_cost` (with `summary.unpriced` when a price is unknown) on `GET /decks/overlap`, a `summary` object that #165's extended response gains (decks analysed, decks needing a purchase, the global cost counted once); **sell counter** = `summary.names`, `summary.copies` and `summary.market_value` on `GET /collection/spare`, computed over every spare card, not just the page returned; **profit and loss counter** = `biggest_gains[0].gain` and `biggest_losses[0].gain` on the existing `GET /collection/stats`, with how many copies they cover from the existing collection summary's known-cost copy count. Phone: three stacked rows. If a section has nothing to say, its counter reads "nothing to decide" instead of 0.
 
 ### 1. Buy: what to buy to make every deck stand on its own
 
@@ -32,19 +32,19 @@ Two lists, because they answer different questions.
 
 **2a. Spare copies (new).** Copies beyond what the saved decks need, counted by card name as everywhere else:
 
-- Per name: `have` (all copies), `needed` (the most the saved decks need at the same time, so it equals `need_for_all` from #165), `spare = have - needed`, `market_value_of_spare`, whether Dragon Shield already marks copies for trade (`trade_quantity`), and the decks that use the card.
+- Per name: `have` (all copies), `needed` (the total copies the saved decks need at the same time, summed across decks, which is `need_for_all` from #165), `spare = max(0, have - needed)`, `market_value_of_spare`, whether Dragon Shield already marks copies for trade (`trade_quantity`), and the decks that use the card.
 - Cards in no saved deck are all spare, **but only when at least one deck is saved**; with no decks the section asks the person to save decks first instead of calling the whole collection spare.
 - Basic lands are left out (as in #165). It says what it does not know: copies for decks the person has not saved, and play-sets, so "spare" means "beyond your saved decks", never "worthless to you".
-- Sorted by market value of the spare copies, descending; cursor-paged.
+- Only names with `spare > 0` are listed, so a card the collection is short on never appears as a negative spare (it belongs to Buy). Sorted by market value of the spare copies, descending; cursor-paged.
 - **Acts on it:** the card page, and a link to the card's Scryfall page (which lists stores; the Vault does not recommend a seller or contact one). The collection export (`/collection/export.csv`, which keeps Dragon Shield's trade quantity column) is linked once at the top; the Vault has no separate trade-list export today.
 
 **2b. Profit and loss.** The existing biggest gains and biggest losses (`GET /collection/stats`), over copies with a known price paid only, with the count of copies it covers ("based on 21,745 of 21,950 copies"). Decision: sell a winner, or hold a loser until it recovers. Each row links to the card. Hidden entirely, with a one-line reason, when the collection has no known prices paid or is a shared view that hides costs.
 
-### 3. Value over time
+### 2c. Context for the sell or hold decision: value over time
 
 - **Decision:** whether a sale now is a good moment, and whether the collection's value is tracking what was paid.
-- **Data:** `GET /collection/history` (daily market value and cost). One chart, the last year by default, with the dates it covers; a note that history starts at the first price refresh, not at the first import.
-- It sits last: it supports the other sections, it does not need action of its own.
+- **Data:** `GET /collection/history` (daily market value and cost). One chart, the last year by default, with the dates it covers; history starts at the first import (the import computes that day's value in the same transaction, `test_an_import_starts_the_value_history`); the daily price refresh then adds later days and updates the current one.
+- **Acts on it:** it is not a standalone section. It is the context for 2a and 2b, with two action targets: a **Show losers** link when market value is below cost over the range (jumps to the losers list) and a **Show spare copies** link otherwise. If the collection has no known cost, only the market line shows and there is no action, so the chart is hidden with the rest of the profit and loss when costs are hidden.
 
 ### 4. Cut: the colour by type heatmap
 
@@ -75,7 +75,7 @@ BUY: can every deck stand on its own?          SELL OR HOLD
 | [Copy shopping list]                  |      Winners            paid   now     gain
 +---------------------------------------+      ...                                [more]
                                                Losers  ...
-VALUE OVER TIME  (1 Jan - 6 Oct)
+SELL OR HOLD, CONTEXT: value over time (1 Jan - 6 Oct)   [Show losers]
 [ line chart: market value, cost ]
 ```
 
@@ -107,15 +107,57 @@ Sol Ring        27 spare  $135
 ...                      [more]
 Winners | Losers  (tabs)
 
-VALUE OVER TIME
+SELL OR HOLD, CONTEXT: value over time   [Show losers]
 [ chart ]
 ```
 
-### States (each has its own mockup in the implementation)
+### States
 
-- **Empty collection:** the page is one panel: "Import your collection to see what to buy or sell", with the import action.
-- **No decks:** Buy is replaced by "Save a deck" and spare copies are hidden (see 2a); profit and loss and value over time still show.
-- **No prices paid, or costs hidden on a shared view:** profit and loss is replaced by one line saying why; the counter shows "nothing to decide"; spare copies, Buy and value over time still show (value over time shows market only).
+Each state is shown at both widths. `[...]` is a control.
+
+**Empty collection** (nothing imported): the page is one panel.
+
+```
+1400 px                                          390 px
+Lab                                              Lab
++----------------------------------------+       +---------------------------+
+| Import your collection to see what to  |       | Import your collection to |
+| buy or sell.        [Import a file]    |       | see what to buy or sell.  |
++----------------------------------------+       | [Import a file]           |
+                                                 +---------------------------+
+```
+
+**No decks yet:** Buy asks for a deck; spare copies are hidden (see 2a); profit and loss and the value chart still show.
+
+```
+1400 px                                          390 px
+Lab                    Prices: Scryfall, 6 Oct   Lab        Prices: Scryfall, 6 Oct
++-----------------+ +-------------+ +--------+  +---------------------------+
+| nothing to      | | needs decks | | loss/  |  | Buy: save a deck to see   |
+| decide          | | first       | | gain   |  | if your decks can all be  |
++-----------------+ +-------------+ +--------+  | built at once [Add a deck]|
+BUY: Save a deck to see whether your decks      | SELL OR HOLD              |
+can all be built at once.   [Add a deck]        | Winners | Losers (tabs)   |
+SELL OR HOLD: Profit and loss | value chart     | value chart               |
+```
+
+**No prices paid** (or costs hidden on a shared view): profit and loss and the chart's cost line are replaced by one line saying why.
+
+```
+1400 px                                          390 px
+Lab                    Prices: Scryfall, 6 Oct   Lab        Prices: Scryfall, 6 Oct
++-----------------+ +-------------+ +--------+  +---------------------------+
+| 2 decks need    | | 14 cards    | | nothing|  | 2 decks need a purchase > |
+| a purchase      | | you could   | | to     |  | 14 cards you could sell > |
+|                 | | sell        | | decide |  | nothing to decide (P&L)   |
++-----------------+ +-------------+ +--------+  +---------------------------+
+BUY ...            SELL OR HOLD                 BUY ...
+                   Spare copies ...             SELL OR HOLD
+                   Profit and loss: "No prices   Spare copies ...
+                   paid are known for these      P&L: no prices paid known
+                   copies" (market line only)    [value chart: market only]
+```
+
 - **Stale prices:** the header says how old the prices are; a dated price is never shown as today's.
 
 ## API and assistant parity
@@ -127,11 +169,12 @@ VALUE OVER TIME
 | Profit and loss | `GET /collection/stats` (existing) | `get_collection_stats` (existing) |
 | Value over time | `GET /collection/history` (existing) | `get_value_history` (existing) |
 
-`docs/ai-parity.md`, `public/llms.txt` and the skills that explain selling are updated with the new tool. The "decision strip" is not a separate endpoint: each counter reads the `total` or `value` field of its section's response.
+The implementation (task 4) must update `docs/ai-parity.md`, `public/llms.txt` and the skills that explain selling for the new tool; this design makes no parity claim today. The "decision strip" is not a separate endpoint: each counter reads the named fields in section 0.
 
 ## Tests (write first)
 
-- `spare` is `have - need_for_all` by name; basic lands never appear; a card used by two decks needing 1 each with 3 owned has spare 1.
+- `spare` is `max(0, have - need_for_all)` by name and only positive spares are listed: a card owned once and needed by two decks is not listed and no spare is ever negative; basic lands never appear; a card used by two decks needing 1 each with 3 owned has spare 1.
+- `summary.names`, `summary.copies` and `summary.market_value` cover every spare card whatever the page size, and `summary.decks_needing_purchase` and `summary.finish_all_cost` on `GET /decks/overlap` match the sum of the per-deck answers (counted once per card).
 - With no saved decks the endpoint answers "no decks" and lists nothing; it never reports the whole collection as spare.
 - Cards in no deck are fully spare once a deck exists.
 - `trade_quantity` is reported without changing `spare`.
@@ -153,6 +196,6 @@ VALUE OVER TIME
 
 1. Server: `GET /collection/spare` and `list_spare_copies`, tests above, docs.
 2. Server: the extended `GET /decks/overlap` (#165), if not already done.
-3. Web: the new Lab page (sections 0 to 3) with every state; remove the old sections; change the page heading and screen label to "Lab" if decision 1 is yes.
+3. Web: the new Lab page (sections 0, 1, 2a, 2b and 2c) with every state; remove the old sections; change the page heading and screen label to "Lab" if decision 1 is yes.
 4. Docs: `docs/api.md`, `docs/ai-parity.md`, `public/llms.txt`, skills.
 5. Production visual pass (#175) after it ships, at 1400 and 390 px.
