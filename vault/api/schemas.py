@@ -294,6 +294,12 @@ class ImportPage(Page):
     items: list[ImportItem]
 
 
+class ImportLinkIn(BaseModel):
+    url: str = Field(min_length=8, max_length=500, description="An Archidekt deck link (archidekt.com/decks/<number>)")
+    name: str | None = Field(None, max_length=200, description="Name to save it under; default: the deck's name on Archidekt")
+    update: bool = Field(False, description="If this deck is already saved, replace its list with Archidekt's current one")
+
+
 class DeckIn(BaseModel):
     name: str
     text: str = Field(max_length=50_000)
