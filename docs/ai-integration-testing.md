@@ -50,6 +50,13 @@ real hosts (`docs/mcp-apps.md`).
 - The embedded Postgres in the Python package `pgserver` has no `pg_trgm`, so the catalog migration fails and a
   misspelled card name returns a 500. Use a full Postgres (Docker, or a normal install).
 - Docker Desktop on Windows can fail to start after an OS update; the smoke test needs only a Postgres, not Docker.
+- **claude.ai keeps the tool list from when the connector was connected.** After a release that adds tools or
+  changes a tool's view, a connected person sees nothing new (2026-10-06: after #83, Claude said it could only
+  replace the whole collection, and its connector settings listed the old 50 tools). Disconnecting and reconnecting
+  The Vault (Customize, Connectors) loads the current list. The server says `listChanged: false` because it can't
+  push a change over stateless HTTP. Release notes for tool changes must tell people to reconnect.
+- Claude draws its own image grids in a sandbox that blocks outside images, so a "show me pictures" answer it builds
+  itself shows empty boxes and links. Pictures must come from a Vault view, whose CSP allows cards.scryfall.io (#205).
 - Name-only collection imports price an arbitrary printing (see `docs/usability-review.md`); use files with set and number.
 
 ## Expert council: a real run (2026-10-05)
