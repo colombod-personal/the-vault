@@ -59,7 +59,7 @@ and per **contested card**, once, because that is the decision:
 card, have, need_for_all, global_deficit
 decks: [{ deck, need, gets: N, lacking: N }]
 options:
-  - move:  "give the copy to <deck>; <other deck> then lacks one" (what changes; the global deficit does not). Offered only when the target deck lacks a copy and another deck holds a positive allocation; every contested card has one, because `have > 0`. Never offered for a card owned zero times, which has no copy to move.
+  - move:  "give the copy to <deck>; <other deck> then lacks one" (what changes; the global deficit does not). Offered only when the target deck has `held_by_other_deck > 0` and the source deck holds a positive allocation of the card; otherwise only `buy` is offered, in the response and in the view. For a contested card (`have > 0`) both conditions hold, so both options appear; a card owned zero times is not contested and never offers `move`.
   - buy:   "buy global_deficit copies at $X (Scryfall's cheapest price, dated)" (the cost to finish every deck for this card, counted once)
 ```
 
@@ -80,7 +80,7 @@ The server computes every number; the web view and assistants only show them. Pr
 
 A section of the Lab (#162), phone-first, "Do your decks stand on their own?":
 - **Nothing contested:** one line, "All N analysed decks can be built at the same time from what you own" (and only when `decks_skipped` is empty), with the list collapsed. When a deck could not be checked the line is qualified: "N of M decks checked; K could not be read", naming them and linking to each, because an empty contested list says nothing about a deck that was skipped.
-- **Contested:** one row per contested card (the decision), with the two options and their prices; below it one row per deck (name, a complete tick or the number of lacking cards) that expands to the cards it holds and lacks. Each deck row links to the deck page and its buy list.
+- **Contested:** one row per contested card (the decision), with the options that apply (`buy` always; `move` only when the rule below allows it) and their prices; below it one row per deck (name, a complete tick or the number of lacking cards) that expands to the cards it holds and lacks. Each deck row links to the deck page and its buy list.
 - At 390 px the contested rows come first and are full width; at 1400 px the contested cards and the deck rows sit side by side.
 
 ## Tests (write first)

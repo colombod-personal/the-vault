@@ -39,7 +39,7 @@ Starting set, from the owner's examples and the roles the Vault already uses: ra
 1. Rule pipeline: patterns over oracle text, for example "create a Treasure token" gives `makes-treasure`, "if one or more tokens would be created ... twice that many" gives `doubles-tokens`. Each rule has fixtures of cards it must and must not match.
 2. Tag pipeline: a mapping table from Scryfall tag `id` to role (reviewed by hand once, then versioned). Tags marked hidden give no rows.
 3. Reviewer pipeline: a scheduled job that compares sources and flags disagreements (a rule says treasure, no tag agrees) for review before they are published.
-4. Rebuilds are idempotent and keyed by catalogue version, so a daily Scryfall update changes only what changed.
+4. Rebuilds are idempotent and keyed by **every input to the roles**, not the catalogue version alone: the catalogue version, the rules version, the tag-mapping version, a hash of the hidden-tag set, and a watermark of reviewed suggestions. A corrected rule, a changed mapping, a newly hidden tag or an accepted suggestion therefore always triggers a rebuild even when Scryfall's data did not change, and a daily update with none of those changes touches nothing. Hiding a tag **withdraws** the rows it produced on the next rebuild (and the published answers stop showing them), so a hidden tag never lingers.
 
 ### 4. Experience from users: suggestions, reviewed
 
@@ -53,7 +53,7 @@ A person (or their assistant) can submit "card X does role Y, because Z" to a `r
 
 ## Decisions for the owner
 
-1. **Readable by signed-in accounts from day one, or after the terms check?** Recommendation: open the rule-derived rows first; add Scryfall-derived rows only after the terms check on #62 (or keep them internal and expose only the Vault's own role names).
+1. **Readable by signed-in accounts from day one, or after the terms check?** Recommendation: before the terms check on #62, only the Vault's own vocabulary and the **rule-derived** associations are visible to anyone. Tag-derived associations stay hidden until that check passes; showing them under the Vault's own role names is not an alternative to the check, because it would still expose tag-derived results.
 2. **Vocabulary size to start.** Recommendation: about 40 roles from the owner's examples and the existing eight, grown by evidence from the suggestion queue.
 3. **Strength.** Recommendation: two levels (`core`, `incidental`), mapped from Scryfall's weights where a tag is the source.
 
