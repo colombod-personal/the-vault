@@ -135,3 +135,54 @@ def test_computed_values_are_labelled_as_the_vaults_and_list_their_inputs():
     p = provenance.computed("legality check", [provenance.for_catalog("oracle_cards")], as_of=date(2026, 10, 4))
     assert p.kind == "computed" and p.source == "The Vault" and p.inputs[0].source == "Scryfall"
     assert p.notice == provenance.FAN_CONTENT_NOTICE and p.as_of == "2026-10-04"
+
+
+# -- multi-faced cards (#197): Scryfall puts the colours on the faces, not at the top level ----------------
+
+DELVER = "44444444-4444-4444-4444-444444444444"
+AWAKENING = "55555555-5555-5555-5555-555555555555"
+FIRE_ICE = "66666666-6666-6666-6666-666666666666"
+
+
+def delver(**extra):
+    obj = card(DELVER, "Delver of Secrets // Insectile Aberration", layout="transform", color_identity=["U"],
+               card_faces=[{"name": "Delver of Secrets", "mana_cost": "{U}", "colors": ["U"], "type_line": "Creature",
+                            "oracle_text": "Transform.", "power": "1", "toughness": "1", "image_uris": {}},
+                           {"name": "Insectile Aberration", "mana_cost": "", "colors": ["U"], "type_line": "Creature",
+                            "oracle_text": "Flying", "power": "3", "toughness": "2", "image_uris": {}}], **extra)
+    for key in ("colors", "mana_cost", "oracle_text"):
+        obj.pop(key, None)  # as Scryfall sends it
+    return obj
+
+
+def test_a_transform_card_takes_its_colours_from_its_faces_and_keeps_them_per_face():
+    row = cs.oracle_card_row(delver())
+    assert row["colors"] == ["U"] and row["color_identity"] == ["U"]
+    assert [f["colors"] for f in row["faces"]] == [["U"], ["U"]]
+    assert row["mana_cost"] is None and row["oracle_text"] is None  # as Scryfall gives them: the faces carry the text
+    assert row["faces"][0]["mana_cost"] == "{U}" and row["faces"][1]["oracle_text"] == "Flying"
+
+
+def test_a_modal_card_with_a_colourless_back_and_one_with_two_colours():
+    awakening = card(AWAKENING, "Agadeem's Awakening // Agadeem, the Undercrypt", layout="modal_dfc", color_identity=["B"],
+                     card_faces=[{"name": "Agadeem's Awakening", "colors": ["B"]}, {"name": "Agadeem, the Undercrypt", "colors": []}])
+    awakening.pop("colors")
+    assert cs.oracle_card_row(awakening)["colors"] == ["B"]
+    two = card(FIRE_ICE, "X // Y", layout="modal_dfc", color_identity=["R", "U"],
+               card_faces=[{"name": "X", "colors": ["R"]}, {"name": "Y", "colors": ["U", "R"]}])
+    two.pop("colors")
+    assert cs.oracle_card_row(two)["colors"] == ["R", "U"]  # front face first, no repeats
+
+
+def test_a_card_with_top_level_colours_keeps_them_even_when_it_has_faces():
+    split = card(FIRE_ICE, "Fire // Ice", layout="split", colors=["R", "U"], color_identity=["R", "U"],
+                 card_faces=[{"name": "Fire", "colors": ["R"]}, {"name": "Ice", "colors": ["U"]}])
+    assert cs.oracle_card_row(split)["colors"] == ["R", "U"]
+    assert cs.oracle_card_row(card())["colors"] == ["R"]  # a single-faced card is unchanged
+    assert cs.oracle_card_row(card(SOL, "Sol Ring", colors=[]))["colors"] == []  # colourless stays colourless
+
+
+def test_the_loaded_transform_card_is_not_colourless(db):
+    cs.sync_oracle_cards(db, [delver()])
+    db.commit()
+    assert db.get(OracleCard, DELVER).colors == ["U"]
