@@ -184,3 +184,19 @@ def test_every_catalog_endpoint_answers_with_provenance(loaded):
     for res in answers:
         assert res.status_code == 200, res.text
         assert res.json()["provenance"] and all(b["kind"] in ("source", "computed") and b["source"] for b in res.json()["provenance"])
+
+
+def test_status_and_whoami_report_the_live_rules_edition_even_on_a_cold_server(signed_in, app):
+    """#244: whoami answered rules_version null while the rules tools answered from edition 2026-09-25."""
+    from twins.universe import Universe
+    load(app)
+    universe = Universe(seed=False)
+    universe.wizards.publish(SAMPLE)
+    app.state.rules_live.reset(universe.transport)  # cold: nothing read yet on this instance
+    assert app.state.rules_live.cached_version is None
+    status = signed_in.get(f"{V1}/status").json()
+    assert status["rules_version"] == app.state.rules_live.cached_version and status["rules_version"]
+    universe.wizards.outage = True
+    app.state.rules_live.reset(universe.transport)  # cold again, and Wizards is down: no edition, and no failure
+    down = signed_in.get(f"{V1}/status")
+    assert down.status_code == 200 and down.json()["rules_version"] is None
