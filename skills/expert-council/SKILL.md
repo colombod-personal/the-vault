@@ -56,6 +56,8 @@ settled only by a quote checked with `verify_citation`. If the rules do not sett
 
 ## Say plainly
 
+- `find_combos` lists only combos Commander Spellbook knows. A deck can hold loops it does not list, so never say a
+  deck has "no infinite combos" from it: say what it found, and what the card text suggests.
 - Metagame knowledge is opinion until the Vault has a source for it (issue #105); label it.
 - Popularity (EDHREC rank) is not power; roles are Scryfall Tagger tags, a community's opinion.
 - The rules edition used (from `whoami`, if asked) and that prices are Scryfall's, dated.

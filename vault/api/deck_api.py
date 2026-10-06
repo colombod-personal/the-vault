@@ -196,6 +196,9 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
         except combos.ComboServiceError as exc:
             raise HTTPException(502, str(exc)) from exc
         out = combos.summarize(results, names)
+        out["limits"] = ("Only combos known to Commander Spellbook are listed. A deck can hold other loops and engines that are not "
+                         "listed (for example a repeatable token engine with mana creatures): finding none does not mean the deck has "
+                         "no infinite combos, so never tell a player it is combo-free from this alone.")
         spellbook = prov.source("Commander Spellbook", origin="combos written by its community", url="https://commanderspellbook.com",
                                 as_of=date.today(), wizards_material=True)
         return {"result": out, "provenance": [spellbook, prov.computed("combo lookup", [spellbook], as_of=date.today())],
