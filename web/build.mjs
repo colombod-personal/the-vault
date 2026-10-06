@@ -31,7 +31,8 @@ export const SOURCES = [
 function build() {
   const hash = createHash('sha256');
   const parts = SOURCES.map((file) => {
-    const source = readFileSync(join(PUBLIC, file), 'utf8');
+    // LF whatever the checkout uses (Windows checkouts have CRLF): the same bundle on every machine
+    const source = readFileSync(join(PUBLIC, file), 'utf8').replace(/\r\n/g, '\n');
     hash.update(file + '\0' + source + '\0');
     const { code } = transformSync(source, {
       loader: 'jsx', jsx: 'transform', target: 'es2020', minify: true, sourcefile: file, charset: 'utf8',
