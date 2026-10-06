@@ -13,20 +13,22 @@ from tests.test_catalog_api import BOLT
 from tests.test_mcp_catalog import agent, bot  # noqa: F401  (fixtures)
 from vault.api import mcp, mcp_ui
 
-VIEWS = {"card": "get_card_oracle", "deck": "deck_stats", "upgrades": "find_upgrades", "steps": "present_steps", "shopping": "shopping_list"}
+VIEWS = {"card": ("get_card_oracle",), "deck": ("deck_stats",), "upgrades": ("find_upgrades",), "steps": ("present_steps",),
+         "shopping": ("shopping_list",), "printings": ("update_owned_cards", "show_owned_printings")}
 
 
-def test_each_view_belongs_to_one_tool_and_every_view_is_used():
+def test_each_view_belongs_to_its_tools_and_every_view_is_used():
     by_tool = {t.name: t.ui for t in mcp.TOOLS if t.ui}
-    assert by_tool == {tool: view for view, tool in VIEWS.items()}
+    assert by_tool == {tool: view for view, tools in VIEWS.items() for tool in tools}
     assert set(VIEWS) == set(mcp_ui.VIEWS)
 
 
 def test_tools_list_names_the_view_only_for_tools_that_have_one(agent, bot):
-    read = make_token(agent)
+    read = make_token(agent, scopes=["read", "write"])  # a write token lists the write tools too (update_owned_cards)
     tools = {t["name"]: t for t in rpc(bot, "tools/list", token=read).json()["result"]["tools"]}
-    for view, tool in VIEWS.items():
-        assert tools[tool]["_meta"] == {"ui": {"resourceUri": f"ui://vault/{view}", "visibility": ["model", "app"]}}
+    for view, names in VIEWS.items():
+        for tool in names:
+            assert tools[tool]["_meta"] == {"ui": {"resourceUri": f"ui://vault/{view}", "visibility": ["model", "app"]}}
     assert "_meta" not in tools["whoami"] and "_meta" not in tools["search_cards"]
 
 
@@ -82,6 +84,14 @@ def test_a_view_only_inserts_text_and_loads_nothing_from_elsewhere(view):
     assert "ui/initialize" in page and "ui/notifications/initialized" in page and "provenanceFooter(" in page
     assert "not produced or endorsed by Scryfall" in page  # every view says it is not an official product
     assert page.count("postMessage") == 1 and "e.source !== window.parent" in page  # one way out, and only the host is listened to
+
+
+def test_printing_pictures_come_only_from_scryfall_with_the_artist_and_the_view_never_applies_a_change():
+    page = mcp_ui.html("printings")
+    assert {v for v, spec in mcp_ui.VIEWS.items() if spec.get("images")} == {"card", "printings"}
+    assert "cards\\.scryfall\\.io" in page and "Illustrated by" in page and "Image: Scryfall" in page
+    assert "confirm_owned_cards_update" not in page and "undo_owned_cards_update" not in page  # a yes in the chat applies, never the view
+    assert '"ui/message"' in page and 'callTool("update_owned_cards"' in page  # the choice goes to the chat; else a preview only
 
 
 def test_only_the_card_view_may_load_an_image_and_only_from_scryfall():

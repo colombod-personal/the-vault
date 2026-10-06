@@ -901,6 +901,12 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         out.pop("_resolved", None)
         return out
 
+    @router.get("/collection/printings", tags=["collection"],
+                summary="The printings of one card you own, most copies first, each with its Scryfall image")
+    def owned_printings(name: str = Query(min_length=1, max_length=300), user: User = Depends(current_user),
+                        db: Session = Depends(get_db)) -> dict:
+        return owned_changes.owned_printings(db, user, name)
+
     @router.post("/collection/changes/preview", tags=["collection"],
                  summary="Preview small edits to the cards owned (add, remove, set): changes nothing; returns a confirmation")
     def preview_owned_changes(request: Request, body: S.OwnedChangesIn, user: User = Depends(current_user),

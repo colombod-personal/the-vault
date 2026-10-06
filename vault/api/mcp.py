@@ -316,6 +316,11 @@ TOOLS = [
          method=lambda a: "POST" if a.get("confirm") is True else "GET",
          path=lambda a: f"{V1}/uploads/{int(a['upload_id'])}" + ("/apply" if a.get("confirm") is True else ""),
          write=True, destructive=True),
+    Tool("show_owned_printings", "Pictures of the printings of one card the person owns (set, number, finish, copies, "
+         "Scryfall image with artist credit), most copies first. Use it when they ask to see which ones they have, or "
+         "to help them match a card in their hand. Hosts with MCP Apps show the pictures; otherwise give the list.",
+         {"name": {"type": "string", "minLength": 1, "maxLength": 300, "description": "The card's name"}}, ["name"],
+         path=lambda a: f"{V1}/collection/printings", query=("name",), ui="printings"),
     Tool("update_owned_cards", "Small edits to the cards the person owns, as they tell you (bought, sold, traded, "
          "found): add or remove copies, or set how many they own. Changes nothing: it shows each card, the printing, "
          "copies before and after and the value change. A line needing a printing comes back as choose_printing with "
@@ -323,7 +328,7 @@ TOOLS = [
          "the preview and, only after they say yes, call confirm_owned_cards_update with the same lines and its "
          "confirmation. At most 50 lines and 25 copies removed (or 10% of the collection); larger changes are an import.",
          {"lines": OWNED_LINES}, ["lines"], method="POST", path=lambda a: f"{V1}/collection/changes/preview",
-         body=lambda a: {"lines": a["lines"]}, write=True),
+         body=lambda a: {"lines": a["lines"]}, write=True, ui="printings"),
     Tool("confirm_owned_cards_update", "Apply exactly the edits update_owned_cards previewed, after the person said "
          "yes: the same lines and the preview's confirmation. Refused if anything differs, the confirmation expired (15 "
          "minutes) or the collection changed since; then preview again. The change shows in the import history with "
@@ -375,11 +380,12 @@ INSTRUCTIONS += "\n" + GROUNDING
 # or it holds only the person's own data (tests/test_agents.py fails for a tool that is in neither group).
 SCRYFALL_DATA = {"get_collection_summary", "search_cards", "get_card", "list_sets", "get_collection_stats",
                  "get_collection_breakdowns", "get_valuation", "get_value_history", "list_card_names", "refresh_prices",
-                 "check_decklist", "lookup_cards", "get_deck", "get_shared_deck"}
+                 "check_decklist", "lookup_cards", "get_deck", "get_shared_deck",
+                 "update_owned_cards", "show_owned_printings"}  # these carry Scryfall's card images
 OWN_DATA_ONLY = {"get_acquisition_timeline", "parse_decklist", "list_decks", "save_deck", "update_deck", "list_imports",
                  "import_collection_csv", "list_export_formats", "list_shared_with_me", "get_import", "delete_deck",
                  "list_my_shares", "accept_share", "stop_sharing", "start_collection_upload",
-                 "get_staged_upload", "confirm_staged_upload", "get_deck_overlap", "update_owned_cards",
+                 "get_staged_upload", "confirm_staged_upload", "get_deck_overlap",
                  "confirm_owned_cards_update", "undo_owned_cards_update"}
 for _tool in TOOLS:
     if not _tool.provenance:
