@@ -33,7 +33,7 @@ Two lists, because they answer different questions.
 **2a. Spare copies (new).** Copies beyond what the saved decks need, counted by card name as everywhere else:
 
 - Per name: `have` (all copies), `needed` (the total copies the saved decks need at the same time, summed across decks, which is `need_for_all` from #165), `spare = max(0, have - needed)`, `market_value_of_spare` and `deck_count` (how many saved decks use the card; names come from the deck page, so no list of decks is nested in a spare item).
-- **Which physical copies are spare (deterministic).** Rows and prices are per printing, finish and condition, so the allocation is stated: copies **not** marked for trade in Dragon Shield satisfy the decks' need first, cheapest first (the decks keep the least valuable copies, so the spare value shown is an upper bound on what selling releases, never an overstatement of what is safe to keep); copies marked for trade fill any remaining need last (the marked pool of a row is `min(trade_quantity, quantity)`: an import can store a `trade_quantity` larger than `quantity`, and the allocation clamps it rather than reporting impossible copies), so they are spare whenever the other copies cover the decks. Ties break by the existing stable collection group id (printing, finish, condition and language, `vault/collection_view.py`), never by `scryfall_id` alone, which foil and condition groups share and unmatched copies lack, so the answer never changes between calls.
+- **Which physical copies are spare (deterministic).** Rows and prices are per printing, finish and condition, so the allocation is stated: the decks keep the **cheapest** copies of the name, whatever their trade status (so the spare value shown is an upper bound on what selling releases, never an overstatement of what is safe to keep); among equally priced copies the ones **not** marked for trade are kept first, so trade-marked copies are the ones reported as spare. The marked pool of a row is `min(trade_quantity, quantity)`: an import can store a `trade_quantity` larger than `quantity`, and the allocation clamps it rather than reporting impossible copies. Ties break by the existing stable collection group id (printing, finish, condition and language, `vault/collection_view.py`), never by `scryfall_id` alone, which foil and condition groups share and unmatched copies lack, so the answer never changes between calls.
 - Each name returns a **bounded preview of at most 10** spare **printing rows**, in allocation order, plus `printing_rows_total` and a `_links.printings` continuation to the cursor-paged `GET /collection/spare/printings?name=...`, so one name with many printing and condition groups never makes a response grow with the collection. A row has (`scryfall_id` or `null` for a copy the importer could not match, set, finish, condition, `spare_quantity`, `unit_price` or `null`, `price_status` of `priced` or `unpriced`, `trade_marked_quantity`, `scryfall_link` or `null`) so the person sees exactly which copies, the value is the sum of those rows, and the selling link points at that printing's Scryfall page; an unmatched copy has no link and shows a Scryfall search by card name instead. **Unpriced and unmatched copies:** they are counted in `spare` but add nothing to `market_value_of_spare`; the response and `summary` report `priced_copies` and `unpriced_copies` so the total never looks complete when it is not ("$842 across 41 priced copies; 3 have no price"); the list sort (value of the spare copies) puts names with only unpriced spare copies last, ties by name.
 - Cards in no saved deck are all spare, **but only when at least one deck is saved**; with no decks the section asks the person to save decks first instead of calling the whole collection spare.
 - Basic lands are left out (as in #165). It says what it does not know: copies for decks the person has not saved, and play-sets, so "spare" means "beyond your saved decks", never "worthless to you".
@@ -161,7 +161,20 @@ BUY ...            SELL OR HOLD                 BUY ...
                    copies" (market line only)    [value chart: market only]
 ```
 
-- **Stale prices:** the header says how old the prices are; a dated price is never shown as today's.
+**Stale prices** (the last refresh is more than a day old): the header carries the date, and every price and total carries it too.
+
+```
+1400 px                                                   390 px
+Lab         Prices: Scryfall, 3 Oct (3 days old)  [Refresh] Lab
++-----------------+ +-------------+ +--------+            Prices: 3 Oct (3 days old)
+| 2 decks need    | | 14 cards    | | loss/  |            +--------------------------+
+| a purchase      | | you could   | | gain   |            | 2 decks need a purchase  |
+| ($6.60, 3 Oct)  | | sell        | | (3 Oct)|            | ($6.60 on 3 Oct)       > |
++-----------------+ | ($842,3 Oct)| +--------+            | 14 cards you could sell  |
+                    +-------------+                       | ($842 on 3 Oct)        > |
+BUY ... prices dated 3 Oct   SELL OR HOLD ... dated       +--------------------------+
+```
+
 
 ## Shared collection views
 
@@ -176,7 +189,7 @@ A shared collection (`/shared/{id}/collection`) grants the viewer the owner's co
 | Profit and loss | **new** `GET /collection/pnl` (cursor-paged per side) | **new** `get_collection_pnl` (read-only; prices, so Scryfall data with provenance) |
 | Value over time | `GET /collection/history` (extended with a market-only `summary`) | `get_value_history` (existing) |
 
-The implementation (task 4) must update `docs/ai-parity.md`, `public/llms.txt` and the skills that explain selling for the new tool; this design makes no parity claim today. The "decision strip" is not a separate endpoint: each counter reads the named fields in section 0.
+The implementation (task 5) must update `docs/ai-parity.md`, `public/llms.txt` and the skills that explain selling for the new tool; this design makes no parity claim today. The "decision strip" is not a separate endpoint: each counter reads the named fields in section 0.
 
 ## Tests (write first)
 
@@ -188,7 +201,8 @@ The implementation (task 4) must update `docs/ai-parity.md`, `public/llms.txt` a
 - `trade_quantity` is reported without changing `spare`.
 - Paging: page size never changes who is spare; sorted by market value of the spare copies.
 - Shared views: the spare, overlap and `pnl` endpoints answer 404 under `/shared/{id}/...` whatever `show_costs` is (hiding the Lab navigation entry does not protect the API, so the route itself is refused), no Lab navigation entry exists on a shared view, and no deck name or deck requirement crosses a collection share (a test shares only the collection and asserts no deck data appears in any response).
-- Mixed-price printings: a name with one cheap copy and one expensive foil, needed once, leaves the expensive foil as the spare under the stated rule; trade-marked copies fill the need last; the spare printing rows sum to `market_value_of_spare`; ordering is stable between calls.
+- Trade versus price: with one deck copy needed and a $100 non-trade copy plus a $1 trade-marked copy, the decks keep the $1 copy and the $100 copy is the spare (trade status never overrides price); at equal prices the trade-marked copy is the spare.
+- Mixed-price printings: a name with one cheap copy and one expensive foil, needed once, leaves the expensive foil as the spare under the stated rule; trade status only breaks price ties; the spare printing rows sum to `market_value_of_spare`; ordering is stable between calls.
 - `GET /collection/pnl`: when every counted holding is profitable the `losers` side is empty and `biggest_loss` is `null` (and vice versa), the counter reads "nothing to decide", and the rendered tabs show the empty message; a holding with a paid price but no current market price is excluded and counted in `unpriced_market_copies` (one with no price paid in `unknown_cost_copies`), never listed as a loss, and the three counts sum to `total_copies`; `winners` and `losers` page independently (continuing one never moves the other); `net_gain` equals the sum of the counted gains.
 - Buy ordering: cheapest purchase first, unpriced last, ties by name; a contested card with a `move` option is not placed ahead of a cheaper purchase.
 - Cross-tenant: another person's decks and collection never appear; `GET /collection/stats` and the history endpoint never return paid or profit fields to a shared viewer whose owner hides costs.
@@ -204,13 +218,14 @@ The implementation (task 4) must update `docs/ai-parity.md`, `public/llms.txt` a
 3. **Cut the colour by type heatmap** and the other composition views (they move nowhere). Recommendation: cut.
 4. **Selling links.** Recommendation: link to the printing's Scryfall page only, and never name or contact a seller, as with the shopping list.
 5. **Buy ordering.** Recommendation: cheapest purchase first (the issue's wording), with contested cards badged. Alternative: contested cards first, because they are the decision between moving and buying.
-6. **Which copies count as spare.** Recommendation: the decks keep the cheapest copies and trade-marked copies fill the need last, so spare value is an upper bound on what selling releases. Alternative: keep the most valuable copies, which understates what can be sold.
+6. **Which copies count as spare.** Recommendation: the decks keep the cheapest copies and trade status only breaks price ties, so spare value is an upper bound on what selling releases. Alternative: keep the most valuable copies, which understates what can be sold.
 7. **No Lab on shared views.** Recommendation: yes (see "Shared collection views"); the Vault overview and Browse serve shared collections. Alternative: keep a reduced Lab with the market-value chart only.
 
 ## Tasks that follow (under #164)
 
-1. Server: `GET /collection/spare` and `list_spare_copies`, tests above, docs.
-2. Server: the extended `GET /decks/overlap` (#165), if not already done.
-3. Web: the new Lab page (sections 0, 1, 2a, 2b and 2c) with every state; remove the old sections; change the page heading and screen label to "Lab" if decision 1 is yes.
-4. Docs: `docs/api.md`, `docs/ai-parity.md`, `public/llms.txt`, skills.
-5. Production visual pass (#175) after it ships, at 1400 and 390 px.
+1. Server: `GET /collection/spare`, `GET /collection/spare/printings` and `list_spare_copies`, tests above, docs.
+2. Server: `GET /collection/pnl` (own-account only, cursor-paged per side, the counted-holdings cohort and coverage counts), `get_collection_pnl`, and the market-only `summary` on `GET /collection/history`, tests above.
+3. Server: the extended `GET /decks/overlap` with its `decks`, `contested` and `purchases` subresources, the `summary`, `format=text` and the `get_deck_overlap` routing (#165), if not already done; the legacy `cards` field keeps its shape but its nested deck lists are bounded (see `docs/deck-independence.md`).
+4. Web: the new Lab page (sections 0, 1, 2a, 2b and 2c) consuming tasks 1 to 3, with every state; remove the old sections; change the page heading and screen label to "Lab" if decision 1 is yes.
+5. Docs: `docs/api.md`, `docs/ai-parity.md`, `public/llms.txt`, skills.
+6. Production visual pass (#175) after it ships, at 1400 and 390 px.
