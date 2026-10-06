@@ -1,6 +1,6 @@
 # Letting an assistant update which cards you own: design (issue #81)
 
-Status: **reviewed by the owner on 2026-10-06** (decisions below; one open question on conflicts). Nothing here is built; #83 implements it once this is agreed
+Status: **agreed with the owner on 2026-10-06** (decisions below). #83 builds the change sets; #194 the re-import. Nothing here is built; #83 implements it once this is agreed
 (`status:ready`). Threat model: docs/mcp-oauth-threat-model.md.
 
 ## What it is for
@@ -111,7 +111,4 @@ change.
    the person does not know.
 4. Buckets: designed in now, a default bucket until #118 lands.
 
-## Open questions
-
-- Conflict policy details: when a card changed on both sides, is the default answer "keep the Vault's edit" or "take the
-  file's"? (Proposal: ask, with "keep the Vault's" preselected, since it is the more recent intent.)
+5. Conflicts on re-import: the preview always asks, with "keep the Vault's edit" preselected (the more recent intent).
