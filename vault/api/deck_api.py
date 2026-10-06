@@ -164,6 +164,12 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
             raise HTTPException(400, str(exc)) from exc
         result["unmatched"] = resolved.unmatched
         result["format"] = fmt
+        colours = {c for e in resolved.played() if e.card is not None for c in (e.card.color_identity or [])}
+        if len(colours) >= 3:  # #216: a five-colour deck's numbers read far better than its real games
+            result["colour_warning"] = (
+                f"This deck uses {len(colours)} colours ({''.join(c for c in 'WUBRG' if c in colours)}), and the simulation does "
+                "not check colours: any land pays for any spell. Real games will miss more spells and start slower than these "
+                "numbers show, the more so the more colours the deck has. Say so when you report them.")
         return answer(db, "mana curve simulation", result, ("oracle_cards",), "simulate", identity(db, user, body))
 
     @router.post("/legality", response_model=Answer, response_model_by_alias=True,

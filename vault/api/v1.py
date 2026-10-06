@@ -16,7 +16,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import urlencode, urlsplit
 
 import httpx
@@ -780,13 +780,41 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
         return idempotent(request, db, user, 201, run)
 
-    @router.get("/decks/{deck_id}", tags=["decks"], response_model=S.Deck, summary="A saved deck, with coverage")
-    def get_deck(deck_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    LEAN_LINES = 40  # cards shown by ?detail=summary: the dearest of those not fully owned
+
+    def _lean_coverage(covered: dict) -> tuple[dict, dict]:
+        """(coverage, summary) of a deck without the per-card detail: counts, and the cards still to get (#232). The full
+        list is 94 lines of about 840 bytes for a 100-card deck: 95% of an answer an assistant mostly does not need."""
+        lines = covered["cards"]
+        todo = sorted((c for c in lines if c["status"] != "owned"),
+                      key=lambda c: (-(c.get("missing_cost") or 0), -(c["missing"]), c["name"]))
+        keep = ("name", "section", "set", "number", "need", "have", "missing", "status", "unit_price", "missing_cost")
+        shown = [{k: c[k] for k in keep} for c in todo[:LEAN_LINES]]
+        need = sum(c["need"] for c in lines)
+        have = sum(min(c["have"], c["need"]) for c in lines)
+        coverage = {"cards": shown, "cards_total": len(lines), "fully_owned": len(lines) - len(todo),
+                    "shown": (f"the {len(shown)} dearest of the {len(todo)} cards not fully owned" if len(todo) > len(shown)
+                              else f"the {len(todo)} cards not fully owned") + "; detail=cards lists every card with its owned printings",
+                    "unparsed": covered["unparsed"], "missing_cost": covered.get("missing_cost"),
+                    "missing_unpriced": covered.get("missing_unpriced"), "priced_as_of": covered.get("priced_as_of")}
+        summary = {"need": need, "have": have, "missing": need - have, "missing_cost": covered.get("missing_cost"),
+                   "missing_unpriced": covered.get("missing_unpriced")}
+        return coverage, summary
+
+    @router.get("/decks/{deck_id}", tags=["decks"], response_model=S.Deck,
+                summary="A saved deck, with coverage (detail=summary: counts and what is still to get, much smaller)")
+    def get_deck(deck_id: Id, detail: Literal["cards", "summary"] = Query(
+                     "cards", description="cards: every card's ownership with the printings owned (the website); summary: the "
+                                          "deck, counts, and the cards not fully owned (the assistants' default)"),
+                 user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         deck = owned_deck(db, user, deck_id)
         covered = analytics.price_coverage(db, user.id, _coverage(deck.text, user_entries(db, user)))
         day = db.scalar(select(func.max(PriceSnapshot.day)))
         covered["priced_as_of"] = day.isoformat() if day else None  # the prices are Scryfall's, from this day
-        return _deck(deck, covered, deck_overview.identities(db, deck_overview.read(deck.text)["commanders"]))
+        out = _deck(deck, covered, deck_overview.identities(db, deck_overview.read(deck.text)["commanders"]))
+        if detail == "summary":
+            out["coverage"], out["summary"] = _lean_coverage(covered)
+        return out
 
     @router.put("/decks/{deck_id}", tags=["decks"], response_model=S.Deck)
     def update_deck(deck_id: Id, body: S.DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)):

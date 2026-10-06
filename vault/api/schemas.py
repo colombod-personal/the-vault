@@ -426,6 +426,9 @@ class CoverageLine(BaseModel):
 
 class Coverage(BaseModel):
     cards: list[CoverageLine]
+    cards_total: int | None = Field(None, description="With ?detail=summary: how many cards the deck has")
+    fully_owned: int | None = Field(None, description="With ?detail=summary: how many of them are fully owned")
+    shown: str | None = Field(None, description="With ?detail=summary: which lines `cards` holds, and how to get the rest")
     unparsed: list[str]
     missing_cost: float | None = Field(None, description="What the missing copies cost at the cheapest known prices")
     missing_unpriced: int | None = Field(None, description="Lines with missing copies and no known price")
@@ -453,19 +456,20 @@ class DeckOverview(BaseModel):
 
 
 class Deck(Hal):
+    # Field order is answer order: who the deck is first (#216, #232), the decklist last.
     id: int
     name: str
-    text: str | None = Field(None, description="The decklist (left out of the AI tools' brief deck list)")
     format: str | None = Field(None, description="The format stored on the deck, if any")
     overview: DeckOverview | None = Field(None, description="Format, commander(s), card count and colour identity at a glance")
+    summary: DeckSummary | None = Field(None, description="Owned, missing and cost to finish, against your collection (list with ?summary=true, and a deck with ?detail=summary)")
     source_url: str | None = None
     source: str | None = Field(None, description="Where the deck came from: archidekt, moxfield, link (another address) or pasted")
     source_author: str | None = None
+    credit: dict | None = Field(None, description="For a deck from Archidekt: its source, link, author and the notice to repeat")
+    coverage: Coverage | None = None
+    text: str | None = Field(None, description="The decklist (left out of the AI tools' brief deck list)")
     created_at: str
     updated_at: str
-    coverage: Coverage | None = None
-    credit: dict | None = Field(None, description="For a deck from Archidekt: its source, link, author and the notice to repeat")
-    summary: DeckSummary | None = Field(None, description="With ?summary=true on the list: owned, missing and cost to finish, against your collection")
     from_: str | None = Field(None, alias="from", description="Who shared it (shared decks only)")
 
 
