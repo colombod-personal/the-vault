@@ -7,7 +7,7 @@ description: >-
   dispute settled, or a deep look at what a deck is trying to do.
 license: MIT
 metadata:
-  vault-tools: "whoami list_decks get_deck deck_stats simulate_draws deck_legality find_combos check_decklist get_deck_overlap validate_deck_changes verify_citation"
+  vault-tools: "whoami list_decks get_deck deck_stats simulate_draws deck_legality find_combos check_decklist get_deck_overlap validate_deck_changes verify_citation get_card_oracle"
 ---
 
 # Expert council
@@ -57,6 +57,15 @@ settled only by a quote checked with `verify_citation`. If the rules do not sett
 
 ## Say plainly
 
+- **Open with the deck**: its name, format, commander(s), card count and colour identity, as the tools returned them.
+- **Numbers exactly as returned**, with their names: "average mana value of the non-land cards: 3.5", "five mana by
+  turn 5: 58% of simulated games". Never reword a figure into a different claim, and never add one a tool did not return.
+- **The Vault has no power score.** Never call a deck weak, strong, low or high power from its curve, roles or
+  popularity. Say what the tools show; label any bracket placement as opinion (`bracket_floor` is only a floor from
+  Game Changers).
+- **Colours**: for a deck of three or more colours, say `simulate_draws` does not check colours (`colour_warning`), so
+  its mana numbers are optimistic.
+- **Never quote a card's cost, type or text from memory**: `get_card_oracle`.
 - `find_combos` lists only combos Commander Spellbook knows. A deck can hold loops it does not list, so never say a
   deck has "no infinite combos" from it: say what it found, and what the card text suggests.
 - Metagame knowledge is opinion until the Vault has a source for it (issue #105); label it.

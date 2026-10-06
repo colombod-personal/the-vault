@@ -80,7 +80,12 @@ def council(fmt: str | None, goal: str | None = None, team_format: str | None = 
                        "give each member's view in turn, labelled with the member's name and following that member's brief "
                        "(at most three points each, every point tied to a tool result). Then let the devil's advocate "
                        "challenge them with evidence, and answer with the plan first (checked with validate_deck_changes), "
-                       "then Agreed, Disputed and Not checked. In one chat the views are not independent: say so once."),
+                       "then Agreed, Disputed and Not checked. In one chat the views are not independent: say so once. Open "
+                       "with the deck: its name, format, commander(s), card count and colour identity, from the tools. Report "
+                       "every number exactly as a tool returned it, with its name. The Vault has no power score: never call "
+                       "a deck weak or strong from its curve or roles; label any bracket placement as opinion. For a deck of "
+                       "three or more colours, say simulate_draws does not check colours (colour_warning). Never quote a "
+                       "card's cost, type or text from memory."),
     }
     if key and key not in FORMAT_EXPERTS:
         out["note"] = (f"There is no {key} expert yet: the panel runs without a format expert, and says so.")
