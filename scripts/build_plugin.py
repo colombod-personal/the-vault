@@ -91,9 +91,9 @@ def dump(data: dict) -> str:
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
-# Flip to True when the OAuth server (milestone M4) is live and checked against the real hosts: the
-# connect page then offers "connect by URL" for ChatGPT and Claude.ai instead of saying it is coming.
-OAUTH_READY = False
+# The OAuth server is live and was checked on the real hosts (claude.ai 2026-10-04, ChatGPT 2026-10-06, #77): the
+# connect page offers "connect by URL" for ChatGPT and Claude.ai.
+OAUTH_READY = True
 
 FAN_NOTICE = ("The Vault is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. "
               "Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC.")
@@ -110,8 +110,11 @@ def connect_page() -> str:
     claude_mcp = f'claude mcp add --transport http vault {mcp_url} --header "Authorization: Bearer vault_pat_..."'
     editor_json = json.dumps({"mcpServers": {"vault": {"type": "http", "url": mcp_url,
                                                        "headers": {"Authorization": "Bearer vault_pat_..."}}}}, indent=2)
-    web_status = ("Open the connectors settings, add a custom connector with the address below, and approve the permissions "
-                  "when the Vault asks you to sign in." if OAUTH_READY else
+    web_status = ("<strong>Claude:</strong> Settings, Connectors, add a custom connector with the address below. "
+                  "<strong>ChatGPT:</strong> Plugins, Add, Add custom MCP server: name it The Vault, paste the address, "
+                  "keep OAuth. Then approve on the Vault's page (tick Write to let it edit your collection and decks). "
+                  "After a Vault update that adds tools, reconnect the connector in Claude; in ChatGPT, delete the app "
+                  "and add it again, as ChatGPT reads the tools only when the app is added." if OAUTH_READY else
                   "These connect by signing in with OAuth, which is not switched on yet (it is being built and checked). "
                   "Until then, use the options above, or check back here.")
     return f"""<!doctype html>

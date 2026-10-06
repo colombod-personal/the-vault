@@ -55,6 +55,13 @@ real hosts (`docs/mcp-apps.md`).
   replace the whole collection, and its connector settings listed the old 50 tools). Disconnecting and reconnecting
   The Vault (Customize, Connectors) loads the current list. The server says `listChanged: false` because it can't
   push a change over stateless HTTP. Release notes for tool changes must tell people to reconnect.
+- **ChatGPT reads the tool list once, when the app is added** (2026-10-06, #77). An app added while sign-in was
+  failing kept 0 tools, no instructions and no logo, and ChatGPT offers no refresh (Manage only edits the name and
+  description). Delete it fully (Uninstall alone keeps the name taken) and add it again. ChatGPT tries the token
+  request without a signature first, then retries with its private_key_jwt assertion: one refused line in the logs
+  before each successful connection is expected.
+- Chrome pauses background tabs: a claude.ai or ChatGPT tab driven by a test while another tab is in front never
+  sends its message and screenshots time out. Drive the tab that is in front.
 - Claude draws its own image grids in a sandbox that blocks outside images, so a "show me pictures" answer it builds
   itself shows empty boxes and links. Pictures must come from a Vault view, whose CSP allows cards.scryfall.io (#205).
 - Name-only collection imports price an arbitrary printing (see `docs/usability-review.md`); use files with set and number.

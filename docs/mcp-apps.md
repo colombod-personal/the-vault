@@ -57,7 +57,7 @@ someone has opened a view in each.
 |---|---|---|---|
 | Claude (web, claude.ai) | **yes** (`shopping`, `deck`: 2026-10-06) | not tried | Views appear inline under the tool call: the shopping list ('You own everything in this list'), and the deck panel with the mana curve chart, roles table, provenance and Fan Content notice. `card`, `upgrades`, `steps`, phone layout and Claude desktop not yet checked (#56) |
 | Claude: the `printings` view (#205) | pending the real check | `ui/message` on tapping a printing: pending | Needs the connector reconnected after the release (claude.ai keeps the old tool list, docs/ai-integration-testing.md) |
-| ChatGPT | not tried | not tried | may expect extra `_meta` keys; the OpenAI Apps SDK documentation is the reference |
+| ChatGPT (web) | not confirmed | not tried | Connected 2026-10-06 (#77). Asked for pictures, ChatGPT showed card images in its own gallery (cropped, no artist credit) rather than, as far as seen, the Vault's view. Whether it renders `ui://vault/*` views is the open question (#85) |
 | VS Code | not tried | not tried | |
 | Cursor | not tried | not tried | |
 | Goose | not tried | not tried | |
