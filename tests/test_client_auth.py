@@ -156,3 +156,13 @@ def test_documents_with_unsafe_key_settings_are_refused(app, universe, key, fiel
     client.sign_in()
     page = client.authorize()
     assert page.status_code == 400 and why in page.text
+
+
+def test_a_refused_token_request_is_logged_with_the_reason_and_no_secret(signer, key, caplog):
+    code = code_for(signer)
+    secret = assertion(signer, rsa("k1"))  # a wrong key: refused
+    with caplog.at_level("WARNING", logger="vault.oauth_routes"):
+        signer.redeem(code, client_assertion_type=client_auth.JWT_BEARER, client_assertion=secret)
+    line = next(r.getMessage() for r in caplog.records if "token request refused" in r.getMessage())
+    assert signer.client_id in line and "assertion=True" in line and "signature" in line
+    assert secret not in line and code not in line  # neither the assertion nor the code is ever logged
