@@ -163,10 +163,9 @@ Prompts (`prompts/list`, `prompts/get`): `rules_judge`, `explain_interaction`, `
 `shopping_help`. The server's `instructions` and every prompt carry the grounding rules: look things up,
 quote only verified text, repeat provenance, never present source material as the Vault's own.
 
-Access: the catalog tools need a token like the rest. `PUBLIC_CATALOG=1` (off by default, see
-docs/compliance.md "Registration") would let the REST catalog endpoints answer without an account,
-rate-limited per IP; MCP always needs a token for now. `CATALOG_RATE_LIMIT` (default 60 a minute) and
-30 deck analyses a minute per person apply.
+Access: the catalog tools need a token like the rest; there is no anonymous access (an anonymous card-data API would
+proxy Scryfall's data, which its terms forbid; docs/compliance.md "Decisions"). `CATALOG_RATE_LIMIT` (default 60 a
+minute per person) and 30 deck analyses a minute per person apply.
 
 Tools that return Scryfall or Archidekt data they did not compute (collection and deck tools) get a
 `provenance` block added by the MCP layer. A test fails for any tool that is in neither the "Scryfall data"

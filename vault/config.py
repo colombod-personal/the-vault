@@ -75,7 +75,6 @@ class Settings:
     twins_url: str = field(default_factory=lambda: _env("VAULT_TWINS_URL"))
     # Catalog lookups (cards, rulings, rules) without an account. Off until the registration question in
     # docs/compliance.md is decided: Wizards' Fan Content Policy says no registration to access its content.
-    public_catalog: bool = field(default_factory=lambda: _env("PUBLIC_CATALOG") in ("1", "true", "yes"))
     catalog_rate_limit: int = field(default_factory=lambda: int(_env("CATALOG_RATE_LIMIT", "60")))  # a minute, per person or per IP
 
     @property

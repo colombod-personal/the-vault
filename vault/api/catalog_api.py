@@ -3,8 +3,10 @@ check that a quote is verbatim, and which data versions the Vault holds.
 
 Every answer carries ``provenance`` (a list of blocks, ``vault.provenance``): the material is
 Wizards' and Scryfall's, shown as theirs. Answers are small and capped, by the card or rule asked
-about: there is no way to list or download the catalog (docs/compliance.md). Signed-in people (or
-personal access tokens) can use it; ``PUBLIC_CATALOG=1`` lets anyone, rate-limited per IP.
+about: there is no way to list or download the catalog (docs/compliance.md). Only signed-in people (or their tokens)
+can use it, rate-limited: there is no anonymous access. An anonymous card-data API would be a proxy of Scryfall's data,
+which Scryfall's terms forbid; every answer here serves a person's collection, decks or question (owner decision
+2026-10-06, #62).
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ from sqlalchemy.orm import Session
 from .. import catalog_queries as q
 from .. import provenance as prov
 from ..models import User
-from ..ratelimit import WINDOW, client_ip, hit
+from ..ratelimit import WINDOW, hit
 from ..rules_live import LiveRules, RulesUnavailable
 from .hal import link
 
@@ -168,12 +170,11 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
     agent = APIRouter(prefix=V1 + "/agent", tags=["agents"])
 
     def access(request: Request, user: User | None = Depends(optional_user)) -> User | None:
-        """Signed-in people, or anyone when PUBLIC_CATALOG is on; either way at most CATALOG_RATE_LIMIT a minute."""
-        if user is None and not settings.public_catalog:
+        """Signed-in people only (never anonymous: see the module docstring), at most CATALOG_RATE_LIMIT a minute."""
+        if user is None:
             raise HTTPException(401, "Sign in (or send a personal access token) to use the catalog.",
                                 headers={"WWW-Authenticate": 'Bearer realm="the-vault"'})
-        who = f"user:{user.id}" if user else f"ip:{client_ip(request, settings)}"
-        throttle(request, settings, "catalog", who, settings.catalog_rate_limit)
+        throttle(request, settings, "catalog", f"user:{user.id}", settings.catalog_rate_limit)
         return user
 
     def status_body(db: Session) -> dict:
