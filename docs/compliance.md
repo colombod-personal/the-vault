@@ -63,6 +63,11 @@ before building anything automated.
 
 ### Archidekt
 
+**No scheduled or automated job contacts Archidekt, and nothing searches it** (owner rule; found broken by the audit of
+#132 on 2026-10-07: the nightly conformance run searched Archidekt for decks and fetched the top one). Live checks of
+the twin against Archidekt run **by hand only** (`TWINS_LIVE_ARCHIDEKT=1`), fetch **one named public deck** (the
+owner's) and never search; `tests/test_workflows.py::test_no_scheduled_job_contacts_archidekt` enforces it.
+
 **The Vault only reads from Archidekt** (owner, 2026-10-05, issue #79). It never writes to Archidekt, never signs
 in to anyone's Archidekt account, and never "syncs" a deck. When the Vault suggests changes, the person applies
 them on Archidekt themselves; the Vault gives the change list and the buying list.

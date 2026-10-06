@@ -230,3 +230,13 @@ def test_jobs_run_on_a_pinned_runner_image_not_ubuntu_latest():
     for path in WORKFLOWS:
         for name, job in load(path)["jobs"].items():
             assert job["runs-on"] != "ubuntu-latest", f"{path.name}: {name}"
+
+
+def test_no_scheduled_job_contacts_archidekt():
+    """Owner rule (#79, #132): Archidekt is read on a person's request, one public deck, never searched or crawled by a
+    scheduled job. The nightly conformance run must not enable the live Archidekt checks, and those checks never search."""
+    workflow = (ROOT / ".github" / "workflows" / "twins-conformance.yml").read_text(encoding="utf-8")
+    assert "TWINS_LIVE_ARCHIDEKT" not in workflow and "archidekt" not in workflow.lower()
+    conformance = (ROOT / "tests" / "conformance" / "test_conformance.py").read_text(encoding="utf-8")
+    assert "decks/v3" not in conformance.split("# -- Archidekt")[1].split("# -- Vercel")[0].replace("# Archidekt is read", "")
+    assert conformance.count("@manual_archidekt") == 2  # both live Archidekt checks need the manual switch

@@ -49,7 +49,8 @@ When the person says they bought, sold, traded or found cards:
    `confirm_owned_cards_update` (the same lines and the preview's `confirmation`) only after they say yes.
    If it is refused (expired, or the collection changed), preview again and ask again.
 4. Say it is in their import history under this app's name and can be undone with `undo_owned_cards_update`
-   (which also previews first). A later re-import from their app keeps these edits.
+   (which also previews first). Tell them a later import of a file replaces the whole collection, so an edit made
+   here is lost unless it is also made in their app (a re-import that keeps these edits is planned).
 5. More than 50 lines or a big removal is refused: suggest importing a fresh export from their app instead.
 
 ## Privacy

@@ -31,6 +31,8 @@ Microsoft's `amplifier-bundle-digital-twin-universe`.
   flags tool descriptions that steer the approver (`flagged`). `tests/test_chatgpt_twin.py` runs it, and the nightly
   conformance run compares its document and keys with the real ones. A twin simpler than the real client is how
   ChatGPT could not connect while every OAuth test passed (#210).
+- **Archidekt is never contacted by a schedule**: the live Archidekt conformance checks run by hand only
+  (`TWINS_LIVE_ARCHIDEKT=1`), fetch one named public deck and never search (docs/compliance.md).
 - **Archidekt decks are as heavy as real ones**: the twin sends every field of the real API (captured 2026-10-06 in
   `tests/fixtures/archidekt_real_keys.json`: 30 deck fields, 36 card-analysis fields, 27 price fields from Card Kingdom,
   Cardmarket and other shops), about 2 KB a card, so tests meet the size and the shop prices real answers carry.
