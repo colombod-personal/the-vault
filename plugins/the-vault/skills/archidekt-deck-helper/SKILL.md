@@ -23,8 +23,8 @@ every piece of Archidekt data.
    matches, `closest` lists near names: ask which one. Only if the deck is not saved, ask for its Archidekt link.
 2. **If it is not saved, save it from the link.** Ask the person first, then call `import_deck_from_link` with the
    link: the server reads the one deck, keeps its sections and credits its author. Do not convert the deck yourself.
-   One deck per request: never fetch other decks, other people's decks or lists of decks (Archidekt's terms do not
-   allow automated searching). For a quick look without saving, `get_archidekt_deck` reads the one deck.
+   One deck per request: never fetch other decks, other people's decks or lists of decks, and do not search or crawl
+   Archidekt. For a quick look without saving, `get_archidekt_deck` reads the one deck.
    Say the deck is Archidekt's (the saved deck's `credit` has the notice to repeat) and give the link back.
 3. **Check it.** `get_deck` shows the saved deck with, for each card, its section and how many copies the person owns. Call
    `deck_legality` with the saved deck's `deck_id` and the format (no need to send the list).
