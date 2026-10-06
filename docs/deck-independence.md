@@ -23,7 +23,7 @@ Counted by card name (basic lands left out), the same way `get_deck_overlap` and
 For each card in a deck, with `need` copies in that deck, and `need_for_all` and `have` for the whole set of saved decks:
 - **free**: the collection holds enough copies for every deck that uses the card (`have >= need_for_all`). Most shared cards are this.
 - **contested**: `have < need_for_all`. The allocation below decides how many copies each deck is given (`gets`).
-- A deck **holds** a contested card when it is given all it needs (another deck wants those copies too) and is **lacking** it when it is given fewer than it needs. The copies it lacks are `lacking = need - gets`, each marked `not_owned` (the collection has none left to give, for any deck) or `held_by_other_deck`.
+- A deck **holds** `gets` copies of a contested card whenever `gets` is above zero (another deck wants those copies too), and **lacks** `lacking = need - gets` copies when that is above zero. Both can be true of the same card: with A and B each needing 2 and 3 owned, A holds 2, B holds 1 and lacks 1. Each lacking copy is marked `not_owned` (the collection has none left to give, for any deck) or `held_by_other_deck`.
 
 A deck is **complete** when it lacks nothing under the allocation (`stands_alone` is true), and **independent** when it also holds no contested card, so that no other deck's completeness depends on it.
 
@@ -45,11 +45,11 @@ Limits to state in the UI: it counts copies, not play (a deck the person does no
 deck: id, name
 need            cards the deck needs (basics left out)
 free            how many of those are not contested
-holds           [{ card, quantity, also_wanted_by: [deck names] }]
+holds           [{ card, quantity (= gets, any positive number), also_wanted_by: [deck names] }]
 lacking         [{ card, quantity, reason: not_owned | held_by_other_deck, price }]
 stands_alone    true when lacking is empty (the deck is complete under the allocation)
 independent     true when lacking and holds are both empty
-independence    free / need, rounded, for sorting only
+independence    free / need, rounded, for sorting only; a deck with nothing to count (need is 0, for example a deck of only basic lands) scores 1.0 and is complete and independent, so there is no division by zero
 cost_to_complete   the cheapest known prices of the lacking copies, `unpriced` counted: what buying finishes this deck, with the others keeping theirs
 ```
 
@@ -92,7 +92,8 @@ A section of the Lab (#162), phone-first, "Do your decks stand on their own?":
 - Provenance: the tool carries Scryfall provenance and the price date.
 - Owned in enough copies for all decks (Sol Ring): not contested, held and lacked by no deck.
 - A card owned zero times: `lacking` with reason `not_owned`.
-- Basic lands never appear.
+- Basic lands never appear; a deck of only basic lands has need 0, independence 1.0, `stands_alone` and `independent` true, and no error.
+- Partial allocation: A and B each need 2, 3 owned: A holds 2; B holds 1 and lacks 1 (the same card in both `holds` and `lacking`).
 - Deck order: the default order, and `priority` overriding it; an id in `priority` that is not the caller's (another person's or missing) answers 404 and reveals nothing.
 - A fully independent set of decks: `stands_alone` for all, `contested` empty.
 - An unreadable saved deck is skipped, as today.
