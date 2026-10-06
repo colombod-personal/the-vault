@@ -71,6 +71,7 @@ def test_the_connect_page_has_each_install_path_and_is_honest_about_oauth():
                    "claude mcp add --transport http vault", "Account → Agents &amp; API", "whoami", bp.FAN_NOTICE):
         assert needle in page, needle
     assert ("not switched on yet" in page) == (not bp.OAUTH_READY)
+    assert 'id="claude"' in page and 'id="chatgpt"' in page and "Add custom MCP server" in page
     assert "<script src" not in page  # nothing loaded from elsewhere
 
 
@@ -108,3 +109,14 @@ def test_the_chatgpt_and_codex_plugin_has_the_skills_the_experts_and_the_vault_s
     assert ".codex-plugin/plugin.json" in names and "skills/expert-council/SKILL.md" in names
     logo = zipfile.ZipFile(tmp_path / "p.zip").read("assets/logo.png")
     assert logo == (bp.ROOT / "public" / "apple-touch-icon.png").read_bytes()  # images byte for byte
+
+
+def test_a_directory_listing_turns_the_steps_into_an_add_button(monkeypatch):
+    """#227: once The Vault is published in an app's directory, its card shows the button instead of the manual steps."""
+    assert "Add The Vault to ChatGPT" not in bp.connect_page()
+    monkeypatch.setitem(bp.LISTINGS, "chatgpt", "https://chatgpt.com/apps/the-vault")
+    page = bp.connect_page()
+    chatgpt = page.split('id="chatgpt"')[1].split("</div>")[0]
+    assert 'href="https://chatgpt.com/apps/the-vault"' in chatgpt and "Add The Vault to ChatGPT" in chatgpt
+    assert "Add custom MCP server" not in chatgpt
+    assert "Add custom connector" in page.split('id="claude"')[1].split("</div>")[0]  # Claude still has its steps

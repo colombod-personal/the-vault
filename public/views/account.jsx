@@ -534,8 +534,9 @@ function AgentsSection() {
   return (
     <Section title="Agents & API">
       <p className="label-mono" style={{ marginBottom: 8 }}>
-        Connect your own AI agents (Claude, ChatGPT, scripts) to your vault through its MCP server or HTTP API.
-        A token acts as you. Read-only unless you allow changes; revoke it any time.{' '}
+        In Claude or ChatGPT you don't need a token: add The Vault there and sign in (<a href="/connect.html">how</a>).
+        Tokens are for Claude Code, Codex, editors and scripts. A token acts as you. Read-only unless you allow changes;
+        revoke it any time.{' '}
         <a href="/llms.txt" target="_blank" rel="noopener">How agents use it</a> ·{' '}
         <a href="/api/docs" target="_blank" rel="noopener">API docs</a>
       </p>
