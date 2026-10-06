@@ -80,6 +80,20 @@ name, web address, what was allowed, when it connected and last acted. Disconnec
 export (`connected_apps.json`, no tokens) and erased with the account. These endpoints need the person (not a token) and
 have no MCP tool.
 
+## Plugins: skills and experts in ChatGPT, Codex and Claude
+
+The connector gives an assistant the Vault's tools. A plugin also brings the skills (rules judge, deck upgrader,
+shopping, collection, Archidekt helper, expert council) and the experts, so they run natively:
+
+- **Claude** (Claude Code, Claude desktop): `plugins/the-vault`, with the experts as agents. Install it from this
+  repo's marketplace (`.claude-plugin/marketplace.json`).
+- **ChatGPT and Codex**: `plugins/the-vault-openai` (`.codex-plugin/plugin.json`, the skills, each expert as a skill
+  since those hosts have no subagents, and the Vault's MCP server). `python scripts/build_plugin.py --zip` writes
+  `dist/the-vault-openai.zip`: upload it on the Vault app's page in ChatGPT (Upload new version) or submit it to the
+  plugin directory (#225).
+- Both are generated from `skills/` and `agents/` by `scripts/build_plugin.py`; never edit them by hand.
+- Hosts with only the connector still get the experts through `council_brief` and `expert_brief` (#220).
+
 ## MCP
 
 Stateless Streamable HTTP. Each JSON-RPC request gets one `application/json` answer, with no

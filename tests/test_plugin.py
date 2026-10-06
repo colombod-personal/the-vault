@@ -90,3 +90,21 @@ def test_no_page_or_plugin_file_names_a_vercel_address():
             if re.search(r"https?://[\w.-]+\.vercel\.app", path.read_text(encoding="utf-8", errors="ignore")):
                 offenders.append(str(path.relative_to(ROOT)))
     assert offenders == []
+
+
+def test_the_chatgpt_and_codex_plugin_has_the_skills_the_experts_and_the_vault_server(tmp_path):
+    """#225: ChatGPT and Codex load skills from a plugin package; with no subagents there, the experts are skills."""
+    manifest = load(bp.OPENAI / ".codex-plugin" / "plugin.json")
+    assert manifest["name"] == "the-vault" and manifest["skills"] == "./skills/" and manifest["mcpServers"] == "./mcp.json"
+    assert manifest["interface"]["privacyPolicyURL"].endswith("/privacy.html") and manifest["interface"]["logo"] == "./assets/logo.png"
+    assert load(bp.OPENAI / "mcp.json")["mcpServers"]["the-vault"]["url"] == "https://mtgvault.cards/api/mcp"
+    skills = {p.parent.name for p in (bp.OPENAI / "skills").glob("*/SKILL.md")}
+    assert {p.name for p in bp.SKILLS.iterdir() if p.is_dir()} <= skills  # every skill
+    assert set(bp.EXPERT_SKILLS) <= skills  # and each expert, as a skill
+    judge = (bp.OPENAI / "skills" / "vault-judge" / "SKILL.md").read_text(encoding="utf-8")
+    assert judge.startswith("---\nname: vault-judge\n") and next(a for a in bp.load_agents() if a["name"] == "vault-judge")["body"] in judge
+    import zipfile
+    names = zipfile.ZipFile(bp.write_zip(tmp_path / "p.zip")).namelist()
+    assert ".codex-plugin/plugin.json" in names and "skills/expert-council/SKILL.md" in names
+    logo = zipfile.ZipFile(tmp_path / "p.zip").read("assets/logo.png")
+    assert logo == (bp.ROOT / "public" / "apple-touch-icon.png").read_bytes()  # images byte for byte
