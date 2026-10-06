@@ -110,5 +110,4 @@ change.
 3. The assistant must understand the card and confirm the printing with the person; "printing not specified" only when
    the person does not know.
 4. Buckets: designed in now, a default bucket until #118 lands.
-
 5. Conflicts on re-import: the preview always asks, with "keep the Vault's edit" preselected (the more recent intent).
