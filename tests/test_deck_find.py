@@ -23,7 +23,8 @@ def test_several_matches_are_ranked_by_how_much_of_the_name_the_query_covers():
 
 def test_no_match_offers_the_nearest_names_and_never_guesses():
     ids, closest = deck_match.search(NAMES, "sliver swarn tuned")
-    assert ids == [] and "Sliver Swarm tuned with rage" in closest
+    assert ids == [] and closest == ["Sliver Swarm tuned with rage"]  # not Elves, not Aang: only near-misses of the words
+    assert deck_match.search(NAMES, "nazgol")[1] == ["Nazgûl"] and deck_match.search(NAMES, "avatar ang")[1] == ["Avatar Aang"]
     assert deck_match.search(NAMES, "zzzz qqqq") == ([], [])
     assert deck_match.search(NAMES, "deck my")[0] == []  # only filler words matches nothing
 

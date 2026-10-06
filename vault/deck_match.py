@@ -38,7 +38,19 @@ def search(names: dict[int, str], q: str, limit: int = 25) -> tuple[list[int], l
             scored.append((-covered, name.lower(), deck_id))
     if scored:
         return [i for _, _, i in sorted(scored)[:limit]], []
-    labels = {n: i for i, n in names.items()}
-    close = difflib.get_close_matches(" ".join(wanted), [" ".join(words(n)) for n in labels], n=3, cutoff=0.4)
-    by_norm = {" ".join(words(n)): n for n in labels}
-    return [], [by_norm[c] for c in close]
+    return [], _closest(names, wanted)
+
+
+def _similar(a: str, b: str) -> float:
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+def _closest(names: dict[int, str], wanted: list[str], n: int = 3) -> list[str]:
+    """Names whose words are each a near-miss of a query word (a typo), best first; nothing for an unrelated query."""
+    scored = []
+    for name in names.values():
+        parts = words(name)
+        best = [max((_similar(w, p) for p in parts), default=0.0) for w in wanted]
+        if min(best) >= 0.7 and sum(best) / len(best) >= 0.8:
+            scored.append((-sum(best) / len(best), name))
+    return [name for _, name in sorted(scored)[:n]]
