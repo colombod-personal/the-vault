@@ -28,7 +28,9 @@ def cards(app):
         cs.sync_oracle_cards(db, [oracle(SOL_RING, "Sol Ring"), oracle(KILLER, "A Killer Among Us")])
         db.add_all([
             Card(scryfall_id="sol-c21", oracle_id=SOL_RING, name="Sol Ring", set_code="c21", set_name="Commander 2021",
-                 collector_number="263"),
+                 collector_number="263", finishes=["nonfoil", "foil"], artist="Mike Bierek",
+                 image_normal="https://cards.scryfall.io/normal/front/s/c21.jpg", image_small="https://cards.scryfall.io/small/front/s/c21.jpg",
+                 scryfall_uri="https://scryfall.com/card/c21/263/sol-ring"),
             Card(scryfall_id="sol-cmr", oracle_id=SOL_RING, name="Sol Ring", set_code="cmr", set_name="Commander Legends",
                  collector_number="472"),
             Card(scryfall_id="killer-mkm", oracle_id=KILLER, name="A Killer Among Us", set_code="mkm",
@@ -207,3 +209,25 @@ def test_edits_touch_only_the_persons_own_collection(app, agent, bot, write):
         assert db.query(Import).filter(Import.user_id == bob_id, Import.kind != "import").count() == 0
     # and Bob cannot undo Alice's change
     assert call_tool(bot, bob_write, "undo_owned_cards_update").get("isError")
+
+
+def test_printing_choices_and_owned_printings_come_with_scryfall_pictures(app, bot, write):
+    ask = preview(bot, write, {"action": "add", "name": "Sol Ring", "quantity": 1})
+    owned = ask["lines"][0]["choose_from"][0]
+    assert owned["image"]["url"].startswith("https://cards.scryfall.io/") and owned["image"]["artist"] == "Mike Bierek"
+    assert owned["finishes"] == ["nonfoil", "foil"] and owned["owned"] == 1
+    assert {b["source"] for b in ask["provenance"]} >= {"Scryfall"}  # the pictures are Scryfall's
+    ready = preview(bot, write, {"action": "add", "name": "Sol Ring", "quantity": 1, "set": "c21", "number": "263"})
+    assert ready["lines"][0]["image"]["artist"] == "Mike Bierek"  # the preview shows the printing chosen
+    shown = call_tool(bot, write, "show_owned_printings", name="Sol Ring")["structuredContent"]
+    assert shown["card"] == "Sol Ring" and shown["copies"] == 1 and shown["printings"][0]["image"]["small"].endswith("c21.jpg")
+    assert call_tool(bot, write, "show_owned_printings", name="Sol Rings")["structuredContent"]["did_you_mean"] == ["Sol Ring"]
+
+
+def test_showing_owned_printings_is_read_only_and_private(agent, cards, bot):
+    read = make_token(agent)
+    assert call_tool(bot, read, "show_owned_printings", name="Sol Ring")["structuredContent"]["copies"] == 1
+    with TestClient(agent.app) as bob:
+        bob.post("/api/auth/dev-login", params={"email": "bob@example.com"})
+        bob_read = make_token(bob)
+    assert call_tool(bot, bob_read, "show_owned_printings", name="Sol Ring")["structuredContent"]["printings"] == []

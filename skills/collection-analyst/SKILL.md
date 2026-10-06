@@ -7,7 +7,7 @@ description: >-
   in the collection, and small edits when they bought, sold or traded cards.
 license: MIT
 metadata:
-  vault-tools: "get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline list_card_names check_decklist list_shared_with_me lookup_cards refresh_prices whoami update_owned_cards confirm_owned_cards_update undo_owned_cards_update"
+  vault-tools: "get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline list_card_names check_decklist list_shared_with_me lookup_cards refresh_prices whoami update_owned_cards confirm_owned_cards_update undo_owned_cards_update show_owned_printings"
 ---
 
 # Collection analyst
@@ -23,6 +23,7 @@ estimate or fill gaps. Follow `vault-attribution` (if installed) for card data a
    - most valuable or specific printings: `search_cards` with `sort="-value"`, a small `limit`, `query`,
      `set` or `name` filters; follow `next_cursor` only if more is needed;
    - one printing in detail and its recent prices: `get_card`;
+   - "show me my Sol Rings", "which printings do I have": `show_owned_printings` (pictures, most copies first);
    - rolled up by card name (top N, by color or type): `list_card_names`;
    - sets: `list_sets`; highlights, gains and losses: `get_collection_stats`;
    - colors, types, mana values, rarities: `get_collection_breakdowns`;
@@ -39,8 +40,10 @@ estimate or fill gaps. Follow `vault-attribution` (if installed) for card data a
 When the person says they bought, sold, traded or found cards:
 
 1. Send their words as lines to `update_owned_cards` (add, remove, or set how many). It changes nothing.
-2. A line with `choose_printing` lists the printings (theirs first): ask which one, in their words, and never
-   pick for them. For an add they may say they do not know; then send `printing_unknown`. A line with
+2. A line with `choose_printing` lists the printings (theirs first), each with its picture: hosts that show the
+   Vault's views display them to tap, so just ask them to tap the one they have; otherwise ask in their words.
+   Never pick for them, and never draw your own grid of card images (the chat blocks those images: use the
+   Vault's view). For an add they may say they do not know; then send `printing_unknown`. A line with
    `did_you_mean` names a card that does not exist: ask which they meant.
 3. Show the preview: each card and printing, copies before and after, the value change. Apply with
    `confirm_owned_cards_update` (the same lines and the preview's `confirmation`) only after they say yes.

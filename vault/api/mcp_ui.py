@@ -35,6 +35,8 @@ h1 { font-size: 18px; margin: 0 0 4px; } h2 { font-size: 14px; margin: 16px 0 6p
 .box { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 8px 0; background: var(--card); }
 .oracle { white-space: pre-wrap; }
 img.card { width: 220px; max-width: 100%; border-radius: 10px; display: block; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 8px 0; }
+.tile { border: 1px solid var(--line); border-radius: 8px; padding: 6px; } img.thumb { width: 100%; border-radius: 7px; display: block; }
 button, select, input[type=range] { font: inherit; } button { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; }
 button.primary { border-color: var(--accent); }
 table { border-collapse: collapse; width: 100%; } td, th { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -326,8 +328,104 @@ function render(root, env) {
 }
 """
 
+PRINTINGS_JS = r"""
+var FINISH = { nonfoil: "non-foil", foil: "foil", etched: "etched foil" };
+function scryfallImage(img) { return img && /^https:\/\/cards\.scryfall\.io\//.test(img.small || img.url) ? (img.small || img.url) : null; }
+function picture(img, alt) {
+  var src = scryfallImage(img); if (!src) { return null; }
+  return h("div", {}, [h("img", { class: "thumb", src: src, alt: alt, referrerpolicy: "no-referrer" }),
+    h("div", { class: "small muted", text: (img.artist ? "Illustrated by " + img.artist + ". " : "") + "Image: Scryfall." })]);
+}
+function linesWith(index, change) {
+  return (lastInput.lines || []).map(function (l, i) { return i === index ? Object.assign({}, l, change) : l; });
+}
+function choose(root, index, text, change, status) {
+  status.textContent = "Sending your choice...";
+  // The choice goes into the chat as the person's message, so the assistant previews again with it.
+  request("ui/message", { role: "user", content: [{ type: "text", text: text }] }).then(function () {
+    status.textContent = "Sent: “" + text + "”";
+  }).catch(function () {
+    // A host that can't take messages: preview it here (it changes nothing) and say what to tell the assistant.
+    callTool("update_owned_cards", { lines: linesWith(index, change) }).then(function (r) {
+      lastInput = { lines: linesWith(index, change) }; show(r);
+      document.getElementById("root").insertBefore(h("div", { class: "box", text: "Tell the assistant: “" + text + "”" }), document.getElementById("root").firstChild);
+    }).catch(function (e) { status.textContent = e.message; });
+  });
+}
+function gallery(root, r) {
+  if (!r.card) {
+    root.appendChild(h("h1", { text: "No card with that name" }));
+    if ((r.did_you_mean || []).length) { root.appendChild(h("p", { text: "Did you mean: " + r.did_you_mean.join(", ") + "?" })); }
+    root.appendChild(provenanceFooter(r.provenance)); return;
+  }
+  root.appendChild(h("h1", { text: r.printings.length ? "Your " + r.card + ": " + r.copies + " cop" + (r.copies === 1 ? "y" : "ies") + " in " + r.printings.length + " printing" + (r.printings.length === 1 ? "" : "s") : "You don't own " + r.card }));
+  var grid = h("div", { class: "grid" }, []);
+  r.printings.forEach(function (c) {
+    var name = (c.set_name || String(c.set).toUpperCase()) + " #" + c.number;
+    var tile = h("div", { class: "tile" }, [picture(c.image, r.card + ", " + name), h("div", { text: name }),
+      h("span", { class: "chip ok", text: c.owned + " " + (FINISH[c.finish] || c.finish || "") })]);
+    if (c.image && c.image.scryfall_uri && /^https:\/\//.test(c.image.scryfall_uri)) { tile.appendChild(h("div", { class: "small" }, [ext(c.image.scryfall_uri, "On Scryfall")])); }
+    grid.appendChild(tile);
+  });
+  root.appendChild(grid);
+  root.appendChild(provenanceFooter(r.provenance));
+}
+function render(root, r) {
+  if (r.printings !== undefined) { gallery(root, r); return; }
+  var lines = r.lines || [];
+  var asking = lines.filter(function (l) { return l.status === "choose_printing"; }).length;
+  root.appendChild(h("h1", { text: asking ? "Which printing?" : r.ready ? "Ready to apply: nothing has changed yet" : "These changes can't be applied as they are" }));
+  if (r.refused) { root.appendChild(h("p", { class: "bad", text: r.refused })); }
+  lines.forEach(function (l, index) {
+    var box = h("div", { class: "box" }, []);
+    var verb = l.action === "add" ? "Add " + l.quantity : l.action === "remove" ? "Remove " + l.quantity : "Set to " + l.quantity;
+    box.appendChild(h("strong", { text: verb + " × " + (l.card || l.name) }));
+    if (l.status === "choose_printing") {
+      var status = h("p", { class: "small muted", text: "Tap the one you have." });
+      box.appendChild(status);
+      var grid = h("div", { class: "grid" }, []);
+      (l.choose_from || []).forEach(function (c) {
+        var name = (c.set_name || String(c.set).toUpperCase()) + " #" + c.number;
+        var tile = h("div", { class: "tile" }, [picture(c.image, (l.card || l.name) + ", " + name),
+          h("div", { text: name }), c.owned ? h("span", { class: "chip ok", text: "you own " + c.owned + (c.finish ? " " + (FINISH[c.finish] || c.finish) : "") }) : null]);
+        (c.finishes || [c.finish || "nonfoil"]).forEach(function (f) {
+          tile.appendChild(h("button", { text: FINISH[f] || f, onclick: function () {
+            choose(root, index, "For " + (l.card || l.name) + ": it's the " + name + ", " + (FINISH[f] || f) + ".",
+              { set: c.set, number: c.number, finish: f, printing_unknown: false }, status);
+          } }));
+          tile.appendChild(document.createTextNode(" "));
+        });
+        grid.appendChild(tile);
+      });
+      box.appendChild(grid);
+      if (l.action === "add") {
+        box.appendChild(h("button", { text: "I don't know which one", onclick: function () {
+          choose(root, index, "For " + (l.card || l.name) + ": I don't know which printing.", { printing_unknown: true }, status);
+        } }));
+      }
+    } else if (l.status === "ready") {
+      var row = h("div", { class: "row" }, []);
+      var pic = picture(l.image, l.card); if (pic) { row.appendChild(h("div", { style: "width:150px" }, [pic])); }
+      var p = l.printing && typeof l.printing === "object" ? String(l.printing.set).toUpperCase() + " #" + l.printing.number + ", " + (FINISH[l.printing.finish] || l.printing.finish) : "printing not specified";
+      row.appendChild(h("div", { class: "grow" }, [h("div", { text: p }), h("div", { text: "Copies: " + l.copies_before + " → " + l.copies_after }),
+        h("div", { class: "small muted", text: l.unit_price_usd ? usd(l.unit_price_usd) + " each (Scryfall's market price, not a store's)" : "No known price" })]));
+      box.appendChild(row);
+    } else {
+      box.appendChild(h("p", { class: "bad", text: l.reason || "Can't be applied" }));
+      if ((l.did_you_mean || []).length) { box.appendChild(h("p", { text: "Did you mean: " + l.did_you_mean.join(", ") + "?" })); }
+    }
+    root.appendChild(box);
+  });
+  if (r.ready) {
+    root.appendChild(h("p", { text: "+" + r.copies_added + " / −" + r.copies_removed + " copies, value change " + usd(r.value_change_usd) + ". Say yes in the chat to apply it; it can be undone." }));
+  }
+  root.appendChild(provenanceFooter(r.provenance));
+}
+"""
+
 VIEWS = {
     "card": {"title": "Card", "js": CARD_JS, "images": True},
+    "printings": {"title": "Owned cards update", "js": PRINTINGS_JS, "images": True},
     "deck": {"title": "Deck dashboard", "js": DECK_JS},
     "upgrades": {"title": "Upgrade candidates", "js": UPGRADES_JS},
     "steps": {"title": "Step by step", "js": STEPS_JS},
