@@ -53,7 +53,7 @@ Tags versus roles: a tag is the person's own opinion or plan (`trade`, `commande
 
 ### 5. Analytics take a `bucket` and a `tag` filter
 
-- `summary`, `breakdowns`, `valuation`, `names` and `stats` accept `bucket` and `tag` (default: the whole inventory). Totals across buckets equal the inventory total (a test). Detailed in #130.
+- `summary`, `breakdowns`, `valuation`, `names` and `stats` accept `bucket` and `tag` (default: the whole inventory). Additive metrics (copies, market value, paid) summed across buckets equal the inventory total (a test); distinct counts (cards, printings, sets) do **not** add up, because one printing split across two buckets counts once in each bucket but once inventory-wide, so they are computed over the combined inventory (`vault/collection_view.py`, `vault/analytics.py` already count distinct values). The test includes that split-stack case. Detailed in #130.
 
 ### 6. One import path (with #193 and #194)
 
