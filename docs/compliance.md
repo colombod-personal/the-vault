@@ -179,13 +179,20 @@ block looks like this:
 - Tests: a CI test fails if any MCP tool's output schema lacks `provenance`, and a UI check fails if a
   third-party value is rendered without a source line.
 
-## What I need from the owner
+## Open with the owner
 
-1. Someone to read the Scryfall API terms and Moxfield terms directly (both blocked my fetches), and
-   paste or confirm the relevant clauses.
-2. Approval to email Scryfall and Moxfield (drafts to follow) and to contact Wizards about rules text.
-3. A decision on the registration question: public minimal tools without an account (recommended)
-   or free accounts only.
+Nothing here blocks a current feature: the Vault fetches nothing from Moxfield and needs no permission from Scryfall
+for what it does today.
+
+- **Moxfield's terms: still unread first-hand** (their page refuses automated fetches). Owner: the repo owner, only if
+  the Vault ever reads anything from Moxfield beyond the person's own exported file. Until then the rule above holds:
+  no automated fetching of Moxfield decks.
+- **Emails to Scryfall and Moxfield: optional, not sent.** Drafts are in `docs/outreach-drafts.md`. Owner: the repo
+  owner decides whether to send them; nothing in the Vault depends on an answer.
+
+Done and no longer open: Scryfall's API terms were read first-hand (2026-10-05, #141, see "Scryfall (API terms)" above); the
+registration question is decided (see Decisions); the rules are cited live from Wizards with no copy kept, so there is
+nothing to ask Wizards about rules text (see Decisions).
 
 ## Decisions
 
