@@ -25,7 +25,8 @@ be revoked (Account → Connected apps for OAuth).
   - collection: `get_collection_summary`, `search_cards`, `get_card`, `list_sets`,
     `get_collection_stats`, `get_value_history`, `get_acquisition_timeline`
   - decks: `check_decklist`, `parse_decklist`, `list_decks`, `get_deck`, `get_deck_overlap`, `save_deck`,
-    `update_deck`, `delete_deck` (asks first), `get_archidekt_deck`, `import_deck_from_link`
+    `update_deck`, `delete_deck` (asks first), `get_archidekt_deck`, `import_deck_from_link`,
+    `refresh_deck` (shows what changed on Archidekt, replaces only with the preview's fingerprint)
   - any card, owned or not: `lookup_cards`
   - edit the cards owned (bought, sold, traded): `update_owned_cards` (preview; asks which printing),
     `confirm_owned_cards_update` (after the person says yes), `undo_owned_cards_update`; pictures of the
