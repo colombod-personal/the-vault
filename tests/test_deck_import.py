@@ -54,7 +54,7 @@ def test_the_same_link_saves_once_and_updating_is_asked_for(archidekt_app):
     first = client.post(f"{V1}/decks/import-link", json={"url": link})
     assert first.status_code == 201 and first.json()["created"] is True
     saved = first.json()["deck"]
-    assert saved["name"] == "Elves" and saved["source"] == "archidekt" and saved["source_author"] == "ann"
+    assert saved["name"] == "Elves" and saved["source_url"] == f"https://archidekt.com/decks/{deck['id']}" and saved["source_author"] == "ann"
     assert saved["text"].startswith("Commander\n1 Sliver Overlord\nDeck\n")
     again = client.post(f"{V1}/decks/import-link", json={"url": f"archidekt.com/decks/{deck['id']}"}).json()  # another spelling of the link
     assert again["created"] is False and again["updated"] is False and again["deck"]["id"] == saved["id"] and "already saved" in again["note"]
