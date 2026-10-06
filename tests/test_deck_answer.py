@@ -11,7 +11,7 @@ def test_each_card_says_which_section_it_is_in_and_the_prices_say_their_day(sign
     sections = {c["name"]: c["section"] for c in deck["coverage"]["cards"]}
     # coverage is of the played cards only: the sideboard and maybeboard are not part of what the deck needs
     assert sections == {"Sliver Overlord": "commander", "Sol Ring": "main", "Llanowar Elves": "main"}
-    assert "credit" not in deck  # a pasted deck has no source to credit
+    assert deck.get("credit") is None  # a pasted deck has no source to credit
     assert deck["coverage"].get("priced_as_of") is None  # no prices loaded yet: no day claimed
 
 
