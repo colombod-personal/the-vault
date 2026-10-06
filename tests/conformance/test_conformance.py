@@ -326,3 +326,40 @@ def test_commander_spellbook_find_my_combos(real, twin):
     assert "card" in variant["uses"][0] and "name" in variant["uses"][0]["card"] and "feature" in variant["produces"][0]
     assert invented(t.json(), r.json()) == []
     assert invented(twin_results["included"][0], variant) == []
+
+
+# -- MCP clients: ChatGPT (twins/mcp_client.py ChatGptClient, #231) ---------------------------
+
+def test_chatgpts_client_document_and_keys(real, twin):
+    """The twin serves what chatgpt.com serves: a private_key_jwt client with RS256 and keys at its jwks_uri. If ChatGPT
+    changes how it authenticates, this fails the night it changes, not the day a person cannot connect."""
+    from joserfc.jwk import RSAKey
+    from twins.mcp_client import CHATGPT_REDIRECT
+
+    r_doc = real.get("https://chatgpt.com/oauth/client.json").json()
+    twin.universe.client_hosts.publish_chatgpt(RSAKey.generate_key(2048, parameters={"kid": "k"}, private=True))
+    t_doc = twin.get("https://chatgpt.com/oauth/client.json").json()
+    for key in ("client_id", "token_endpoint_auth_method", "token_endpoint_auth_signing_alg", "jwks_uri"):
+        assert t_doc[key] == r_doc[key], key
+    assert r_doc["redirect_uris"] == [CHATGPT_REDIRECT] == t_doc["redirect_uris"]
+    assert invented(t_doc, r_doc) == []
+    r_keys = real.get(r_doc["jwks_uri"]).json()
+    t_keys = twin.get(t_doc["jwks_uri"]).json()
+    assert missing(r_keys["keys"][0], ["kty", "n", "e", "kid"]) == [] and invented(t_keys, r_keys) == []
+
+
+def test_archidekt_real_deck_keys_have_not_drifted_from_the_twin(real):
+    """The key sets the twin reproduces (tests/fixtures/archidekt_real_keys.json, captured 2026-10-06) are still what the
+    real API sends: a field added or removed there means the twin, and what the Vault reads, need updating."""
+    import json
+    from pathlib import Path
+
+    fx = json.loads((Path(__file__).parents[1] / "fixtures" / "archidekt_real_keys.json").read_text(encoding="utf-8"))
+    page = real.get("https://archidekt.com/api/decks/v3/", params={"name": "elves", "orderBy": "-viewCount"}).json()
+    deck = real.get(f"https://archidekt.com/api/decks/{page['results'][0]['id']}/").json()
+    entry = deck["cards"][0]
+    got = {"deck": deck, "entry": entry, "card": entry["card"], "oracleCard": entry["card"]["oracleCard"],
+           "edition": entry["card"]["edition"], "prices": entry["card"]["prices"]}
+    for part in ("deck", "entry", "card", "edition", "prices"):
+        assert set(fx[part]) - {"vault_cache", "provenance"} == set(got[part]), (part, sorted(set(fx[part]) ^ set(got[part])))
+    assert set(fx["oracleCard"]) <= set(got["oracleCard"])  # a card may have more (double-faced cards), never fewer

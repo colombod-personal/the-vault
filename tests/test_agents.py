@@ -498,10 +498,8 @@ def test_a_busy_database_answers_503_with_retry_after_not_a_500(app, signed_in, 
 def test_write_tools_describe_what_they_do_without_steering_the_approval():
     """ChatGPT flagged a description that told the approver when to say yes as a 'Suspicious Instruction' (#221):
     tool descriptions say what the tool does; the workflow (preview, the person's yes) is in the server instructions."""
-    import re
+    from twins.mcp_client import STEERING as steering  # one definition: the twin of ChatGPT's safety check
     from vault.api import mcp
-    steering = re.compile(r"only after|after (the person|they) say|said yes|say yes|ask the person|call again with|show (it|that|this) to",
-                          re.IGNORECASE)
     flagged = {t.name: steering.findall(t.description) for t in mcp.TOOLS if t.write and steering.search(t.description)}
     assert not flagged, flagged
     assert "only once the person has said yes" in mcp.INSTRUCTIONS  # the guidance lives here instead
