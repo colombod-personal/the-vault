@@ -25,8 +25,11 @@ import replaces the whole collection and records what changed (`imports`, with a
     only that difference is applied,
   - **the collection now**, with the edits made in the Vault since the last import: those stay.
 
-  The last imported file does not need to be stored: it is today's collection minus the change sets recorded since that
-  import (assistant edits are recorded as change sets for this reason). When the same card changed on both sides (the
+  The baseline is **the last imported file as imported, stored per scope** (the folders, later buckets, it covered),
+  not derived by subtracting change sets from today's collection: a card added only in the Vault and kept by a merge is
+  in no file, so subtracting would count it as part of the baseline and a second import of the same file would delete
+  it (docs/collections.md, decision 6). Each merged import stores its own snapshot as the new baseline; change sets stay
+  the history. When the same card changed on both sides (the
   person told the assistant they sold it, and the new file also drops it), the import preview lists it once as a
   **conflict** and asks, instead of applying it twice. A "replace everything with this file" option stays for people
   who want the old behaviour. This is server behaviour, not AI: it applies to every import, from the web app, the API
@@ -64,7 +67,8 @@ change.
    several.
 5. **Undo.** The last assistant change set can be undone until the collection changes again (another edit or an
    import); the web app shows an Undo on that history entry too. Undo is itself recorded.
-6. **Audit.** Each change set records the app (OAuth client or token name), the time and the summary; the person sees
+6. **Audit and scope.** Each change set records, per changed printing, the folder (the future bucket) of the copies it
+   added or removed, from day one (docs/collections.md). Each change set also records the app (OAuth client or token name), the time and the summary; the person sees
    it in their import history and can revoke the app under Connected apps.
 7. **Rate limit.** 10 change sets a minute per person.
 8. **Nothing else changes.** Decks, shares and the account are untouched; saved decks' coverage reflects the new counts
