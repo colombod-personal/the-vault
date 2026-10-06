@@ -106,11 +106,16 @@ def test_read_only_token_and_mcp_can_look_up(client, app, universe):
         assert result["structuredContent"]["data"][0]["name"] == "Lightning Bolt"
 
 
-def test_sets_catalog_is_public_and_cached(app, universe):
-    with TestClient(app) as anonymous:
+def test_sets_catalog_is_for_signed_in_people_only_and_cached_privately(app, universe):
+    with TestClient(app) as stranger:
+        res = stranger.get(f"{V1}/catalog/sets")  # #62: no anonymous Scryfall data
+        assert res.status_code == 401 and "Bearer" in res.headers["www-authenticate"]
+    with TestClient(app) as anonymous:  # (named for what it was: now a signed-in person)
+        assert anonymous.post("/api/auth/dev-login").status_code == 200
         res = anonymous.get(f"{V1}/catalog/sets")
         assert res.status_code == 200, res.text
-        assert "max-age=86400" in res.headers["cache-control"]
+        assert "private" in res.headers["cache-control"] and "max-age=86400" in res.headers["cache-control"]
+        assert "public" not in res.headers["cache-control"]
         body = res.json()
         assert body["count"] == len(body["items"]) > 0
         assert {"code", "name", "icon_svg_uri"} <= set(body["items"][0])
@@ -122,6 +127,7 @@ def test_sets_catalog_is_public_and_cached(app, universe):
 def test_sets_catalog_when_scryfall_is_down(app, universe):
     universe.scryfall.fail_next("/sets", 503, times=5)
     with TestClient(app) as anonymous:
+        anonymous.post("/api/auth/dev-login")
         res = anonymous.get(f"{V1}/catalog/sets")
     assert res.status_code == 503 and res.headers["retry-after"]
 
@@ -179,6 +185,7 @@ def test_a_sets_refresh_that_waited_for_the_lock_uses_the_list_fetched_meanwhile
 
 def test_sets_catalog_is_paged(app, universe):
     with TestClient(app) as anonymous:
+        anonymous.post("/api/auth/dev-login")
         first = anonymous.get(f"{V1}/catalog/sets", params={"limit": 2}).json()
         assert first["count"] == 2 and first["total"] > 2 and first["_links"]["next"]
         codes, url = [], f"{V1}/catalog/sets?limit=2"

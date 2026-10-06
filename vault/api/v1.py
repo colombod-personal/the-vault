@@ -1049,13 +1049,16 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     @router.get("/catalog/sets", tags=["cards"], response_model=S.SetCatalog, response_model_by_alias=True,
                 summary="Every Magic set: code, name, icon, release date (refreshed daily from Scryfall), paged by code")
-    def catalog_sets(request: Request, response: Response, cursor: str | None = None, limit: int | None = None) -> dict:
+    def catalog_sets(request: Request, response: Response, cursor: str | None = None, limit: int | None = None,
+                     user: User = Depends(current_user)) -> dict:
+        """Signed-in people only (#62): this is Scryfall's set list served as it is, and the Vault serves no Scryfall data
+        to strangers (an anonymous copy would be the proxy their terms forbid). The website reads it after sign-in."""
         try:
             items = catalog.sets()
         except (ApiError, httpx.HTTPError) as exc:
             raise HTTPException(503, "Scryfall's set list is unavailable right now", headers={"Retry-After": "60"}) from exc
         page, nxt = paginate(items, lambda s: (s["code"],), lambda s: s["code"], cursor=cursor, limit=limit)
-        response.headers["Cache-Control"] = "public, max-age=86400"
+        response.headers["Cache-Control"] = "private, max-age=86400"  # the browser may keep it a day; no shared cache may
         # Dragon Shield's own set codes (e.g. gk2_orzhov) and the Scryfall set each stands for.
         return {**page_body(request, page, nxt, len(items), limit=limit), "aliases": set_alias_map(), "alias_prefixes": list(SET_ALIAS_PREFIXES)}
 
