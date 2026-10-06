@@ -324,7 +324,14 @@ class OwnedUndoIn(BaseModel):
 class ImportLinkIn(BaseModel):
     url: str = Field(min_length=8, max_length=500, description="An Archidekt deck link (archidekt.com/decks/<number>)")
     name: str | None = Field(None, max_length=200, description="Name to save it under; default: the deck's name on Archidekt")
-    update: bool = Field(False, description="If this deck is already saved, replace its list with Archidekt's current one")
+    update: bool = Field(False, description="If this deck is already saved, compare it with Archidekt's current list")
+    confirm: bool = Field(False, description="With update: replace the saved list (needs the preview's fingerprint)")
+    fingerprint: str | None = Field(None, max_length=64, description="From the update preview")
+
+
+class DeckRefreshIn(BaseModel):
+    confirm: bool = Field(False, description="Replace the saved list with the source's (needs the preview's fingerprint)")
+    fingerprint: str | None = Field(None, max_length=64, description="From the preview: the source's list that was shown")
 
 
 class DeckIn(BaseModel):

@@ -36,7 +36,7 @@ from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
 from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, import_days, view_version
-from .. import archidekt_cache, deck_import, deck_match, deck_overview, owned_changes
+from .. import archidekt_cache, deck_import, deck_match, deck_overview, deck_refresh, owned_changes
 from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, export_collection, import_collection,
                         preview_import as preview_collection_import, user_entries)
 from ..models import AccessToken, ApiSession, Card, Deck, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
@@ -869,7 +869,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         deck_id = int(found[1])
 
         def run():
-            parsed = deck_import.to_decklist(archidekt_cache.read(db, deck_id, fetch_archidekt))
+            parsed = deck_import.to_decklist(archidekt_cache.read(db, deck_id, fetch_archidekt,
+                                                                  refresh=body.update and not body.confirm))
             if not parsed["text"] or not _parse(parsed["text"]).lines:
                 raise HTTPException(400, "That Archidekt deck has no cards")
             url = deck_import.canonical_url(deck_id)
@@ -877,8 +878,12 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                          if (decklist.parse_url(d.source_url) or ("", ""))[1:] == (str(deck_id),)), None)
             if same is not None and not body.update:
                 return {"created": False, "updated": False, "deck": _deck(same), "counts": parsed["counts"],
-                        "note": "This deck is already saved. Call again with update true to replace its list with Archidekt's current one."}
+                        "note": "This deck is already saved. With update true, the answer shows what Archidekt's current list changes."}
+            if same is not None and not body.confirm:  # an update shows what changes first (#217)
+                return {"created": False, "updated": False, **_refresh_preview(same, parsed)}
             if same is not None:
+                if body.fingerprint != deck_refresh.fingerprint(parsed["text"]):
+                    raise HTTPException(409, "Archidekt's list is not the one previewed (or no fingerprint was given): preview again")
                 same.text, same.updated_at = parsed["text"], datetime.now(timezone.utc)
                 same.format = parsed["format"] or same.format
                 same.source_url, same.source_author = url, parsed["author"] or same.source_author
@@ -893,6 +898,45 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             return {"created": True, "updated": False, "deck": _deck(deck), "counts": parsed["counts"]}
 
         return idempotent(request, db, user, 201, run)
+
+    # -- refreshing a saved deck from its stored link (vault.deck_refresh, #217) --------------------
+    def _refresh_preview(deck: Deck, parsed: dict) -> dict:
+        changes = deck_refresh.diff(deck.text, parsed["text"])
+        return {"deck": _deck(deck, brief=True), "source": {"url": deck.source_url, "name": parsed["name"], "author": parsed["author"]},
+                "changes": changes, "summary": deck_refresh.summary(changes), "unchanged": not changes,
+                "fingerprint": deck_refresh.fingerprint(parsed["text"]),
+                "note": "Nothing has changed yet." if changes else "The saved list already matches the source."}
+
+    @router.post("/decks/{deck_id}/refresh", tags=["decks"],
+                 summary="Compare a saved deck with its stored Archidekt link; replace the list only with confirm and the preview's fingerprint")
+    def refresh_deck(request: Request, deck_id: Id, body: S.DeckRefreshIn, user: User = Depends(current_user),
+                     db: Session = Depends(get_db)) -> dict:
+        deck = owned_deck(db, user, deck_id)
+        if not deck.source_url:
+            raise HTTPException(400, "This deck has no stored link to refresh from. Paste the current list to update it.")
+        found = decklist.parse_url(deck.source_url)
+        if found is None or found[0] != "archidekt":
+            raise HTTPException(400, "Only Archidekt links can be read by the Vault. For Moxfield and other sites (their terms do "
+                                     "not allow automated reading), export the current list there and paste it to update the deck.")
+        # the preview asks Archidekt again (unless the copy is under a minute old); the confirm uses that same copy
+        parsed = deck_import.to_decklist(archidekt_cache.read(db, int(found[1]), fetch_archidekt, refresh=not body.confirm))
+        if not parsed["text"] or not _parse(parsed["text"]).lines:
+            raise HTTPException(400, "The deck on Archidekt has no cards now: nothing was changed")
+        if not body.confirm:
+            return _refresh_preview(deck, parsed)
+        if body.fingerprint != deck_refresh.fingerprint(parsed["text"]):
+            raise HTTPException(409, "The list on Archidekt is not the one previewed (or no fingerprint was given): preview again")
+
+        def run():
+            changes = deck_refresh.diff(deck.text, parsed["text"])
+            deck.text, deck.updated_at = parsed["text"], datetime.now(timezone.utc)
+            deck.format = parsed["format"] or deck.format
+            deck.source_author = parsed["author"] or deck.source_author
+            db.flush()
+            return {"refreshed": True, "deck": _deck(deck, brief=True), "changes": changes,
+                    "summary": deck_refresh.summary(changes)}
+
+        return idempotent(request, db, user, 200, run)
 
     # -- card catalog (Scryfall data, served by the Vault) ---------------------------------------
     catalog = Catalog(transport, rewrite_image=(lambda url: outbound.browser_url(settings, url)) if settings.twins_url else None)

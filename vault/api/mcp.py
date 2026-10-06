@@ -294,9 +294,21 @@ TOOLS = [
          "is left unchanged unless update is true. Archidekt links only; the deck remains Archidekt's, with its credit and link.",
          {"url": {"type": "string", "minLength": 8, "maxLength": 500, "description": "An Archidekt deck link"},
           "name": {"type": "string", "maxLength": 200, "description": "Name to save it under (default: its name on Archidekt)"},
-          "update": {"type": "boolean", "default": False, "description": "Replace an already-saved copy's list with Archidekt's current one"}},
+          "update": {"type": "boolean", "default": False, "description": "For a deck already saved: compare it with Archidekt's current list"},
+          "confirm": {"type": "boolean", "description": "With update: replace the saved list with the previewed one"},
+          "fingerprint": {"type": "string", "maxLength": 64, "description": "From the update preview"}},
          ["url"], method="POST", path=lambda a: f"{V1}/decks/import-link",
-         body=lambda a: {k: a[k] for k in ("url", "name", "update") if a.get(k) is not None}, write=True, provenance=("archidekt",)),
+         body=lambda a: {k: a[k] for k in ("url", "name", "update", "confirm", "fingerprint") if a.get(k) is not None},
+         write=True, provenance=("archidekt",)),
+    Tool("refresh_deck", "Compares a saved deck with its stored Archidekt link. With confirm false or absent it returns the "
+         "changes per section and card (added, removed, counts), the source's name and author, and a fingerprint, and "
+         "changes nothing. With confirm true and that fingerprint it replaces the saved list with the source's; a "
+         "different list on Archidekt returns an error. Decks from Moxfield or other sites, or with no link, return an "
+         "error that says to paste a fresh export instead.",
+         {"deck_id": ID, "confirm": CONFIRM, "fingerprint": {"type": "string", "maxLength": 64, "description": "From the preview"}},
+         ["deck_id"], method="POST", path=lambda a: f"{V1}/decks/{int(a['deck_id'])}/refresh",
+         body=lambda a: {k: a[k] for k in ("confirm", "fingerprint") if a.get(k) is not None},
+         write=True, destructive=True, provenance=("archidekt",)),
     Tool("get_archidekt_deck", "A public deck from Archidekt by its id (the number in archidekt.com/decks/<id>). "
          "One deck per request, only the one the person gave you. Check list_decks first: the deck may be saved. "
          "The deck is Archidekt's: credit Archidekt and link the deck when you use it. Read-only: nothing can "

@@ -48,6 +48,16 @@ def archidekt_app(database_url, universe):
         yield client, app, deck, universe
 
 
+def age_cache(app, seconds=120):
+    """Make the cached Archidekt copy older than a refresh's one-minute floor."""
+    from datetime import timedelta
+    from sqlalchemy import update
+    from vault.models import ArchidektDeckCache
+    with app.state.db.sessions() as db:
+        db.execute(update(ArchidektDeckCache).values(fetched_at=ArchidektDeckCache.fetched_at - timedelta(seconds=seconds)))
+        db.commit()
+
+
 def test_the_same_link_saves_once_and_updating_is_asked_for(archidekt_app):
     client, app, deck, universe = archidekt_app
     link = f"https://archidekt.com/decks/{deck['id']}/elves_for_all"
@@ -60,7 +70,11 @@ def test_the_same_link_saves_once_and_updating_is_asked_for(archidekt_app):
     assert again["created"] is False and again["updated"] is False and again["deck"]["id"] == saved["id"] and "already saved" in again["note"]
     assert len(client.get(f"{V1}/decks").json()["items"]) == 1
     universe.archidekt.add_deck("Elves", "ann", [(1, "Sol Ring")], deck_id=deck["id"])  # the deck changed on Archidekt
-    refreshed = client.post(f"{V1}/decks/import-link", json={"url": link, "update": True, "name": "Elves, tuned"}).json()
+    age_cache(app)
+    preview = client.post(f"{V1}/decks/import-link", json={"url": link, "update": True, "name": "Elves, tuned"}).json()
+    assert preview["updated"] is False and preview["changes"] and preview["fingerprint"]  # an update shows what changes first
+    refreshed = client.post(f"{V1}/decks/import-link", json={"url": link, "update": True, "confirm": True, "name": "Elves, tuned",
+                                                             "fingerprint": preview["fingerprint"]}).json()
     assert refreshed["updated"] is True and refreshed["deck"]["id"] == saved["id"] and refreshed["deck"]["name"] == "Elves, tuned"
     assert len(client.get(f"{V1}/decks").json()["items"]) == 1
 
@@ -87,3 +101,36 @@ def test_importing_is_a_write_and_each_person_gets_their_own_copy(archidekt_app)
         bob.post("/api/auth/dev-login", params={"email": "bob@example.com"})
         assert bob.get(f"{V1}/decks").json()["items"] == []
         assert bob.post(f"{V1}/decks/import-link", json={"url": f"https://archidekt.com/decks/{deck['id']}"}).json()["created"] is True
+
+
+def test_refresh_shows_the_changes_and_replaces_only_what_was_previewed(archidekt_app):
+    client, app, deck, universe = archidekt_app
+    saved = client.post(f"{V1}/decks/import-link", json={"url": f"https://archidekt.com/decks/{deck['id']}"}).json()["deck"]
+    path = f"{V1}/decks/{saved['id']}/refresh"
+    same = client.post(path, json={}).json()
+    assert same["unchanged"] is True and same["changes"] == []
+    universe.archidekt.add_deck("Elves", "ann", [(2, "Sol Ring"), (1, "Elvish Mystic"),
+                                                 (1, "Sliver Overlord", None, None, "Commander")], deck_id=deck["id"])
+    age_cache(app)
+    preview = client.post(path, json={}).json()
+    by_card = {c["card"]: c for c in preview["changes"]}
+    assert by_card["Sol Ring"] == {"section": "Deck", "card": "Sol Ring", "before": 1, "after": 2}
+    assert by_card["Llanowar Elves"]["after"] == 0 and by_card["Elvish Mystic"]["before"] == 0
+    assert preview["summary"]["added"] == 1 and preview["summary"]["removed"] == 1 and "Nothing has changed" in preview["note"]
+    assert client.get(f"{V1}/decks/{saved['id']}").json()["text"] == saved["text"]  # the preview changed nothing
+    assert client.post(path, json={"confirm": True}).status_code == 409  # no fingerprint: refused
+    assert client.post(path, json={"confirm": True, "fingerprint": "not-the-one"}).status_code == 409
+    done = client.post(path, json={"confirm": True, "fingerprint": preview["fingerprint"]}).json()
+    assert done["refreshed"] is True and done["summary"] == preview["summary"]
+    text = client.get(f"{V1}/decks/{saved['id']}").json()["text"]
+    assert "2 Sol Ring" in text and "Llanowar Elves" not in text
+    assert client.get(f"{V1}/decks/{saved['id']}").json()["source_author"] == "ann"  # the credit stays
+
+
+def test_refresh_needs_an_archidekt_link(archidekt_app):
+    client, *_ = archidekt_app
+    pasted = client.post(f"{V1}/decks", json={"name": "Pasted", "text": "1 Sol Ring"}).json()
+    assert "no stored link" in client.post(f"{V1}/decks/{pasted['id']}/refresh", json={}).json()["detail"]
+    mox = client.post(f"{V1}/decks", json={"name": "Mox", "text": "1 Sol Ring", "source_url": "https://moxfield.com/decks/abc"}).json()
+    res = client.post(f"{V1}/decks/{mox['id']}/refresh", json={})
+    assert res.status_code == 400 and "Moxfield" in res.json()["detail"]
