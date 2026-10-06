@@ -14,18 +14,20 @@ For the saved decks: can they all be built **at the same time** from the copies 
 - 28 cards appear in more than one deck. **27 of them are not contested**: the collection holds at least as many copies as all the decks need together (Sol Ring: needed by 4 decks, owned 31; Cavern of Souls: needed 4, owned 8; Leyline of the Guildpact: needed 3, owned exactly 3).
 - **1 is contested: The World Tree.** Three decks (Avatar Aang, Sliver Swarm, The dragon in the night) each need 1; the collection holds 2. One of the three decks has to go without it, or a third copy is bought (Scryfall's cheapest price today: $6.60).
 
-So the useful answer is narrow and specific, and it is easy to lose in a long list. The design therefore reports only **contested** cards as borrowing, and says plainly when nothing is contested.
+So the useful answer is narrow and specific, and it is easy to lose in a long list. The design therefore reports only **contested** cards as a borrowing question, and says plainly when nothing is contested.
 
 ## Definitions
 
 Counted by card name (basic lands left out), the same way `get_deck_overlap` and the deck coverage already count: any printing owned counts.
 
-For each card in a deck, with `need` copies in that deck:
-- **free**: the collection holds enough copies for every deck that uses the card (`have >= need_for_all`). Nothing is borrowed. Most shared cards are this.
-- **borrowed**: `have < need_for_all` but the deck still gets its copies under the allocation below. Another deck that wants the card goes without, or a copy has to move.
-- **short**: not covered even after allocation (`need` exceeds the copies this deck can be given). The deck page already shows this as "missing"; here it is split into *not owned at all* and *owned but allocated to another deck*.
+For each card in a deck, with `need` copies in that deck, and `need_for_all` and `have` for the whole set of saved decks:
+- **free**: the collection holds enough copies for every deck that uses the card (`have >= need_for_all`). Most shared cards are this.
+- **contested**: `have < need_for_all`. The allocation below decides how many copies each deck is given (`gets`).
+- A deck **holds** a contested card when it is given all it needs (another deck wants those copies too) and is **lacking** it when it is given fewer than it needs. The copies it lacks are `lacking = need - gets`, each marked `not_owned` (the collection has none left to give, for any deck) or `held_by_other_deck`.
 
-A deck **stands alone** when it has no borrowed and no short cards, under the allocation.
+A deck is **complete** when it lacks nothing under the allocation (`stands_alone` is true), and **independent** when it also holds no contested card, so that no other deck's completeness depends on it.
+
+The **global deficit** of a contested card is `need_for_all - have`. Under the allocation the decks' `lacking` copies of that card add up to exactly the global deficit, whatever the order: the order only decides *which* deck lacks. So the cost to finish every deck is the global deficit times the price, counted once, and the per-deck costs below are shares of it and must never be added to a separate total.
 
 ## The allocation rule (who gets a contested copy)
 
@@ -43,22 +45,25 @@ Limits to state in the UI: it counts copies, not play (a deck the person does no
 deck: id, name
 need            cards the deck needs (basics left out)
 free            how many of those are not contested
-borrowed        [{ card, quantity, contested_with: [deck names that lose out] }]
-short           [{ card, quantity, owned_elsewhere, price }]
-stands_alone    true when borrowed and short are both empty
+holds           [{ card, quantity, also_wanted_by: [deck names] }]
+lacking         [{ card, quantity, reason: not_owned | held_by_other_deck, price }]
+stands_alone    true when lacking is empty (the deck is complete under the allocation)
+independent     true when lacking and holds are both empty
 independence    free / need, rounded, for sorting only
-cost_to_stand_alone   the cheapest known prices of the copies to buy so this deck stands alone (borrowed + short), with `unpriced` counted
+cost_to_complete   the cheapest known prices of the lacking copies, `unpriced` counted: what buying finishes this deck, with the others keeping theirs
 ```
 
 and per **contested card**, once, because that is the decision:
 
 ```
-card, have, need_for_all
-decks: [{ deck, need, gets: N }]
+card, have, need_for_all, global_deficit
+decks: [{ deck, need, gets: N, lacking: N }]
 options:
-  - move:  "give the copy to <deck>; <other deck> then needs one" (what changes)
-  - buy:   "buy N copy(ies) at $X (Scryfall's cheapest price, dated)" (what it costs; both decks stand alone after)
+  - move:  "give the copy to <deck>; <other deck> then lacks one" (what changes; the global deficit does not)
+  - buy:   "buy global_deficit copies at $X (Scryfall's cheapest price, dated)" (the cost to finish every deck for this card, counted once)
 ```
+
+Worked examples (they become tests): three decks each need 1, one owned: global deficit 2; deck A (first in the order) gets it, B and C lack 1 each (`held_by_other_deck`); buying 1 completes B only and the card stays contested until the second is bought. Deck A needs 2, B needs 1, two owned: global deficit 1; A gets both, B lacks 1; one purchase finishes everything, even though A "holds" two contested copies.
 
 The server computes every number; the web view and assistants only show them. Prices are Scryfall's, labelled with their date, as everywhere else.
 
@@ -67,21 +72,26 @@ The server computes every number; the web view and assistants only show them. Pr
 - **Extend** `GET /api/v1/decks/overlap` (as the issue says): keep the existing fields (`decks_checked`, `shared_cards`, `short_cards`, `cards`) so nothing that reads them breaks, and add `decks` (the per-deck answer above), `contested` (the per-card decisions) and `allocation` (the rule used and the order). New optional query parameter `priority`.
 - HAL `_links` to each deck, a response model (`S.DeckOverlap`), the usual rate limit, and the tenancy rule: a deck id in `priority` that is not one of the caller's decks answers 404, like every other deck route (no way to tell another person's deck from a missing one).
 - **MCP:** the same data through the existing `get_deck_overlap` tool (output grows, input gains `priority`), so no new tool to classify; the tool description says what contested means. `docs/ai-parity.md` and `public/llms.txt` updated.
-- Performance: it reads each saved deck once and the collection once (as today); decks are few (tens), so no paging beyond today's 200-card cap on the card list; the `decks` list is capped at 50 with a note when more exist.
+- **Paging:** the new lists (`decks` and `contested`) are cursor-paged with `limit`, `cursor` and a HAL `next` link, like the other lists. The allocation is computed across **all** decks first and then sliced, so the page size never changes an answer. The legacy `cards` field keeps its existing 200-card cap for compatibility.
+- **Provenance:** `get_deck_overlap` is classified `OWN_DATA_ONLY` today; adding prices makes it Scryfall data, so it moves to `SCRYFALL_DATA` (the wrapper then attaches Scryfall provenance and the Fan Content notice), and the prices carry their date. A test fails if a tool that returns prices is classified own-data-only.
+- Performance: it reads each saved deck once and the collection once (as today); decks are few (tens).
 
 ## The web view
 
 A section of the Lab (#162), phone-first, "Do your decks stand on their own?":
 - **Nothing contested:** one line, "All N decks can be built at the same time from what you own", and the list collapsed.
-- **Contested:** one row per contested card (the decision), with the two options and their prices; below it one row per deck (name, stands-alone tick or the number of borrowed cards) that expands to its borrowed and short cards. Each deck row links to the deck page and its buy list.
+- **Contested:** one row per contested card (the decision), with the two options and their prices; below it one row per deck (name, a complete tick or the number of lacking cards) that expands to the cards it holds and lacks. Each deck row links to the deck page and its buy list.
 - At 390 px the contested rows come first and are full width; at 1400 px the contested cards and the deck rows sit side by side.
 
 ## Tests (write first)
 
-- A card owned once and used by two decks: contested; the deck that comes first in the order gets it; the other has it as `short` with `owned_elsewhere`.
-- Owned twice, used by three decks (The World Tree): one deck loses; `move` and `buy` options; buying one copy makes all three stand alone.
-- Owned in enough copies for all decks (Sol Ring): not contested, not borrowed.
-- A card owned zero times: `short`, not "borrowed".
+- A card owned once and used by two decks: contested; the deck that comes first in the order gets it; the other lacks it (`held_by_other_deck`).
+- Owned twice, used by three decks (The World Tree): global deficit 1; one deck lacks it; `move` and `buy` options; buying one copy completes all three.
+- The worked examples above: three decks needing 1 with one owned (deficit 2, buying 1 completes one deck only); A needs 2, B needs 1, two owned (one purchase finishes everything); the decks' `cost_to_complete` shares add up to the global deficit times the price, in any order.
+- Paging: `limit` and `cursor` return all decks across pages with the same answers as one page; the page size never changes who lacks what.
+- Provenance: the tool carries Scryfall provenance and the price date.
+- Owned in enough copies for all decks (Sol Ring): not contested, held and lacked by no deck.
+- A card owned zero times: `lacking` with reason `not_owned`.
 - Basic lands never appear.
 - Deck order: the default order, and `priority` overriding it; an id in `priority` that is not the caller's (another person's or missing) answers 404 and reveals nothing.
 - A fully independent set of decks: `stands_alone` for all, `contested` empty.

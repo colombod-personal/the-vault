@@ -14,7 +14,7 @@ The deck ideas lab (#161) and deck independence (#165) need to answer "this deck
 
 ## The limit to design around
 
-Scryfall's terms forbid simply repackaging, republishing or proxying its data; the software must add value. So the public table must not be a mirror of Scryfall's tags. It is the Vault's own layer: its vocabulary, its mappings, its review, and a second kind of evidence (rules text) that Scryfall's tags do not carry. Scryfall's tag is one labelled input, credited to Scryfall Tagger contributors. The terms check is recorded on #62 before any Scryfall-derived row is readable by the public; until then the rows built only from the Vault's own rules can be public and the Scryfall-derived ones stay internal.
+Scryfall's terms forbid simply repackaging, republishing or proxying its data; the software must add value. So the shared table must not be a mirror of Scryfall's tags. It is the Vault's own layer: its vocabulary, its mappings, its review, and a second kind of evidence (rules text) that Scryfall's tags do not carry. Scryfall's tag is one labelled input, credited to Scryfall Tagger contributors. The terms check is recorded on #62 before any Scryfall-derived row is readable by signed-in accounts; until then the rows built only from the Vault's own rules can be readable and the Scryfall-derived ones stay internal.
 
 ## Design
 
@@ -31,7 +31,7 @@ Starting set, from the owner's examples and the roles the Vault already uses: ra
 - `strength`: `core` (the card exists to do this), `incidental` (does it on the side), matching how Scryfall weights are used today.
 - `source`: `vault_rule` (a deterministic rule over oracle text), `scryfall_tag` (mapped from a Tagger tag), `suggestion` (accepted from a person), `ai` (labelled, per #126).
 - `evidence`: for `vault_rule` the matched text; for `scryfall_tag` the tag `id` (never the slug); for `suggestion` the suggestion id.
-- Read: the table is public like the card catalogue. Write: only the pipeline's database role; no API route writes it. A test fails if any route does.
+- Read: like the card catalogue, it is readable by **every signed-in account**; there is no anonymous access (owner decision on #62, 2026-10-06: free accounts, no anonymous catalog, `PUBLIC_CATALOG` removed). Opening it to people without an account would be a separate product decision about a page that adds value, not part of this design. Write: only the pipeline's database role; no API route writes it. A test fails if any route does.
 
 ### 3. How rows are produced (pipelines, not people)
 
@@ -47,12 +47,12 @@ A person (or their assistant) can submit "card X does role Y, because Z" to a `r
 ### 5. The questions it answers
 
 - `roles_of(card)` and `roles_of(deck)`: what a deck does, which of the Vault's roles it has and lacks (replaces the eight fixed roles).
-- `equivalents(card)`: other cards sharing a `core` role, ranked by overlap of roles, colour identity, mana value and format legality, with the ones you own first. Feeds "what can stand in for this missing card" in #161 and the swap suggestions in #165.
+- `equivalents(card, deck_id | colour_identity + format)`: other cards sharing a `core` role. Colour identity and format legality are **filters**, applied before ranking: a card outside the deck's colour identity, or banned or not legal in its format, is never offered. The target deck (or an explicit colour identity and format) is a required input for that reason. The remaining candidates are ranked by overlap of roles and mana-value difference, with the ones you own first. Feeds "what can stand in for this missing card" in #161 and the swap suggestions in #165.
 - Every answer carries provenance: the source of each role, the Scryfall credit where a tag was used, and "a Vault role, not a rule".
 
 ## Decisions for the owner
 
-1. **Public from day one, or after the terms check?** Recommendation: publish rule-derived rows first; add Scryfall-derived rows to the public table only after the terms check on #62 (or keep them internal and expose only the Vault's own role names).
+1. **Readable by signed-in accounts from day one, or after the terms check?** Recommendation: open the rule-derived rows first; add Scryfall-derived rows only after the terms check on #62 (or keep them internal and expose only the Vault's own role names).
 2. **Vocabulary size to start.** Recommendation: about 40 roles from the owner's examples and the existing eight, grown by evidence from the suggestion queue.
 3. **Strength.** Recommendation: two levels (`core`, `incidental`), mapped from Scryfall's weights where a tag is the source.
 
