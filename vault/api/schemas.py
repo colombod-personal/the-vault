@@ -407,6 +407,7 @@ class Deck(Hal):
     name: str
     text: str
     source_url: str | None = None
+    source: str | None = Field(None, description="Where the deck came from: archidekt, moxfield, link (another address) or pasted")
     source_author: str | None = None
     created_at: str
     updated_at: str
@@ -417,6 +418,7 @@ class Deck(Hal):
 
 class DeckPage(Page):
     items: list[Deck]
+    closest: list[str] | None = Field(None, description="With ?q= and no match: the nearest deck names")
 
 
 class AuthorRecorded(Deck):
