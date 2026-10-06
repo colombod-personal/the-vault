@@ -373,6 +373,7 @@ class OwnedPrinting(BaseModel):
 
 class CoverageLine(BaseModel):
     name: str
+    section: str = Field("main", description="Where the card sits in the list: commander, main, sideboard, maybeboard, companion")
     set: str | None = None
     number: str | None = None
     need: int
@@ -392,6 +393,7 @@ class Coverage(BaseModel):
     unparsed: list[str]
     missing_cost: float | None = Field(None, description="What the missing copies cost at the cheapest known prices")
     missing_unpriced: int | None = Field(None, description="Lines with missing copies and no known price")
+    priced_as_of: str | None = Field(None, description="The day the prices are from (Scryfall's, not a shop's today)")
 
 
 class DeckSummary(BaseModel):
@@ -412,6 +414,7 @@ class Deck(Hal):
     created_at: str
     updated_at: str
     coverage: Coverage | None = None
+    credit: dict | None = Field(None, description="For a deck from Archidekt: its source, link, author and the notice to repeat")
     summary: DeckSummary | None = Field(None, description="With ?summary=true on the list: owned, missing and cost to finish, against your collection")
     from_: str | None = Field(None, alias="from", description="Who shared it (shared decks only)")
 

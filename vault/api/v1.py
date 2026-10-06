@@ -650,7 +650,11 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             for r in owned_rows:
                 if r.quantity > 0:  # a row of 0 copies isn't owning the card
                     similar.setdefault(loose_name(r.name), Counter())[r.name] += r.quantity
+        sections = {}
+        for line in deck.lines:  # where each card sits in the list (a card in two sections keeps its first)
+            sections.setdefault(line.name.strip().lower(), line.section)
         return {"cards": [{"name": c.entry.name,
+                           "section": sections.get(c.entry.name.strip().lower(), "main"),
                            **({"set": None, "number": None} if c.entry.name.strip().lower() in mixed
                               else {"set": c.entry.set_code, "number": c.entry.collector_number}),
                            "need": c.need, "have": c.have, "missing": c.missing, "status": c.status,
@@ -669,6 +673,10 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                "_links": {"self": link(f"{V1}/decks/{d.id}")}}
         if coverage is not None:
             out["coverage"] = coverage
+        if _source_kind(d.source_url) == "archidekt":
+            out["credit"] = {"source": "Archidekt", "url": d.source_url, "author": d.source_author,
+                             "notice": "Deck list from Archidekt" + (f" by {d.source_author}" if d.source_author else "")
+                                       + ". The deck is theirs, not the Vault's."}
         return out
 
     @router.post("/decks/parse", tags=["decks"], response_model=S.ParsedDeck,
@@ -766,7 +774,10 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     @router.get("/decks/{deck_id}", tags=["decks"], response_model=S.Deck, summary="A saved deck, with coverage")
     def get_deck(deck_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         deck = owned_deck(db, user, deck_id)
-        return _deck(deck, analytics.price_coverage(db, user.id, _coverage(deck.text, user_entries(db, user))))
+        covered = analytics.price_coverage(db, user.id, _coverage(deck.text, user_entries(db, user)))
+        day = db.scalar(select(func.max(PriceSnapshot.day)))
+        covered["priced_as_of"] = day.isoformat() if day else None  # the prices are Scryfall's, from this day
+        return _deck(deck, covered)
 
     @router.put("/decks/{deck_id}", tags=["decks"], response_model=S.Deck)
     def update_deck(deck_id: Id, body: S.DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
