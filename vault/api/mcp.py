@@ -19,12 +19,13 @@ import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Callable
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import parse_qs, parse_qsl, quote, urlsplit
 
 import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 
+from ..deck_tools import FORMATS
 from ..models import User
 from . import mcp_ui
 from .mcp_catalog import GROUNDING, PROMPTS, catalog_tools, provenance_blocks, render_prompt
@@ -170,6 +171,8 @@ SOURCE_URL = {"anyOf": [{"type": "string", "maxLength": 500}, {"type": "null"}],
 SOURCE_AUTHOR = {"anyOf": [{"type": "string", "maxLength": 200}, {"type": "null"}],
                  "description": "Who made the deck at its source (e.g. the Archidekt author), kept for the credit; "
                                 "null clears it"}
+DECK_FORMAT = {"anyOf": [{"type": "string", "enum": list(FORMATS)}, {"type": "null"}],
+               "description": "The deck's format; null clears it (it is then read from the list)"}
 SET_SORTS = ["-value", "value", "-quantity", "quantity", "-unique", "unique", "name", "code", "release", "-release"]
 PAGING = {
     "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25, "description": "Items per page"},
@@ -259,27 +262,33 @@ TOOLS = [
              "anyOf": [{"required": ["id"]}, {"required": ["name"]}, {"required": ["set", "collector_number"]}]}}},
          ["identifiers"],
          method="POST", path=lambda a: f"{V1}/cards/lookup", body=lambda a: {"identifiers": a["identifiers"]}),
-    Tool("list_decks", "The person's saved decks, each with where it came from (archidekt, moxfield, link, pasted). Pass `query` with "
-         "words from the deck's name ('sliver swarm') to find it: best match first, and when nothing matches `closest` lists "
-         "near names. People name their decks; use this before asking for a link or an id.",
+    Tool("list_decks", "The person's saved decks at a glance: each deck's name, `overview` (format, commander(s), card count, the "
+         "commanders' colour identity) and where it came from (archidekt, moxfield, link, pasted); no card lines (get_deck "
+         "has them). Present each deck as its name, format and commander(s), e.g. 'Sliver Swarm: Commander, led by Sliver "
+         "Overlord, 100 cards'. Say when the format is read from the list rather than set (`format_from`). Pass `query` "
+         "with words from the deck's name ('sliver swarm') to find it: best match first, and when nothing matches `closest` "
+         "lists near names. People name their decks; use this before asking for a link or an id.",
          {**PAGING, "query": {"type": "string", "maxLength": 200, "description": "Words from the deck's name"}},
-         path=lambda a: f"{V1}/decks", query=("limit", "cursor", "q")),
+         path=lambda a: f"{V1}/decks?brief=true", query=("limit", "cursor", "q")),  # no card text: get_deck has it
     Tool("get_deck_overlap", "Cards that are in more than one of the person's saved decks, how many copies building "
          "every deck at once needs, how many they own, and how many they are short. Basic lands are left out.",
          path=lambda a: f"{V1}/decks/overlap"),
-    Tool("get_deck", "A saved deck with its text and coverage against the collection.",
+    Tool("get_deck", "A saved deck: its name, `overview` (format, commander(s), card count, colour identity), its text and "
+         "coverage against the collection. Lead with the name, format and commander(s); show card lines only when asked.",
          {"deck_id": ID}, ["deck_id"], path=lambda a: f"{V1}/decks/{int(a['deck_id'])}"),
     Tool("save_deck", "Save a decklist to the person's decks.",
-         {"name": {"type": "string"}, "text": DECKLIST, "source_url": SOURCE_URL, "source_author": SOURCE_AUTHOR},
+         {"name": {"type": "string"}, "text": DECKLIST, "source_url": SOURCE_URL, "source_author": SOURCE_AUTHOR,
+          "format": DECK_FORMAT},
          ["name", "text"], method="POST", path=lambda a: f"{V1}/decks",
          body=lambda a: {"name": a["name"], "text": a["text"], "source_url": a.get("source_url"),
-                         "source_author": a.get("source_author")}, write=True),
-    Tool("update_deck", "Replace a saved deck's name and text (and its source link and author, if given).",
+                         "source_author": a.get("source_author"), "format": a.get("format")}, write=True),
+    Tool("update_deck", "Replace a saved deck's name and text (and its source link, author and format, if given). To set only "
+         "the format, send the deck's current name and text from get_deck with the new format.",
          {"deck_id": ID, "name": {"type": "string"}, "text": DECKLIST, "source_url": SOURCE_URL,
-          "source_author": SOURCE_AUTHOR},
+          "source_author": SOURCE_AUTHOR, "format": DECK_FORMAT},
          ["deck_id", "name", "text"], method="PUT", path=lambda a: f"{V1}/decks/{int(a['deck_id'])}",
          body=lambda a: {"name": a["name"], "text": a["text"],
-                         **{k: a[k] for k in ("source_url", "source_author") if k in a}}, write=True),
+                         **{k: a[k] for k in ("source_url", "source_author", "format") if k in a}}, write=True),
     Tool("import_deck_from_link", "Save a public Archidekt deck to the person's decks from its link: the server reads the deck and keeps "
          "its sections (commander, main, sideboard, maybeboard) and credits its author; do not convert the deck yourself. If the "
          "link is already saved nothing changes unless update is true. Only Archidekt links work; the deck stays Archidekt's: "
@@ -378,11 +387,12 @@ INSTRUCTIONS += "\n" + GROUNDING
 
 # Every tool is classified: either its answer carries Scryfall or Archidekt data (so it gets provenance),
 # or it holds only the person's own data (tests/test_agents.py fails for a tool that is in neither group).
-SCRYFALL_DATA = {"get_collection_summary", "search_cards", "get_card", "list_sets", "get_collection_stats",
+SCRYFALL_DATA = {"list_decks",  # the commanders' colour identity is Scryfall's Oracle data
+                 "get_collection_summary", "search_cards", "get_card", "list_sets", "get_collection_stats",
                  "get_collection_breakdowns", "get_valuation", "get_value_history", "list_card_names", "refresh_prices",
                  "check_decklist", "lookup_cards", "get_deck", "get_shared_deck",
                  "update_owned_cards", "show_owned_printings"}  # these carry Scryfall's card images
-OWN_DATA_ONLY = {"get_acquisition_timeline", "parse_decklist", "list_decks", "save_deck", "update_deck", "list_imports",
+OWN_DATA_ONLY = {"get_acquisition_timeline", "parse_decklist", "save_deck", "update_deck", "list_imports",
                  "import_collection_csv", "list_export_formats", "list_shared_with_me", "get_import", "delete_deck",
                  "list_my_shares", "accept_share", "stop_sharing", "start_collection_upload",
                  "get_staged_upload", "confirm_staged_upload", "get_deck_overlap",
@@ -441,7 +451,11 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
         try:
             async with httpx.AsyncClient(transport=transport, base_url=str(request.base_url).rstrip("/")) as client:
                 method = tool.method(args) if callable(tool.method) else tool.method
-                res = await client.request(method, tool.path(args), **kwargs)
+                path = tool.path(args)
+                if "?" in path:  # a fixed query in the path (list_decks' brief=true): kept next to the caller's params
+                    path, fixed = path.split("?", 1)
+                    kwargs["params"] = {**dict(parse_qsl(fixed)), **kwargs["params"]}
+                res = await client.request(method, path, **kwargs)
         except Exception:  # the API failed: this tool call failed, not the whole MCP request (or its batch)
             log.exception("MCP tool %s failed", tool.name)
             return 500, {"type": "about:blank", "title": "Internal server error", "status": 500,

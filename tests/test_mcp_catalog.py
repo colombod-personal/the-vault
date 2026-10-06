@@ -102,8 +102,10 @@ def test_tools_that_return_scryfall_data_get_a_provenance_block(agent, bot):
     block = page["provenance"][0]
     assert block["source"] == "Scryfall" and block["kind"] == "source" and block["notice"] == prov.FAN_CONTENT_NOTICE
     assert "TCGplayer" in block["origin"] and block["url"] == "https://scryfall.com"
-    own = call_tool(bot, read, "list_decks")["structuredContent"]
+    own = call_tool(bot, read, "list_imports")["structuredContent"]
     assert "provenance" not in own  # only the person's own data: nothing to attribute
+    decks = call_tool(bot, read, "list_decks")["structuredContent"]  # carries the commanders' colour identity (#216)
+    assert {b["source"] for b in decks["provenance"]} == {"Scryfall"}
 
 
 def test_archidekt_decks_are_attributed_to_their_author_and_linked():

@@ -36,7 +36,7 @@ from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
 from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, import_days, view_version
-from .. import archidekt_cache, deck_import, deck_match, owned_changes
+from .. import archidekt_cache, deck_import, deck_match, deck_overview, owned_changes
 from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, export_collection, import_collection,
                         preview_import as preview_collection_import, user_entries)
 from ..models import AccessToken, ApiSession, Card, Deck, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
@@ -670,10 +670,14 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         host = (urlsplit(url).hostname or "").lower() if url else ""
         return "archidekt" if host.endswith("archidekt.com") else "moxfield" if host.endswith("moxfield.com") else "link" if url else "pasted"
 
-    def _deck(d: Deck, coverage: dict | None = None) -> dict:
-        out = {"id": d.id, "name": d.name, "text": d.text, "source_url": d.source_url, "source": _source_kind(d.source_url), "source_author": d.source_author,
+    def _deck(d: Deck, coverage: dict | None = None, known: dict | None = None, brief: bool = False) -> dict:
+        """A deck answer: what it is at a glance (format, commanders: vault.deck_overview) first, then the list."""
+        out = {"id": d.id, "name": d.name, "format": d.format, "overview": deck_overview.overview(d.text, d.format, known),
+               "source_url": d.source_url, "source": _source_kind(d.source_url), "source_author": d.source_author,
                "created_at": _iso(d.created_at), "updated_at": _iso(d.updated_at),
                "_links": {"self": link(f"{V1}/decks/{d.id}")}}
+        if not brief:
+            out["text"] = d.text
         if coverage is not None:
             out["coverage"] = coverage
         if _source_kind(d.source_url) == "archidekt":
@@ -729,6 +733,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     @router.get("/decks", tags=["decks"], response_model=S.DeckPage)
     def list_decks(request: Request, cursor: str | None = None, limit: int | None = None, summary: bool = False,
+                   brief: bool = Query(False, description="Leave each deck's card text out: name, format, commanders, counts"),
                    q: str | None = Query(None, max_length=200, description="Find a deck by words from its name ('sliver swarm'); "
                                          "best match first; when nothing matches, `closest` lists near names"),
                    user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
@@ -740,7 +745,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             page, nxt = [by_id[i] for i in ids], None  # ranked by how well the name matches, not by name
         else:
             page, nxt = paginate(rows, lambda d: (d.name.lower(),), lambda d: d.id, cursor=cursor, limit=limit)
-        items = [_deck(d) for d in page]
+        known = deck_overview.identities(db, [c for d in page for c in deck_overview.read(d.text)["commanders"]])
+        items = [_deck(d, known=known, brief=brief) for d in page]
         if summary and page:  # each deck against your collection; the collection and prices read once for the page
             owned = user_entries(db, user)
             readable = []
@@ -767,7 +773,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
         def run():
             deck = Deck(user_id=user.id, name=body.name.strip()[:200] or "Untitled deck", text=body.text,
-                        source_url=body.source_url, source_author=body.source_author)
+                        source_url=body.source_url, source_author=body.source_author, format=body.format)
             db.add(deck)
             db.flush()
             return _deck(deck)
@@ -780,7 +786,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         covered = analytics.price_coverage(db, user.id, _coverage(deck.text, user_entries(db, user)))
         day = db.scalar(select(func.max(PriceSnapshot.day)))
         covered["priced_as_of"] = day.isoformat() if day else None  # the prices are Scryfall's, from this day
-        return _deck(deck, covered)
+        return _deck(deck, covered, deck_overview.identities(db, deck_overview.read(deck.text)["commanders"]))
 
     @router.put("/decks/{deck_id}", tags=["decks"], response_model=S.Deck)
     def update_deck(deck_id: Id, body: S.DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -793,6 +799,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                   "updated_at": datetime.now(timezone.utc)}
         if "source_url" in body.model_fields_set:  # omitted: keep it (null clears it)
             values["source_url"] = body.source_url
+        if "format" in body.model_fields_set:  # likewise
+            values["format"] = body.format
         if "source_author" in body.model_fields_set:
             values["source_author"] = body.source_author
         elif "source_url" in values:
@@ -807,6 +815,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             db.rollback()
             raise HTTPException(404, "Deck not found")
         db.commit()
+        db.refresh(deck)
         return _deck(deck)
 
     @router.post("/decks/{deck_id}/source-author", tags=["decks"], response_model=S.AuthorRecorded,
@@ -871,13 +880,14 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                         "note": "This deck is already saved. Call again with update true to replace its list with Archidekt's current one."}
             if same is not None:
                 same.text, same.updated_at = parsed["text"], datetime.now(timezone.utc)
+                same.format = parsed["format"] or same.format
                 same.source_url, same.source_author = url, parsed["author"] or same.source_author
                 if body.name:
                     same.name = body.name.strip()[:200] or same.name
                 db.flush()
                 return {"created": False, "updated": True, "deck": _deck(same), "counts": parsed["counts"]}
             deck = Deck(user_id=user.id, name=(body.name or parsed["name"] or "Archidekt deck").strip()[:200], text=parsed["text"],
-                        source_url=url, source_author=parsed["author"])
+                        source_url=url, source_author=parsed["author"], format=parsed["format"])
             db.add(deck)
             db.flush()
             return {"created": True, "updated": False, "deck": _deck(deck), "counts": parsed["counts"]}
