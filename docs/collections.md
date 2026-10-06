@@ -66,7 +66,7 @@ Tags versus roles: a tag is the person's own opinion or plan (`trade`, `commande
 
 ### 8. GDPR
 
-- New per-person tables (`buckets`, `tag_assignments`, `card_annotations`) are added to `personal_data` (erased with the account), `export_archive` (a `buckets.json` and `tags.json`), `docs/gdpr.md` and `public/privacy.html`; a test fails if a per-person table is missing from them.
+- New per-person tables (`buckets`, `tag_assignments`, `card_annotations`) are added to `personal_data` (erased with the account), `export_archive` (`buckets.json`, `tags.json` and `card_annotations.json`), `docs/gdpr.md` and `public/privacy.html`; a test fails if a per-person table is missing from them.
 
 ## The surface (for #121 to #130)
 
