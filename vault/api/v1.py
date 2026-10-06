@@ -36,7 +36,7 @@ from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
 from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, import_days, view_version
-from .. import deck_match
+from .. import archidekt_cache, deck_match
 from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, export_collection, import_collection,
                         preview_import as preview_collection_import, user_entries)
 from ..models import AccessToken, ApiSession, Deck, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
@@ -821,13 +821,18 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         db.commit()
         return {"deleted": True}
 
-    @router.get("/archidekt/decks/{deck_id}", tags=["decks"], summary="A public Archidekt deck (fetched server-side)")
-    def archidekt_deck(deck_id: Id, user: User = Depends(current_user)) -> dict:
-        try:
-            with ArchidektClient(client=httpx.Client(transport=transport, timeout=30, follow_redirects=True)) as client:
-                return client.get_deck(deck_id).raw
-        except ApiError as exc:
-            raise HTTPException(exc.status_code if exc.status_code == 404 else 502, str(exc)) from exc
+    @router.get("/archidekt/decks/{deck_id}", tags=["decks"],
+                summary="A public Archidekt deck (fetched server-side; repeat reads within 10 minutes come from a cache)")
+    def archidekt_deck(deck_id: Id, refresh: bool = False, user: User = Depends(current_user),
+                       db: Session = Depends(get_db)) -> dict:
+        def fetch(deck: int) -> dict:
+            try:
+                with ArchidektClient(client=httpx.Client(transport=transport, timeout=30, follow_redirects=True)) as client:
+                    return client.get_deck(deck).raw
+            except ApiError as exc:
+                raise HTTPException(exc.status_code if exc.status_code == 404 else 502, str(exc)) from exc
+
+        return archidekt_cache.read(db, deck_id, fetch, refresh=refresh)
 
     # -- card catalog (Scryfall data, served by the Vault) ---------------------------------------
     catalog = Catalog(transport, rewrite_image=(lambda url: outbound.browser_url(settings, url)) if settings.twins_url else None)
