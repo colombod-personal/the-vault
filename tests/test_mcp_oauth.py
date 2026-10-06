@@ -108,7 +108,8 @@ def test_resource_and_authorization_server_metadata(client):
     assert server["issuer"] == BASE and server["code_challenge_methods_supported"] == ["S256"]
     assert server["client_id_metadata_document_supported"] is True
     assert server["grant_types_supported"] == ["authorization_code", "refresh_token"]
-    assert server["token_endpoint_auth_methods_supported"] == ["none"]
+    assert server["token_endpoint_auth_methods_supported"] == ["none", "private_key_jwt"]
+    assert server["token_endpoint_auth_signing_alg_values_supported"] == ["RS256", "PS256", "ES256"]
     assert server["authorization_endpoint"] == f"{BASE}/oauth/authorize" and server["registration_endpoint"]
     cors = client.api.get("/.well-known/oauth-authorization-server").headers["access-control-allow-origin"]
     assert cors == "*"

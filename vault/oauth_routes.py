@@ -29,6 +29,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from sqlalchemy.orm import Session
 from starlette.datastructures import QueryParams
 
+from . import client_auth
 from . import oauth_clients as clients
 from . import oauth_server as server
 from .auth import PKCE_CHALLENGE as PKCE_CHALLENGE_RE, session_user
@@ -275,7 +276,10 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
             "registration_endpoint": f"{base}/oauth/register", "revocation_endpoint": f"{base}/oauth/revoke",
             "scopes_supported": list(server.SCOPES), "response_types_supported": ["code"],
             "response_modes_supported": ["query"], "grant_types_supported": ["authorization_code", "refresh_token"],
-            "token_endpoint_auth_methods_supported": ["none"], "revocation_endpoint_auth_methods_supported": ["none"],
+            # public clients (PKCE) and clients that sign an assertion with their published keys (vault.client_auth)
+            "token_endpoint_auth_methods_supported": ["none", "private_key_jwt"],
+            "token_endpoint_auth_signing_alg_values_supported": list(client_auth.ALGORITHMS),
+            "revocation_endpoint_auth_methods_supported": ["none"],
             "code_challenge_methods_supported": ["S256"], "client_id_metadata_document_supported": True,
             "authorization_response_iss_parameter_supported": True, "service_documentation": f"{base}/llms.txt",
         }, headers=metadata_headers)
@@ -359,14 +363,32 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
         return redirect(req.redirect_uri, {"code": code, "state": req.state}, settings)
 
     # -- token endpoint -------------------------------------------------------------------
+    keys = client_auth.KeyCache()
+
+    def authenticate_client(db: Session, client_id: str, assertion_type: str | None, assertion: str | None) -> None:
+        """A private_key_jwt client must prove itself with a signed assertion; a public one must not send one."""
+        client = clients.known_client(db, client_id)
+        if client is not None and client.token_auth == "private_key_jwt":
+            client_auth.verify(db, fetcher, keys, client_id=client_id, jwks_uri=client.jwks_uri or "",
+                               algorithm=client.auth_alg or "", assertion_type=assertion_type, assertion=assertion,
+                               audiences=(f"{settings.base_url}/oauth/token", settings.base_url))
+            db.commit()  # the assertion is spent even if the grant then fails
+        elif assertion or assertion_type:
+            raise clients.ClientError("invalid_client", "This client is public (PKCE only): it must not send a client_assertion")
+
     @router.post("/oauth/token", dependencies=limit, include_in_schema=False)
     def token(grant_type: str | None = Form(None), client_id: str | None = Form(None), code: str | None = Form(None),
               redirect_uri: str | None = Form(None), code_verifier: str | None = Form(None),
               refresh_token: str | None = Form(None), scope: str | None = Form(None),
-              resource_: str | None = Form(None, alias="resource"), db: Session = Depends(get_db)):
+              resource_: str | None = Form(None, alias="resource"),
+              client_assertion_type: str | None = Form(None), client_assertion: str | None = Form(None),
+              db: Session = Depends(get_db)):
         try:
+            if not client_id and client_assertion:
+                client_id = client_auth.unverified_issuer(client_assertion)  # only to know whose keys to check it with
             if not client_id:
-                raise server.OAuthError("invalid_client", "client_id is required (public clients only)")
+                raise server.OAuthError("invalid_client", "client_id is required")
+            authenticate_client(db, client_id, client_assertion_type, client_assertion)
             if grant_type == "authorization_code":
                 if not (code and redirect_uri and code_verifier):
                     raise server.OAuthError("invalid_request", "code, redirect_uri and code_verifier are required")
@@ -377,7 +399,7 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
                 result = server.refresh(db, client_id, refresh_token, scope, resource_)
             else:
                 raise server.OAuthError("unsupported_grant_type", "grant_type must be authorization_code or refresh_token")
-        except server.OAuthError as exc:
+        except (server.OAuthError, clients.ClientError) as exc:
             return token_error(exc)
         return JSONResponse(result, headers={**NO_STORE, **CORS})
 

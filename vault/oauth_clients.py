@@ -318,16 +318,45 @@ class ClientFetcher:
             raise _refuse("not valid JSON") from None
 
 
-def parse_document(url: str, doc) -> tuple[str, list[str]]:
-    """(name, redirect URIs) of a metadata document, if it is about ``url`` and acceptable."""
+SIGNING_ALGORITHMS = ("RS256", "PS256", "ES256")  # for private_key_jwt (vault.client_auth); asymmetric only
+
+
+@dataclass(frozen=True)
+class TokenAuth:
+    """How a client authenticates at the token endpoint: ``none`` (public, PKCE only) or ``private_key_jwt``."""
+
+    method: str = "none"
+    jwks_uri: str | None = None
+    algorithm: str | None = None
+
+
+def _token_auth(url: str, doc: dict) -> TokenAuth:
+    method = doc.get("token_endpoint_auth_method", "none")
+    if method == "none":
+        return TokenAuth()
+    if method != "private_key_jwt":
+        raise ClientError("invalid_client", "Supported token_endpoint_auth_method values: none, private_key_jwt")
+    algorithm = doc.get("token_endpoint_auth_signing_alg", "RS256")
+    if algorithm not in SIGNING_ALGORITHMS:
+        raise ClientError("invalid_client", f"token_endpoint_auth_signing_alg must be one of {', '.join(SIGNING_ALGORITHMS)}")
+    jwks_uri = doc.get("jwks_uri")
+    if not isinstance(jwks_uri, str) or len(jwks_uri) > MAX_URL:
+        raise ClientError("invalid_client", "private_key_jwt needs a jwks_uri (inline jwks are not supported)")
+    # The keys must live where the client_id does: the same SSRF rules, and the same host.
+    if check_client_id_url(jwks_uri) != check_client_id_url(url):
+        raise ClientError("invalid_client", "The jwks_uri must be on the same host as the client_id")
+    return TokenAuth("private_key_jwt", jwks_uri, algorithm)
+
+
+def parse_document(url: str, doc) -> tuple[str, list[str], TokenAuth]:
+    """(name, redirect URIs, token authentication) of a metadata document, if it is about ``url`` and acceptable."""
     if not isinstance(doc, dict) or doc.get("client_id") != url:
         raise ClientError("invalid_client", "The metadata document is not about this client_id")
     name = clean_name(doc.get("client_name"))
     if not name:
         raise ClientError("invalid_client", "The metadata document has no client_name")
-    if doc.get("token_endpoint_auth_method", "none") != "none":
-        raise ClientError("invalid_client", "Only public clients (token_endpoint_auth_method none) are supported")
-    return name, _redirect_list(doc.get("redirect_uris"))
+    auth = _token_auth(url, doc)
+    return name, _redirect_list(doc.get("redirect_uris")), auth
 
 
 # -- registry --------------------------------------------------------------------------------
@@ -367,7 +396,7 @@ def _spend_fetch_budget(db: Session, per_minute: int, scope: str = "") -> None:
         raise ClientError("temporarily_unavailable", "Too many apps are being checked right now; try again in a minute")
 
 
-def _store_cimd(db: Session, client_id: str, name: str, uris: list[str], cap: int) -> OAuthClient:
+def _store_cimd(db: Session, client_id: str, name: str, uris: list[str], cap: int, auth: TokenAuth = TokenAuth()) -> OAuthClient:
     """Save a fetched document. Two first fetches of one URL at once both reach the insert: the
     unique index lets one win, and the other updates the winner's row."""
     for _ in range(2):
@@ -378,6 +407,7 @@ def _store_cimd(db: Session, client_id: str, name: str, uris: list[str], cap: in
                 row = OAuthClient(client_id=client_id, kind="cimd")
                 db.add(row)
             row.name, row.redirect_uris, row.fetched_at, row.expires_at = name, uris, _now(), _now() + UNUSED_TTL
+            row.token_auth, row.jwks_uri, row.auth_alg = auth.method, auth.jwks_uri, auth.algorithm
             db.commit()
             return row
         except IntegrityError:
@@ -402,8 +432,8 @@ def _cimd_client(db: Session, fetcher: ClientFetcher, client_id: str, limits: Li
         if exc.code == "temporarily_unavailable" and stale is not None:
             return stale  # out of budget or slots: an app seen before keeps working on what was fetched last
         raise
-    name, uris = parse_document(client_id, document)
-    return _store_cimd(db, client_id, name, uris, limits.cimd_cap)
+    name, uris, auth = parse_document(client_id, document)
+    return _store_cimd(db, client_id, name, uris, limits.cimd_cap, auth)
 
 
 def resolve_client(db: Session, fetcher: ClientFetcher, client_id: str, limits: Limits = Limits(),

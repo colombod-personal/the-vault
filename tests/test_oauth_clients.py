@@ -240,8 +240,8 @@ def test_a_document_about_another_client_is_refused(app, universe, browser):
     ({"redirect_uris": ["http://app.example/cb"]}, "redirect_uris"), ({"redirect_uris": "https://app.example/cb"}, "redirect_uris"),
     ({"redirect_uris": ["myapp://cb"]}, "redirect_uris"), ({"redirect_uris": [f"https://app.example/{i}" for i in range(11)]}, "redirect_uris"),
     ({"name": None}, "client_name"), ({"name": "   "}, "client_name"),
-    ({"token_endpoint_auth_method": "private_key_jwt"}, "public clients"),
-    ({"token_endpoint_auth_method": "client_secret_basic"}, "public clients"),
+    ({"token_endpoint_auth_method": "private_key_jwt"}, "jwks_uri"),  # keys are required (tests/test_client_auth.py)
+    ({"token_endpoint_auth_method": "client_secret_basic"}, "none, private_key_jwt"),  # no shared secrets
 ])
 def test_unacceptable_metadata_is_refused(app, universe, browser, fields, why):
     url = universe.client_hosts.publish(GOOD_HOST, **fields)

@@ -245,6 +245,10 @@ class OAuthClient(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # cimd: when the document was read
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)  # dcr: unused ones go
+    # token endpoint authentication (vault.client_auth): "none" (public, PKCE) or "private_key_jwt" with these keys
+    token_auth: Mapped[str] = mapped_column(String(20), default="none", server_default="none")
+    jwks_uri: Mapped[str | None] = mapped_column(String(512))
+    auth_alg: Mapped[str | None] = mapped_column(String(10))
 
 
 class OAuthGrant(Base):
