@@ -26,8 +26,13 @@ def section_of(categories: list[str]) -> str:
     return "Deck"
 
 
+# Archidekt's deckFormat numbers, only those checked against a real deck (3: Commander, "Sliver Swarm", 2026-10-06).
+# Unknown numbers leave the format to be read from the list (vault.deck_overview) rather than guessed.
+ARCHIDEKT_FORMATS = {3: "commander"}
+
+
 def to_decklist(raw: dict) -> dict:
-    """``{"name", "author", "text", "counts"}`` from Archidekt's deck JSON; the list keeps its sections."""
+    """``{"name", "author", "text", "counts", "format"}`` from Archidekt's deck JSON; the list keeps its sections."""
     buckets: dict[str, dict[str, int]] = {name: {} for name, _ in SECTIONS}
     for entry in raw.get("cards") or []:
         card = (entry.get("card") or {})
@@ -44,4 +49,5 @@ def to_decklist(raw: dict) -> dict:
             lines.append(header)
             lines.extend(f"{q} {n}" for n, q in cards.items())
     return {"name": (raw.get("name") or "").strip(), "author": ((raw.get("owner") or {}).get("username") or "").strip() or None,
-            "text": "\n".join(lines), "counts": {header: sum(cards.values()) for header, cards in buckets.items() if cards}}
+            "text": "\n".join(lines), "counts": {header: sum(cards.values()) for header, cards in buckets.items() if cards},
+            "format": ARCHIDEKT_FORMATS.get(raw.get("deckFormat"))}

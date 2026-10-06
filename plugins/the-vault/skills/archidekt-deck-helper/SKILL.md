@@ -21,6 +21,8 @@ every piece of Archidekt data.
 1. **Find the deck the way the person names it.** People say "my sliver deck", not a number. Call `list_decks`
    with `query` set to the words they used; if it matches, that is the deck (use its `id` below). If nothing
    matches, `closest` lists near names: ask which one. Only if the deck is not saved, ask for its Archidekt link.
+   Name decks by their `overview`: format, commander(s), card count ("Sliver Swarm: Commander, led by Sliver
+   Overlord, 100 cards"), never by card lines.
 2. **If it is not saved, save it from the link.** Ask the person first, then call `import_deck_from_link` with the
    link: the server reads the one deck, keeps its sections and credits its author. Do not convert the deck yourself.
    One deck per request: never fetch other decks, other people's decks or lists of decks, and do not search or crawl

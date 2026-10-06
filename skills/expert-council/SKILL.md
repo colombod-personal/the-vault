@@ -34,8 +34,9 @@ challenged, and report. Follow `vault-attribution` (if installed) for every sour
 
 ## Procedure
 
-1. **Intake.** Find the deck: a saved deck by name (`list_decks`, then `get_deck`), a link, or a pasted list. Get the
-   format, the goal (tune, legal?, explain, synergies) and any budget.
+1. **Intake.** Find the deck: a saved deck by name (`list_decks`, then `get_deck`), a link, or a pasted list. Its
+   `overview` gives the format and commander(s): open with them, and confirm the format when `format_from` says it
+   was only read from the list (it picks which experts sit on the panel). Get the goal (tune, legal?, explain, synergies) and any budget.
 2. **Facts first.** Gather the shared facts once: `deck_stats`, `simulate_draws` (how the curve plays), `deck_legality`,
    `find_combos`, `check_decklist`, and
    `get_deck_overlap` if the person has other saved decks. Give these facts to every member.

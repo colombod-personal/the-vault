@@ -8,6 +8,8 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from ..deck_tools import FORMATS
+
 
 MAX_ID = 2**31 - 1  # ids are INTEGER columns: 32 bits on Postgres
 
@@ -328,6 +330,8 @@ class ImportLinkIn(BaseModel):
 class DeckIn(BaseModel):
     name: str
     text: str = Field(max_length=50_000)
+    format: Literal[FORMATS] | None = Field(None, description="The deck's format (commander, standard, pioneer, ...). Left as "
+                                            "it is when an update omits it; null clears it (then it is read from the list)")
     source_url: str | None = Field(None, max_length=500, description="Where the deck came from (an http or https "
                                    "link). Left as it is when an update omits it; null clears it")
     source_author: str | None = Field(None, max_length=200, description="Who made the deck at its source (for the "
@@ -429,10 +433,24 @@ class DeckSummary(BaseModel):
     missing_unpriced: int | None = Field(None, description="Lines with missing copies and no known price")
 
 
+class DeckOverview(BaseModel):
+    format: str | None = Field(None, description="commander, standard, ... or null when unknown")
+    format_from: str | None = Field(None, description="'set on the deck', or 'the list names a commander' (a reading, not a fact)")
+    commanders: list[str] = Field(default_factory=list, description="The commander(s): partners and backgrounds are several")
+    cards: int | None = Field(None, description="Cards in the deck (commanders included; sideboard and maybeboard apart)")
+    sideboard: int | None = None
+    maybeboard: int | None = None
+    companion: int | None = None
+    color_identity: str | None = Field(None, description="The commanders' colour identity, WUBRG order (Scryfall's Oracle data)")
+    note: str | None = None
+
+
 class Deck(Hal):
     id: int
     name: str
-    text: str
+    text: str | None = Field(None, description="The decklist (left out of the AI tools' brief deck list)")
+    format: str | None = Field(None, description="The format stored on the deck, if any")
+    overview: DeckOverview | None = Field(None, description="Format, commander(s), card count and colour identity at a glance")
     source_url: str | None = None
     source: str | None = Field(None, description="Where the deck came from: archidekt, moxfield, link (another address) or pasted")
     source_author: str | None = None
