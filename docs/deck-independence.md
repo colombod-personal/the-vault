@@ -23,7 +23,7 @@ Counted by card name (basic lands left out), the same way `get_deck_overlap` and
 For each card in a deck, with `need` copies in that deck, and `need_for_all` and `have` for the whole set of saved decks:
 - **free**: the collection holds enough copies for every deck that uses the card (`have >= need_for_all`). Most shared cards are this.
 - **contested**: `have < need_for_all`. The allocation below decides how many copies each deck is given (`gets`).
-- A deck **holds** `gets` copies of a contested card whenever `gets` is above zero (another deck wants those copies too), and **lacks** `lacking = need - gets` copies when that is above zero. Both can be true of the same card: with A and B each needing 2 and 3 owned, A holds 2, B holds 1 and lacks 1. Each lacking copy is marked `not_owned` (the collection has none left to give, for any deck) or `held_by_other_deck`.
+- A deck **holds** `gets` copies of a contested card whenever `gets` is above zero (another deck wants those copies too), and **lacks** `lacking = need - gets` copies when that is above zero. Both can be true of the same card: with A and B each needing 2 and 3 owned, A holds 2, B holds 1 and lacks 1. Each lacking copy is one of two kinds, defined against this deck's own demand and the total owned: `not_owned` copies are those the collection could not supply even if this deck were given every owned copy (`max(0, need - have)`), so they must be bought whatever the other decks do; `held_by_other_deck` copies are the rest (`lacking - not_owned`): they exist in the collection but were given to another deck, so they are available by moving. A mixed shortage is split, not labelled with one reason.
 
 A deck is **complete** when it lacks nothing under the allocation (`stands_alone` is true), and **independent** when it also holds no contested card, so that no other deck's completeness depends on it.
 
@@ -46,7 +46,7 @@ deck: id, name
 need            cards the deck needs (basics left out)
 free            how many of those are not contested
 holds           [{ card, quantity (= gets, any positive number), also_wanted_by: [deck names] }]
-lacking         [{ card, quantity, reason: not_owned | held_by_other_deck, price }]
+lacking         [{ card, quantity, not_owned, held_by_other_deck, price }]   (quantity = not_owned + held_by_other_deck)
 stands_alone    true when lacking is empty (the deck is complete under the allocation)
 independent     true when lacking and holds are both empty
 independence    free / need, rounded, for sorting only; a deck with nothing to count (need is 0, for example a deck of only basic lands) scores 1.0 and is complete and independent, so there is no division by zero
@@ -91,7 +91,8 @@ A section of the Lab (#162), phone-first, "Do your decks stand on their own?":
 - Paging: `limit` and `cursor` return all decks across pages with the same answers as one page; the page size never changes who lacks what.
 - Provenance: the tool carries Scryfall provenance and the price date.
 - Owned in enough copies for all decks (Sol Ring): not contested, held and lacked by no deck.
-- A card owned zero times: `lacking` with reason `not_owned`.
+- A card owned zero times: all its lacking copies are `not_owned`.
+- A mixed shortage: A and B each need 2, 3 owned: B lacks 1, and it is `held_by_other_deck` (available by moving); with only 1 owned and A and B each needing 2, A (first) gets it and lacks 1 (`not_owned` 1), while B gets none and lacks 2 (`not_owned` 1, `held_by_other_deck` 1).
 - Basic lands never appear; a deck of only basic lands has need 0, independence 1.0, `stands_alone` and `independent` true, and no error.
 - Partial allocation: A and B each need 2, 3 owned: A holds 2; B holds 1 and lacks 1 (the same card in both `holds` and `lacking`).
 - Deck order: the default order, and `priority` overriding it; an id in `priority` that is not the caller's (another person's or missing) answers 404 and reveals nothing.
