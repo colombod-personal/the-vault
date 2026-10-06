@@ -25,6 +25,7 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 
+from .. import experts
 from ..deck_tools import FORMATS
 from ..models import User
 from . import mcp_ui
@@ -353,6 +354,20 @@ TOOLS = [
                            "description": "From this tool's preview, once the person agreed"}},
          method="POST", path=lambda a: f"{V1}/collection/changes/undo",
          body=lambda a: {"confirmation": a.get("confirmation")}, write=True, destructive=True),
+    Tool("council_brief", "The expert council for a deck review, a rules dispute or a synergy question: the panel the "
+         "council's rules seat for the format and goal (only on-topic format experts; Commander adds the casual table; "
+         "always a rules judge and a devil's advocate), each member's full brief, and the chair's procedure. With a "
+         "deck_id and no format, the format is read from the saved deck.",
+         {"format": {"type": "string", "maxLength": 40, "description": "commander, limited, pauper, standard, pioneer, two-headed-giant, ..."},
+          "goal": {"type": "string", "maxLength": 300, "description": "What the person wants: tune, check, explain, synergies, budget"},
+          "deck_id": ID,
+          "team_format": {"type": "string", "maxLength": 40, "description": "For Two-Headed Giant: the format the team plays"},
+          "budget": {"type": "boolean", "description": "The person has a budget (seats the collection and budget analyst)"}},
+         path=lambda a: f"{V1}/council", query=("format", "goal", "deck_id", "team_format", "budget")),
+    Tool("expert_brief", "One council expert's brief, to answer a question as that expert (for example the rules judge or "
+         "the Commander expert). The ids are listed in council_brief's panel and in the enum here.",
+         {"expert": {"type": "string", "enum": sorted(experts.DATA["experts"])}}, ["expert"],
+         path=lambda a: f"{V1}/experts/{a['expert']}"),
     Tool("list_export_formats", "Formats the collection can be exported in to move it to another app (Dragon "
          "Shield, Moxfield, Archidekt, generic CSV, text list), each with a download link. The files can be "
          "large; give the person the link rather than reading the whole file.",
@@ -395,7 +410,7 @@ SCRYFALL_DATA = {"list_decks",  # the commanders' colour identity is Scryfall's 
 OWN_DATA_ONLY = {"get_acquisition_timeline", "parse_decklist", "save_deck", "update_deck", "list_imports",
                  "import_collection_csv", "list_export_formats", "list_shared_with_me", "get_import", "delete_deck",
                  "list_my_shares", "accept_share", "stop_sharing", "start_collection_upload",
-                 "get_staged_upload", "confirm_staged_upload", "get_deck_overlap",
+                 "get_staged_upload", "confirm_staged_upload", "get_deck_overlap", "council_brief", "expert_brief",
                  "confirm_owned_cards_update", "undo_owned_cards_update"}
 for _tool in TOOLS:
     if not _tool.provenance:

@@ -31,6 +31,8 @@ Rules, cards and prices - how to answer:
 - Shops: you have no shop's price, stock or shipping. Never say which shop is cheapest, never call a
   price "current", never say anything goes into a cart. Give the dated Scryfall price and let the person
   compare shops themselves (a shop's own search link is fine).
+- Deck reviews, rules disputes and synergy questions: call council_brief and follow it. It seats the experts for
+  the format, with each one's brief: answer as each of them in turn, then challenge, then the plan.
 - Decks: a person names a deck ("my sliver deck"); find it with list_decks before asking for a link.
   A deck read from Archidekt is Archidekt's: credit Archidekt and give the deck's link back.
 """
@@ -192,7 +194,8 @@ PROMPTS = [
      "arguments": [_arg("deck", "The deck: a saved deck's name, a link, or the decklist"), _arg("format", "The format, e.g. commander"),
                    _arg("goal", "What the person wants: tune it, check it, explain it, find synergies", required=False)],
      "text": "Act as the chair of an expert council reviewing this {format} deck. Goal: {goal}\n\nDeck: {deck}\n\n" + GROUNDING +
-             "\nSteps: find the deck (list_decks and get_deck for a saved deck); gather shared facts once with deck_stats, deck_legality, "
+             "\nFirst call council_brief with the format and goal (or the saved deck's deck_id): it seats the panel and gives "
+             "each member's brief; follow it. Steps: find the deck (list_decks and get_deck for a saved deck); gather shared facts once with deck_stats, deck_legality, "
              "find_combos, check_decklist and get_deck_overlap. Seat only experts for this format (for commander: the Commander expert and a "
              "casual table voice), plus a rules judge and a devil's advocate, and the synergy or collection analyst if useful. Give each at most "
              "three points with evidence, then let the devil's advocate challenge them with evidence. Answer with the plan first (checked with "
