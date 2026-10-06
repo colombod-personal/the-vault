@@ -27,16 +27,18 @@ Tags versus roles: a tag is the person's own opinion or plan (`trade`, `commande
 ### 1. Buckets are the folder, made first-class
 
 - New `buckets` table (person, name, kind, position, optional `vault_metadata`) and `entries.bucket_id`. **Backfill:** one bucket per distinct `folder` value; entries with no folder go to a default bucket named **"Unsorted"** (the person can rename it).
-- Import maps a file's folder to a bucket by name (creating it when new); export maps the bucket name back to the folder, so the CSV round-trip stays lossless.
+- **Source folder is kept on the entry.** `entries.folder` stays exactly as written in the file (including blank, `Unsorted` and case-only variants), and `entries.bucket_id` is the Vault's grouping of it. Export writes `entries.folder`, never the bucket name, so the CSV round-trip (`tests/test_api.py::test_reimport_records_changes_and_export_round_trips`) stays byte-identical: a blank folder stays blank, a literal "Unsorted" stays "Unsorted", `Box` and `box` stay distinct on export even though bucket names compare case-insensitively (they map to one bucket). Renaming a bucket changes the Vault's label only; it does not rewrite exported folders. An explicit move of copies to another bucket writes the target bucket's name to `entries.folder` of the moved rows (a deliberate edit, recorded as a change), and that is the only way an export's folder changes.
+- **History keeps the same identity.** Change-set rows (#193/#194) record the source folder string and the bucket id; the pre-#121 baseline therefore distinguishes edits per folder, not just per default bucket, and a folder with no remaining entries stays recoverable from history.
 - A stack split across buckets is two entries, as now. No change to entry granularity.
-- Limit: at most 100 buckets per person; names unique per person, case-insensitive.
+- Limit: the backfill never merges or rejects existing data: an inventory with more distinct folders than the cap (the tests accept 501) keeps one bucket per folder. The cap of 100 applies only to buckets a person **creates** or to an **import that would add** buckets past it; such an import is rejected atomically with a preview naming the folders, and existing buckets above the cap stay editable and deletable. Names are unique per person, case-insensitive (case-only folder variants share a bucket, see above).
 - **Ask:** is "Unsorted" the right default name, and which folders do you use in Dragon Shield today? (No list or breakdown shows folders, which is itself a gap: add `bucket` to the collection card items and a `bucket` filter to the search and breakdown tools, so an assistant can list what is in a bucket. Part of #122 and #130.)
 
 ### 2. Tags attach to the card (oracle id), not to the entry or the printing
 
 - Entries are replaced on every import, so nothing can hang off `entries.id`. Tags are keyed `(person, oracle_id, tag)`: they survive imports, and a card that leaves the inventory keeps its tags (shown as "not owned") instead of losing the person's work. Removing a tag is explicit.
 - Printing-level tags (a particular foil) are a later extension keyed by `scryfall_id` and finish; not in v1.
-- Sources on a tag assignment: `person`, `assistant` (carries which app wrote it and when, per #127: never shown as the person's own), `system` (for example `imported:<file>`, `unmatched`).
+- Sources on a tag assignment: `person`, `assistant` (carries which app wrote it and when, per #127: never shown as the person's own), `system` (for example `imported:<file>`).
+- **Unmatched copies are not tags.** An entry the importer could not match has neither a Scryfall id nor an oracle id (`vault/importer.py`), so it cannot take an `(person, oracle_id, tag)` key. "Unmatched" stays derived per entry from the missing printing, as today, and is shown as a status, never stored as a tag. If the card is matched later, the person's tags can be added then.
 - Namespaces are plain text with a colon (`deck:sliver`, `trade:sell`); no curated list in v1. Slug rules: lower case, letters, digits, `-`, `:`; at most 40 characters.
 - Limits: at most 50 tags per card and 500 distinct tags per person, so no response grows with the collection (cursor paging everywhere).
 
@@ -56,11 +58,11 @@ Tags versus roles: a tag is the person's own opinion or plan (`trade`, `commande
 ### 6. One import path (with #193 and #194)
 
 - The owner decided on 2026-10-06 that a re-import becomes a **three-way update** (apply only what changed in the person's app since the last import, keep edits made in the Vault, ask about conflicts; "replace everything" stays), designed in `docs/owned-cards-updates.md` (PR #193, issue #194).
-- Buckets must fit that, not fight it: **every change set records its bucket from day one** (the default bucket until #121 lands), so the baseline of the "last imported file" can be derived per bucket; "import into one bucket" (#124) means a file maps to a single bucket and only that bucket's rows are compared; reset (#129) is the same operation with an empty file. These three are one code path with different scopes.
+- Buckets must fit that, not fight it: **every change set records its bucket from day one** (the default bucket until #121 lands), so the baseline of the "last imported file" can be derived per bucket; "import into one bucket" (#124) means a file maps to a single bucket and only that bucket's rows are compared; reset (#129) is the same operation with an empty target in **replace** mode for the selected scope (not ordinary merge mode: a card added only in the Vault is in neither the baseline nor the empty file, and a merge would keep it), with preview and confirmation kept. These three are one code path with different scopes and modes.
 
 ### 7. `vault_metadata` (detail in #119)
 
-- `JSONB NOT NULL DEFAULT '{"version": 1}'` with a check that `version` is a positive integer, on buckets, tag assignments and the per-person card annotation; **not** on entries (replaced on import). Free-form for assistants and connectors, never read by the Vault's own logic, size-capped (8 KB) and labelled with who wrote it.
+- `JSONB NOT NULL DEFAULT '{"version": 1}'` with a check that `version` is a positive integer, on buckets, tag assignments and the per-person card annotation; **not** on entries (replaced on import). The card annotation is keyed `(person, oracle_id)`, like card-level tags: it survives imports and stays, shown as "not owned", when the card leaves the inventory. A printing-level annotation is the same later extension as printing-level tags, keyed by `scryfall_id` and finish. Free-form for assistants and connectors, never read by the Vault's own logic, size-capped (8 KB) and labelled with who wrote it.
 
 ### 8. GDPR
 
