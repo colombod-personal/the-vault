@@ -105,7 +105,10 @@ def test_archidekt_decks_through_the_twin(database_url, tmp_path, universe):
         assert deck["name"] == "Elves" and deck["cards"][0]["card"]["edition"]["editioncode"] == "dom"
         assert client.get(f"/api/v1/archidekt/decks/{private['id']}").status_code == 404
         universe.archidekt.outage = True
-        assert client.get(f"/api/v1/archidekt/decks/{public['id']}").status_code == 502
+        again = client.get(f"/api/v1/archidekt/decks/{public['id']}")  # a recent copy is served: Archidekt is not asked
+        assert again.status_code == 200 and again.json()["vault_cache"]["from_cache"] is True
+        unseen = universe.archidekt.add_deck("Never read", "ann", [(1, "Sol Ring")])
+        assert client.get(f"/api/v1/archidekt/decks/{unseen['id']}").status_code == 502  # nothing cached: the outage shows
 
 
 def test_archidekt_search_pages_like_drf(universe):
@@ -156,3 +159,44 @@ def test_vault_routes_outbound_calls_to_the_twin_server():
     with pytest.raises(RuntimeError, match="local development only"):
         Settings(database_url="postgresql://u@db/vault", twins_url="http://localhost:9000",
                  base_url="https://vault.example", session_secret="s").check()
+
+
+def test_repeat_reads_of_a_deck_reach_archidekt_once_and_say_how_old_they_are(database_url, universe):
+    from datetime import datetime, timedelta, timezone
+
+    from vault import archidekt_cache
+    from vault.models import ArchidektDeckCache
+
+    deck = universe.archidekt.add_deck("Elves", "ann", [(1, "Sol Ring")])
+    settings = Settings(database_url=database_url, session_secret="t", base_url="http://testserver", dev_login=True)
+    app = create_app(settings, serve_static=False, transport=universe.transport)
+    path = f"/api/v1/archidekt/decks/{deck['id']}"
+
+    def requests():
+        return [c for c in universe.archidekt.calls if c.path.rstrip("/").endswith(f"/decks/{deck['id']}")]
+
+    with TestClient(app) as client:
+        client.post("/api/auth/dev-login")
+        first = client.get(path).json()
+        assert first["vault_cache"]["from_cache"] is False and len(requests()) == 1
+        for _ in range(3):  # the deck page, the graph overlay, the AI tool and the library tiles all read it again
+            again = client.get(path).json()
+            assert again["vault_cache"]["from_cache"] is True and again["name"] == "Elves"
+        assert len(requests()) == 1
+        assert client.get(path, params={"refresh": "true"}).json()["vault_cache"]["from_cache"] is True  # under a minute old
+        assert len(requests()) == 1
+        with app.state.db.sessions() as db:  # age the copy: a refresh now asks Archidekt again
+            row = db.get(ArchidektDeckCache, deck["id"])
+            row.fetched_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+            db.commit()
+        assert client.get(path).json()["vault_cache"]["from_cache"] is True  # still inside the 10 minutes
+        refreshed = client.get(path, params={"refresh": "true"}).json()
+        assert refreshed["vault_cache"]["from_cache"] is False and len(requests()) == 2
+        with app.state.db.sessions() as db:  # old entries are deleted when the next one is written
+            old = db.get(ArchidektDeckCache, deck["id"])
+            old.fetched_at = datetime.now(timezone.utc) - archidekt_cache.RETENTION - timedelta(days=1)
+            db.commit()
+        other = universe.archidekt.add_deck("Other", "ann", [(1, "Sol Ring")])
+        client.get(f"/api/v1/archidekt/decks/{other['id']}")
+        with app.state.db.sessions() as db:
+            assert db.get(ArchidektDeckCache, deck["id"]) is None

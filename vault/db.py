@@ -3,6 +3,7 @@ in development and in the tests, so what is tested is what runs."""
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -31,8 +32,14 @@ def make_engine(url: str) -> Engine:
     # recycle idle connections (Neon suspends idle compute after a few minutes).
     # Neon's pooled endpoint (DATABASE_URL, host "...-pooler...") is PgBouncer in transaction mode,
     # so psycopg's automatic server-side prepared statements are turned off (prepare_threshold=None).
-    return create_engine(url, pool_pre_ping=True, pool_size=2, max_overflow=2, pool_recycle=240,
-                         connect_args={"prepare_threshold": None})
+    # An MCP tool call holds one connection for its whole request and makes an in-process API call that opens two
+    # or three more, so a pool of 2+2 was exhausted by two concurrent calls on one instance and the second one waited
+    # 30 s and failed with a 500 (found in a real council run, #169). Neon's pooler is PgBouncer, which takes many
+    # client connections cheaply: a larger pool per instance is fine, and a short wait answers 503 with Retry-After.
+    return create_engine(url, pool_pre_ping=True, pool_recycle=240, connect_args={"prepare_threshold": None},
+                         pool_size=int(os.environ.get("DB_POOL_SIZE", "6")),
+                         max_overflow=int(os.environ.get("DB_MAX_OVERFLOW", "14")),
+                         pool_timeout=float(os.environ.get("DB_POOL_TIMEOUT", "8")))
 
 
 class Database:

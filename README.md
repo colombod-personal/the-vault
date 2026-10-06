@@ -370,10 +370,11 @@ open, read-only API its developers describe on their forum.
   for it).
 - Every deck is credited to Archidekt and its author, with a link back.
 - It is gentle with Archidekt's rate limit (they start limiting at about 40 requests a minute): one request per
-  deck a person asks for. Today every read reaches Archidekt; a cache for repeat reads is planned (#133).
+  deck a person asks for, and a public deck read is kept for 10 minutes so opening it again does not reach
+  Archidekt (#133).
+- A guard test (`tests/test_archidekt_readonly.py`, #132) fails if anything in the Vault could write to Archidekt.
 
-The details and sources are in [`docs/compliance.md`](docs/compliance.md#archidekt) (#79). Open work: a code
-review that nothing writes to Archidekt (#132), and the cache (#133).
+The details and sources are in [`docs/compliance.md`](docs/compliance.md#archidekt) (#79).
 
 ## Next steps
 

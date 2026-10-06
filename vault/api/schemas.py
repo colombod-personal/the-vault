@@ -294,6 +294,12 @@ class ImportPage(Page):
     items: list[ImportItem]
 
 
+class ImportLinkIn(BaseModel):
+    url: str = Field(min_length=8, max_length=500, description="An Archidekt deck link (archidekt.com/decks/<number>)")
+    name: str | None = Field(None, max_length=200, description="Name to save it under; default: the deck's name on Archidekt")
+    update: bool = Field(False, description="If this deck is already saved, replace its list with Archidekt's current one")
+
+
 class DeckIn(BaseModel):
     name: str
     text: str = Field(max_length=50_000)
@@ -367,6 +373,7 @@ class OwnedPrinting(BaseModel):
 
 class CoverageLine(BaseModel):
     name: str
+    section: str = Field("main", description="Where the card sits in the list: commander, main, sideboard, maybeboard, companion")
     set: str | None = None
     number: str | None = None
     need: int
@@ -386,6 +393,7 @@ class Coverage(BaseModel):
     unparsed: list[str]
     missing_cost: float | None = Field(None, description="What the missing copies cost at the cheapest known prices")
     missing_unpriced: int | None = Field(None, description="Lines with missing copies and no known price")
+    priced_as_of: str | None = Field(None, description="The day the prices are from (Scryfall's, not a shop's today)")
 
 
 class DeckSummary(BaseModel):
@@ -401,16 +409,19 @@ class Deck(Hal):
     name: str
     text: str
     source_url: str | None = None
+    source: str | None = Field(None, description="Where the deck came from: archidekt, moxfield, link (another address) or pasted")
     source_author: str | None = None
     created_at: str
     updated_at: str
     coverage: Coverage | None = None
+    credit: dict | None = Field(None, description="For a deck from Archidekt: its source, link, author and the notice to repeat")
     summary: DeckSummary | None = Field(None, description="With ?summary=true on the list: owned, missing and cost to finish, against your collection")
     from_: str | None = Field(None, alias="from", description="Who shared it (shared decks only)")
 
 
 class DeckPage(Page):
     items: list[Deck]
+    closest: list[str] | None = Field(None, description="With ?q= and no match: the nearest deck names")
 
 
 class AuthorRecorded(Deck):

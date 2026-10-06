@@ -39,7 +39,7 @@ creating additional Magic software", under the Fan Content Policy, with these gu
 | Requirement (Scryfall's wording, shortened) | What it means for us | Status |
 |---|---|---|
 | No Scryfall logos; do not imply Scryfall endorses you | "Not produced or endorsed by Scryfall" in the footer, MCP instructions and plugin | done |
-| No paywall: no payments, surveys, subscriptions, ratings, chat servers or follows in exchange for the data. "If you have an account system, end-users should be able to access card data anonymously or with free accounts." | The Vault is free; free accounts are explicitly fine. Optional anonymous access exists (`PUBLIC_CATALOG`) | done |
+| No paywall: no payments, surveys, subscriptions, ratings, chat servers or follows in exchange for the data. "If you have an account system, end-users should be able to access card data anonymously or with free accounts." | The Vault is free; free accounts are explicitly fine. No anonymous access (see Decisions) | done |
 | Do not use the data to create new games or imply it is from another game | Magic only | done |
 | "You may not simply repackage, republish, or proxy Scryfall data. Your software must create additional value for end-users." | Tools answer for the person's collection and decks, check legality and budgets, verify citations, simulate curves; card lookups serve that grounding. No bulk dumps or raw search proxy | done; keep in review |
 | `User-Agent` (accurate, the app's name) and `Accept` on every API request | `jobs/sync_prices.py`, `jobs/sync_catalog.py` | done |
@@ -77,17 +77,19 @@ Sources (re-read 2026-10-05):
   API for whatever you want", asking only that it not be hammered
   ([thread 2832338](https://archidekt.com/forum/thread/2832338)). In early 2026 the same developer wrote "I believe we
   start rate limiting people at 40 requests per minute" ([thread 19112643](https://archidekt.com/forum/thread/19112643)):
-  anything the Vault adds (#133) keeps the whole Vault well under that, paced rather than in bursts.
+  the cache (#133) and anything added behind it keep the whole Vault well under that, paced rather than in bursts.
 - **Writing:** there is no API for other apps to change a person's deck, so the Vault does not write.
 
 What the Vault does:
 
-- Reads **one public deck per request a person makes** (opening a link, the deck page, the graph overlay, or the
-  `get_archidekt_deck` tool), server-side, with the toolkit's User-Agent naming the project. Private decks are not
-  read (Archidekt answers 404 without sign-in).
-- **No cache and no rate cap yet.** Today every read reaches Archidekt, one request per deck a person asks for.
-  The plan (#133) is a cache for repeat reads, and a cap only if it is needed, and then only behind the cache so an
-  over-limit read gets the cached copy instead of an error.
+- Reads **one public deck per request a person makes** (opening a link, the deck page, the graph overlay,
+  or the `get_archidekt_deck` tool), server-side, with the toolkit's User-Agent naming the project.
+  Private decks are not read (Archidekt answers 404 without sign-in).
+- **A cache, and no rate cap yet, by design (#133, 2026-10-06).** A read of a public deck is kept in `archidekt_deck_cache`
+  (the deck's public JSON by id, no person's id) and served for 10 minutes; Refresh asks Archidekt again unless the copy
+  is under a minute old; entries older than 7 days are deleted. Every answer carries `vault_cache` (from cache or not,
+  fetched_at, age in seconds). Calls to Archidekt and cache hits are logged as counts. A cap is added only if the counts
+  show it is needed, and then only behind this cache: an over-limit read gets the cached copy instead of an error.
 - No background jobs, crawling or deck search; nothing is fetched without a person asking. Decks are stored only
   when a person presses Save: their copy of that one deck's list, link and author's public username (for the
   credit), in their account, removable any time.
@@ -96,7 +98,7 @@ What the Vault does:
 Code review that nothing writes to Archidekt, with a guard test: #132.
 
 Planned (#94): listing a person's **own** public decks by their Archidekt username, as one read on that person's
-request, paced and cached. It is not built. Today's support is the single deck a person gives, and the
+request, paced and cached. It is not built. Today's support is the single deck a person gives or has saved, and the
 `archidekt-deck-helper` skill (and its generated plugin copy) tells agents to fetch only that one deck; they will need
 updating together with #94.
 
@@ -181,3 +183,14 @@ block looks like this:
 2. Approval to email Scryfall and Moxfield (drafts to follow) and to contact Wizards about rules text.
 3. A decision on the registration question: public minimal tools without an account (recommended)
    or free accounts only.
+
+## Decisions
+
+- **Free accounts, no anonymous catalog (owner, 2026-10-06, #62).** The Vault stays free; every feature needs a free
+  account because it serves the person's own collection, decks and questions. There is no anonymous card or rules API:
+  it would add nothing beyond Scryfall's own data and would amount to the "repackage, republish, or proxy" that
+  Scryfall's terms forbid, and it would spend the free database on traffic that is not a player's. The `PUBLIC_CATALOG`
+  switch was removed from the code so it cannot be turned on by mistake. If people should ever look up cards without an
+  account, that is a product decision about a page that adds value, not a switch on a raw API.
+- **Comprehensive Rules (owner, 2026-10-05, #142):** cited live from Wizards' current edition; the Vault stores no copy
+  (docs/rules-index.md).

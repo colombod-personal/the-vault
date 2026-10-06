@@ -49,13 +49,13 @@ Checked on 2026-10-04:
   the plan validator and rulings, light and dark themes, and the real Scryfall image loading.
 - The wire format follows the published specification (ext-apps `2026-01-26`).
 
-Not checked: real hosts. The specification and this implementation were read, not run against Claude, ChatGPT,
+Checked in a real host so far: Claude on the web (below). The specification and this implementation were read, not run against ChatGPT,
 VS Code, Cursor or Goose. Their rendering, CSP handling and quirks may differ; the matrix below stays empty until
 someone has opened a view in each.
 
 | Host | View renders | Tool calls from the view | Notes |
 |---|---|---|---|
-| Claude (web / desktop) | not tried | not tried | |
+| Claude (web, claude.ai) | **yes** (`shopping`, `deck`: 2026-10-06) | not tried | Views appear inline under the tool call: the shopping list ('You own everything in this list'), and the deck panel with the mana curve chart, roles table, provenance and Fan Content notice. `card`, `upgrades`, `steps`, phone layout and Claude desktop not yet checked (#56) |
 | ChatGPT | not tried | not tried | may expect extra `_meta` keys; the OpenAI Apps SDK documentation is the reference |
 | VS Code | not tried | not tried | |
 | Cursor | not tried | not tried | |

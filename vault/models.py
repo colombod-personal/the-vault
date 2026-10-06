@@ -606,3 +606,15 @@ class StagedUpload(Base):
     content: Mapped[bytes | None] = mapped_column(LargeBinary)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ArchidektDeckCache(Base):
+    """A public Archidekt deck's JSON as last fetched, so repeat reads never reach Archidekt (docs/compliance.md: its
+    terms forbid automated requests and its developers warned they would lock the API if it is hammered). Public data
+    only, no person's id; entries unread for ``RETENTION`` are deleted."""
+
+    __tablename__ = "archidekt_deck_cache"
+
+    deck_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    data: Mapped[dict] = mapped_column(JSONB)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

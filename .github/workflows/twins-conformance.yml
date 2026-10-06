@@ -9,7 +9,7 @@ permissions:
   contents: read
 jobs:
   conformance:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19 (#180); move deliberately
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -28,7 +28,7 @@ jobs:
     # jobs/vercel_setup.py's Vercel calls against a scratch project (never the app's own): set the
     # repository variable VERCEL_CONFORMANCE_PROJECT to enable it. Read-only, plus one refused redeploy.
     if: github.ref == 'refs/heads/main' && vars.VERCEL_CONFORMANCE_PROJECT != ''
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19 (#180); move deliberately
     environment: vercel-production
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4

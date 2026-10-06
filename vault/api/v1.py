@@ -15,7 +15,7 @@ import hashlib
 import time
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Annotated
 from urllib.parse import urlencode, urlsplit
 
@@ -36,6 +36,7 @@ from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
 from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, import_days, view_version
+from .. import archidekt_cache, deck_import, deck_match
 from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, export_collection, import_collection,
                         preview_import as preview_collection_import, user_entries)
 from ..models import AccessToken, ApiSession, Deck, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
@@ -649,7 +650,11 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             for r in owned_rows:
                 if r.quantity > 0:  # a row of 0 copies isn't owning the card
                     similar.setdefault(loose_name(r.name), Counter())[r.name] += r.quantity
+        sections = {}
+        for line in deck.lines:  # where each card sits in the list (a card in two sections keeps its first)
+            sections.setdefault(line.name.strip().lower(), line.section)
         return {"cards": [{"name": c.entry.name,
+                           "section": sections.get(c.entry.name.strip().lower(), "main"),
                            **({"set": None, "number": None} if c.entry.name.strip().lower() in mixed
                               else {"set": c.entry.set_code, "number": c.entry.collector_number}),
                            "need": c.need, "have": c.have, "missing": c.missing, "status": c.status,
@@ -658,12 +663,20 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                           for c in lines],
                 "unparsed": deck.unparsed}
 
+    def _source_kind(url: str | None) -> str:
+        host = (urlsplit(url).hostname or "").lower() if url else ""
+        return "archidekt" if host.endswith("archidekt.com") else "moxfield" if host.endswith("moxfield.com") else "link" if url else "pasted"
+
     def _deck(d: Deck, coverage: dict | None = None) -> dict:
-        out = {"id": d.id, "name": d.name, "text": d.text, "source_url": d.source_url, "source_author": d.source_author,
+        out = {"id": d.id, "name": d.name, "text": d.text, "source_url": d.source_url, "source": _source_kind(d.source_url), "source_author": d.source_author,
                "created_at": _iso(d.created_at), "updated_at": _iso(d.updated_at),
                "_links": {"self": link(f"{V1}/decks/{d.id}")}}
         if coverage is not None:
             out["coverage"] = coverage
+        if _source_kind(d.source_url) == "archidekt":
+            out["credit"] = {"source": "Archidekt", "url": d.source_url, "author": d.source_author,
+                             "notice": "Deck list from Archidekt" + (f" by {d.source_author}" if d.source_author else "")
+                                       + ". The deck is theirs, not the Vault's."}
         return out
 
     @router.post("/decks/parse", tags=["decks"], response_model=S.ParsedDeck,
@@ -713,9 +726,17 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     @router.get("/decks", tags=["decks"], response_model=S.DeckPage)
     def list_decks(request: Request, cursor: str | None = None, limit: int | None = None, summary: bool = False,
+                   q: str | None = Query(None, max_length=200, description="Find a deck by words from its name ('sliver swarm'); "
+                                         "best match first; when nothing matches, `closest` lists near names"),
                    user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         rows = list(db.scalars(select(Deck).where(Deck.user_id == user.id)))
-        page, nxt = paginate(rows, lambda d: (d.name.lower(),), lambda d: d.id, cursor=cursor, limit=limit)
+        closest: list[str] = []
+        if q and q.strip():
+            ids, closest = deck_match.search({d.id: d.name for d in rows}, q, limit or 25)
+            by_id = {d.id: d for d in rows}
+            page, nxt = [by_id[i] for i in ids], None  # ranked by how well the name matches, not by name
+        else:
+            page, nxt = paginate(rows, lambda d: (d.name.lower(),), lambda d: d.id, cursor=cursor, limit=limit)
         items = [_deck(d) for d in page]
         if summary and page:  # each deck against your collection; the collection and prices read once for the page
             owned = user_entries(db, user)
@@ -731,7 +752,10 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 have = sum(min(c["have"], c["need"]) for c in cov["cards"])
                 item["summary"] = {"need": need, "have": have, "missing": need - have,
                                    "missing_cost": cov.get("missing_cost"), "missing_unpriced": cov.get("missing_unpriced")}
-        return page_body(request, items, nxt, len(rows), limit=limit, summary="true" if summary else None)
+        body = page_body(request, items, nxt, len(rows), limit=limit, summary="true" if summary else None, q=q or None)
+        if q and q.strip():
+            body["closest"] = closest
+        return body
 
     @router.post("/decks", tags=["decks"], response_model=S.Deck, status_code=201)
     def create_deck(request: Request, body: S.DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -750,7 +774,10 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     @router.get("/decks/{deck_id}", tags=["decks"], response_model=S.Deck, summary="A saved deck, with coverage")
     def get_deck(deck_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         deck = owned_deck(db, user, deck_id)
-        return _deck(deck, analytics.price_coverage(db, user.id, _coverage(deck.text, user_entries(db, user))))
+        covered = analytics.price_coverage(db, user.id, _coverage(deck.text, user_entries(db, user)))
+        day = db.scalar(select(func.max(PriceSnapshot.day)))
+        covered["priced_as_of"] = day.isoformat() if day else None  # the prices are Scryfall's, from this day
+        return _deck(deck, covered)
 
     @router.put("/decks/{deck_id}", tags=["decks"], response_model=S.Deck)
     def update_deck(deck_id: Id, body: S.DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -805,13 +832,54 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         db.commit()
         return {"deleted": True}
 
-    @router.get("/archidekt/decks/{deck_id}", tags=["decks"], summary="A public Archidekt deck (fetched server-side)")
-    def archidekt_deck(deck_id: Id, user: User = Depends(current_user)) -> dict:
+    @router.get("/archidekt/decks/{deck_id}", tags=["decks"],
+                summary="A public Archidekt deck (fetched server-side; repeat reads within 10 minutes come from a cache)")
+    def archidekt_deck(deck_id: Id, refresh: bool = False, user: User = Depends(current_user),
+                       db: Session = Depends(get_db)) -> dict:
+        return archidekt_cache.read(db, deck_id, fetch_archidekt, refresh=refresh)
+
+    def fetch_archidekt(deck: int) -> dict:
         try:
             with ArchidektClient(client=httpx.Client(transport=transport, timeout=30, follow_redirects=True)) as client:
-                return client.get_deck(deck_id).raw
+                return client.get_deck(deck).raw
         except ApiError as exc:
             raise HTTPException(exc.status_code if exc.status_code == 404 else 502, str(exc)) from exc
+
+    @router.post("/decks/import-link", tags=["decks"],
+                 summary="Save a public Archidekt deck from its link: the server reads it and keeps its sections; the same link never "
+                         "duplicates")
+    def import_deck_from_link(request: Request, body: S.ImportLinkIn, user: User = Depends(current_user),
+                              db: Session = Depends(get_db)) -> dict:
+        found = decklist.parse_url(body.url)
+        if found is None or found[0] != "archidekt":
+            raise HTTPException(400, "Only Archidekt deck links can be fetched (archidekt.com/decks/<number>). For another site, "
+                                     "export the list as text and save it with save_deck.")
+        deck_id = int(found[1])
+
+        def run():
+            parsed = deck_import.to_decklist(archidekt_cache.read(db, deck_id, fetch_archidekt))
+            if not parsed["text"] or not _parse(parsed["text"]).lines:
+                raise HTTPException(400, "That Archidekt deck has no cards")
+            url = deck_import.canonical_url(deck_id)
+            same = next((d for d in db.scalars(select(Deck).where(Deck.user_id == user.id, Deck.source_url.is_not(None)))
+                         if (decklist.parse_url(d.source_url) or ("", ""))[1:] == (str(deck_id),)), None)
+            if same is not None and not body.update:
+                return {"created": False, "updated": False, "deck": _deck(same), "counts": parsed["counts"],
+                        "note": "This deck is already saved. Call again with update true to replace its list with Archidekt's current one."}
+            if same is not None:
+                same.text, same.updated_at = parsed["text"], datetime.now(timezone.utc)
+                same.source_url, same.source_author = url, parsed["author"] or same.source_author
+                if body.name:
+                    same.name = body.name.strip()[:200] or same.name
+                db.flush()
+                return {"created": False, "updated": True, "deck": _deck(same), "counts": parsed["counts"]}
+            deck = Deck(user_id=user.id, name=(body.name or parsed["name"] or "Archidekt deck").strip()[:200], text=parsed["text"],
+                        source_url=url, source_author=parsed["author"])
+            db.add(deck)
+            db.flush()
+            return {"created": True, "updated": False, "deck": _deck(deck), "counts": parsed["counts"]}
+
+        return idempotent(request, db, user, 201, run)
 
     # -- card catalog (Scryfall data, served by the Vault) ---------------------------------------
     catalog = Catalog(transport, rewrite_image=(lambda url: outbound.browser_url(settings, url)) if settings.twins_url else None)

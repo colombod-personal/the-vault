@@ -63,19 +63,25 @@ def blocks(body):
     return body["provenance"]
 
 
-def test_anonymous_callers_are_refused_unless_the_catalog_is_public(client, app):
+def test_anonymous_callers_are_always_refused(client, app, monkeypatch):
+    """No anonymous catalog, even if an old PUBLIC_CATALOG setting is still around: an anonymous card-data API would proxy
+    Scryfall's data, which its terms forbid (owner decision 2026-10-06, #62)."""
+    monkeypatch.setenv("PUBLIC_CATALOG", "1")
     load(app)
-    res = client.get(f"{V1}/cards", params={"name": "Lightning Bolt"})
-    assert res.status_code == 401 and "Bearer" in res.headers["www-authenticate"]
+    for path, params in ((f"{V1}/cards", {"name": "Lightning Bolt"}), (f"{V1}/rules/search", {"q": "sample rule"}),
+                         (f"{V1}/rules/100.1", {})):
+        res = client.get(path, params=params)
+        assert res.status_code == 401 and "Bearer" in res.headers["www-authenticate"], path
 
 
-def test_a_public_catalog_serves_anyone_but_rate_limits_them(database_url):
+def test_signed_in_people_are_rate_limited(database_url):
     settings = Settings(database_url=database_url, session_secret="t", dev_login=True, base_url="http://testserver",
-                        public_catalog=True, catalog_rate_limit=3)
+                        catalog_rate_limit=3)
     app = create_app(settings, serve_static=False)
     load(app)
-    with TestClient(app) as anon:
-        codes = [anon.get(f"{V1}/cards", params={"name": "Lightning Bolt"}).status_code for _ in range(5)]
+    with TestClient(app) as person:
+        person.post("/api/auth/dev-login")
+        codes = [person.get(f"{V1}/cards", params={"name": "Lightning Bolt"}).status_code for _ in range(5)]
     assert codes == [200, 200, 200, 429, 429]
     app.state.db.engine.dispose()
 
