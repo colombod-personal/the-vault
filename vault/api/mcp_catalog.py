@@ -231,8 +231,9 @@ def provenance_blocks(kinds: tuple[str, ...], body: dict) -> list[dict]:
         out.append(prov.source("Scryfall", origin="card data and images: Wizards of the Coast and artists; prices: TCGplayer and Cardmarket",
                                url="https://scryfall.com", as_of=as_of, wizards_material=True).model_dump(exclude_none=True))
     if "archidekt" in kinds:
-        owner = (body.get("owner") or {}).get("username") if isinstance(body.get("owner"), dict) else None
-        deck_id = body.get("id")
+        deck = body.get("deck") if isinstance(body.get("deck"), dict) else {}
+        owner = (body.get("owner") or {}).get("username") if isinstance(body.get("owner"), dict) else deck.get("author")
+        deck_id = body.get("id") or deck.get("id")
         out.append(prov.source("Archidekt", origin=f"deck by {owner}" if owner else "a deck by its Archidekt author",
                                url=f"https://archidekt.com/decks/{deck_id}" if deck_id else "https://archidekt.com").model_dump(exclude_none=True))
     return out

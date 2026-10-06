@@ -102,7 +102,7 @@ def test_archidekt_decks_through_the_twin(database_url, tmp_path, universe):
     with TestClient(create_app(settings, serve_static=False, transport=universe.transport)) as client:
         client.post("/api/auth/dev-login")
         deck = client.get(f"/api/v1/archidekt/decks/{public['id']}").json()
-        assert deck["name"] == "Elves" and deck["cards"][0]["card"]["edition"]["editioncode"] == "dom"
+        assert deck["deck"]["name"] == "Elves" and "1 Llanowar Elves" in deck["text"] and deck["deck"]["author"] == "ann"
         assert client.get(f"/api/v1/archidekt/decks/{private['id']}").status_code == 404
         universe.archidekt.outage = True
         again = client.get(f"/api/v1/archidekt/decks/{public['id']}")  # a recent copy is served: Archidekt is not asked
@@ -181,7 +181,7 @@ def test_repeat_reads_of_a_deck_reach_archidekt_once_and_say_how_old_they_are(da
         assert first["vault_cache"]["from_cache"] is False and len(requests()) == 1
         for _ in range(3):  # the deck page, the graph overlay, the AI tool and the library tiles all read it again
             again = client.get(path).json()
-            assert again["vault_cache"]["from_cache"] is True and again["name"] == "Elves"
+            assert again["vault_cache"]["from_cache"] is True and again["deck"]["name"] == "Elves"
         assert len(requests()) == 1
         assert client.get(path, params={"refresh": "true"}).json()["vault_cache"]["from_cache"] is True  # under a minute old
         assert len(requests()) == 1
@@ -216,3 +216,23 @@ def test_the_archidekt_twin_has_every_field_the_real_api_sends():
     for part, keys in got.items():
         assert set(keys) == set(real[part]), (part, sorted(set(real[part]) ^ set(keys)))
     assert len(json.dumps(deck["cards"])) // len(deck["cards"]) > 2000  # real: 3,318 bytes a card, so size limits are exercised
+
+
+def test_a_real_sized_archidekt_deck_comes_back_small_with_its_identity_and_no_shop_prices(database_url, universe):
+    """#219: one real deck answered 313,760 characters, mostly other shops' per-card prices. The twin is now as heavy."""
+    import json
+
+    cards = [(1, "Sliver Overlord", None, None, "Commander")] + [(1, f"Test Card {i:02d}", None, None, "Ramp") for i in range(99)]
+    deck = universe.archidekt.add_deck("Sliver Swarm", "ann", cards, deck_format=3)
+    assert len(json.dumps(deck)) > 200_000  # the realistic twin: the size that broke the assistants
+    settings = Settings(database_url=database_url, session_secret="t", base_url="http://testserver", dev_login=True)
+    with TestClient(create_app(settings, serve_static=False, transport=universe.transport)) as client:
+        client.post("/api/auth/dev-login")
+        answer = client.get(f"/api/v1/archidekt/decks/{deck['id']}").json()
+    text = json.dumps(answer)
+    assert len(text) < 12_000, len(text)
+    assert list(answer)[0] == "deck" and answer["deck"]["overview"]["format"] == "commander"
+    assert answer["deck"]["overview"]["commanders"] == ["Sliver Overlord"] and answer["deck"]["overview"]["cards"] == 100
+    assert answer["credit"]["source"] == "Archidekt" and answer["deck"]["url"] == f"https://archidekt.com/decks/{deck['id']}"
+    for shop_price in ("ckFoil", "cmMinimum", "tcgLand", "scgSku", "cardTrader", "\"prices\""):  # no shop's price, id or SKU
+        assert shop_price not in text, shop_price
