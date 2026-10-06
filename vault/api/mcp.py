@@ -233,8 +233,8 @@ TOOLS = [
           **PAGING, **SHARE},
          path=lambda a: _base(a) + "/names", query=("sort", "colors", "type", "min_value", "limit", "cursor")),
     Tool("refresh_prices", "Fetch fresh card data and today's prices from Scryfall for the person's own "
-         "printings, up to 300 per call, and recompute today's collection value. Call again with the returned "
-         "cursor until remaining is 0.",
+         "printings, up to 300 per call, and recompute today's collection value. Each call returns a cursor and "
+         "how many remain; passing the cursor continues until remaining is 0.",
          {"cursor": {"type": "string", "maxLength": 36, "description": "cursor from the previous call"},
           "force": {"type": "boolean", "default": False,
                     "description": "Also refresh printings that already have today's price"}},
@@ -290,10 +290,9 @@ TOOLS = [
          ["deck_id", "name", "text"], method="PUT", path=lambda a: f"{V1}/decks/{int(a['deck_id'])}",
          body=lambda a: {"name": a["name"], "text": a["text"],
                          **{k: a[k] for k in ("source_url", "source_author", "format") if k in a}}, write=True),
-    Tool("import_deck_from_link", "Save a public Archidekt deck to the person's decks from its link: the server reads the deck and keeps "
-         "its sections (commander, main, sideboard, maybeboard) and credits its author; do not convert the deck yourself. If the "
-         "link is already saved nothing changes unless update is true. Only Archidekt links work; the deck stays Archidekt's: "
-         "credit it. Ask the person before saving.",
+    Tool("import_deck_from_link", "Saves a public Archidekt deck to the person's decks from its link. The server reads the deck, "
+         "keeps its sections (commander, main, sideboard, maybeboard), its format and its author's credit. A link already saved "
+         "is left unchanged unless update is true. Archidekt links only; the deck remains Archidekt's, with its credit and link.",
          {"url": {"type": "string", "minLength": 8, "maxLength": 500, "description": "An Archidekt deck link"},
           "name": {"type": "string", "maxLength": 200, "description": "Name to save it under (default: its name on Archidekt)"},
           "update": {"type": "boolean", "default": False, "description": "Replace an already-saved copy's list with Archidekt's current one"}},
@@ -306,10 +305,9 @@ TOOLS = [
          {"deck_id": ID}, ["deck_id"], path=lambda a: f"{V1}/archidekt/decks/{int(a['deck_id'])}"),
     Tool("list_imports", "Past collection imports, newest first, with what changed each time.", dict(PAGING),
          path=lambda a: f"{V1}/imports", query=("limit", "cursor")),
-    Tool("import_collection_csv", "Replace the collection with a collection file and record what changed. Dragon "
-         "Shield, Moxfield and generic CSV exports are detected automatically. Without confirm it only shows what "
-         "would change (added, removed, changed): show that to the person and call again with confirm true only "
-         "after they say yes.",
+    Tool("import_collection_csv", "Replaces the collection with a collection file and records what changed. Dragon "
+         "Shield, Moxfield and generic CSV exports are detected automatically. With confirm false or absent it returns "
+         "what would change (added, removed, changed) and changes nothing; with confirm true it imports the file.",
          {"csv": {"type": "string", "description": "The CSV file's content"},
           "filename": {"type": "string", "default": "agent-import.csv"}, "confirm": CONFIRM}, ["csv"],
          method="POST", path=lambda a: f"{V1}/imports" if a.get("confirm") is True else f"{V1}/imports/preview",
@@ -320,8 +318,8 @@ TOOLS = [
     Tool("get_staged_upload", "A file the person uploaded through start_collection_upload: still waiting, or what "
          "importing it would change and which rows match no known printing (fix those in the file and upload again).",
          {"upload_id": ID}, ["upload_id"], path=lambda a: f"{V1}/uploads/{int(a['upload_id'])}"),
-    Tool("confirm_staged_upload", "Import an uploaded file, replacing the collection. Without confirm it only shows "
-         "the preview: show it to the person and call again with confirm true only after they say yes.",
+    Tool("confirm_staged_upload", "Imports a file uploaded through start_collection_upload, replacing the collection. "
+         "With confirm false or absent it returns the preview and changes nothing; with confirm true it imports it.",
          {"upload_id": ID, "confirm": CONFIRM}, ["upload_id"],
          method=lambda a: "POST" if a.get("confirm") is True else "GET",
          path=lambda a: f"{V1}/uploads/{int(a['upload_id'])}" + ("/apply" if a.get("confirm") is True else ""),
@@ -331,25 +329,25 @@ TOOLS = [
          "to help them match a card in their hand. Hosts with MCP Apps show the pictures; otherwise give the list.",
          {"name": {"type": "string", "minLength": 1, "maxLength": 300, "description": "The card's name"}}, ["name"],
          path=lambda a: f"{V1}/collection/printings", query=("name",), ui="printings"),
-    Tool("update_owned_cards", "Small edits to the cards the person owns, as they tell you (bought, sold, traded, "
-         "found): add or remove copies, or set how many they own. Changes nothing: it shows each card, the printing, "
-         "copies before and after and the value change. A line needing a printing comes back as choose_printing with "
-         "the choices: ask the person (never guess); for an add they can say they do not know (printing_unknown). Show "
-         "the preview and, only after they say yes, call confirm_owned_cards_update with the same lines and its "
-         "confirmation. At most 50 lines and 25 copies removed (or 10% of the collection); larger changes are an import.",
+    Tool("update_owned_cards", "Previews small edits to the cards the person owns (bought, sold, traded, found): add "
+         "or remove copies, or set how many are owned. Changes nothing. Returns each card, its printing, copies before "
+         "and after, the value change and, when every line is resolved, a confirmation for confirm_owned_cards_update. "
+         "A line whose printing is ambiguous returns status choose_printing with the candidate printings (pictures in "
+         "the view); an add may be sent with printing_unknown. Limits: 50 lines, 25 copies removed (or 10% of the "
+         "collection) per change; larger changes are imports.",
          {"lines": OWNED_LINES}, ["lines"], method="POST", path=lambda a: f"{V1}/collection/changes/preview",
          body=lambda a: {"lines": a["lines"]}, write=True, ui="printings"),
-    Tool("confirm_owned_cards_update", "Apply exactly the edits update_owned_cards previewed, after the person said "
-         "yes: the same lines and the preview's confirmation. Refused if anything differs, the confirmation expired (15 "
-         "minutes) or the collection changed since; then preview again. The change shows in the import history with "
-         "this app's name, and undo_owned_cards_update can revert it.",
+    Tool("confirm_owned_cards_update", "Applies the change previewed by update_owned_cards, given the same lines and "
+         "that preview's confirmation. Returns an error when the lines differ from the preview, the confirmation is "
+         "older than 15 minutes, or the collection changed since. The change is recorded in the import history under "
+         "this app's name; undo_owned_cards_update reverts it.",
          {"lines": OWNED_LINES, "confirmation": {"type": "string", "minLength": 8, "maxLength": 400,
                                                  "description": "From the preview the person agreed to"}},
          ["lines", "confirmation"], method="POST", path=lambda a: f"{V1}/collection/changes/apply",
          body=lambda a: {"lines": a["lines"], "confirmation": a["confirmation"]}, write=True, destructive=True),
-    Tool("undo_owned_cards_update", "Revert the last edits made through an assistant, while nothing else changed the "
-         "collection since. Without a confirmation it shows what the undo would change: show the person, then call "
-         "again with that confirmation after they say yes.",
+    Tool("undo_owned_cards_update", "Reverts the most recent change made through an assistant, if nothing else has "
+         "changed the collection since. Without a confirmation it returns what the undo would change, and a "
+         "confirmation; with that confirmation it applies the undo.",
          {"confirmation": {"type": "string", "minLength": 8, "maxLength": 400,
                            "description": "From this tool's preview, once the person agreed"}},
          method="POST", path=lambda a: f"{V1}/collection/changes/undo",
@@ -378,8 +376,8 @@ TOOLS = [
          {"share_id": ID}, ["share_id"], path=lambda a: f"{V1}/shared/{int(a['share_id'])}/deck"),
     Tool("get_import", "One collection import: when it ran, the file, and what it added, removed and changed.",
          {"import_id": ID}, ["import_id"], path=lambda a: f"{V1}/imports/{int(a['import_id'])}"),
-    Tool("delete_deck", "Delete one of the person's saved decks. Without confirm it only shows the deck that would be "
-         "deleted: show it to the person and call again with confirm true only after they say yes.",
+    Tool("delete_deck", "Deletes one of the person's saved decks. With confirm false or absent it returns the deck "
+         "that would be deleted and changes nothing; with confirm true it deletes it.",
          {"deck_id": ID, "confirm": CONFIRM}, ["deck_id"],
          method=lambda a: "DELETE" if a.get("confirm") is True else "GET",
          path=lambda a: f"{V1}/decks/{int(a['deck_id'])}", write=True, destructive=True),
@@ -390,8 +388,8 @@ TOOLS = [
          "their collection or deck appears under list_shared_with_me.",
          {"invite_token": {"type": "string", "minLength": 8, "maxLength": 200, "description": "The invite token"}}, ["invite_token"],
          method="POST", path=lambda a: f"{V1}/shares/accept", body=lambda a: {"token": a["invite_token"]}, write=True),
-    Tool("stop_sharing", "Stop a share: as the owner, revoke it; as the recipient, leave it. Without confirm it only "
-         "lists the person's shares: show the one that would end and call again with confirm true after they say yes.",
+    Tool("stop_sharing", "Ends a share: the owner revokes it, the recipient leaves it. With confirm false or absent "
+         "it returns the person's shares and changes nothing; with confirm true it ends the given share.",
          {"share_id": ID, "confirm": CONFIRM}, ["share_id"],
          method=lambda a: "DELETE" if a.get("confirm") is True else "GET",
          path=lambda a: f"{V1}/shares/{int(a['share_id'])}" if a.get("confirm") is True else f"{V1}/shares",
