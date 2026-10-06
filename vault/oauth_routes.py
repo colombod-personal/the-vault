@@ -400,6 +400,10 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
             else:
                 raise server.OAuthError("unsupported_grant_type", "grant_type must be authorization_code or refresh_token")
         except (server.OAuthError, clients.ClientError) as exc:
+            if exc.code == "invalid_client":  # why an app could not connect: its public client_id and our reason, never a secret
+                log.warning("token request refused: client=%s grant=%s assertion=%s type=%s reason=%s", (client_id or "")[:200],
+                            grant_type, bool(client_assertion), (client_assertion_type or "")[:80],
+                            getattr(exc, "description", str(exc)))
             return token_error(exc)
         return JSONResponse(result, headers={**NO_STORE, **CORS})
 
