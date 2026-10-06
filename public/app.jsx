@@ -71,16 +71,18 @@ const VAULT_START_NOTICE = (() => {
 // Navigation lives in the URL hash (#/browse, #/sets/MKM, …), so the browser's Back and Forward
 // buttons, refresh and bookmarks work. Opening a card or the account panel adds a history
 // entry too, so Back closes it before leaving the view.
-const VAULT_VIEWS = ['dashboard', 'browse', 'sets', 'decks', 'lab', 'graph', 'valuation'];
+const VAULT_VIEWS = ['dashboard', 'browse', 'sets', 'decks', 'lab', 'graph', 'valuation', 'help'];
 function vaultRouteFromHash(fallback) {
   const [view, arg] = location.hash.replace(/^#\/?/, '').split('/').map((p) => decodeURIComponent(p || ''));
   if (view === 'sets' && arg) return { view: 'setdetail', code: arg };
   if (view === 'decks' && arg) return { view: 'decks', deckId: arg };
+  if (view === 'help') return { view: 'help', section: arg || '' };
   return { view: VAULT_VIEWS.includes(view) ? view : fallback };
 }
 function vaultHashFor(route) {
   if (route.view === 'setdetail') return `#/sets/${encodeURIComponent(route.code)}`;
   if (route.view === 'decks' && route.deckId) return `#/decks/${encodeURIComponent(route.deckId)}`;
+  if (route.view === 'help') return helpHashFor(route.section);
   return `#/${route.view}`;
 }
 const vaultUrlFor = (route) => location.pathname + location.search + vaultHashFor(route);
@@ -112,6 +114,7 @@ function App() {
   const [me, setMe] = useStateApp(null);
   const [notice, setNotice] = useStateApp(VAULT_START_NOTICE);
   const [accountOpen, setAccountOpen] = useStateApp(false);
+  const [welcome, setWelcome] = useStateApp(() => !welcomeSeen());
   const [viewing, setViewing] = useStateApp(null); // { id, from } while looking at someone's shared collection
   const [deckText, setDeckText] = useStateApp(null); // deck opened from saved/shared decks
   const refreshingRef = useRefApp(false);      // a server refresh is running (manual or automatic)
@@ -349,6 +352,8 @@ function App() {
 
   if (auth === 'signed-out') return <SignIn />;
   const nav = (view, extra = {}) => setRoute({ view, ...extra });
+  const dismissWelcome = () => { welcomeDone(); setWelcome(false); };
+  const welcomeBanner = welcome && !viewing && data && <Welcome hasCollection={data.meta.totalQty > 0} onDismiss={dismissWelcome} />;
   const viewingBanner = viewing && data && (
     <div className="panel panel-tight" style={{ margin: '12px 24px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderColor: 'var(--gold)' }}>
       <span className="label-mono">
@@ -367,8 +372,9 @@ function App() {
         </header>
         {viewing && viewingBanner}
         {noticeBanner}
+        {welcomeBanner}
         <main>
-          {viewing ? (
+          {route.view === 'help' ? <Help section={route.section} /> : viewing ? (
             // Someone else's collection, shared but empty: nothing to import here.
             <div style={{ display: 'grid', placeItems: 'center', minHeight: '60vh' }}>
               <div className="panel" style={{ width: 'min(460px, 100%)', textAlign: 'center' }}>
@@ -431,8 +437,11 @@ function App() {
         </header>
         {viewing && viewingBanner}
         {noticeBanner}
+        {welcomeBanner}
 
         <main>
+          {route.view !== 'help' && <div className="help-row"><HelpHint view={route.view} /></div>}
+          {route.view === 'help' && <Help section={route.section} />}
           {route.view === 'dashboard' && (
             <Dashboard
               data={data}

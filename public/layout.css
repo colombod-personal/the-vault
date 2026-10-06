@@ -331,3 +331,9 @@ html, body { max-width: 100%; overflow-x: clip; }
   .card-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .card-grid.card-rail { grid-auto-columns: 30%; }
 }
+
+/* In-app help on phones */
+@media (max-width: 760px) {
+  .acct-menu .acct-help { display: none; }   /* the "?" on each page and the welcome link to it */
+  .welcome { margin: 12px 16px 0; }
+}

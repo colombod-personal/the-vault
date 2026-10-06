@@ -229,6 +229,7 @@ function AccountMenu({ me, onImported, onAccount, readOnly }) {
   return (
     <div className="acct-menu" style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 'auto' }}>
       {!readOnly && <ImportButton onImported={onImported} />}
+      <a className="btn sm ghost acct-help" href="#/help">Help</a>
       <button className="btn sm ghost acct-name" title={me && me.email ? me.email : ''} onClick={onAccount}>
         {me ? (me.name || me.email || 'Account') : 'Account'}
       </button>

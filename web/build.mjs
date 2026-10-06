@@ -24,6 +24,7 @@ export const SOURCES = [
   'views/lab.jsx',
   'views/graph.jsx',
   'views/valuation.jsx',
+  'views/help.jsx',
   'app.jsx',
 ];
 
