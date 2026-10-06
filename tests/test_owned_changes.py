@@ -6,7 +6,7 @@ is in the history with its app and can be undone, and nobody else's collection i
 import pytest
 from fastapi.testclient import TestClient
 
-from test_agents import V1, agent, bot, call_tool, make_token  # noqa: F401 - fixtures
+from test_agents import V1, agent, bot, call_tool, make_token, rpc  # noqa: F401 - fixtures
 from vault import catalog_sync as cs
 from vault import owned_changes
 from vault.models import Card, Entry, Import, User
@@ -158,8 +158,8 @@ def test_big_removals_and_long_change_sets_are_refused(app, bot, write, monkeypa
     monkeypatch.setattr(owned_changes, "REMOVAL_FLOOR", 5)
     monkeypatch.setattr(owned_changes, "MAX_REMOVED_COPIES", 3)  # the copies cap
     assert not preview(bot, write, REMOVE_ALL_KILLERS)["ready"]
-    long = call_tool(bot, write, "update_owned_cards", lines=[ADD_CMR] * 51)
-    assert long.get("isError")
+    long = rpc(bot, "tools/call", {"name": "update_owned_cards", "arguments": {"lines": [ADD_CMR] * 51}}, write)
+    assert long.json()["error"]["code"] == -32602  # refused by the tool's schema before anything runs
 
 
 def test_a_read_only_connection_cannot_edit(agent, cards, bot):
