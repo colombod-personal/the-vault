@@ -1,3 +1,5 @@
+@AGENTS.md
+
 # The Vault
 
 MTG collection manager: FastAPI server (`vault/`) on top of the `mtg-toolkits` library, with the
@@ -67,6 +69,7 @@ React prototype as the front end (`public/`). Read `README.md` first.
 - Picking up work (`docs/triage.md`): check issues and PRs updated since you last looked for overlap; claim an issue
   (`in-progress`, assign yourself, comment) before working; pick only `status:ready` issues, highest priority first;
   never implement `status:needs-refinement` (help refine it with research or a design PR instead) and skip
-  `status:blocked`; close with a comment saying what merged and how it was checked; file defects you find as issues.
+  `status:blocked`; close only after every acceptance criterion has evidence posted in the issue (`AGENTS.md`: merged is
+  not deployed is not verified; PRs say `Refs #n`, never `Closes #n`); file defects you find as issues.
 - The Comprehensive Rules are not stored: they are read live from Wizards (`vault/rules_live.py`, `docs/rules-index.md`).
   Do not add a copy of the rules text to the database, the repository or a fixture that is not invented.
