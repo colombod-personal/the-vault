@@ -16,12 +16,12 @@ Each section names (1) the decision it supports, (2) where the person acts on it
 
 ### 0. The decision strip (top of the page)
 
-Three server-computed counters, each a link that scrolls to its section: **decks that need a purchase** (and what finishing them costs, counted once per #165), **cards you could sell** (spare copies, with their market value), **biggest known loss and gain**. Each counter reads named fields the server already returns or will return (never a browser calculation): **purchase counter** = `summary.decks_needing_purchase` and `summary.finish_all_cost` (with `summary.unpriced` when a price is unknown) on `GET /decks/overlap`, a `summary` object that #165's extended response gains (decks analysed, decks needing a purchase, the global cost counted once); **sell counter** = `summary.names`, `summary.copies` and `summary.market_value` on `GET /collection/spare`, computed over every spare card, not just the page returned; **profit and loss counter** = `biggest_gains[0].gain` and `biggest_losses[0].gain` on the existing `GET /collection/stats`, with how many copies they cover from the existing collection summary's known-cost copy count. Phone: three stacked rows. If a section has nothing to say, its counter reads "nothing to decide" instead of 0.
+Three server-computed counters, each a link that scrolls to its section: **decks that need a purchase** (and what finishing them costs, counted once per #165), **cards you could sell** (spare copies, with their market value), **biggest known loss and gain**. Each counter reads named fields the server already returns or will return (never a browser calculation): **purchase counter** = `summary.decks_needing_purchase` and `summary.finish_all_cost` (with `summary.unpriced` when a price is unknown) on `GET /decks/overlap`, a `summary` object that #165's extended response gains (decks analysed, decks needing a purchase, the global cost counted once); **sell counter** = `summary.names`, `summary.copies` and `summary.market_value` on `GET /collection/spare`, computed over every spare card, not just the page returned; **profit and loss counter** = new sign-filtered fields on `GET /collection/stats`: `pnl_extremes.biggest_gain` (the largest `gain` strictly above zero, or `null`) and `pnl_extremes.biggest_loss` (the most negative `gain` strictly below zero, or `null`), plus `pnl_extremes.covered_copies` and `pnl_extremes.total_copies`. The existing `biggest_gains` and `biggest_losses` arrays are only sorted, not sign-filtered, so when every priced holding is profitable `biggest_losses[0]` is still a gain; the counter therefore never reads them directly. A `null` side reads "nothing to decide". Phone: three stacked rows. If a section has nothing to say, its counter reads "nothing to decide" instead of 0.
 
 ### 1. Buy: what to buy to make every deck stand on its own
 
 - **Decision:** buy a copy or move one from another deck (#165).
-- **Data:** `GET /decks/overlap` as extended in `docs/deck-independence.md`: per deck `stands_alone`, `lacking`, `cost_to_complete`, per contested card the `move` and `buy` options, and the global cost counted once. The Lab shows contested cards first (the decision), then decks that lack cards that are simply not owned.
+- **Data:** `GET /decks/overlap` as extended in `docs/deck-independence.md`: per deck `stands_alone`, `lacking`, `cost_to_complete`, per contested card the `move` and `buy` options, and the global cost counted once. The Lab lists the cards to buy **cheapest first** (issue #162): one list ordered by the cost of the purchase that finishes the card (`global_deficit` times the cheapest known price), ties by card name, cards with no known price last. A contested card carries a **move possible** badge with its `move` option; it is not ordered ahead of cheaper purchases (owner decision 5 offers the alternative of contested cards first).
 - **Acts on it:** a deck row links to the deck page and its buy list; each card links to the card; **Copy shopping list** uses the existing `shopping_list` text (the Vault does not contact stores; prices are Scryfall's cheapest, dated).
 - **Owner question inside it:** none new; the allocation rule and its override live in #165.
 - **Empty states:** no decks saved: "Save a deck to see whether your decks can all be built at once", with the import-a-deck action. Decks that all stand alone: one line, "All N decks can be built at the same time from what you own."
@@ -32,13 +32,15 @@ Two lists, because they answer different questions.
 
 **2a. Spare copies (new).** Copies beyond what the saved decks need, counted by card name as everywhere else:
 
-- Per name: `have` (all copies), `needed` (the total copies the saved decks need at the same time, summed across decks, which is `need_for_all` from #165), `spare = max(0, have - needed)`, `market_value_of_spare`, whether Dragon Shield already marks copies for trade (`trade_quantity`), and the decks that use the card.
+- Per name: `have` (all copies), `needed` (the total copies the saved decks need at the same time, summed across decks, which is `need_for_all` from #165), `spare = max(0, have - needed)`, `market_value_of_spare`, and the decks that use the card.
+- **Which physical copies are spare (deterministic).** Rows and prices are per printing, finish and condition, so the allocation is stated: copies **not** marked for trade in Dragon Shield satisfy the decks' need first, cheapest first (the decks keep the least valuable copies, so the spare value shown is an upper bound on what selling releases, never an overstatement of what is safe to keep); copies marked for trade (`trade_quantity`) fill any remaining need last, so they are spare whenever the other copies cover the decks. Ties break by printing id so the answer never changes between calls.
+- Each name returns its spare **printing rows** (`scryfall_id`, set, finish, condition, `spare_quantity`, unit price, `trade_marked_quantity`) so the person sees exactly which copies, the value is the sum of those rows, and the selling link points at that printing's Scryfall page. The list sort (value of the spare copies) uses those rows.
 - Cards in no saved deck are all spare, **but only when at least one deck is saved**; with no decks the section asks the person to save decks first instead of calling the whole collection spare.
 - Basic lands are left out (as in #165). It says what it does not know: copies for decks the person has not saved, and play-sets, so "spare" means "beyond your saved decks", never "worthless to you".
 - Only names with `spare > 0` are listed, so a card the collection is short on never appears as a negative spare (it belongs to Buy). Sorted by market value of the spare copies, descending; cursor-paged.
-- **Acts on it:** the card page, and a link to the card's Scryfall page (which lists stores; the Vault does not recommend a seller or contact one). The collection export (`/collection/export.csv`, which keeps Dragon Shield's trade quantity column) is linked once at the top; the Vault has no separate trade-list export today.
+- **Acts on it:** the card page, and a link to each spare printing's Scryfall page (which lists stores; the Vault does not recommend a seller or contact one). The collection export (`/collection/export.csv`, which keeps Dragon Shield's trade quantity column) is linked once at the top; the Vault has no separate trade-list export today.
 
-**2b. Profit and loss.** The existing biggest gains and biggest losses (`GET /collection/stats`), over copies with a known price paid only, with the count of copies it covers ("based on 21,745 of 21,950 copies"). Decision: sell a winner, or hold a loser until it recovers. Each row links to the card. Hidden entirely, with a one-line reason, when the collection has no known prices paid or is a shared view that hides costs.
+**2b. Profit and loss.** The existing biggest gains and biggest losses (`GET /collection/stats`), over copies with a known price paid only, with the count of copies it covers ("based on 21,745 of 21,950 copies"). Decision: sell a winner, or hold a loser until it recovers. Each row links to the card in the Vault and to that printing's Scryfall page, where its current selling value and stores can be inspected (links only, no seller named). Hidden entirely, with a one-line reason, when the collection has no known prices paid or is a shared view that hides costs.
 
 ### 2c. Context for the sell or hold decision: value over time
 
@@ -160,6 +162,10 @@ BUY ...            SELL OR HOLD                 BUY ...
 
 - **Stale prices:** the header says how old the prices are; a dated price is never shown as today's.
 
+## Shared collection views
+
+A shared collection (`/shared/{id}/collection`) grants the viewer the owner's collection, not the owner's saved decks (decks and collections are separate share kinds, `docs/collections.md`, `docs/gdpr.md`). Everything deck-derived is therefore **own-account only**: Buy, spare copies and the purchase and sell counters are never computed or returned for a shared view (no `/shared/...` route for them; asking returns 404, and the page shows no such section), and they must not fall back to computing against the viewer's own decks. A shared Lab shows only what the share allows: profit and loss when the owner allowed costs, and value over time (market only when costs are hidden).
+
 ## API and assistant parity
 
 | Section | REST | Assistant tool |
@@ -179,6 +185,10 @@ The implementation (task 4) must update `docs/ai-parity.md`, `public/llms.txt` a
 - Cards in no deck are fully spare once a deck exists.
 - `trade_quantity` is reported without changing `spare`.
 - Paging: page size never changes who is spare; sorted by market value of the spare copies.
+- Shared views: the spare and overlap endpoints answer 404 under `/shared/{id}/...`, a shared Lab renders no Buy or spare section, and no deck name or deck requirement crosses a collection share (a test shares only the collection and asserts no deck data appears in any response).
+- Mixed-price printings: a name with one cheap copy and one expensive foil, needed once, leaves the expensive foil as the spare under the stated rule; trade-marked copies fill the need last; the spare printing rows sum to `market_value_of_spare`; ordering is stable between calls.
+- `pnl_extremes`: when every priced holding is profitable `biggest_loss` is `null` (and vice versa); the counter then reads "nothing to decide".
+- Buy ordering: cheapest purchase first, unpriced last, ties by name; a contested card with a `move` option is not placed ahead of a cheaper purchase.
 - Cross-tenant: another person's decks and collection never appear; a shared view with costs hidden shows no paid or profit fields.
 - The Lab page renders every state above (empty, no decks, no prices paid, hidden costs, stale prices) at 1400 and 390 px, with no horizontal scroll at 390.
 - The old sections (spend by month, colour, type and curve breakdowns, type priciest cards, stockpiles) are gone and nothing links to them.
@@ -190,7 +200,9 @@ The implementation (task 4) must update `docs/ai-parity.md`, `public/llms.txt` a
 1. **The name.** The navigation says "Lab" but the page heading and its screen label say "Insights". Recommendation: make the page say **Lab** too.
 2. **Spare means beyond saved decks.** Recommendation: yes, labelled as such, because the Vault cannot know decks that are not saved. Alternative: also hold back a play-set of four for every card in a deck (rejected for most formats: it would hide real spares).
 3. **Cut the colour by type heatmap** and the other composition views (they move nowhere). Recommendation: cut.
-4. **Selling links.** Recommendation: link to the card's Scryfall page only, and never name or contact a seller, as with the shopping list.
+4. **Selling links.** Recommendation: link to the printing's Scryfall page only, and never name or contact a seller, as with the shopping list.
+5. **Buy ordering.** Recommendation: cheapest purchase first (the issue's wording), with contested cards badged. Alternative: contested cards first, because they are the decision between moving and buying.
+6. **Which copies count as spare.** Recommendation: the decks keep the cheapest copies and trade-marked copies fill the need last, so spare value is an upper bound on what selling releases. Alternative: keep the most valuable copies, which understates what can be sold.
 
 ## Tasks that follow (under #164)
 
