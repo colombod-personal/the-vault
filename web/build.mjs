@@ -5,12 +5,14 @@
 // nothing in the views changes. The output, public/app.bundle.js, is committed; its header
 // holds a hash of the sources, and tests/test_frontend_build.py fails when it is out of date.
 //
+// Additionally builds analytics.bundle.js from analytics.jsx with node_modules bundled.
+//
 //   npm --prefix web ci && npm --prefix web run build     (or: run watch)
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, watch } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { transformSync } from 'esbuild';
+import { transformSync, buildSync } from 'esbuild';
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
 export const SOURCES = [
@@ -27,6 +29,22 @@ export const SOURCES = [
   'views/help.jsx',
   'app.jsx',
 ];
+
+function buildAnalytics() {
+  // Bundle analytics.js with node_modules dependencies
+  const webDir = dirname(fileURLToPath(import.meta.url));
+  buildSync({
+    entryPoints: [join(PUBLIC, 'analytics.js')],
+    bundle: true,
+    minify: true,
+    format: 'iife',
+    target: 'es2020',
+    outfile: join(PUBLIC, 'analytics.bundle.js'),
+    logLevel: 'warning',
+    nodePaths: [join(webDir, 'node_modules')],
+  });
+  console.log('public/analytics.bundle.js: analytics with @vercel/analytics bundled');
+}
 
 function build() {
   const hash = createHash('sha256');
@@ -49,8 +67,10 @@ function build() {
   console.log(`public/app.bundle.js: ${SOURCES.length} files`);
 }
 
+buildAnalytics();
 build();
 if (process.argv.includes('--watch')) {
+  watch(join(PUBLIC, 'analytics.js'), () => { try { buildAnalytics(); } catch (e) { console.error(e.message); } });
   for (const file of SOURCES) {
     watch(join(PUBLIC, file), () => { try { build(); } catch (e) { console.error(e.message); } });
   }
