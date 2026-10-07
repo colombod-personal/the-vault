@@ -157,3 +157,9 @@ def test_the_passphrase_check_is_exact_and_an_empty_one_never_matches():
 def test_a_short_passphrase_stops_the_server_from_starting(database_url):
     with pytest.raises(RuntimeError, match="at least 16"):
         Settings(database_url=database_url, session_secret="test", reviewer_passphrase="short").check()
+
+
+def test_the_guide_states_the_real_number_of_copies_in_the_demo_collection(app):
+    """The live page said 'about 150 copies' while the demo holds 110: the number is computed from the data, not typed."""
+    guide = TestClient(app).get("/reviewers").text
+    assert f"{sum(row[1] for row in reviewer.OWNED)} copies of well-known cards" in guide and "about 150" not in guide
