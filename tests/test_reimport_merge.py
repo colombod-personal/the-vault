@@ -511,7 +511,11 @@ def test_a_re_import_of_ten_thousand_rows_with_edits_stays_fast(app, person):
     assert previewed < 12 and merged < 20 and first < 20, (first, previewed, merged)
     t0 = time.perf_counter()
     upload(person, newer)  # the same file again
-    assert time.perf_counter() - t0 < 7
+    again = time.perf_counter() - t0
+    # Relative to this run (#288): a slow runner passes, a repeat that is slower than the merge that applied 900 changes fails. The same
+    # file again has nothing to apply, so it must not cost more than that merge plus noise; the absolute ceilings above still catch a
+    # slowdown of everything together.
+    assert again < max(merged * 1.5, 3) and again < 20, (again, merged)
 
 
 # -- the migration of collections imported before this ---------------------------------------------------------------
