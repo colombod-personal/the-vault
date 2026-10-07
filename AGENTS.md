@@ -81,3 +81,32 @@ repeat that.
   you may have broken before you push, not CI's log after.
 - Pull requests that CI turns red are fixed by pushing **one** corrected commit after running `prepush.py`, never by trial
   and error against CI. If you are not sure a push will pass, it is not ready.
+
+## 8. The issue is the board: progress is written there, in the same shape, every time
+
+The owner reads GitHub, not the chat. An issue that does not say where its work stands is a mess, whatever the code does.
+Every issue carries a **Progress block** at the top of its body (between `progress:start` and `progress:end`, written only by
+`scripts/issue_progress.py`): one state line, the pull requests, and a row per acceptance criterion with its state and
+evidence. A criterion is `open`, `in review` (a PR is open), `merged` (on main, not seen working), `verified` (evidence in
+the issue), `owner` (waits for a decision, an action or a real-app check only the owner can give) or `waived` (the owner
+dropped it, in a comment that says so). The state line is derived, never typed: it says VERIFIED only when every row is
+verified or waived.
+
+What happens, and who does it:
+
+1. **Before work:** the issue has criteria in the owner's words (section 1). Claim it: `in-progress`, assignee, comment,
+   and give it a **milestone** (an issue without a milestone is not planned work).
+2. **Opening a PR:** the description starts with `Refs #n` (or `No issue: <why>`), never `Closes`/`Fixes`/`Resolves`:
+   `scripts/check_pr_rules.py` fails the pull request otherwise. The `issue progress` workflow then updates the Progress block
+   (`in review`) and comments on the issue by itself.
+3. **Merging:** the same workflow marks it `merged` and comments. Merged is not verified: the rows stay open.
+4. **Verifying:** after deploy, run the criterion the way the owner would (section 2), post the evidence in the issue, then
+   `python scripts/issue_progress.py tick <issue> "<words of the criterion>" --evidence "<link or the captured answer>"`.
+5. **Closing:** `python scripts/issue_progress.py close <issue>`: it refuses while any row is not verified or waived.
+   A bug is closed the same way, with the production evidence of the fix.
+6. **Waiting on the owner:** rows that need the owner are `owner`, the issue gets the `waiting-owner` label, and the comment
+   says the exact step. When the owner answers, the row becomes `verified` or `waived` with their words as evidence.
+7. **`in-progress` is only for work happening now** (a branch or agent is on it). When the PR merges or the work stops, remove
+   it: a stale label is a lie. `needs-verification` is not used: the Progress block says what is left and why.
+
+If the board and the code disagree, the board is wrong: fix it in the same turn, before anything else.

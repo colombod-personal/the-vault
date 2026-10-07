@@ -10,7 +10,8 @@ and a **priority**.
 | Area (one or more) | `area:frontend`, `area:backend`, `area:database`, `area:data`, `area:ai-integration`, `area:infra` | What part of the product it touches |
 | Type (one) | `bug`, `type:feature`, `type:design`, `type:research`, `type:chore` | The kind of work |
 | Status (one) | `status:needs-refinement`, `status:ready`, `status:blocked` | Whether it can be picked up (below) |
-| Working | `in-progress`, `needs-verification` | `in-progress`: a session or person has claimed it right now. `needs-verification`: merged, not yet checked end to end in Claude or ChatGPT (`AGENTS.md`: merged is not verified) |
+| Working | `in-progress`, `waiting-owner` | `in-progress`: a session or person is on it right now (a branch or agent exists; removed when the PR merges or work stops). `waiting-owner`: a decision, an action or a real-app check only the owner can give is the one thing left (the Progress block says which). `needs-verification` is retired: the Progress block says what is merged and what is not yet verified |
+| Planning | milestone | Every open issue has one (M1 to M6 for the AI-integration roadmap, M7 for the hardening and verification work after the audit of 2026-10-07). No milestone, not planned |
 | Priority (one) | `P1` do first, `P2` next, `P3` later | Order of work |
 | Topic (optional) | `mcp`, `skills`, `harness`, `auth`, `security`, `apps-ui`, `onboarding`, `accessibility`, `epic` | Finer tags; `epic` marks a container |
 
