@@ -35,7 +35,11 @@ def test_the_api_and_the_tool_find_a_saved_deck_by_name_and_say_where_it_came_fr
     found = agent.get(f"{V1}/decks", params={"q": "my sliver swarm deck"}).json()
     assert [d["name"] for d in found["items"]] == ["Sliver Swarm tuned with rage"] and found["items"][0]["source"] == "archidekt"
     assert found["closest"] == []
+    assert found["count"] == 1 and found["total"] == 1  # the matches, not all the person's decks (a real Claude run read "2 found, 1 listed")
     miss = agent.get(f"{V1}/decks", params={"q": "sliver swarn"}).json()
     assert miss["items"] == [] and miss["closest"] == ["Sliver Swarm tuned with rage"]
+    assert miss["count"] == 0 and miss["total"] == 0
+    everything = agent.get(f"{V1}/decks").json()
+    assert everything["count"] == 2 and everything["total"] == 2  # without a search, every deck
     via_tool = call_tool(bot, make_token(agent), "list_decks", query="sliver swarm")["structuredContent"]
     assert [d["name"] for d in via_tool["items"]] == ["Sliver Swarm tuned with rage"]

@@ -793,8 +793,12 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 have = sum(min(c["have"], c["need"]) for c in cov["cards"])
                 item["summary"] = {"need": need, "have": have, "missing": need - have,
                                    "missing_cost": cov.get("missing_cost"), "missing_unpriced": cov.get("missing_unpriced")}
-        body = page_body(request, items, nxt, len(rows), limit=limit, summary="true" if summary else None, q=q or None)
-        if q and q.strip():
+        searching = bool(q and q.strip())
+        # `total` counts what the request is about: every deck, or, with a name search, the decks that matched (an assistant read
+        # "total 2, one listed" as "two decks match, one shown")
+        body = page_body(request, items, nxt, len(page) if searching else len(rows), limit=limit,
+                         summary="true" if summary else None, q=q or None)
+        if searching:
             body["closest"] = closest
         return body
 
