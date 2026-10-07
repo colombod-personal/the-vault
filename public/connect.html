@@ -83,7 +83,7 @@ codex mcp login vault</code></pre></div><p>Or by hand in ~/.codex/config.toml (C
 url = "https://mtgvault.cards/api/mcp"</code></pre></div><p>Without browser sign-in: create a personal access token (Account → Agents &amp; API; read-only is enough), keep it in an environment variable named VAULT_TOKEN, and name it in the same table:</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>[mcp_servers.vault]
 url = "https://mtgvault.cards/api/mcp"
 bearer_token_env_var = "VAULT_TOKEN"</code></pre></div><p class="note">The CLI and the IDE extension share this configuration. Format from the tool's own documentation (<a href="https://learn.chatgpt.com/docs/extend/mcp?surface=cli" target="_blank" rel="noopener">Codex: MCP</a>), read 2026-10-07.</p></div>
-  <div class="card" id="cursor"><h3>Cursor</h3><p>In .cursor/mcp.json (this project) or ~/.cursor/mcp.json (all projects); Cursor offers the sign-in for a server that asks for it:</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>{
+  <div class="card" id="cursor"><h3>Cursor</h3><p>In .cursor/mcp.json (this project) or ~/.cursor/mcp.json (all projects); Cursor documents OAuth for servers that need it; if it shows no sign-in, use the token block below:</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>{
   "mcpServers": {
     "vault": {
       "url": "https://mtgvault.cards/api/mcp"
@@ -99,7 +99,7 @@ bearer_token_env_var = "VAULT_TOKEN"</code></pre></div><p class="note">The CLI a
     }
   }
 }</code></pre></div><p class="note">The root key is mcpServers. Format from the tool's own documentation (<a href="https://cursor.com/docs/context/mcp" target="_blank" rel="noopener">Cursor: MCP</a>), read 2026-10-07.</p></div>
-  <div class="card" id="vscode"><h3>VS Code (GitHub Copilot)</h3><p>In .vscode/mcp.json (or run “MCP: Open User Configuration” for all workspaces); VS Code asks you to sign in when the server asks for it:</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>{
+  <div class="card" id="vscode"><h3>VS Code (GitHub Copilot)</h3><p>In .vscode/mcp.json (or run “MCP: Open User Configuration” for all workspaces); VS Code documents OAuth for servers that need it; if it shows no sign-in, use the token block below:</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>{
   "servers": {
     "vault": {
       "type": "http",

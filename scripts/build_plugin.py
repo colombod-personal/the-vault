@@ -156,7 +156,7 @@ HARNESSES = [
     {"id": "cursor", "title": "Cursor",
      "docs": [("Cursor: MCP", "https://cursor.com/docs/context/mcp")],
      "steps": [
-         {"kind": "oauth", "label": "In .cursor/mcp.json (this project) or ~/.cursor/mcp.json (all projects); Cursor offers the sign-in for a server that asks for it:", "lang": "json",
+         {"kind": "oauth", "label": "In .cursor/mcp.json (this project) or ~/.cursor/mcp.json (all projects); Cursor documents OAuth for servers that need it; if it shows no sign-in, use the token block below:", "lang": "json",
           "code": _json({"mcpServers": {"vault": {"url": MCP_URL}}})},
          {"kind": "token", "label": f"{TOKEN_HOW}; Cursor fills in the variable:", "lang": "json",
           "code": _json({"mcpServers": {"vault": {"url": MCP_URL, "headers": {"Authorization": f"Bearer ${{env:{TOKEN_ENV}}}"}}}})},
@@ -166,7 +166,7 @@ HARNESSES = [
      "docs": [("VS Code: MCP servers", "https://code.visualstudio.com/docs/copilot/customization/mcp-servers"),
               ("VS Code: MCP configuration reference", "https://code.visualstudio.com/docs/agents/reference/mcp-configuration")],
      "steps": [
-         {"kind": "oauth", "label": "In .vscode/mcp.json (or run “MCP: Open User Configuration” for all workspaces); VS Code asks you to sign in when the server asks for it:", "lang": "json",
+         {"kind": "oauth", "label": "In .vscode/mcp.json (or run “MCP: Open User Configuration” for all workspaces); VS Code documents OAuth for servers that need it; if it shows no sign-in, use the token block below:", "lang": "json",
           "code": _json({"servers": {"vault": {"type": "http", "url": MCP_URL}}})},
          {"kind": "token", "label": "Without browser sign-in: create a personal access token (Account → Agents & API); VS Code asks for it once, hides it and stores it:", "lang": "json",
           "code": _json({"inputs": [{"type": "promptString", "id": "vault-token", "description": "The Vault personal access token", "password": True}],

@@ -73,7 +73,7 @@ be revoked (Account → Connected apps for OAuth).
 
     The CLI and the IDE extension share this configuration.
   - Cursor (Cursor: MCP: https://cursor.com/docs/context/mcp)
-    In .cursor/mcp.json (this project) or ~/.cursor/mcp.json (all projects); Cursor offers the sign-in for a server that asks for it:
+    In .cursor/mcp.json (this project) or ~/.cursor/mcp.json (all projects); Cursor documents OAuth for servers that need it; if it shows no sign-in, use the token block below:
 
     ```json
     {
@@ -102,7 +102,7 @@ be revoked (Account → Connected apps for OAuth).
 
     The root key is mcpServers.
   - VS Code (GitHub Copilot) (VS Code: MCP servers: https://code.visualstudio.com/docs/copilot/customization/mcp-servers; VS Code: MCP configuration reference: https://code.visualstudio.com/docs/agents/reference/mcp-configuration)
-    In .vscode/mcp.json (or run “MCP: Open User Configuration” for all workspaces); VS Code asks you to sign in when the server asks for it:
+    In .vscode/mcp.json (or run “MCP: Open User Configuration” for all workspaces); VS Code documents OAuth for servers that need it; if it shows no sign-in, use the token block below:
 
     ```json
     {
