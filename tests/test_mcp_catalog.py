@@ -157,3 +157,18 @@ def test_the_instructions_say_the_vault_is_not_endorsed_and_consent_names_owned_
     from vault.oauth_routes import SCOPE_TEXT
     assert "not approved or endorsed by Wizards of the Coast" in GROUNDING and "never speak for any of them" in GROUNDING
     assert "change which cards you own" in SCOPE_TEXT["write"]
+
+
+def test_every_tool_has_a_title_and_a_read_only_or_destructive_annotation_as_the_claude_directory_requires():
+    """#241: Anthropic's submission needs a title and readOnlyHint or destructiveHint on every tool."""
+    from vault.api import mcp
+    assert len(mcp.TOOLS) >= 57
+    for tool in mcp.TOOLS:
+        entry = tool.schema()
+        assert entry["title"].strip() and entry["description"].strip(), tool.name
+        hints = entry["annotations"]
+        assert isinstance(hints["readOnlyHint"], bool) and isinstance(hints["destructiveHint"], bool), tool.name
+        if tool.write:
+            assert hints["readOnlyHint"] is False, f"{tool.name} writes but says it is read only"
+        else:
+            assert hints["readOnlyHint"] is True and hints["destructiveHint"] is False, tool.name
