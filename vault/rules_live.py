@@ -9,6 +9,8 @@ tools say so and never answer from memory.
 
 from __future__ import annotations
 
+import json
+import logging
 import math
 import re
 import threading
@@ -25,6 +27,9 @@ from . import rules_parser
 RULES_PAGE = "https://magic.wizards.com/en/rules"
 USER_AGENT = "the-vault/0.1 (+https://github.com/colombod-personal/the-vault)"
 PAGE_TTL = 6 * 3600
+FAILURE_TTL = 20  # seconds a failed read is remembered when no edition is cached: calls answer 503 at once instead of each waiting for Wizards
+TIMEOUT = httpx.Timeout(20, connect=5)
+log = logging.getLogger("vault.access")
 TXT_LINK = re.compile(r'https://media\.wizards\.com/[^"\'<>]+?MagicCompRules[^"\'<>]*?\.txt', re.IGNORECASE)
 REF = re.compile(r"\b(\d{3}\.\d+[a-z]?|\d{3})\b")
 WORD = re.compile(r"[a-z0-9']+")
@@ -33,7 +38,11 @@ STOP = {"the", "and", "for", "that", "with", "this", "from", "are", "can", "does
 
 
 class RulesUnavailable(Exception):
-    """Wizards' rules could not be fetched and no edition is cached."""
+    """Wizards' rules could not be fetched and no edition is cached. ``retry_after`` is when to ask again, in seconds."""
+
+    def __init__(self, message: str, retry_after: int = FAILURE_TTL):
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 def _words(text: str) -> list[str]:
@@ -160,19 +169,27 @@ class Edition:
 
 
 class LiveRules:
-    """The current edition, fetched from Wizards when needed and cached in memory per instance."""
+    """The current edition, fetched from Wizards when needed and cached in memory per instance.
+
+    Reading Wizards is the one slow thing the rules tools can do (a page and a file of about a megabyte), so: one call
+    reads it while the others wait for that read only when there is nothing to serve; a cached edition that is due for a
+    check is served to everyone else meanwhile (never made to wait); and a failed read with nothing cached is remembered
+    for ``FAILURE_TTL`` seconds, so a Wizards that is down or slow costs one attempt per window and not one per call (ten
+    parallel calls used to mean ten timeouts in a row behind a lock, holding every thread the server had)."""
 
     def __init__(self, transport: httpx.BaseTransport | None = None, page_url: str = RULES_PAGE, page_ttl: float = PAGE_TTL,
                  clock=time.monotonic):
         self.transport, self.page_url, self.page_ttl, self.clock = transport, page_url, page_ttl, clock
         self._edition: Edition | None = None
         self._checked = -math.inf
+        self._failed_until = -math.inf
+        self._failure = ""
         self._lock = threading.Lock()
 
     def reset(self, transport: httpx.BaseTransport | None = None) -> None:
         """Forget the cached edition (and use ``transport`` from now on): the next call reads Wizards again."""
         with self._lock:
-            self.transport, self._edition, self._checked = transport, None, -math.inf
+            self.transport, self._edition, self._checked, self._failed_until = transport, None, -math.inf, -math.inf
 
     @property
     def cached_version(self) -> str | None:
@@ -180,13 +197,23 @@ class LiveRules:
         return self._edition.version if self._edition else None
 
     def _client(self) -> httpx.Client:
-        return httpx.Client(transport=self.transport, timeout=30, follow_redirects=True,
+        return httpx.Client(transport=self.transport, timeout=TIMEOUT, follow_redirects=True,
                             headers={"User-Agent": USER_AGENT, "Accept": "*/*"})
 
     def edition(self) -> Edition:
-        with self._lock:
+        edition = self._edition
+        if edition is not None and self.clock() - self._checked < self.page_ttl:
+            return edition
+        if edition is not None:
+            if not self._lock.acquire(blocking=False):
+                return edition  # someone is checking for a newer one: the one we have is good meanwhile
+        else:
+            self._lock.acquire()  # nothing to serve: wait for the read that is under way (or make it)
+        try:
             if self._edition is not None and self.clock() - self._checked < self.page_ttl:
                 return self._edition
+            if self._edition is None and self.clock() < self._failed_until:
+                raise RulesUnavailable(self._failure, max(1, math.ceil(self._failed_until - self.clock())))
             try:
                 with self._client() as client:
                     page = client.get(self.page_url)
@@ -200,8 +227,14 @@ class LiveRules:
                         res.raise_for_status()
                         self._edition = Edition.build(res.content.decode("utf-8-sig"), url)
                 self._checked = self.clock()
-            except (httpx.HTTPError, rules_parser.RulesFormatError, RulesUnavailable) as exc:
+            except Exception as exc:  # whatever went wrong with Wizards' side: a download, an encoding, a format we do not know
+                log.warning(json.dumps({"event": "rules_read_failed", "error_class": type(exc).__name__,
+                                        "cached_edition": self._edition is not None}))
                 if self._edition is None:
-                    raise RulesUnavailable(f"The Comprehensive Rules could not be read from Wizards of the Coast: {exc}") from exc
+                    self._failure = "The Comprehensive Rules could not be read from Wizards of the Coast just now. Try again shortly."
+                    self._failed_until = self.clock() + FAILURE_TTL
+                    raise RulesUnavailable(self._failure) from exc
                 self._checked = self.clock() - self.page_ttl + 300  # keep the cached edition; try again in 5 minutes
             return self._edition
+        finally:
+            self._lock.release()

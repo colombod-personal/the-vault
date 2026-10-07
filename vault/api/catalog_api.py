@@ -136,17 +136,23 @@ class StatusOut(BaseModel):
     links: dict = Field(default_factory=dict, alias="_links")
 
 
-def throttle(request: Request, settings, bucket: str, who: str, allowed: int) -> None:
-    """Count one call for ``who`` ("user:7" or "ip:1.2.3.4") in ``bucket``; 429 over ``allowed`` a minute.
-    Counted in the database like the sign-in limits, under a keyed hash, so the rows name no one."""
+def throttle(request: Request, settings, bucket: str, who: str, allowed: int, db: Session | None = None) -> None:
+    """Count one call for ``who`` ("user:7" or "ip:1.2.3.4") in ``bucket``; 429 over ``allowed`` a minute, with Retry-After
+    and the seconds in the message. Counted in the database like the sign-in limits, under a keyed hash, so the rows name no
+    one. Pass the request's own ``db`` session: a second one would hold two connections at once, and under parallel use
+    (five agents) a request that needs two waits for the pool it is itself emptying (#169)."""
     minute = int(time.time() // WINDOW)
     key = hmac.new(settings.session_secret.encode(), f"{bucket}:{who}".encode(), hashlib.sha256).hexdigest()
-    with request.app.state.db.sessions() as db:
+    if db is None:
+        with request.app.state.db.sessions() as own:
+            count = hit(own, key, minute)
+            own.commit()
+    else:
         count = hit(db, key, minute)
         db.commit()
     if count > allowed:
-        raise HTTPException(429, f"Too many {bucket} requests. Try again in a minute.",
-                            headers={"Retry-After": str(max(1, math.ceil((minute + 1) * WINDOW - time.time())))})
+        wait = max(1, math.ceil((minute + 1) * WINDOW - time.time()))
+        raise HTTPException(429, f"Too many {bucket} requests. Try again in {wait} seconds.", headers={"Retry-After": str(wait)})
 
 
 class WhoamiOut(BaseModel):
@@ -168,15 +174,15 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
         try:
             return live_rules.edition()
         except RulesUnavailable as exc:
-            raise HTTPException(503, str(exc), headers={"Retry-After": "300"}) from exc
+            raise HTTPException(503, str(exc), headers={"Retry-After": str(exc.retry_after)}) from exc
     agent = APIRouter(prefix=V1 + "/agent", tags=["agents"])
 
-    def access(request: Request, user: User | None = Depends(optional_user)) -> User | None:
+    def access(request: Request, user: User | None = Depends(optional_user), db: Session = Depends(get_db)) -> User | None:
         """Signed-in people only (never anonymous: see the module docstring), at most CATALOG_RATE_LIMIT a minute."""
         if user is None:
             raise HTTPException(401, "Sign in (or send a personal access token) to use the catalog.",
                                 headers={"WWW-Authenticate": 'Bearer realm="the-vault"'})
-        throttle(request, settings, "catalog", f"user:{user.id}", settings.catalog_rate_limit)
+        throttle(request, settings, "catalog", f"user:{user.id}", settings.catalog_rate_limit, db)
         return user
 
     def status_body(db: Session) -> dict:
