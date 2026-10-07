@@ -16,7 +16,7 @@ import secrets
 from datetime import date, datetime, timezone
 
 from mtg_toolkits.models import CollectionEntry, Condition, Finish
-from sqlalchemy import JSON, Boolean, Index, LargeBinary, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import JSON, Boolean, Index, LargeBinary, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, Uuid, text
 from sqlalchemy import DDL, event
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -448,21 +448,46 @@ class Card(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+def _cents_property(column: str):
+    """A price in dollars (what every reader and the API use) over the integer-cents column that stores it."""
+    def get(self) -> float | None:
+        cents = getattr(self, column)
+        return None if cents is None else cents / 100
+
+    def set_(self, value) -> None:
+        from .prices import to_cents  # no import cycle at load time: prices imports this module
+
+        setattr(self, column, to_cents(value))
+    return property(get, set_)
+
+
 class PriceSnapshot(Base):
+    """One row per owned printing per day: the Scryfall prices that day, in **integer cents** (``usd_cents`` and so on), under a
+    native 16-byte ``uuid`` key. Compacted from float prices under a ``varchar(36)`` key by migration 0110 (#63): about 40% fewer
+    bytes a row, measured in docs/catalog-design.md. Readers use the dollar properties ``usd``, ``usd_foil``... (None when there
+    is no price); a price no import would accept is stored as no price (``vault.prices.to_cents``). Ids that are not UUIDs
+    (a user's CSV can carry anything in its id column) never match a row: see ``vault.prices.valid_ids``. ``eur_etched`` was
+    dropped: nothing read it."""
+
     __tablename__ = "price_snapshots"
 
-    scryfall_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    scryfall_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
     day: Mapped[date] = mapped_column(Date, primary_key=True)
-    usd: Mapped[float | None] = mapped_column(Float)
-    usd_foil: Mapped[float | None] = mapped_column(Float)
-    usd_etched: Mapped[float | None] = mapped_column(Float)
-    eur: Mapped[float | None] = mapped_column(Float)
-    eur_foil: Mapped[float | None] = mapped_column(Float)
-    eur_etched: Mapped[float | None] = mapped_column(Float)
+    usd_cents: Mapped[int | None] = mapped_column(Integer)
+    usd_foil_cents: Mapped[int | None] = mapped_column(Integer)
+    usd_etched_cents: Mapped[int | None] = mapped_column(Integer)
+    eur_cents: Mapped[int | None] = mapped_column(Integer)
+    eur_foil_cents: Mapped[int | None] = mapped_column(Integer)
+
+    usd = _cents_property("usd_cents")
+    usd_foil = _cents_property("usd_foil_cents")
+    usd_etched = _cents_property("usd_etched_cents")
+    eur = _cents_property("eur_cents")
+    eur_foil = _cents_property("eur_foil_cents")
 
     def for_finish(self, finish: str, currency: str = "usd") -> float | None:
         suffix = {"nonfoil": "", "foil": "_foil", "etched": "_etched"}.get(finish, "")
-        return getattr(self, currency + suffix)
+        return getattr(self, currency + suffix, None)  # None for a column that is not stored (eur_etched)
 
 
 class CollectionValue(Base):

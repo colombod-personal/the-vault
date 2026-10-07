@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from .importer import user_entries
 from .models import Card, Entry, Import, PriceSnapshot, User
-from .prices import latest_prices, plausible_price, unit_price
+from .prices import latest_prices, plausible_price, unit_price, valid_ids
 
 
 def finite(value: float | None) -> float | None:
@@ -35,7 +35,7 @@ def _printing(row: Entry) -> str:
     return {"foil": "Foil", "etched": "Etched"}.get(row.finish, "Normal")
 
 
-PRICE_KEYS = ("usd", "usd_foil", "usd_etched", "eur", "eur_foil", "eur_etched")
+PRICE_KEYS = ("usd", "usd_foil", "usd_etched", "eur", "eur_foil", "eur_etched")  # eur_etched is no longer stored (#63): always None
 
 
 def group_id(name: str, set_code: str, number: str, printing: str, condition: str, language: str) -> str:
@@ -151,7 +151,7 @@ class CollectionView:
                 spend[day[:7]] += (paid or 0.0) * r.quantity
         ordered = sorted(groups.values(), key=lambda g: (g.name.lower(), g.set_code, g.number, g.id))
         # every finish's latest price, as plain data (the view outlives this session), for card data
-        snapshots = {i: {**{k: plausible_price(getattr(p, k)) for k in PRICE_KEYS}, "day": p.day.isoformat()}
+        snapshots = {i: {**{k: plausible_price(getattr(p, k, None)) for k in PRICE_KEYS}, "day": p.day.isoformat()}
                      for i, p in prices.items()}
         timeline = [(m, months[m], round(spend[m], 2), round(worth[m], 2)) for m in sorted(months)]
         latest = db.execute(select(Import.created_at, Import.source).where(Import.user_id == user.id)
@@ -196,7 +196,7 @@ class CollectionView:
         } for c in self.db.scalars(select(Card).where(Card.scryfall_id.in_(ids)))}
 
     def price_history(self, g: Group, days: int = 90) -> list[dict]:
-        if not g.scryfall_id:
+        if not g.scryfall_id or not valid_ids([g.scryfall_id]):
             return []
         rows = self.db.scalars(
             select(PriceSnapshot).where(PriceSnapshot.scryfall_id == g.scryfall_id)

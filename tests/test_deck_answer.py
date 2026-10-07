@@ -18,10 +18,11 @@ def test_each_card_says_which_section_it_is_in_and_the_prices_say_their_day(sign
 def test_the_prices_say_the_day_they_are_from(signed_in, app):
     from datetime import date
 
+    from tests.ids import sid
     from vault.models import PriceSnapshot
 
     with app.state.db.sessions() as db:
-        db.add(PriceSnapshot(scryfall_id="p-1", day=date(2026, 10, 5), usd=1.0))
+        db.add(PriceSnapshot(scryfall_id=sid("p-1"), day=date(2026, 10, 5), usd=1.0))
         db.commit()
     saved = signed_in.post(f"{V1}/decks", json={"name": "Elves", "text": TEXT}).json()
     assert signed_in.get(f"{V1}/decks/{saved['id']}").json()["coverage"]["priced_as_of"] == "2026-10-05"
