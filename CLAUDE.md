@@ -5,6 +5,8 @@
 MTG collection manager: FastAPI server (`vault/`) on top of the `mtg-toolkits` library, with the
 React prototype as the front end (`public/`). Read `README.md` first.
 
+- **The GitHub repository is the backlog, not your memory** (`AGENTS.md` section 9): read issues, pull requests and CI live with `gh` in the same turn
+  before stating anything about them (counts, states, what an issue says); check the repo for an existing doc or design before writing one.
 - Library logic (CSV formats, Scryfall matching, deltas, decklists) belongs in
   `colombod-personal/mtg-toolkits`, not here. Bump the pinned commit in `pyproject.toml`,
   `requirements.txt` and `requirements-vcs.txt` together.
