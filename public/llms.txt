@@ -237,9 +237,19 @@ be revoked (Account → Connected apps for OAuth).
 
 ## Credit
 
-Card data, images and prices come from Scryfall (https://scryfall.com). When you show card
-images, name the artist and Scryfall, and don't crop the images. The Vault is unofficial Fan Content permitted under
-the Fan Content Policy, not approved or endorsed by Wizards. Portions of the materials used are
+The Vault is a layer on other people's work. Say whose material you are showing:
+- Card data, rulings, images, set icons and daily prices: Scryfall (https://scryfall.com). Prices originate at TCGplayer
+  (USD), Cardmarket (EUR) and Cardhoarder (MTGO tickets), reached only through Scryfall, never a live shop price.
+- The Comprehensive Rules, card names, mana symbols and art: Wizards of the Coast, rules read live from Wizards' rules page.
+- Role tags (ramp, removal, ...): Scryfall Tagger and its community of volunteers; popularity rank: EDHREC, via Scryfall.
+- Combos: Commander Spellbook and its community, on request, nothing stored.
+- Decks read from a link: Archidekt and the deck's author, read only, one public deck on request; link back to the deck.
+- Collections: Dragon Shield and Moxfield file formats that the person uploads; the Vault never connects to either service.
+- Card images: name the artist and Scryfall, and don't crop the images.
+Nothing about the person is ever sent to any of these services. Full list and licences: https://mtgvault.cards/credits.html
+
+The Vault is unofficial Fan Content permitted under the Fan Content Policy, not approved or endorsed by Wizards, Scryfall,
+Archidekt, Moxfield, Dragon Shield or Commander Spellbook. Portions of the materials used are
 property of Wizards of the Coast. ©Wizards of the Coast LLC.
 
 ## Docs
