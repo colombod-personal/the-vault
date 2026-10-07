@@ -12,7 +12,7 @@ const HELP_SECTIONS = [
     id: 'import', title: 'Import your collection', views: ['dashboard'],
     body: [
       'Export a CSV from the Dragon Shield Card Manager (Inventory, Export) or from Moxfield (Collection, More, Export CSV) and choose it with “Import CSV” (top right) or, in an empty vault, “Choose CSV file”. The format is detected for you, and only the file you choose is read: the Vault never connects to your accounts there.',
-      'Import again any time. Each import replaces the collection with the new file and records what changed, so you can see copies added, removed and changed.',
+      'Import again any time. The Vault applies only what changed in your app since the last import and keeps edits you made through an assistant. If the same card changed in both places, your assistant shows it in the preview and asks; the edit made here is kept unless you say otherwise. Each import records what changed, so you can see copies added, removed and changed.',
       'If an assistant you allowed to make changes edits which cards you own, that change is listed under “Collection history” in Account, with the app that made it. The latest one can be reverted there with “Undo” (you see what it will change first), until your collection changes again.',
     ],
   },
