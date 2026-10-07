@@ -423,7 +423,7 @@ window.VaultApi = (() => {
       body.append('file', file);
       return create(V1 + '/imports', { body });
     },
-    archidektDeck: (id) => call(V1 + '/archidekt/decks/' + encodeURIComponent(id)),
+    archidektDeck: (id, refresh = false) => call(V1 + '/archidekt/decks/' + encodeURIComponent(id) + '?detail=cards' + (refresh ? '&refresh=true' : '')),
     logout: (everywhere = false) => call('/api/auth/logout' + (everywhere ? '?everywhere=true' : ''), { method: 'POST' })
       .finally(() => localStore.clear()),
     clearLocalData: () => localStore.clear(),

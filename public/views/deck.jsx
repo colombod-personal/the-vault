@@ -2,7 +2,15 @@
 // you own and what finishing it costs (GET /decks/{id}, coverage against your collection). A deck's
 // page has tabs: Cards (what you own of each, grouped by type), Stats, Legality, Upgrades (marking
 // the ones you already own), Combos and a Buy list, all computed by the server (/decks/*).
-const { useState: useStateD, useMemo: useMemoD, useEffect: useEffectD } = React;
+const { useState: useStateD, useMemo: useMemoD, useEffect: useEffectD, useRef: useRefD } = React;
+
+// "just now", "3 minutes ago": how old the copy of a deck read from its site is (the Vault keeps one for ten minutes).
+const ageText = (seconds) => {
+  if (seconds == null) return '';
+  if (seconds < 60) return 'just now';
+  const m = Math.round(seconds / 60);
+  return m < 60 ? `${m} minute${m === 1 ? '' : 's'} ago` : `${Math.round(m / 60)} hour${Math.round(m / 60) === 1 ? '' : 's'} ago`;
+};
 
 // Only the deck's actual Commander category, not user categories like "Commander Synergy".
 const isCommander = (c) => c.section === 'commander' || (c.categories || []).some((x) => String(x).trim().toLowerCase() === 'commander');
@@ -217,6 +225,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
   const [format, setFormat] = useStateD(null);
   const [justSaved, setJustSaved] = useStateD(false);
   const [reload, setReload] = useStateD(0);
+  const askAgain = useRefD(false); // the Refresh button asks the site again; opening the page may use the Vault's ten-minute copy
 
   async function load() {
     setError(''); setLoading(true); setRows(null); setCoverage(null);
@@ -224,7 +233,8 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
       let d;
       if (source.url) {
         try {
-          d = await window.DeckSrc.fetchUrl(source.url.trim());
+          const refresh = askAgain.current; askAgain.current = false;
+          d = await window.DeckSrc.fetchUrl(source.url.trim(), refresh);
           window.VaultApi.rememberDeckAuthor(source.saved, d.author);
         } catch (e) {
           if (!source.saved) throw e;
@@ -304,6 +314,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
               {deck.author && <>by {deck.author} · </>}
               {deck.url && <a href={deck.url} target="_blank" rel="noopener noreferrer">{window.DeckSrc.isArchidekt(deck.url) ? 'on Archidekt' : 'original'} ↗</a>}
               {deck.url && window.DeckSrc.isArchidekt(deck.url) && <> · deck list from Archidekt, thanks to its author</>}
+              {deck.cache && <> · read from Archidekt {ageText(deck.cache.age_seconds)}{deck.cache.from_cache ? ' (the Vault’s copy; Refresh asks Archidekt again)' : ''}</>}
             </p>
           )}
           {deck && deck.offline && <p style={{ fontSize: 12, color: 'var(--gold)', marginTop: 6 }}>Couldn't reach the deck's site ({deck.offline}), so this is your saved copy.</p>}
@@ -314,7 +325,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
               title={!Array.isArray(myDecks) && !source.saved ? 'Waiting for your saved decks, to update rather than duplicate' : undefined}>
               {justSaved ? 'Saved ✓' : saved ? 'Update saved copy' : 'Save to your decks'}
             </button>
-            {deck.url && <button className="btn sm" onClick={() => { setJustSaved(false); setReload((n) => n + 1); }} disabled={loading}>Refresh</button>}
+            {deck.url && <button className="btn sm" onClick={() => { setJustSaved(false); askAgain.current = true; setReload((n) => n + 1); }} disabled={loading}>Refresh</button>}
             {saved && <button className="btn sm ghost" onClick={remove}>Remove</button>}
           </div>
         )}

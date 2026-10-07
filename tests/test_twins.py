@@ -1,5 +1,6 @@
 """The Vault against the Scryfall and Archidekt twins, and the twin universe itself."""
 
+import json
 from pathlib import Path
 
 import httpx
@@ -236,3 +237,21 @@ def test_a_real_sized_archidekt_deck_comes_back_small_with_its_identity_and_no_s
     assert answer["credit"]["source"] == "Archidekt" and answer["deck"]["url"] == f"https://archidekt.com/decks/{deck['id']}"
     for shop_price in ("ckFoil", "cmMinimum", "tcgLand", "scgSku", "cardTrader", "\"prices\""):  # no shop's price, id or SKU
         assert shop_price not in text, shop_price
+
+
+def test_archidekt_detail_cards_lists_every_card_with_its_printing_and_no_prices(database_url, universe):
+    """#256: the web app needs the cards with set and collector number; assistants keep the small answer."""
+    deck = universe.archidekt.add_deck("Mixed", "ann", [(1, "Sol Ring", "c21", "263"), (2, "Llanowar Elves", None, None, "Ramp"),
+                                                       (1, "Counterspell", None, None, "Sideboard"), (1, "Atraxa, Praetors' Voice", None, None, "Commander")])
+    settings = Settings(database_url=database_url, session_secret="t", base_url="http://testserver", dev_login=True)
+    with TestClient(create_app(settings, serve_static=False, transport=universe.transport)) as client:
+        client.post("/api/auth/dev-login")
+        lean = client.get(f"/api/v1/archidekt/decks/{deck['id']}").json()
+        assert "cards" not in lean  # the assistants' answer stays small
+        full = client.get(f"/api/v1/archidekt/decks/{deck['id']}", params={"detail": "cards"}).json()
+        by_name = {c["name"]: c for c in full["cards"]}
+        assert by_name["Sol Ring"]["set"] == "c21" and by_name["Sol Ring"]["collector_number"] == "263" and by_name["Sol Ring"]["section"] == "Deck"
+        assert by_name["Llanowar Elves"]["quantity"] == 2 and by_name["Counterspell"]["section"] == "Sideboard"
+        assert by_name["Atraxa, Praetors' Voice"]["section"] == "Commander"
+        assert "price" not in json.dumps(full["cards"]).lower()
+        assert full["vault_cache"]["from_cache"] is True or full["vault_cache"]["from_cache"] is False  # the age travels with it
