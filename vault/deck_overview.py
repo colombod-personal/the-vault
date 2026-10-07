@@ -89,3 +89,18 @@ def overview(text: str, stored_format: str | None, known: dict[str, list[str]] |
     if not seen["readable"]:
         out["note"] = "The saved list could not be read"
     return out
+
+
+def archidekt_credit(d) -> dict | None:
+    """The credit a saved deck from Archidekt carries in every answer about it: the source, the link, the author, when the
+    Vault last took the list from that link (``fetched_at``), and the notice to repeat. None for any other deck."""
+    from urllib.parse import urlsplit
+
+    host = (urlsplit(d.source_url).hostname or "").lower() if d.source_url else ""
+    if not host.endswith("archidekt.com"):
+        return None
+    fetched = d.source_fetched_at
+    return {"source": "Archidekt", "url": d.source_url, "author": d.source_author,
+            "fetched_at": fetched.isoformat() if fetched else None,
+            "notice": "Deck list from Archidekt" + (f" by {d.source_author}" if d.source_author else "")
+                      + ". The deck is theirs, not the Vault's."}

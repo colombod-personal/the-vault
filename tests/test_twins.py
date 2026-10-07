@@ -235,6 +235,7 @@ def test_a_real_sized_archidekt_deck_comes_back_small_with_its_identity_and_no_s
     assert list(answer)[0] == "deck" and answer["deck"]["overview"]["format"] == "commander"
     assert answer["deck"]["overview"]["commanders"] == ["Sliver Overlord"] and answer["deck"]["overview"]["cards"] == 100
     assert answer["credit"]["source"] == "Archidekt" and answer["deck"]["url"] == f"https://archidekt.com/decks/{deck['id']}"
+    assert answer["credit"]["fetched_at"] == answer["vault_cache"]["fetched_at"]  # #96: deck answers carry fetched_at
     for shop_price in ("ckFoil", "cmMinimum", "tcgLand", "scgSku", "cardTrader", "\"prices\""):  # no shop's price, id or SKU
         assert shop_price not in text, shop_price
 
