@@ -73,13 +73,14 @@ def test_no_skill_contains_rules_or_card_text():
 
 
 def test_the_archidekt_helper_reads_one_deck_and_links_shops_without_contacting_them():
-    """The shop links are the formats checked on 2026-10-04 (issue #80); the skill must not claim to edit Archidekt
-    or know a shop's price, since the Vault has neither (docs/compliance.md)."""
+    """The shop links are the formats checked on 2026-10-04 (issue #80). Magic Madhouse's was corrected on 2026-10-07 (the
+    old ?q= format showed the home page, not results) and Cardmarket's could not be re-checked (bot check). The skill must
+    not claim to edit Archidekt or know a shop's price, since the Vault has neither (docs/compliance.md)."""
     meta, body = parse(SKILLS / "archidekt-deck-helper")
     assert "get_archidekt_deck" in meta["metadata"]["vault-tools"]
     for link in ("https://www.cardkingdom.com/catalog/search?search=header&filter%5Bname%5D=CARD+NAME",
                  "https://www.cardmarket.com/en/Magic/Products/Search?searchString=CARD+NAME",
-                 "https://magicmadhouse.co.uk/?q=CARD+NAME"):
+                 "https://magicmadhouse.co.uk/search.php?search_query=CARD+NAME"):
         assert f"`{link}`" in body
     assert "You never edit Archidekt" in body and "One deck per" in body
     assert "cannot say which shop is cheapest" in body

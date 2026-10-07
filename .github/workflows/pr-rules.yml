@@ -1,0 +1,20 @@
+name: pull request rules
+# A pull request that changes sign-in, tokens or the OAuth server must say what happened to the threat model and who reviewed it
+# before the merge (scripts/check_pr_rules.py, issue #41). No secrets, read-only, nothing from the pull request is run.
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  auth-review-lines:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Security-sensitive changes name the threat model and the review
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: python3 scripts/check_pr_rules.py

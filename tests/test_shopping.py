@@ -61,8 +61,8 @@ def test_without_rules_it_prices_the_cheapest_priced_printing_as_before_and_choo
     r = ask(shopping)
     assert r["rules"] is None and r["format"] == "plain" and r["no_qualifying_printing"] == 0
     burn = lines_of(r)["Test Burn"]
-    assert (burn["unit_price_usd"], burn["price_date"], burn["printing"]) == (0.5, TODAY.isoformat(), None)
-    assert "no printing is chosen" in burn["price_basis"]
+    assert (burn["unit_price_usd"], burn["price_date"], burn.get("printing")) == (0.5, TODAY.isoformat(), None)
+    assert "no printing is chosen" in r["price_basis"]
     assert set(r["text"].splitlines()) == {"1 Test Burn", "2 Cheap Ramp", "1 Test Rock"}
     assert r["total_usd"] == round(0.5 + 2 * 0.25 + 1.0, 2)
 
@@ -76,7 +76,7 @@ def test_the_cheapest_printing_that_fits_the_sets_is_chosen_and_reported(shoppin
     assert burn["printing"] == {"scryfall_id": "burn-mh2", "set": "MH2", "set_name": "Modern Horizons 2", "collector_number": "10",
                                 "finish": "nonfoil", "language": "en"}
     assert (burn["unit_price_usd"], burn["price_date"]) == (0.5, PRINTING_DAY.isoformat())
-    assert "fits your rules" in burn["price_basis"]
+    assert "fits your rules" in r["price_basis"]
     assert r["rules"] == {"finish": None, "language": None, "sets": ["mh2", "sld"], "condition": None}
 
 
@@ -88,7 +88,7 @@ def test_the_finish_rule_picks_the_cheapest_printing_in_that_finish(shopping):
     assert etched["Test Burn"]["printing"]["set"] == "SLD" and etched["Test Burn"]["unit_price_usd"] == 9.0
     # no finish rule: whichever finish of whichever printing is cheapest, which can be a foil-only printing
     anyone = lines_of(ask(shopping))
-    assert anyone["Cheap Ramp"]["printing"] is None  # (no rules at all: nothing chosen)
+    assert anyone["Cheap Ramp"].get("printing") is None  # (no rules at all: nothing chosen)
     cheapest = lines_of(ask(shopping, sets=["m20", "2xm"]))
     assert cheapest["Cheap Ramp"]["printing"]["finish"] == "foil" and cheapest["Test Burn"]["printing"]["set"] == "2XM"
 
@@ -96,7 +96,7 @@ def test_the_finish_rule_picks_the_cheapest_printing_in_that_finish(shopping):
 def test_a_card_with_no_printing_that_fits_is_reported_and_left_out(shopping):
     r = ask(shopping, finish="nonfoil")
     ramp = lines_of(r)["Cheap Ramp"]  # only exists in foil in the catalog
-    assert ramp["no_qualifying_printing"] is True and ramp["printing"] is None and ramp["unit_price_usd"] is None
+    assert ramp["no_qualifying_printing"] is True and ramp.get("printing") is None and ramp["unit_price_usd"] is None
     assert "finish nonfoil" in ramp["reason"]
     assert r["no_qualifying_printing"] == 1 and r["unpriced_lines"] == 0
     assert "Cheap Ramp" not in r["text"] and "Test Burn" in r["text"]
@@ -119,7 +119,7 @@ def test_the_language_rule_uses_the_printings_own_language(shopping):
 def test_the_condition_rule_is_kept_and_shown_but_changes_no_price(shopping):
     plain = ask(shopping, sets=["mh2", "2xm"])
     graded = ask(shopping, sets=["mh2", "2xm"], condition="LP")
-    assert [(l["name"], l["unit_price_usd"], l["printing"]) for l in graded["lines"]] == [(l["name"], l["unit_price_usd"], l["printing"]) for l in plain["lines"]]
+    assert [(l["name"], l["unit_price_usd"], l.get("printing")) for l in graded["lines"]] == [(l["name"], l["unit_price_usd"], l.get("printing")) for l in plain["lines"]]
     assert graded["rules"]["condition"] == "LP" and graded["total_usd"] == plain["total_usd"]
     note = next(n for n in graded["notes"] if "Condition LP" in n)
     assert "not per condition" in note

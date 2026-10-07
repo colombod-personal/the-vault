@@ -287,7 +287,7 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
         lines, total, unpriced, excluded = [], 0.0, 0, 0
         for c, card in missing:
             line = {"name": card.name if card else c.entry.name, "quantity": c.missing, "unit_price_usd": None, "price_date": None,
-                    "known_card": card is not None, "printing": None}
+                    "known_card": card is not None}
             if rules.given:
                 picked = shop.choose(printings.get(card.oracle_id, []), rules) if card else None
                 if picked is None:
@@ -296,14 +296,12 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
                     excluded += 1
                 else:
                     printing, finish, unit = picked
-                    line.update(unit_price_usd=unit, price_date=as_of, printing=shop.printing_dict(printing, finish),
-                                price_basis="the cheapest printing that fits your rules")
+                    line.update(unit_price_usd=unit, price_date=as_of, printing=shop.printing_dict(printing, finish))
                     total += unit * c.missing
             else:
                 price = prices.get(card.oracle_id) if card else None
                 if price is not None and price.usd is not None:
-                    line.update(unit_price_usd=price.usd, price_date=price.day.isoformat(),
-                                price_basis="the cheapest priced paper printing (no rules given; no printing is chosen)")
+                    line.update(unit_price_usd=price.usd, price_date=price.day.isoformat())
                     total += price.usd * c.missing
             if line["unit_price_usd"] is None and not line.get("no_qualifying_printing"):
                 unpriced += 1
@@ -311,7 +309,9 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
         every = body.format == "all"
         fmt = "plain" if every else body.format
         info = shop.STORES[fmt]
-        result = {"lines": lines, "format": body.format, "text": shop.render(lines, fmt),
+        result = {"price_basis": ("the cheapest printing that fits your rules, per line (`printing`)" if rules.given else
+                                  "the cheapest priced paper printing of each card; no rules were given, so no printing is chosen"),
+                  "lines": lines, "format": body.format, "text": shop.render(lines, fmt),
                   "total_usd": round(total, 2), "unpriced_lines": unpriced, "no_qualifying_printing": excluded,
                   "rules": rules.describe() if rules.given else None,
                   "store_format": ({k: {"store": v["store"], "line": v["line"], "checked": v["checked"], "help_page": v["page"],

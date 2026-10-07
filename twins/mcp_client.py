@@ -42,6 +42,10 @@ HOSTS = {  # host -> the addresses its name resolves to
 }
 CHATGPT_REDIRECT = "https://chatgpt.com/connector_platform_oauth_redirect"
 JWT_BEARER = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+# What a host that can show MCP Apps puts in ``initialize`` (ext-apps specification 2026-01-26, read 2026-10-07; the real
+# payloads of claude.ai and ChatGPT have not been captured yet: the server logs them, docs/mcp-apps.md says how to read the log).
+APPS_CAPABILITIES = {"extensions": {"io.modelcontextprotocol/ui": {"mimeTypes": ["text/html;profile=mcp-app"]}}}
+SESSION_HEADER = "Mcp-Session-Id"
 # What ChatGPT's safety check flagged on 2026-10-06 (#221): a tool description that tells the approver when to approve.
 STEERING = re.compile(r"only after|after (the person|they) say|said yes|say yes|ask the person|call again with|show (it|that|this) to",
                       re.IGNORECASE)
@@ -125,6 +129,7 @@ class McpClient:
         self.verifier, self.challenge = pkce()
         self.state = secrets.token_urlsafe(12)
         self.tokens: dict = {}
+        self.session_id: str | None = None  # the Mcp-Session-Id the server handed out at initialize, sent back on every request
 
     # -- discovery ---------------------------------------------------------------------------
     def discover(self) -> tuple[dict, dict]:
@@ -197,8 +202,30 @@ class McpClient:
                                 "refresh_token": refresh_token or self.tokens["refresh_token"]}, override)
         return self.api.post("/oauth/token", data=form)
 
-    def mcp(self, method: str, params: dict | None = None, token: str | None = None, path: str = "/api/mcp") -> httpx.Response:
+    def initialize(self, capabilities: dict | None = None, token: str | None = None, name: str = "twin-client",
+                   protocol: str = "2025-06-18") -> dict:
+        """The MCP handshake as a Streamable HTTP client does it: ``initialize`` with its capabilities, keep the
+        ``Mcp-Session-Id`` the server answers with (``None`` when it gives none), then ``notifications/initialized``.
+        Pass ``APPS_CAPABILITIES`` for a host that can show MCP Apps, ``{}`` for one that cannot."""
+        self.session_id = None
+        res = self.mcp("initialize", {"protocolVersion": protocol, "capabilities": capabilities or {},
+                                      "clientInfo": {"name": name, "version": "1"}}, token=token)
+        assert res.status_code == 200, res.text
+        self.session_id = res.headers.get(SESSION_HEADER.lower())
+        self.api.post(self.mcp_path, json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                      headers=self._headers(token))
+        return res.json()["result"]
+
+    mcp_path = "/api/mcp"
+
+    def _headers(self, token: str | None = None) -> dict:
         headers = {"Authorization": f"Bearer {token or self.tokens['access_token']}"}
+        if self.session_id:
+            headers[SESSION_HEADER] = self.session_id
+        return headers
+
+    def mcp(self, method: str, params: dict | None = None, token: str | None = None, path: str = "/api/mcp") -> httpx.Response:
+        headers = self._headers(token)
         return self.api.post(path, json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}},
                              headers=headers)
 

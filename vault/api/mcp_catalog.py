@@ -169,7 +169,7 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
         Tool("find_combos", "Combos present in a decklist, and combos one card short (with the missing cards), asked of Commander Spellbook "
              "on demand. Descriptions are theirs and are attributed; the Vault keeps no copy of their data. It lists only combos Commander Spellbook knows: finding none does not mean the deck has " "no infinite combos." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
              {"text": deck, "deck_id": DECK_ID}, [], method="POST", path=lambda a: f"{V1}/decks/combos", body=lambda a: _deck_body(a),
-             provenance=("computed",)),
+             provenance=("computed",), ui="combos"),
         Tool("shopping_list", "The cards of a decklist the person does not own, with a dated Scryfall price of each, as paste-ready text for a "
              "store's own list tool: `format` is plain, cardkingdom (Card Kingdom's Deck Builder), tcgplayer (Mass Entry with set and "
              "collector number), cardmarket (want list with the expansion's name), csv, or all; each was checked against the store's own "
