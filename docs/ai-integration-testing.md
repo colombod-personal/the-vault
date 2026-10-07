@@ -13,7 +13,8 @@ python scripts/ai_smoke.py --url https://mtgvault.cards --token vault_pat_... --
 ```
 
 A read-only personal access token is enough (Account → Agents & API); nothing is written. Groups: `connection`, `cards`,
-`rules`, `decks`, `prompts` (prompts and MCP Apps views). It checks, among others: the card is the playable card and not a
+`rules`, `decks`, `prompts` (prompts, the MCP Apps views and the capability check: the view list is compared with the server's own in
+`tests/test_ai_smoke.py`, so a view added without updating the script fails in CI). It checks, among others: the card is the playable card and not a
 token; the answer has a dated price; a plain-language rules search finds rules; a verbatim quote verifies and an invented
 one fails with the true text; `present_steps` flags an invented rule number; a 100-card deck is legal; every upgrade
 candidate is within budget; a bad plan is caught; provenance and the Fan Content notice are present; the view pages

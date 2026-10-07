@@ -20,18 +20,26 @@ import sys
 import httpx
 
 FAILS: list[str] = []
+# The MCP Apps views the server serves (ui://vault/<name>). tests/test_ai_smoke.py compares this with vault/api/mcp_ui.py, so adding
+# a view without updating it fails in CI instead of on the next live run.
+VIEWS = {"card", "printings", "deck", "combos", "upgrades", "steps", "shopping"}
+APPS = {"extensions": {"io.modelcontextprotocol/ui": {"mimeTypes": ["text/html;profile=mcp-app"]}}}
 
 
 class Client:
     def __init__(self, url: str, token: str):
         self.url, self.token, self.n = url.rstrip("/") + "/api/mcp", token, 0
 
-    def rpc(self, method: str, params: dict | None = None) -> dict:
+    def rpc(self, method: str, params: dict | None = None, session: str | None = None, headers_out: dict | None = None) -> dict:
         self.n += 1
-        r = httpx.post(self.url, timeout=90, headers={"Authorization": f"Bearer {self.token}", "Accept": "application/json"},
-                       json={"jsonrpc": "2.0", "id": self.n, "method": method, "params": params or {}})
+        headers = {"Authorization": f"Bearer {self.token}", "Accept": "application/json"}
+        if session:
+            headers["Mcp-Session-Id"] = session
+        r = httpx.post(self.url, timeout=90, headers=headers, json={"jsonrpc": "2.0", "id": self.n, "method": method, "params": params or {}})
         if r.status_code == 401:
             sys.exit("401: the token was refused (create a personal access token in the Vault: Account, Agents & API)")
+        if headers_out is not None:
+            headers_out.update(r.headers)
         return r.json()
 
     def call(self, tool: str, **args) -> dict:
@@ -152,7 +160,16 @@ def prompts(c: Client) -> None:
     got = c.rpc("prompts/get", {"name": "rules_judge", "arguments": {"question": "Does Bolt kill a 3/3?"}})["result"]
     check("verify_citation" in got["messages"][0]["content"]["text"], "the rules_judge prompt tells the agent to verify citations")
     res = c.rpc("resources/list")["result"]["resources"]
-    check(len(res) == 5 and all(r["mimeType"] == "text/html;profile=mcp-app" for r in res), "five MCP Apps views are served")
+    check({r["uri"] for r in res} == {f"ui://vault/{v}" for v in VIEWS} and all(r["mimeType"] == "text/html;profile=mcp-app" for r in res),
+          f"the {len(VIEWS)} MCP Apps views are served", str(sorted(r["uri"] for r in res)))
+    for name, caps, expect in (("a host with MCP Apps", APPS, True), ("a host without", {}, False)):
+        out: dict = {}
+        c.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": caps, "clientInfo": {"name": "ai-smoke", "version": "1"}}, headers_out=out)
+        session = out.get("mcp-session-id")
+        listed = c.rpc("tools/list", session=session)["result"]["tools"]
+        with_views = {t["name"] for t in listed if "_meta" in t}
+        check(bool(session) and (len(with_views) >= len(VIEWS)) == expect and (expect or not with_views),
+              f"tools/list for {name}: view links {'present' if expect else 'absent'}", f"session={bool(session)} views on {sorted(with_views)}")
     page = c.rpc("resources/read", {"uri": "ui://vault/card"})["result"]["contents"][0]
     check("innerHTML" not in page["text"] and page["_meta"]["ui"]["csp"] == {"resourceDomains": ["https://cards.scryfall.io"]}, "the card view inserts text only and allows only Scryfall's image host")
 
