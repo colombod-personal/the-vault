@@ -46,6 +46,8 @@ def main() -> int:
     py = sys.executable
     run(py, "scripts/build_plugin.py", "--check")
     present = [t for t in CROSS_CUTTING if os.path.exists(t)]  # a branch cut before a test existed does not have it
+    changed = [f for f in out("git", "diff", "--name-only", "origin/main...HEAD", "HEAD").splitlines() if f.startswith("tests/test_") and f.endswith(".py")]
+    present += [t for t in dict.fromkeys(changed) if os.path.exists(t) and t not in present]  # and every test file this branch touched
     run(py, "-m", "pytest", "-q", "-x", *present)
     touched = [f for f in out("git", "diff", "--name-only", "origin/main...HEAD").splitlines() if f.startswith(SECURITY_SENSITIVE)]
     if touched:

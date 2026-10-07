@@ -97,9 +97,7 @@ def test_seeding_is_idempotent_and_reset_puts_the_demo_back_as_it_was(app):
 
 def test_a_private_copy_can_load_its_own_collection_and_sign_in_keeps_it(app):
     own = ("Folder Name,Quantity,Trade Quantity,Card Name,Set Code,Set Name,Card Number,Condition,Printing,Language,Price Bought,"
-           "Date Bought,LOW,MID,MARKET
-My binder,3,0,Lightning Bolt,m11,Magic 2011,149,NearMint,Normal,English,1.5,2020-01-01,1,2,2
-")
+           "Date Bought,LOW,MID,MARKET\nMy binder,3,0,Lightning Bolt,m11,Magic 2011,149,NearMint,Normal,English,1.5,2020-01-01,1,2,2\n")
     with app.state.db.sessions() as db:
         user = reviewer.seed(db, reset=True, collection=own.encode("utf-8"))
         names = {e.name: e.quantity for e in db.scalars(select(Entry).where(Entry.user_id == user.id))}
