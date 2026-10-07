@@ -180,7 +180,12 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
             result = dt.legality(resolved, body.format)
         except dt.DeckError as exc:
             failing(exc)
-        return answer(db, "legality check", result, ("oracle_cards",), "legality", identity(db, user, body))
+        fmt = result["format"]
+        in_deck = [e.card.oracle_id for e in resolved.played() if e.card is not None]
+        result["changes"] = q.legality_changes(db, list(dict.fromkeys(in_deck)), fmt)
+        result["changes_note"] = q.LEGALITY_NOTE
+        return answer(db, "legality check (with the recorded legality changes of its cards)", result, ("oracle_cards",), "legality",
+                      identity(db, user, body))
 
     @router.post("/upgrades", response_model=Answer, response_model_by_alias=True,
                  summary="Upgrade candidates within a budget: legal, in the deck's colors, not already in it")

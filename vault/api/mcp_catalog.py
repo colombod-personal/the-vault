@@ -69,8 +69,9 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              path=lambda a: f"{V1}/agent/whoami", title="Check the connection", provenance=("catalog",)),
         Tool("get_card_oracle", "A card's official Oracle text, types, legalities and Scryfall Tagger tags, by exact name "
              "(either face of a double-faced card) or Oracle id. For a card with two faces, each face's mana cost, text and "
-             "stats are under `faces`; the top-level fields can be empty. A misspelled name returns suggestions, never "
-             "a guess. Works for any card, owned or not.",
+             "stats are under `faces`; the top-level fields can be empty. Also lists the recorded changes of its legality "
+             "(`legality_changes`: a ban, an unban or a restriction, with the day the Vault saw it). A misspelled name returns "
+             "suggestions, never a guess. Works for any card, owned or not.",
              {"name": {"type": "string", "minLength": 1, "maxLength": 300, "description": "Exact card name"},
               "oracle_id": {"type": "string", "minLength": 36, "maxLength": 36}},
              path=lambda a: f"{V1}/catalog/cards", query=("name", "oracle_id"), provenance=("catalog",), ui="card"),
@@ -124,7 +125,8 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              body=lambda a: _deck_body(a, "format", "on_the_play", "turns", "samples", "seed"),
              provenance=("computed",)),
         Tool("deck_legality", "Whether a decklist is legal in a format: banned or illegal cards, copy limits, deck size, commander color "
-             "identity. Lists every issue, and says what it did not check." + " Give `deck_id` (a saved deck, from list_decks) or `text`.", {"text": deck, "deck_id": DECK_ID, "format": fmt}, ["format"],
+             "identity. Lists every issue, says what it did not check, and lists recorded changes of legality for the cards in the "
+             "deck in that format (`changes`)." + " Give `deck_id` (a saved deck, from list_decks) or `text`.", {"text": deck, "deck_id": DECK_ID, "format": fmt}, ["format"],
              method="POST", path=lambda a: f"{V1}/decks/legality", body=lambda a: _deck_body(a, "format"),
              provenance=("computed",)),
         Tool("find_upgrades", "Upgrade candidates for a deck within a budget: legal, inside the deck's colors, not already in it, each priced "

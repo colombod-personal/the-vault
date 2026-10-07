@@ -38,6 +38,9 @@ class CardOut(BaseModel):
     suggestions: list[str] = Field(default_factory=list, description="Close names, when the name was not found exactly")
     tags: list[dict] = Field(default_factory=list, description="Scryfall Tagger tags (community opinion, not rules)")
     rulings_total: int = 0
+    legality_changes: list[dict] = Field(default_factory=list, description="Recorded changes of this card's legality (bans, unbans, restrictions), "
+                                         "newest first: format, old, new, observed_on. Empty when none was recorded")
+    legality_changes_note: str | None = Field(default=None, description="What the recorded changes are and are not")
     price: dict | None = Field(default=None, description="Cheapest priced paper printing, today's figure: usd, usd_foil, eur, as_of, source")
     provenance: list[prov.Provenance]
     links: dict = Field(default_factory=dict, alias="_links")
@@ -223,8 +226,12 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
                 "provenance": q.provenance_for(db, *sources), "_links": {"self": link(f"{V1}/catalog/cards")}}
         if found:
             _, total = q.rulings_for(db, found.oracle_id, 1)
-            body |= {"tags": q.card_tags(db, found.oracle_id), "rulings_total": total}
+            body |= {"tags": q.card_tags(db, found.oracle_id), "rulings_total": total,
+                     "legality_changes": q.legality_changes(db, [found.oracle_id]), "legality_changes_note": q.LEGALITY_NOTE}
             body["_links"]["rulings"] = link(f"{V1}/catalog/cards/{found.oracle_id}/rulings")
+            if body["legality_changes"]:  # the change log is the Vault's own record of Scryfall's data, so it is labelled as computed
+                body["provenance"].append(prov.computed("legality change log: the Vault compared Scryfall's legalities between daily loads",
+                                                        q.provenance_for(db, "oracle_cards"), as_of=body["legality_changes"][0]["observed_on"]))
             price = db.get(q.OraclePrice, found.oracle_id)
             if price is not None:  # the cheapest priced paper printing, today's figure (no history for cards nobody owns)
                 body["price"] = {"usd": price.usd, "usd_foil": price.usd_foil, "eur": price.eur, "as_of": price.day.isoformat(),
