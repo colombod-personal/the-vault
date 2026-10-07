@@ -83,3 +83,27 @@ def test_the_archidekt_helper_reads_one_deck_and_links_shops_without_contacting_
         assert f"`{link}`" in body
     assert "You never edit Archidekt" in body and "One deck per" in body
     assert "cannot say which shop is cheapest" in body
+
+
+AGENTS = sorted((Path(__file__).parent.parent / "agents").glob("*.md"))
+
+
+def _agent(path: Path):
+    front, body = path.read_text(encoding="utf-8").replace("\r\n", "\n")[4:].split("\n---\n", 1)
+    return yaml.safe_load(front), body
+
+
+@pytest.mark.parametrize("path", AGENTS, ids=lambda p: p.stem)
+def test_an_agent_can_call_every_tool_its_skills_tell_it_to_and_only_real_tools(path):
+    """#247: an agent that lists a skill but not the skill's tools is told to call things it is not allowed to; and a
+    council member must not list the council skill, which sends it to convene another council. Agents never change
+    data, so a skill's write steps are left to the main assistant (the generated note says so)."""
+    meta, _ = _agent(path)
+    allowed = set(meta["vault-tools"])
+    assert allowed <= TOOLS, f"unknown tools: {allowed - TOOLS}"
+    for name in meta.get("skills", []):
+        skill, _ = parse(SKILLS / name)
+        needed = {t for t in skill["metadata"]["vault-tools"].split() if not mcp.BY_NAME[t].write}  # agents are read-only (tests/test_agent_definitions.py)
+        assert needed <= allowed, f"{meta['name']} lists the skill {name} but may not call {sorted(needed - allowed)}"
+    if "expert council" in meta["description"]:
+        assert "expert-council" not in meta.get("skills", []), "a member of the council does not convene it"

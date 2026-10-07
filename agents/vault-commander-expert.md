@@ -16,8 +16,6 @@ vault-tools:
   - get_rule
   - verify_citation
 skills:
-  - expert-council
-  - deck-upgrader
   - vault-attribution
 ---
 
