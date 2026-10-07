@@ -401,14 +401,20 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                   finish: str | None = None, condition: str | None = None, sort: str = "name",
                   cursor: str | None = None, limit: int | None = None, ctx: Ctx = Depends(ctx_dep),
                   printing: str | None = Query(None, description="Printing label: Normal, Foil, Etched, … (any case)"),
-                  card_type: str | None = Query(None, alias="type", min_length=1, max_length=40,
-                                                description="A word of the card's type line, any case: Creature, Artifact, Land, "
-                                                            "Legendary, Sliver ... Printings whose card data is not stored yet are left out"),
-                  mana_value: float | None = Query(None, ge=0, le=1_000_000,
-                                                   description="Exactly this mana value (0 for lands). Printings whose card data "
-                                                               "is not stored yet are left out")):
+                  card_type: str | None = Query(None, alias="type", max_length=40,
+                                                description=f"Main type, as in the breakdowns and list_card_names: {', '.join(analytics.TYPES)} (any case). "
+                                                            "Printings whose card data is not stored yet are left out"),
+                  mana_value: str | None = Query(None,
+                                                 description=f"Mana value bucket, as in the breakdowns: {', '.join(analytics.MANA_VALUES)}. "
+                                                             "Printings whose card data is not stored yet are left out")):
             if sort not in SORTS:
                 raise HTTPException(400, f"sort must be one of {sorted(SORTS)}")
+            if card_type is not None:
+                card_type = next((t for t in analytics.TYPES if t.lower() == card_type.strip().lower()), None)
+                if card_type is None:
+                    raise HTTPException(400, f"type must be one of {', '.join(analytics.TYPES)}")
+            if mana_value is not None and mana_value not in analytics.MANA_VALUES:
+                raise HTTPException(400, f"mana_value must be one of {', '.join(analytics.MANA_VALUES)}")
             view = ctx.view()
 
             def body():

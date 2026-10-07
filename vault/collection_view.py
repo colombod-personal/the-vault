@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import math
-import re
 import threading
 from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
@@ -18,6 +17,7 @@ from datetime import date, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .analytics import main_type
 from .importer import user_entries
 from .models import Card, Entry, Import, PriceSnapshot, User
 from .prices import latest_prices, plausible_price, unit_price, valid_ids
@@ -156,8 +156,8 @@ class CollectionView:
                 spend[day[:7]] += (paid or 0.0) * r.quantity
         for g in groups.values():  # what the type and mana value filters read; None until the printing is matched
             card = known.get(g.scryfall_id)
-            if card is not None:
-                g.type_line, g.cmc = card[2], card[3]
+            if card is not None:  # a matched card with no type line counts as Other and with no mana value as 0, as the breakdowns do
+                g.type_line, g.cmc = card[2] or "", card[3] if card[3] is not None else 0.0
         ordered = sorted(groups.values(), key=lambda g: (g.name.lower(), g.set_code, g.number, g.id))
         # every finish's latest price, as plain data (the view outlives this session), for card data
         snapshots = {i: {**{k: plausible_price(getattr(p, k, None)) for k in PRICE_KEYS}, "day": p.day.isoformat()}
@@ -275,7 +275,7 @@ class CollectionView:
 
 def filtered(view: CollectionView, *, q: str | None = None, set_code: str | None = None,
              finish: str | None = None, condition: str | None = None, name: str | None = None,
-             card_type: str | None = None, mana_value: float | None = None) -> list[Group]:
+             card_type: str | None = None, mana_value: str | None = None) -> list[Group]:
     out = view.groups
     if q:
         needle = q.lower()
@@ -289,18 +289,19 @@ def filtered(view: CollectionView, *, q: str | None = None, set_code: str | None
         out = [g for g in out if g.finish == finish]
     if condition:
         out = [g for g in out if g.condition == condition]
+    # The same definitions as the breakdowns and list_card_names (vault.analytics): one main type per card, and mana value buckets.
+    # Printings whose card data is not stored yet have neither and are left out of these two filters, never guessed.
     if card_type:
-        out = [g for g in out if g.type_line and type_matches(g.type_line, card_type)]
-    if mana_value is not None:  # printings whose card data is not stored yet have no mana value and are left out
-        out = [g for g in out if g.cmc is not None and g.cmc == mana_value]
+        want = card_type.strip().lower()
+        out = [g for g in out if g.type_line is not None and main_type(g.type_line).lower() == want]
+    if mana_value:
+        out = [g for g in out if g.cmc is not None and mana_bucket(g.cmc) == mana_value]
     return out
 
 
-def type_matches(type_line: str, wanted: str) -> bool:
-    """A type matches the words of the card's type line, any case: 'Creature' matches 'Legendary Creature — Sliver', and so
-    does 'Sliver'. A word is a whole word ('Art' does not match 'Artifact')."""
-    word = wanted.strip().lower()
-    return bool(word) and word in re.findall(r"[\w'-]+", type_line.lower())
+def mana_bucket(cmc: float) -> str:
+    """The mana value bucket the breakdowns use: 0 to 7 (a fraction counts down), and 8+."""
+    return "8+" if cmc >= 8 else str(int(math.floor(max(cmc, 0))))
 
 
 SORTS = {

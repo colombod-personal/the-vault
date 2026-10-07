@@ -5,8 +5,10 @@ const { useEffect: useEffectB, useState: useStateB } = React;
 const BROWSE_PAGE = 60;
 // The view's sort choices, as the server's `sort` parameter.
 const BROWSE_SORTS = { value: '-value', qty: '-quantity', name: 'name', recent: '-acquired', oldest: 'acquired', mana: 'mana_value', manaDesc: '-mana_value' };
-// Magic's card types (a card's type line is matched word by word on the server, so any word of it also works through the API).
-const BROWSE_TYPES = ['Artifact', 'Battle', 'Creature', 'Enchantment', 'Instant', 'Kindred', 'Land', 'Planeswalker', 'Sorcery'];
+// The same types and mana value buckets as the Lab's breakdowns and the assistant's tools (the server defines them, vault/analytics.py):
+// one main type per card (an Artifact Creature is a Creature), and mana value 0 to 7 or 8+ (a fraction counts down).
+const BROWSE_TYPES = ['Creature', 'Land', 'Artifact', 'Enchantment', 'Instant', 'Sorcery', 'Planeswalker', 'Battle', 'Other'];
+const BROWSE_MANA = ['0', '1', '2', '3', '4', '5', '6', '7', '8+'];
 
 function Browse({ data, openCard, initialQuery }) {
   const api = data.api;
@@ -15,7 +17,7 @@ function Browse({ data, openCard, initialQuery }) {
   const [setF, setSetF] = useStateB('');
   const [printingF, setPrintingF] = useStateB('');
   const [typeF, setTypeF] = useStateB('');
-  const [manaF, setManaF] = useStateB('');  // a mana value, as typed ('' = any); the server matches it exactly
+  const [manaF, setManaF] = useStateB('');  // a mana value ('' = any); the server matches it exactly
   const [sort, setSort] = useStateB(initialQuery?.sort || 'value');
   const [layout, setLayout] = useStateB('table');
   const [shown, setShown] = useStateB(null);   // { items, total, value_total, more }
@@ -98,17 +100,10 @@ function Browse({ data, openCard, initialQuery }) {
             <option value="">All card types</option>
             {BROWSE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
-          <input
-            className="input"
-            type="number"
-            min="0"
-            step="1"
-            inputMode="numeric"
-            placeholder="Mana value (any)"
-            aria-label="Filter by mana value"
-            value={manaF}
-            onChange={e => { const v = e.target.value; if (v === '' || /^[0-9]{1,7}$/.test(v)) setManaF(v); }}
-          />
+          <select className="select" aria-label="Filter by mana value" value={manaF} onChange={e => setManaF(e.target.value)}>
+            <option value="">Any mana value</option>
+            {BROWSE_MANA.map(n => <option key={n} value={n}>Mana value {n}</option>)}
+          </select>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-2)' }}>
           <div aria-live="polite">
