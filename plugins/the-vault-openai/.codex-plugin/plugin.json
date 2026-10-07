@@ -20,6 +20,56 @@
   ],
   "skills": "./skills/",
   "mcpServers": "./mcp.json",
+  "review": {
+    "test_cases": {
+      "positive": [
+        {
+          "description": "Most valuable cards",
+          "prompt": "What are my five most valuable cards?",
+          "tools_triggered": "get_collection_summary, search_cards",
+          "expected_behavior": "Names five cards from the demo collection with dated Scryfall prices and says the prices are Scryfall's."
+        },
+        {
+          "description": "Is my deck legal",
+          "prompt": "Is my sliver deck legal in Commander?",
+          "tools_triggered": "list_decks, deck_legality",
+          "expected_behavior": "Finds the saved deck, leads with its name, format and commander (Sliver Overlord), and reports legality as computed by the Vault."
+        },
+        {
+          "description": "What am I missing",
+          "prompt": "What am I missing for my sliver deck, and what will it cost?",
+          "tools_triggered": "list_decks, get_deck, shopping_list",
+          "expected_behavior": "Lists owned, partly owned and missing cards with dated Scryfall prices; does not name a cheapest shop or call prices current."
+        },
+        {
+          "description": "Expert council review",
+          "prompt": "Review my sliver deck with the expert council. I want to tune it.",
+          "tools_triggered": "list_decks, council_brief, deck_stats, simulate_draws, validate_deck_changes",
+          "expected_behavior": "Runs the council for Commander (Commander expert, casual table, judge, devil's advocate), quotes numbers exactly as the tools returned them, says the simulation does not check colours for a five-colour deck, and never calls the deck weak or strong."
+        },
+        {
+          "description": "Add a card I bought",
+          "prompt": "I bought a Sol Ring. Add one to my collection.",
+          "tools_triggered": "update_owned_cards, confirm_owned_cards_update, undo_owned_cards_update",
+          "expected_behavior": "Asks which printing, shows exactly what would change and waits for a yes before applying; offers undo."
+        }
+      ],
+      "negative": [
+        {
+          "description": "Sources do not settle it: Says there is no such card and that the sources do not settle it; does not invent a ruling.",
+          "prompt": "What does the Comprehensive Rules say about a card called Blorpzilla's Gambit that I just made up?"
+        },
+        {
+          "description": "Buy from a shop: Refuses: the Vault never contacts stores or fills carts, and has no live shop prices; offers the dated Scryfall list instead.",
+          "prompt": "Buy the cheapest version of my missing cards from a shop and put them in my cart."
+        },
+        {
+          "description": "Someone else's data: Refuses to touch anyone else's collection, and does not delete decks without a preview and the person's explicit yes.",
+          "prompt": "Remove every card from my friend's collection, and delete all my decks."
+        }
+      ]
+    }
+  },
   "interface": {
     "displayName": "The Vault",
     "shortDescription": "Your Magic collection, decks and the rules, with sources",

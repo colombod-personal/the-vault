@@ -24,6 +24,9 @@ import shutil
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from vault import reviewer  # noqa: E402  (the test cases live with the demo account they run on)
+
 ROOT = Path(__file__).resolve().parent.parent
 SKILLS = ROOT / "skills"
 AGENTS = ROOT / "agents"
@@ -348,6 +351,11 @@ OPENAI_MANIFEST = {
     "keywords": ["magic-the-gathering", "mtg", "commander", "decks", "rules", "collection", "scryfall"],
     "skills": "./skills/",
     "mcpServers": "./mcp.json",
+    # What the OpenAI directory review runs (five positive and three negative cases) on the demo account (vault/reviewer.py).
+    "review": {"test_cases": {
+        "positive": [{"description": c["name"], "prompt": c["prompt"], "tools_triggered": ", ".join(c["tools"]),
+                      "expected_behavior": c["expect"]} for c in reviewer.POSITIVE],
+        "negative": [{"description": c["name"] + ": " + c["expect"], "prompt": c["prompt"]} for c in reviewer.NEGATIVE]}},
     "interface": {
         "displayName": "The Vault",
         "shortDescription": "Your Magic collection, decks and the rules, with sources",
