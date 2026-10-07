@@ -237,6 +237,8 @@ be revoked (Account → Connected apps for OAuth).
 - Useful endpoints:
   - `/api/v1/collection/cards?sort=-value&limit=25`
   - `/api/v1/collection/cards?q=bolt`
+  - `/api/v1/collection/cards?type=Creature&sort=-value` (the dearest creatures)
+  - `/api/v1/collection/cards?mana_value=4&sort=-value` (the dearest cards at mana value 4; buckets 0 to 7 and 8+)
   - `POST /api/v1/decks/coverage {"text": "1 Sol Ring\n4 Lightning Bolt"}`
   - `POST /api/v1/cards/lookup {"identifiers": [{"name": "Rhystic Study"}]}` (any card, up to 75)
 

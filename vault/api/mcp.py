@@ -28,7 +28,7 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 
-from .. import experts, observability
+from .. import analytics, experts, observability
 from ..deck_tools import FORMATS
 from ..models import User
 from . import mcp_session, mcp_ui
@@ -208,13 +208,22 @@ TOOLS = [
           "finish": {"type": "string", "enum": ["nonfoil", "foil", "etched"]},
           "condition": {"type": "string", "enum": ["mint", "near_mint", "excellent", "good", "light_played", "played", "poor"]},
           "printing": {"type": "string", "maxLength": 40, "description": "Printing label, e.g. 'Foil', 'Normal', 'Etched'"},
-          "sort": {"type": "string", "enum": ["name", "-name", "-value", "value", "-quantity", "set", "-acquired", "acquired"],
+          "type": {"type": "string", "enum": list(analytics.TYPES),
+                   "description": "Main type, the same one list_card_names and the breakdowns use (a card has one: an Artifact Creature is a "
+                                  "Creature). Printings whose card data is not stored yet are left out"},
+          "mana_value": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 7},
+                                   {"type": "string", "enum": list(analytics.MANA_VALUES)}],
+                         "description": "Mana value bucket, the same ones the breakdowns use: 0 to 7, or '8+' (a fraction counts down). "
+                                        "Printings whose card data is not stored yet are left out"},
+          "sort": {"type": "string", "enum": ["name", "-name", "-value", "value", "-quantity", "set", "-acquired", "acquired",
+                                              "mana_value", "-mana_value"],
                    "default": "name",
                    "description": "'-value' = most valuable first, '-acquired' = most recently bought first, "
-                                  "'acquired' = first bought first"},
+                                  "'acquired' = first bought first, 'mana_value' = cheapest to cast first "
+                                  "('-mana_value' the reverse; cards without data last)"},
           **PAGING, **SHARE},
          path=lambda a: _base(a) + "/cards",
-         query=("q", "set", "name", "finish", "condition", "printing", "sort", "limit", "cursor")),
+         query=("q", "set", "name", "finish", "condition", "printing", "type", "mana_value", "sort", "limit", "cursor")),
     Tool("get_card", "One printing in detail: every copy (condition, language, folder, price paid, date), "
          "Scryfall card data (type, text, image with artist credit) and 90 days of prices.",
          {"card_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$", "description": "The id from search_cards"},
