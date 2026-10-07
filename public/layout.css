@@ -323,11 +323,14 @@ html, body { max-width: 100%; overflow-x: clip; }
   .tbl td:first-child { min-width: 130px; max-width: 170px; }
 
   /* ---- Controls: fingertip-sized ---- */
+  button.brand { min-height: 36px; }   /* the logo is a button: the way home */
   .btn { min-height: 36px; }
-  .btn.sm, .btn.xs { min-height: 34px; padding: 6px 10px; }
-  .chip { min-height: 34px; padding: 6px 12px; font-size: 10.5px; }
+  .btn.sm, .btn.xs { min-height: 36px; padding: 6px 10px; }
+  .chip { min-height: 36px; padding: 6px 12px; font-size: 10.5px; }
   .input, .select { min-height: 42px; font-size: 16px !important; } /* 16px stops iOS zooming into a focused field */
   .pip { min-width: 28px; min-height: 28px; }
+  button.pip { min-width: 36px; min-height: 36px; }   /* the colour filters of the Graph are buttons */
+  .row-link { display: inline-flex; align-items: center; min-height: 36px; }   /* a row's name opens the card */
   .row { flex-wrap: wrap; }
 
   /* ---- Inline grids that reflow ---- */
