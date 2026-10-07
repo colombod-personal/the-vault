@@ -145,3 +145,11 @@ def test_the_sections_no_longer_say_what_the_app_does_not_do():
                   "Account, Connected apps", "Account, Your data", "Account, Shared with me"):
         assert stale not in all_text, stale
     assert "Each import replaces the collection with the new file" in sections()["import"]  # true today (the three-way re-import is #194)
+
+
+def test_a_help_link_scrolls_its_section_heading_to_the_top_not_just_into_view():
+    """Seen in the browser at 390 px (#159): focus() alone scrolled the least it could, so the section a "?" opened
+    sat under the bottom tab bar. The heading is scrolled to the top, below the top bar."""
+    assert "el.focus({ preventScroll: true }); el.scrollIntoView({ block: 'start' });" in HELP
+    block = CSS.split(".help-section h2 {", 1)[1].split("}", 1)[0]
+    assert "scroll-margin-top" in block

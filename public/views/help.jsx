@@ -96,9 +96,10 @@ function HelpHint({ view, shared }) {
 function Help({ section }) {
   const headingRef = useRefH(null);
   useEffectH(() => {
-    // Focus moves to the opened section's heading; the page scrolls to it.
+    // Focus moves to the opened section's heading, and the page scrolls so the heading is at the top, clear of the top bar
+    // (focus alone scrolls the least it can: on a phone the heading ended up under the bottom tab bar).
     const el = document.getElementById('help-' + section);
-    if (el) { el.setAttribute('tabindex', '-1'); el.focus({ preventScroll: false }); }
+    if (el) { el.setAttribute('tabindex', '-1'); el.focus({ preventScroll: true }); el.scrollIntoView({ block: 'start' }); }
     else if (headingRef.current) headingRef.current.focus();
   }, [section]);
   return (
