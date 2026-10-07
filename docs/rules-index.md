@@ -28,18 +28,73 @@ life total", "protection from red", ...) against the live 2026-09-25 edition.
 | C. Semantic (embeddings) | Vectors per rule | Similarity | needs a model | Needs a paid model or heavy local compute: against "free"; not pursued |
 | D. Link only | Nothing | None | — | The judge could not find, quote or check rules |
 
+### Measured on the real edition (#144, 2026-10-07)
+
+Run `python scripts/measure_rules_index.py` (add `DATABASE_URL` to include approach A; it uses a temporary table and keeps nothing). Edition
+2026-09-25: 3,165 rules, 741 glossary entries. Network times are from the machine that ran it (a UK connection to Wizards' CDN, warm); the
+earlier spike measured 1.0 s for the page and 0.6 s for the file from another network, so treat network figures as "tens of milliseconds
+to about a second".
+
+| Step | Measured |
+|---|---|
+| Rules page GET (150 KB) | median 21 ms (slowest of 5: 172 ms) |
+| TXT `HEAD` (returns `ETag`, `Last-Modified`) | median 8 ms |
+| TXT GET (978 KB) | median 21 ms |
+| Parse and build the index and navigation map (approach B) | 253 ms |
+| Memory held per instance by the built edition | 9 MB |
+| One search question (BM25 plus term boost) | 1.6 ms |
+| Stemmed full-text index of every rule, text not kept (approach A) | 765 KB; 0.45 ms a check |
+
+**Citation checking, per approach.** 300 rules; for each a true quote (8 to 16 consecutive words) and the same quote altered, and the true quote
+attributed to the wrong rule. "Wrongly accepted" is the share of altered quotes the check passed; a good check passes every true quote and no altered one.
+
+| Alteration | B: the Vault's check on the fetched text | A: stemmed index in Postgres |
+|---|---|---|
+| true quotes accepted | 300 of 300 | 300 of 300 |
+| a negation added ("can" to "can not") | 0 of 153 wrongly accepted | **40 of 153 (26%)** |
+| one word swapped for another | 0 of 295 | 29 of 295 (10%) |
+| a plural toggled ("creature" for "creatures") | 0 of 295 | **267 of 295 (91%)** |
+| a small word dropped ("the", "a", "of") | 0 of 266 | 38 of 266 (14%) |
+| two words swapped | 0 of 300 | 54 of 300 (18%) |
+| right words, wrong rule number | 0 of 300 | 0 of 300 |
+| the last word cut short by a letter | **92 of 92 (100%)** | 36 of 92 (39%) |
+
+What it shows. Approach A cannot tell a quote from a paraphrase: stemming and dropped small words make "can not" and "creatures" pass, which is
+the very error a citation check exists to catch, so it cannot back `verify_citation`. Approach B is exact on every alteration except one:
+**a quote that stops in the middle of a word still passes**, because the check is a substring test (`catalog_queries._squash`); it should require
+word boundaries. That is a defect in `verify_citation` found by this measurement and recorded here, not fixed in this change (it also covers the
+Oracle-text and ruling checks). Approach C (embeddings) was **not measured**: it needs a model, and similarity cannot answer "is this exact
+sentence in the rule" at all. Approach D (link only) cannot check a quote at all.
+
+**Edition detection, per approach** (simulated with the real `LiveRules` and the Wizards twin, a clock stepped by the minute for 8 hours after the change;
+approach A is analytic):
+
+| Approach | A new edition (a new file name) | A file corrected in place | Cost of looking |
+|---|---|---|---|
+| A: daily job keeps a derived index | at the next daily run: up to 24 hours (analytic) | only if the job also compares validators (not built) | a database write and a reindex each time |
+| B before #143 (page every 6 h, refetch on a new name) | seen after 360 minutes | **never** until the instance restarts (the cached edition was kept while the name was unchanged) | page read per 6 h |
+| **B now** (also one `HEAD` on the unchanged name) | seen after 360 minutes | seen after 360 minutes | page (21 ms) + `HEAD` (8 ms) per 6 h; file and 253 ms rebuild only when it changed |
+| C: embeddings | like A, plus re-embedding | like A | not measured |
+| D: link only | nothing to detect (the page is the link) | nothing to detect | none; but nothing can be checked |
+
+The 360 minutes are the page TTL (6 hours), the longest an instance can be behind. A real Wizards edition has been seen only once in these
+measurements, so the cadence of real editions (one per set, roughly every two to three months, announced by an Update Bulletin before release) comes from
+the bulletins, not from a series of measurements.
+
 ## Recommendation: B, "fetch, cache, search in memory"
 
 - **Nothing of the rules text is stored in the database.** Each server instance fetches the current edition's TXT
   when a rules tool is first called, builds an in-memory index (41 ms), and keeps it while the instance is warm.
-- **The edition is detected automatically:** the daily job reads the rules page and stores only the edition's URL
-  and date (a few bytes of metadata). Instances whose cached edition differs refetch. No manual tracking.
+- **The edition is detected automatically, by each instance:** it reads the rules page (at most every 6 hours) and refetches when
+  the link names another file, or when the file under the same name changed (one `HEAD` compares its `ETag`). Nothing about the
+  edition is stored: not the text, not its URL, not its date (see "Design" below, which supersedes the first idea of a daily job that
+  kept the URL). No manual tracking.
 - **Every quote comes from Wizards' own file**, with the rule number, the edition date, the notice and the link;
   `verify_citation` checks against that same fetched text.
 - **If Wizards' site is unreachable**, the rules tools say so; they never answer from memory.
-- **Changes needed (#145, #146):** drop the stored `rules` table and the `rules` catalog source; a small
-  `vault/rules_live.py` (fetch, parse, BM25, cache keyed by edition); the four rules tools read from it; improve
-  search for keyword abilities (boost section 702 when the question names a keyword); glossary support.
+- **Changes that followed (#145, #146, done):** the stored `rules` and `rules_versions` tables and the `rules` catalog source are gone
+  (migration 0104, and the catalog job refuses a `rules` source: `tests/test_rules_parser.py`); `vault/rules_live.py` (fetch, parse, BM25,
+  navigation map, cache keyed by edition) feeds the rules tools; a keyword or glossary term in a question puts its defining rule first.
 
 Open points for the design: cold-start latency on Vercel (about 0.6 s extra, first call only), and a short retry
 with backoff when Wizards' server is slow.
@@ -84,4 +139,39 @@ incl. 903 Commander), and a strategy: find the term (`find_rules_term`) or searc
 children; follow the references both ways; check exceptions in the parent and siblings; verify every quote.
 
 **Removed:** the `rules` and `rules_versions` tables (empty in production; dropped by a migration), the `rules`
-catalog source and `RULES_URL`.
+catalog source and `RULES_URL`. Other pages of these docs that once described loading the rules into the catalog
+(`docs/catalog-design.md` tables and "Rulings and rules", `docs/ai-integration-testing.md`'s local-data command,
+`docs/data-sources.md`) were corrected to match (#142); `tests/test_rules_parser.py::test_the_catalog_job_no_longer_loads_the_rules` is
+the test that a command naming `rules` as a source is refused.
+
+## How a new edition is announced, and how the Vault notices (#143)
+
+**What Wizards does** (read 2026-10-07):
+
+- With each set release Wizards publishes an **Update Bulletin** on its announcements page (for example "Secrets of Strixhaven Update
+  Bulletin", 15 April 2026, and "Lorwyn Eclipsed Update Bulletin", 9 January 2026, both by Eric Levine): "a summary of the rules changes
+  planned to come to Magic with the release", ending "the official rules can be found on our rules page ... the official rules take
+  precedence". The bulletin is a summary, not a machine-readable feed; there is no RSS or API for the Comprehensive Rules.
+- The authoritative announcement is the **rules page itself** (`magic.wizards.com/en/rules`): its three links (DOCX, PDF, TXT) change
+  to the new file. The page carries **no date or version text**; the edition is in the file name (`MagicCompRules 20260925.txt`) and in
+  the file's first lines ("These rules are effective as of September 25, 2026").
+- **A file can be published before it takes effect.** The current TXT's `Last-Modified` is 17 August 2026, 39 days before its effective
+  date. When the page began linking it is not known. So an edition read from the page may be one that is not yet in force.
+
+**What the Vault does:**
+
+1. Each server instance reads the page at most every 6 hours and takes the TXT link (`TXT_LINK` in `vault/rules_live.py`).
+2. A link to a **different file name** is a new edition: the file is fetched, parsed and indexed (253 ms), and every later answer carries the
+   new version. Nobody tracks it by hand.
+3. The **same file name** is asked once with `HEAD` (8 ms): a changed `ETag` means Wizards corrected the file in place, and it is read again.
+   An unchanged file costs no download.
+4. The answer's `version` is the file's own "effective as of" date, and its provenance names the edition and links Wizards' document. If that
+   date is still in the future, the provenance says so ("this edition takes effect on ..., until then the previous edition is in force"),
+   because an assistant should not present a rule as in force before its date.
+5. If Wizards cannot be reached and an edition is cached, the cached one is kept (retry in 5 minutes); with nothing cached the rules tools
+   answer 503 and say so.
+6. **Nightly, the real page is compared with the twin** (`tests/conformance`, `test_wizards_rules_*`): if Wizards changes how the page links the
+   file, the check fails that night, not when a person asks a rules question.
+
+**Owner-visible limits:** an instance can be up to 6 hours behind a new edition; the Vault does not read Update Bulletins (it needs
+none, the file is the source); and it cannot know a file's publication date relative to the page beyond the file's `Last-Modified`.

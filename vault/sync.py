@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from . import models
 from .models import Entry, PriceSnapshot
-from .prices import compute_values, upsert  # noqa: F401  (upsert: re-exported)
+from .prices import compute_values, to_cents, upsert, valid_ids  # noqa: F401  (upsert: re-exported)
 
 
 EXACT = ("set_number", "id")
@@ -48,8 +48,8 @@ def card_row(c: Card) -> dict:
 def price_row(c: Card, day: date) -> dict:
     p = c.prices
     return {
-        "scryfall_id": c.id, "day": day, "usd": p.usd, "usd_foil": p.usd_foil, "usd_etched": p.usd_etched,
-        "eur": p.eur, "eur_foil": p.eur_foil, "eur_etched": p.eur_etched,
+        "scryfall_id": c.id, "day": day, "usd_cents": to_cents(p.usd), "usd_foil_cents": to_cents(p.usd_foil),
+        "usd_etched_cents": to_cents(p.usd_etched), "eur_cents": to_cents(p.eur), "eur_foil_cents": to_cents(p.eur_foil),
     }
 
 
@@ -104,7 +104,7 @@ def sync(db: Session, cards: Iterable[Card], day: date | None = None) -> dict:
             updates)
 
     upsert(db, models.Card, [card_row(c) for c in matched.values()], ("scryfall_id",))
-    upsert(db, PriceSnapshot, [price_row(c, day) for c in matched.values()], ("scryfall_id", "day"))
+    upsert(db, PriceSnapshot, [price_row(c, day) for c in matched.values() if valid_ids([c.id])], ("scryfall_id", "day"))
     db.commit()
     users = compute_values(db, day)
     return {

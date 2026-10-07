@@ -1,6 +1,6 @@
 # Card roles: what each card does, and what can stand in for it (design for #166, epic #174)
 
-Status: design for owner review. Nothing here is built yet.
+Status: design for owner review. The larger design below (a role vocabulary, a `card_roles` table, review pipelines) is not built. One part of it is: **Oracle-text rules as a fallback for the eight roles** (#18), described in the next section.
 
 ## Why
 
@@ -11,6 +11,59 @@ The deck ideas lab (#161) and deck independence (#165) need to answer "this deck
 - `oracle_tags` holds all 4,560 Scryfall Tagger tags with their tree (`parent_ids`, `child_ids`). `oracle_tag_links` holds links only for a curated set (`TAG_ROOTS`, 19 roots plus descendants, about 55k links), each with Scryfall's weight (`very_strong` ... `weak`).
 - `vault/deck_tools.py` maps eight coarse roles to tags (`ROLE_TAGS`: ramp, draw, removal, sweeper, counterspell, tutor, recursion, sacrifice_outlet) and rolls descendants up. `HIDDEN_TAGS` switches a tag off, as Scryfall asks.
 - Gap: the examples the owner gave (treasure generation, token doubling, repeatable draw versus one-shot draw) are finer than these eight roles, and the Vault has no roles of its own, only Scryfall's opinion passed through.
+
+## Built: roles from Oracle text, as a fallback to Scryfall's tags (#18)
+
+`docs/catalog-design.md` ("Tags") once said Scryfall's Tagger tags replace deriving roles from Oracle text. That was the author's
+proposal, never an owner decision, and #18 asks for tags **derived from Oracle text with documented rules**. Both are now
+true: the tags stay the primary source, and `vault/role_rules.py` adds a small set of written rules that fill the gaps.
+
+How it behaves (`vault/deck_tools.py`, `roles_of` and `role_entries`):
+
+- **Tagger wins.** For a card and a role, if Scryfall's Tagger has a tag for that role (through the tag tree), that is the answer,
+  shown with its weight. A rule is consulted only for a role where the card has **no Tagger tag**.
+- **Always labelled.** A role from a rule is shown as `basis: "computed"` with the rule's id (`rule: "ramp-fetch-land"`) and
+  no weight; a Tagger role is `basis: "scryfall_tagger"`. The answer's provenance is the Vault's `computed` block listing the
+  Oracle text and the tags it read; the text rules are never presented as Scryfall's and never as a fact about the card.
+  `deck_stats` counts both and says how many of each (`from_tagger`, `computed`), so the old counts only grow where a rule
+  found something Tagger did not.
+- **Where it applies.** `deck_stats` roles and `get_card_oracle`'s `computed_roles`. Upgrade candidates still come from Tagger
+  tags (a database query that rules over text cannot replace); the deck's role counts used for "what is the deck short of"
+  include the computed roles.
+- **Text is read per face** (`vault/card_faces.py`), reminder text in parentheses is removed, the card's own name is read as
+  `~`. The rules are narrow on purpose: a miss shows no role, a false hit shows the rule that made it.
+- **Not measured against Tagger at scale.** The tests (`tests/test_role_rules.py`) are hand-picked cards, one or more per rule,
+  including cards each rule must not match. How often the rules agree with Tagger over the whole catalog was not measured
+  (that needs the full Tagger file, whose use is gated by `docs/compliance.md`); compare the rules with the tags over a loaded catalog before
+  widening them.
+
+The rules (the same ids and wording as the code; `tests/test_role_rules.py` fails if one is missing here):
+
+| Rule | Role | Matches | Known to get wrong |
+|---|---|---|---|
+| `ramp-add-mana` | ramp | a non-land artifact, creature or enchantment with an activated 'add' mana ability ({T}: Add ...) | a rock or creature that adds mana only under a condition is still matched; a mana ability that needs a cost per use is too |
+| `ramp-fetch-land` | ramp | a non-land card with 'search your library for ... land ... put it onto the battlefield' (Cultivate-style) | does not check that the land comes in untapped or that the spell is cheap; a land that fetches a land (Evolving Wilds) is deliberately not ramp |
+| `ramp-extra-land` | ramp | 'you may play an additional land' (or two, or any number) | a card that gives the extra land drop only to opponents is matched too |
+| `ramp-treasure` | ramp | creates one or more Treasure tokens | treats every Treasure maker as ramp, including a one-shot reward on a spell that is mostly something else |
+| `draw-cards` | draw | 'you draw', 'draw a card/two/X cards', 'target player draws', 'each player draws' | counts a card that draws only as a drawback or a symmetrical wheel the same as a plain draw spell |
+| `removal-destroy-exile` | removal | 'destroy' or 'exile' (up to N) target creature, artifact, enchantment, planeswalker, battle or permanent | an optional 'may' or a conditional clause is not read; 'exile target card from a graveyard' is correctly not matched |
+| `removal-damage` | removal | 'deals N damage to any target / target creature / planeswalker / battle' (burn and fight spells) | damage aimed only at players is not matched; damage shared out 'divided as you choose' is |
+| `removal-shrink-fight` | removal | 'target creature gets -N/-N', '-X/-X until end of turn', or 'fights target creature' | a -N/-N that only shrinks a creature without killing it is matched; so is a one-sided fight of your own creature |
+| `removal-pacify` | removal | an Aura that says the enchanted creature 'can't attack or block' | the creature stays on the battlefield and can still use abilities |
+| `sweeper-destroy-all` | sweeper | 'destroy' or 'exile' all creatures, permanents, artifacts, enchantments or planeswalkers (not 'you control') | a sweeper that spares a type or has an exception in a later sentence is still matched |
+| `sweeper-damage-each` | sweeper | 'deals N damage to each creature' (without 'you control') | damage that only hits some creatures ('each creature with flying') is matched |
+| `sweeper-shrink-all` | sweeper | 'all creatures get -N/-N' or '-X/-X' | a symmetrical shrink that does not kill a big creature still counts |
+| `sweeper-each-sacrifices` | sweeper | 'each player sacrifices all/every creature' | none known |
+| `counter-spell` | counterspell | 'counter target spell' or 'counter target ... ability', 'counter that spell' | a counter with a heavy condition (only creature spells, only noncreature) is matched like an unconditional one |
+| `tutor-library` | tutor | 'search your library for' something that is not only a land | a card that fetches a named, narrow card is matched like Demonic Tutor |
+| `recursion-to-hand` | recursion | 'return ... card(s) from your/a/target player's graveyard to ... hand or the battlefield' | a card that returns only itself ('return ~ from your graveyard') is matched too |
+| `recursion-reanimate` | recursion | 'put target ... card from a graveyard onto the battlefield' | a reanimation of only the card itself is matched too |
+| `sacrifice-outlet` | sacrifice_outlet | a cost of 'Sacrifice a/another/an/two creature(s), permanent ...:' before a colon (a repeatable outlet) | an outlet limited to one type of permanent (a Treasure, a land) is matched like a creature outlet |
+| `extra-turn` | extra_turn | 'take an extra turn', 'takes an extra turn after this one' | a card that only stops extra turns is not matched, but a rare typo could be |
+| `mass-land-denial` | mass_land_denial | Wizards' own description (Commander Brackets, Feb 2025): cards that destroy, exile or bounce several lands, keep lands tapped, or change what mana several lands make (Armageddon, Ruination, Sunder, Winter Orb, Blood Moon). Matched: destroy/exile/sacrifice/return all lands, lands that don't untap, 'can't untap more than one land', 'nonbasic lands are <type>s' | Wizards published examples and a description, not a list: this finds the clear wordings and misses odd ones; it also matches symmetric effects and effects limited to nonbasic lands that Wizards might not count |
+
+The last two rows are not roles. They are the two effects the Commander Brackets name that no Tagger role covers, found the same
+way and used by the bracket hint (`vault/brackets.py`, `docs/catalog-design.md`).
 
 ## The limit to design around
 

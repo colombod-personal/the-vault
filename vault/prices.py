@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections import defaultdict
 from datetime import date
 
@@ -23,8 +24,30 @@ def plausible_price(value) -> float | None:
     return float(value)
 
 
+UUID_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+_UUID = re.compile(UUID_PATTERN, re.IGNORECASE)
+
+
+def valid_ids(ids) -> list[str]:
+    """The ids that can be a price row's key: Scryfall ids are UUIDs, but ``entries.scryfall_id`` can hold whatever a user's CSV
+    had in its id column, and a malformed one must mean "no price", never an error from the database."""
+    return sorted({i for i in ids if isinstance(i, str) and _UUID.match(i)})
+
+
+def uuid_sql(column: str) -> str:
+    """``column`` (text) as a uuid in raw SQL, NULL for a value that is not one, so a join on it never raises."""
+    return f"(CASE WHEN {column} ~* '{UUID_PATTERN}' THEN ({column})::uuid END)"
+
+
+def to_cents(value) -> int | None:
+    """A price in dollars as the integer cents stored: None when it is not a price one copy could have (see ``plausible_price``)."""
+    price = plausible_price(value)
+    return None if price is None else int(round(price * 100))
+
+
 def latest_prices(db: Session, scryfall_ids: set[str]) -> dict[str, PriceSnapshot]:
     """The most recent snapshot for each printing."""
+    scryfall_ids = valid_ids(scryfall_ids)
     if not scryfall_ids:
         return {}
     latest = (

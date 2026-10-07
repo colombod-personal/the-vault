@@ -143,3 +143,33 @@ def test_the_api_says_when_the_rules_cannot_be_read(signed_in, app):
     app.state.rules_live.reset(httpx.MockTransport(lambda r: httpx.Response(503)))
     res = signed_in.get(f"{V1}/rules/search", params={"q": "trample"})
     assert res.status_code == 503 and "could not be read" in res.json()["detail"]
+
+
+# -- how a new edition, or a corrected file, is noticed (#143, #144) ------------------------------------------------------------
+
+def test_a_file_corrected_in_place_under_the_same_name_is_picked_up_after_the_ttl():
+    """Wizards can fix a typo in the published file without changing its name: the page's link is the same, only the file's
+    ETag moves. One HEAD per ttl notices it; an unchanged file is not downloaded again."""
+    clock = [0.0]
+    universe = Universe(seed=False)
+    universe.wizards.publish(TEXT, "20270303")
+    rules = LiveRules(transport=universe.transport, page_ttl=100, clock=lambda: clock[0])
+    first = rules.edition().rows["100.1"]["text"]
+    gets = lambda: [c for c in universe.wizards.calls if c.method == "GET" and c.path.endswith(".txt")]  # noqa: E731
+    assert len(gets()) == 1
+    clock[0] = 101
+    assert rules.edition().rows["100.1"]["text"] == first and len(gets()) == 1  # same ETag: not downloaded again
+    assert [c.method for c in universe.wizards.calls if c.path.endswith(".txt")] == ["GET", "HEAD"]
+    universe.wizards.publish(TEXT.replace("These rules apply to any game.", "These rules apply to every game."), "20270303")  # a correction
+    clock[0] = 150
+    assert rules.edition().rows["100.1"]["text"] == first  # not before the ttl is up
+    clock[0] = 202
+    assert "every game" in rules.edition().rows["100.1"]["text"] and len(gets()) == 2
+
+
+def test_an_edition_published_before_its_effective_date_says_so_in_its_provenance():
+    rules, _ = live(TEXT, "20270303")  # effective as of March 3, 2027
+    block = rules.edition().provenance()[0]
+    assert block.version == "2027-03-03" and "takes effect on 2027-03-03" in block.origin and "previous edition is in force" in block.origin
+    past, _ = live(TEXT.replace("March 3, 2027", "March 3, 2020"), "20200303")
+    assert "takes effect" not in past.edition().provenance()[0].origin

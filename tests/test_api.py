@@ -8,6 +8,7 @@ import pytest
 from mtg_toolkits.scryfall import Card
 
 from sqlalchemy import event, select
+from tests.ids import sid
 from vault.sync import sync, wanted_cards
 
 CSV = (Path(__file__).parent / "fixtures" / "collection.csv").read_bytes()
@@ -32,7 +33,7 @@ def all_cards(client, path=f"{V1}/collection/cards", **params):
 
 def card(id, name, set_code, number, finishes=("nonfoil",), **prices):
     return Card.from_json({
-        "id": id, "name": name, "set": set_code, "collector_number": number, "finishes": list(finishes),
+        "id": sid(id), "name": name, "set": set_code, "collector_number": number, "finishes": list(finishes),
         "prices": {k: str(v) for k, v in prices.items()}, "type_line": "Artifact", "artist": "Mark Tedin",
         "image_uris": {"small": f"https://img.test/{id}-s.jpg", "normal": f"https://img.test/{id}.jpg"},
         "scryfall_uri": f"https://scryfall.com/card/{set_code}/{number}",
@@ -176,7 +177,7 @@ def test_collection_items_carry_card_data_without_a_query_per_card(app, signed_i
 
     cards = {c["name"]: c for c in all_cards(signed_in)}
     sol = cards["Sol Ring"]["card"]
-    assert (sol["scryfall_id"], sol["set_code"], sol["collector_number"], sol["type_line"]) == ("sol", "c21", "263", "Artifact")
+    assert (sol["scryfall_id"], sol["set_code"], sol["collector_number"], sol["type_line"]) == (sid("sol"), "c21", "263", "Artifact")
     assert sol["image"]["normal"] == "https://img.test/sol.jpg" and sol["image"]["artist"] == "Mark Tedin"
     assert (sol["prices"]["usd"], sol["prices"]["usd_foil"], sol["prices"]["day"]) == (1.0, 3.0, "2026-09-27")
     assert all(c["card"] for c in cards.values())
@@ -706,7 +707,7 @@ def test_an_implausible_stored_price_does_not_break_a_cards_history(app, signed_
     upload(signed_in)
     with app.state.db.sessions() as db:
         sync(db, BULK, day=date(2026, 9, 27))
-        db.add(PriceSnapshot(scryfall_id="sol", day=date(2026, 9, 28), usd=float("inf"), usd_foil=float("inf")))
+        db.add(PriceSnapshot(scryfall_id=sid("sol"), day=date(2026, 9, 28), usd=float("inf"), usd_foil=float("inf")))
         db.commit()
     sol = {c["name"]: c for c in all_cards(signed_in)}["Sol Ring"]
     res = signed_in.get(sol["_links"]["self"]["href"])

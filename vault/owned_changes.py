@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from . import catalog_queries as q
 from .models import Card, Entry, Import, OraclePrice, PriceSnapshot, User
+from .prices import valid_ids
 
 MAX_LINES = 50
 MAX_REMOVED_COPIES = 25
@@ -127,7 +128,7 @@ def _printing_label(db: Session, r: Entry | Card, quantity: int | None = None, f
 
 
 def _price(db: Session, scryfall_id: str | None, oracle_id: str | None) -> float | None:
-    if scryfall_id:
+    if scryfall_id and valid_ids([scryfall_id]):
         p = db.scalar(select(PriceSnapshot).where(PriceSnapshot.scryfall_id == scryfall_id).order_by(PriceSnapshot.day.desc()))
         if p and (p.usd or p.usd_foil):
             return p.usd or p.usd_foil

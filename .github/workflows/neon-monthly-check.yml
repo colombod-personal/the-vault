@@ -1,0 +1,33 @@
+name: neon-monthly-check
+# On the 1st of every month: open a reminder issue to read Neon's compute hours, network transfer and restore history in the Neon
+# console (jobs/budget_alert.py, docs/catalog-design.md "Neon budget"). Those cannot be read from the database, and are tracked
+# automatically only when the owner has created a Neon API key (secret NEON_API_KEY, variable NEON_PROJECT_ID in the
+# vercel-production environment: see jobs/neon_usage.py). This workflow holds no secret: only `issues: write` and the run's own token.
+on:
+  schedule:
+    - cron: "23 7 1 * *"
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  remind:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19 (#180); move deliberately
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.12"
+      - run: pip install --require-hashes --no-deps -r jobs/requirements-ops.txt  # httpx, hash-checked
+      - name: Open the monthly check issue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          MONTHLY: "yes"
+        run: python -m jobs.budget_alert --from-env

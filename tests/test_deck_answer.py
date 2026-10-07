@@ -18,10 +18,11 @@ def test_each_card_says_which_section_it_is_in_and_the_prices_say_their_day(sign
 def test_the_prices_say_the_day_they_are_from(signed_in, app):
     from datetime import date
 
+    from tests.ids import sid
     from vault.models import PriceSnapshot
 
     with app.state.db.sessions() as db:
-        db.add(PriceSnapshot(scryfall_id="p-1", day=date(2026, 10, 5), usd=1.0))
+        db.add(PriceSnapshot(scryfall_id=sid("p-1"), day=date(2026, 10, 5), usd=1.0))
         db.commit()
     saved = signed_in.post(f"{V1}/decks", json={"name": "Elves", "text": TEXT}).json()
     assert signed_in.get(f"{V1}/decks/{saved['id']}").json()["coverage"]["priced_as_of"] == "2026-10-05"
@@ -39,17 +40,18 @@ def test_every_missing_card_has_a_price_and_the_day_that_price_is_from(signed_in
     """#96: 'dated price per missing card' - each line says its own day, not only the coverage's priced_as_of."""
     from datetime import date
 
+    from tests.ids import sid
     from vault.models import Card, PriceSnapshot
 
     with app.state.db.sessions() as db:
-        db.add_all([Card(scryfall_id="sol-1", name="Sol Ring", set_code="C21", collector_number="263"),
-                    Card(scryfall_id="elf-1", name="Llanowar Elves", set_code="DOM", collector_number="168"),
-                    Card(scryfall_id="elf-2", name="Llanowar Elves", set_code="M19", collector_number="314")])
+        db.add_all([Card(scryfall_id=sid("sol-1"), name="Sol Ring", set_code="C21", collector_number="263"),
+                    Card(scryfall_id=sid("elf-1"), name="Llanowar Elves", set_code="DOM", collector_number="168"),
+                    Card(scryfall_id=sid("elf-2"), name="Llanowar Elves", set_code="M19", collector_number="314")])
         db.flush()
-        db.add_all([PriceSnapshot(scryfall_id="sol-1", day=date(2026, 10, 5), usd=1.5),
-                    PriceSnapshot(scryfall_id="elf-1", day=date(2026, 10, 3), usd=0.4),
-                    PriceSnapshot(scryfall_id="elf-1", day=date(2026, 10, 1), usd=0.1),  # older: the latest row is the price
-                    PriceSnapshot(scryfall_id="elf-2", day=date(2026, 10, 4), usd=0.3)])
+        db.add_all([PriceSnapshot(scryfall_id=sid("sol-1"), day=date(2026, 10, 5), usd=1.5),
+                    PriceSnapshot(scryfall_id=sid("elf-1"), day=date(2026, 10, 3), usd=0.4),
+                    PriceSnapshot(scryfall_id=sid("elf-1"), day=date(2026, 10, 1), usd=0.1),  # older: the latest row is the price
+                    PriceSnapshot(scryfall_id=sid("elf-2"), day=date(2026, 10, 4), usd=0.3)])
         db.commit()
     saved = signed_in.post(f"{V1}/decks", json={"name": "Elves", "text": TEXT}).json()
     for detail in ("cards", "summary"):

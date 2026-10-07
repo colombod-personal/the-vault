@@ -14,6 +14,7 @@ provenance, never presented as the Vault's own. Pages that could not be read are
 | Cardmarket price guide | Prices | **Not used** | Their API is closed to new applications (help centre, 2026-10-07); the terms are behind a bot check and **have not been read** (owner step in "Shops" below) |
 | Card Kingdom price list | Prices | **Not used** | `api.cardkingdom.com/api/pricelist` answers publicly, but the terms (read 2026-10-07) forbid robots and data extraction except search engines following robots.txt, and robots.txt disallows `/api/`: needs Card Kingdom's permission |
 | Magic Madhouse product feed | Prices, stock | **Not used** | Offered to affiliate partners: a full product feed, Google Shopping format, four times a day (affiliate page, 2026-10-07). Its terms forbid copying or exploiting the site without written permission, "granted either directly or through a legitimate reselling programme". Joining is the owner's decision; no commission rate is published on the page |
+| Wizards Commander Brackets and Game Changers list | The bracket hint in `deck_stats` (`vault/brackets.py`) | **Read once, thresholds kept in code** (2026-10-07, #171); the pages are re-checked every night (`tests/conformance`) | The brackets are Wizards' published rules, cited with links as sources of the computed hint; the Game Changers flag comes from Scryfall's card data |
 | Archidekt | Public decks | **Used, read only**: one public deck when a person asks, credited with a link back | The Vault only reads, never writes, and does not crawl or search (see `compliance.md`) |
 | Moxfield | Decks | **Not used for fetching** | Terms of Service read first-hand 2026-10-07: no "robot, spider or other automatic device" and no manual copying without written approval; no API policy is published (see `compliance.md`) |
 | EDHREC | Aggregates | **Not used for fetching** | Terms do not permit automated access (see `compliance.md`) |
@@ -56,8 +57,19 @@ rejects a line shape, the fix is in `vault/shopping.py` (`STORES`, `render`) and
   provenance (Commander Spellbook, link to each combo's page, as-of) and no claim of our own.
 - To revisit: ask the Commander Spellbook maintainers (Discord) whether a nightly copy is welcome.
   Ingestion is worth it only with their consent; until then a call per request is the safe option.
-- Their client needs a descriptive `User-Agent`, a timeout, a small rate limit and a circuit
-  breaker so a slow upstream never slows the Vault.
+- Their client (`vault/combos.py`) sends a descriptive `User-Agent`, has a 15 s timeout, and **since #20** a rate limit and
+  a circuit breaker, so a slow upstream never slows the Vault and a busy day cannot flood a volunteer-run service:
+  - **Rate limit:** at most 20 calls a minute from one server process (sliding window). The 21st gets `503` with
+    `Retry-After`, and no request goes to Commander Spellbook.
+  - **Circuit breaker:** after 3 failures in a row (timeouts, 5xx, 429, an answer in an unexpected shape) the client stops
+    calling for 60 s (`503` with `Retry-After`); then one probe call decides: success closes the breaker, failure reopens it for
+    twice as long, up to 5 minutes. An upstream `Retry-After` on a 429 opens it at once for that long. A refusal of our own
+    request (another 4xx) is not counted as the service failing. Everything else in the Vault keeps working meanwhile.
+  - **Limits of the guard, honestly:** both are per process. Each warm serverless instance counts on its own, so the real ceiling
+    is 20 a minute times the number of instances, and a breaker opened in one instance does not stop another. A shared counter
+    in Postgres would fix that and was not built because one Vault instance is what runs today. The numbers are ours (Commander
+    Spellbook publishes no limit that we found); tested against the twin's scripted failures (`tests/test_combos.py`), not
+    against a real overload, which was never provoked.
 
 ## Shops: links, terms and price feeds (issue #80)
 

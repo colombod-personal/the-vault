@@ -24,9 +24,10 @@ insert text only.
 
 ```bash
 # 1. Postgres 14+ with the pg_trgm extension (Docker's postgres:16 has it)
-# 2. real data: download Scryfall's oracle-cards, rulings, oracle-tags bulk files and the Comprehensive Rules .txt, then
-DATABASE_URL=postgresql://... python -m jobs.sync_catalog --sources oracle_cards,rulings,oracle_tags,rules \
-  --file oracle_cards=oracle-cards.jsonl.gz --file rulings=rulings.jsonl.gz --file oracle_tags=oracle-tags.jsonl.gz --file rules=cr.txt
+# 2. real data: download Scryfall's oracle-cards, rulings and oracle-tags bulk files, then (the Comprehensive Rules are not loaded: the
+#    server reads them live from Wizards, docs/rules-index.md; the job refuses a "rules" source)
+DATABASE_URL=postgresql://... python -m jobs.sync_catalog --sources oracle_cards,rulings,oracle_tags \
+  --file oracle_cards=oracle-cards.jsonl.gz --file rulings=rulings.jsonl.gz --file oracle_tags=oracle-tags.jsonl.gz
 CATALOG_SOURCES=oracle_prices DATABASE_URL=... python -m jobs.sync_prices      # downloads default-cards (about 75 MB)
 # 3. run it and sign in (DEV_LOGIN=1 gives a "Local dev sign-in" button), then create a token in the account panel
 DEV_LOGIN=1 DATABASE_URL=... uvicorn --factory vault.app:create_app --port 8010
