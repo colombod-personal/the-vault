@@ -432,3 +432,52 @@ def test_the_pool_state_is_readable():
     state = observability.pool_state(engine)
     assert state == {"size": 6, "checked_out": 0, "overflow": -6, "max_overflow": 14}
     engine.dispose()
+
+
+def test_a_caller_that_gives_up_is_logged_with_how_long_it_waited_not_as_a_server_error(loaded_agent, app, monkeypatch, caplog):
+    from starlette.requests import ClientDisconnect
+
+    signed_in, token = loaded_agent
+
+    def gone(*args, **kwargs):
+        raise ClientDisconnect()
+
+    monkeypatch.setattr("vault.api.catalog_api.q.find_card", gone)
+    with TestClient(app, raise_server_exceptions=False) as bot, caplog.at_level(logging.INFO, logger="vault.access"):
+        bot.get(f"{V1}/catalog/cards", params={"name": "Lightning Bolt"}, headers=auth(token))
+    events = [json.loads(r.getMessage())["event"] for r in caplog.records if r.name == "vault.access"]
+    assert "client_disconnected" in events and "unhandled_exception" not in events
+
+
+def test_five_oauth_connected_agents_in_parallel_on_a_pool_of_one(database_url, monkeypatch):
+    """Claude and ChatGPT connect with OAuth, not a personal token: the same parallel use through the twin MCP client."""
+    from twins import Universe
+    from twins.mcp_client import McpClient
+
+    monkeypatch.setenv("DB_POOL_SIZE", "1")
+    monkeypatch.setenv("DB_MAX_OVERFLOW", "0")
+    monkeypatch.setenv("DB_POOL_TIMEOUT", "5")
+    settings = Settings(database_url=database_url, session_secret="test", dev_login=True, base_url="http://testserver",
+                        google_client_id="google-web", google_client_secret="x", oauth_rate_limit=1000, oauth_register_rate_limit=1000,
+                        oauth_fetch_limit=100_000, oauth_fetch_ip_limit=100_000)
+    universe = Universe()
+    universe.register_vault(settings)
+    app = create_app(settings, serve_static=False, transport=universe.transport, resolver=universe.resolve)
+    try:
+        load(app)
+        agents = []
+        for i in range(5):
+            agent = McpClient(lambda: TestClient(app), universe.client_hosts.publish(path=f"/oauth/client{i}.json"))
+            agent.connect()
+            agents.append(agent)
+        calls = [("get_card_oracle", {"name": "Lightning Bolt"}), ("search_rules", {"query": "sample rule"}), ("get_rule", {"number": "100.1"}),
+                 ("list_decks", {})]
+
+        def run(agent):
+            return [agent.tool(name, **args)["result"]["isError"] for name, args in calls * 3]
+
+        with ThreadPoolExecutor(5) as pool:
+            results = list(pool.map(run, agents))
+        assert results == [[False] * 12] * 5
+    finally:
+        app.state.db.engine.dispose()

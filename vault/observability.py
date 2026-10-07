@@ -8,6 +8,7 @@ object on the ``vault.access`` logger with an ``event`` and a ``request_id``, fo
 * ``server_error`` (a warning): an answer of 500 or more that was not an exception (a 503 for a busy pool).
 * ``unhandled_exception`` (an error): the exception's class, its cause's class, the SQLSTATE when it is a database error, and
   where in the Vault's code it came from (file, function, line), the route, the duration and the pool.
+* ``client_disconnected`` (a warning): the caller gave up before it was answered, and how long it had waited.
 * ``db_connect_retry`` and ``migration_deferred`` (warnings): a database connection that was refused and tried again.
 
 ``request_id`` is Vercel's ``x-vercel-id`` when there is one (so a line is found from Vercel's own request log, and the
@@ -102,6 +103,17 @@ def log_unhandled(request, exc: BaseException) -> str:
           duration_ms=round((time.perf_counter() - started) * 1000) if started else None,
           pool=pool_state(engine) if engine is not None else {}, **describe(exc))
     return rid
+
+
+def log_client_gone(request) -> None:
+    """The caller closed the connection before the request was answered: how long it had waited is what tells a slow answer
+    from one that was never going to come ("server isn't responding" is what an agent says when it gives up)."""
+    state = state_of(request.scope)
+    started = state.get("started")
+    engine = getattr(getattr(request.app.state, "db", None), "engine", None)
+    event(logging.WARNING, "client_disconnected", request_id=state.get("request_id"), route=route_of(request.scope),
+          method=request.method, waited_ms=round((time.perf_counter() - started) * 1000) if started else None,
+          pool=pool_state(engine) if engine is not None else {})
 
 
 class Observe:

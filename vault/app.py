@@ -16,14 +16,12 @@ from starlette.middleware.gzip import GZipMiddleware
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-import logging
-import threading
-
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.exc import TimeoutError as SATimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.requests import ClientDisconnect
 
 from . import auth as auth_module
 from . import observability
@@ -106,7 +104,7 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
     @app.exception_handler(SATimeoutError)
     async def busy(request: Request, exc: SATimeoutError):
         """Every database connection of this instance was busy for the whole wait: say so (and when to retry)."""
-        rid = observability.log_unhandled(request, exc)
+        observability.log_unhandled(request, exc)
         return unavailable(request, "The Vault is busy right now. Try again in a few seconds.")
 
     @app.exception_handler(OperationalError)
@@ -114,13 +112,16 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
     async def database_unreachable(request: Request, exc: Exception):
         """The database refused or dropped the connection even after the retries (Neon waking from suspend, its connection
         limit, a network blip): a 503 that says to try again, never a 500."""
-        rid = observability.log_unhandled(request, exc)
+        observability.log_unhandled(request, exc)
         return unavailable(request, "The Vault could not reach its database just now. Try again in a few seconds.")
 
     @app.exception_handler(Exception)
     async def unexpected(request: Request, exc: Exception):
         """Anything nobody planned for: logged under the request id (class, route, duration, pool: no message, no data) and
         answered with a document that tells the caller to try again and which request to quote."""
+        if isinstance(exc, ClientDisconnect):  # the caller gave up before it was answered: nobody to answer, but worth a line
+            observability.log_client_gone(request)
+            return Response(status_code=499)
         rid = observability.log_unhandled(request, exc)
         detail = f"Something went wrong on the Vault's side. Try again in a few seconds; if it keeps happening, quote request {rid}."
         if request.url.path == mcp.PATH:
