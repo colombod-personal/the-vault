@@ -24,6 +24,8 @@ Rules, cards and prices - how to answer:
 - Every result has `provenance`. Pass it on: say the material is Scryfall's or Wizards' (the Fan Content
   notice in it must be repeated when you show rules or card text), and that figures marked `computed`
   were worked out by the Vault from the sources it lists. Never present source material as the Vault's own.
+- The Vault is an unofficial fan project, not approved or endorsed by Wizards of the Coast, Scryfall, Archidekt or
+  Commander Spellbook. Say so if asked who made a card, rule or price, and never speak for any of them.
 - Roles ("ramp", "removal") are Scryfall Tagger tags, a community's opinion. Popularity (EDHREC rank)
   is not power. Prices are dated and come from Scryfall; they are not a store's price today.
 - Budgets and legality are enforced by the Vault: before you present a list of changes, call
@@ -72,10 +74,12 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              {"name": {"type": "string", "minLength": 1, "maxLength": 300, "description": "Exact card name"},
               "oracle_id": {"type": "string", "minLength": 36, "maxLength": 36}},
              path=lambda a: f"{V1}/catalog/cards", query=("name", "oracle_id"), provenance=("catalog",), ui="card"),
-        Tool("get_rulings", "A card's rulings (Wizards' text via Scryfall), newest first, at most 25.",
+        Tool("get_rulings", "A card's rulings (Wizards' text via Scryfall), newest first, at most 25 a page. More "
+             "remain when `next_offset` is not null: pass it back as `offset` to read the next page.",
              {"oracle_id": {"type": "string", "minLength": 36, "maxLength": 36, "description": "From get_card_oracle"},
-              "limit": {"type": "integer", "minimum": 1, "maximum": 25, "default": 25}}, ["oracle_id"],
-             path=lambda a: f"{V1}/catalog/cards/{quote(a['oracle_id'], safe='')}/rulings", query=("limit",), provenance=("catalog",)),
+              "limit": {"type": "integer", "minimum": 1, "maximum": 25, "default": 25},
+              "offset": {"type": "integer", "minimum": 0, "maximum": 10000, "default": 0, "description": "Skip this many of the newest rulings"}}, ["oracle_id"],
+             path=lambda a: f"{V1}/catalog/cards/{quote(a['oracle_id'], safe='')}/rulings", query=("limit", "offset"), provenance=("catalog",)),
         Tool("search_rules", "Search the Comprehensive Rules for a topic (e.g. 'replacement effect damage'); best matches "
              "first, at most 10, each with its number and the edition. A keyword ability or glossary term in the query puts "
              "its defining rules first. The rules are read live from Wizards of the Coast's current edition.",

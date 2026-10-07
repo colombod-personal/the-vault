@@ -47,6 +47,8 @@ class RulingsOut(BaseModel):
     oracle_id: str
     rulings: list[dict]
     total: int
+    offset: int = 0
+    next_offset: int | None = None
     provenance: list[prov.Provenance]
     links: dict = Field(default_factory=dict, alias="_links")
 
@@ -251,13 +253,14 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
                 "provenance": edition.provenance(), "_links": {"self": link(f"{V1}/catalog/walkthrough")}}
 
     @router.get("/cards/{oracle_id}/rulings", response_model=RulingsOut, response_model_by_alias=True,
-                summary="A card's rulings (Wizards' text via Scryfall), newest first, at most 25")
+                summary="A card's rulings (Wizards' text via Scryfall), newest first, at most 25 a page; offset pages on")
     def rulings(oracle_id: Annotated[str, Path(min_length=36, max_length=36)], limit: int = Query(default=25, ge=1, le=q.MAX_RULINGS),
-                user=Depends(access), db: Session = Depends(get_db)) -> dict:
+                offset: int = Query(default=0, ge=0, le=10000), user=Depends(access), db: Session = Depends(get_db)) -> dict:
         if db.get(q.OracleCard, oracle_id) is None:
             raise HTTPException(404, "No card with that Oracle id")
-        items, total = q.rulings_for(db, oracle_id, limit)
-        return {"oracle_id": oracle_id, "rulings": items, "total": total, "provenance": q.provenance_for(db, "rulings"),
+        items, total = q.rulings_for(db, oracle_id, limit, offset)
+        return {"oracle_id": oracle_id, "rulings": items, "total": total, "offset": offset,
+                "next_offset": offset + len(items) if offset + len(items) < total else None, "provenance": q.provenance_for(db, "rulings"),
                 "_links": {"self": link(f"{V1}/catalog/cards/{oracle_id}/rulings")}}
 
     @router.get("/rules/search", response_model=RuleSearchOut, response_model_by_alias=True,

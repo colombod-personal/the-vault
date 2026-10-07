@@ -200,3 +200,21 @@ def test_status_and_whoami_report_the_live_rules_edition_even_on_a_cold_server(s
     app.state.rules_live.reset(universe.transport)  # cold again, and Wizards is down: no edition, and no failure
     down = signed_in.get(f"{V1}/status")
     assert down.status_code == 200 and down.json()["rules_version"] is None
+
+
+def test_rulings_page_on_with_offset_so_the_oldest_ones_can_be_read(loaded):
+    """#23: a card with 30 rulings used to show 25 and hide the other five for good."""
+    first = loaded.get(f"{V1}/cards/{BOLT}/rulings", params={"limit": 25}).json()
+    assert first["next_offset"] == 25 and first["offset"] == 0
+    rest = loaded.get(f"{V1}/cards/{BOLT}/rulings", params={"limit": 25, "offset": first["next_offset"]}).json()
+    assert len(rest["rulings"]) == 5 and rest["next_offset"] is None
+    seen = {r["comment"] for r in first["rulings"]} | {r["comment"] for r in rest["rulings"]}
+    assert len(seen) == 30 and "Ruling number 0 about the bolt’s target." in seen
+
+
+def test_a_real_quote_from_the_oldest_ruling_verifies(loaded):
+    """#25: verify_citation only read the newest 25 rulings, so a genuine quote from an older one was called unverified."""
+    old = loaded.post(f"{V1}/verify-citation", json={"kind": "ruling", "ref": "Lightning Bolt", "quote": "Ruling number 0 about the bolt's target."}).json()
+    assert old["verified"] is True and old["detail"]["ruling"]["published_at"] == "2010-01-01"
+    bad = loaded.post(f"{V1}/verify-citation", json={"kind": "ruling", "ref": "Lightning Bolt", "quote": "Ruling number 99 about nothing."}).json()
+    assert bad["verified"] is False and bad["detail"]["rulings_checked"] == 30

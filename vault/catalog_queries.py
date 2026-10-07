@@ -74,12 +74,12 @@ def card_body(card: OracleCard) -> dict:
     }
 
 
-def rulings_for(db: Session, oracle_id: str, limit: int = MAX_RULINGS) -> tuple[list[dict], int]:
-    """Rulings for one card, newest first, capped. Returns (rulings, total)."""
+def rulings_for(db: Session, oracle_id: str, limit: int = MAX_RULINGS, offset: int = 0) -> tuple[list[dict], int]:
+    """Rulings for one card, newest first, one page at a time (``offset`` skips the newest ones). Returns (rulings, total)."""
     limit = max(1, min(limit, MAX_RULINGS))
     total = db.scalar(select(func.count()).select_from(Ruling).where(Ruling.oracle_id == oracle_id)) or 0
     rows = db.scalars(select(Ruling).where(Ruling.oracle_id == oracle_id)
-                      .order_by(Ruling.published_at.desc().nulls_last(), Ruling.id).limit(limit)).all()
+                      .order_by(Ruling.published_at.desc().nulls_last(), Ruling.id).limit(limit).offset(max(0, offset))).all()
     return [{"published_at": r.published_at.isoformat() if r.published_at else None, "source": r.source,
              "comment": r.comment} for r in rows], total
 
@@ -114,10 +114,16 @@ def verify_citation(db: Session, kind: str, ref: str, quote: str, version: str |
     if kind == "oracle_text":
         ok = wanted in _squash(card.oracle_text or "")
         return {"verified": ok, "card": card.name, "source_text": None if ok else card.oracle_text}
-    rulings, _ = rulings_for(db, card.oracle_id)
+    rulings = []  # every ruling the card has, not only the newest page: a real quote from an old ruling must verify (#25)
+    while True:
+        page, total = rulings_for(db, card.oracle_id, MAX_RULINGS, len(rulings))
+        rulings += page
+        if not page or len(rulings) >= total:
+            break
     hit = next((r for r in rulings if wanted in _squash(r["comment"])), None)
     return {"verified": hit is not None, "card": card.name, "ruling": hit,
-            "source_text": None if hit else [r["comment"] for r in rulings[:5]]}
+            "source_text": None if hit else [r["comment"] for r in rulings[:5]],
+            "rulings_checked": len(rulings)}
 
 
 # -- versions -----------------------------------------------------------------------------------

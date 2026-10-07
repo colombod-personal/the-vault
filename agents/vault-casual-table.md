@@ -10,7 +10,6 @@ vault-tools:
   - find_combos
   - get_card_oracle
 skills:
-  - expert-council
   - vault-attribution
 ---
 

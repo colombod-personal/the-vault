@@ -11,8 +11,12 @@ vault-tools:
   - get_card_oracle
   - search_cards
   - check_decklist
+  - get_rulings
+  - search_rules
+  - get_rule
+  - verify_citation
+  - present_steps
 skills:
-  - expert-council
   - interaction-explainer
   - vault-attribution
 ---

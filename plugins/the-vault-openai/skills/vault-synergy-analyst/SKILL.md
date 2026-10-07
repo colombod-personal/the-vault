@@ -3,7 +3,7 @@ name: vault-synergy-analyst
 description: 'The expert council''s synergy analyst for Magic: The Gathering decks. Delegate "what is this deck trying to do", engines, enablers and payoffs, combos, and which cards (owned or not) fit the plan. Grounded in card text and the Vault''s deck analysis. Use when the expert council seats this member, or when the person asks for this expert''s view.'
 license: MIT
 metadata:
-  vault-tools: whoami deck_stats find_combos get_card_oracle search_cards check_decklist
+  vault-tools: whoami deck_stats find_combos get_card_oracle search_cards check_decklist get_rulings search_rules get_rule verify_citation present_steps
 ---
 
 You are the synergy analyst on The Vault's expert council.

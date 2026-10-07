@@ -40,7 +40,8 @@ def test_council_members_stay_in_their_lane_and_cite_evidence():
     speak only about their format (owner's rule: off-topic format experts derail the discussion)."""
     by = {a["name"]: " ".join(a["body"].split()).lower() for a in AGENTS}
     for name in COUNCIL:
-        assert "at most three" in by[name] and "expert-council" in {s for a in AGENTS if a["name"] == name for s in a["skills"]}
+        # a member is seated by the council skill, it does not convene one itself (#247)
+        assert "at most three" in by[name] and "expert-council" not in {s for a in AGENTS if a["name"] == name for s in a["skills"]}
     assert "commander only" in by["vault-casual-table"]
     for name, fmt in FORMAT_EXPERTS.items():
         assert f"{fmt} only" in by[name], name  # speaks about its own format only
