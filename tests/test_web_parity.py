@@ -92,11 +92,11 @@ def tool(bot, token, name, /, **args):
 
 
 def strip(answer: dict) -> dict:
-    """The numbers: an answer without its links and provenance blocks and the saved deck's id and name (they name the
+    """The numbers: an answer without its links and provenance blocks and the saved deck's id, name and where it came from: link, author, fetched_at (they name the
     request or the copy, not the deck's contents). Everything else, the overview included, must be equal."""
     out = {k: v for k, v in answer.items() if k not in ("provenance", "_links")}
     if isinstance(out.get("deck"), dict):
-        out["deck"] = {k: v for k, v in out["deck"].items() if k not in ("id", "name")}
+        out["deck"] = {k: v for k, v in out["deck"].items() if k not in ("id", "name", "url", "author", "fetched_at", "source", "credit")}
     return out
 
 
