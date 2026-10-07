@@ -30,7 +30,7 @@ This is an engineering document, not legal advice: have the privacy notice
 | `api_sessions` | yes | signed-in apps: client, device name, dates, token hashes | `app_sessions.json` (no hashes) | `purge_user` |
 | `retired_refresh_tokens` | yes | hashes of already-rotated app refresh tokens, kept until they would expire, to detect a copied token | – (hashes only) | `purge_user`, and with their app session |
 | `passkeys` | yes | WebAuthn credentials: public key, name, dates (the private key never leaves the person's device) | `passkeys.json` (names and dates) | `purge_user` |
-| `oauth_grants` | yes | apps the person connected with OAuth (ChatGPT, Claude, ...): client id, scopes allowed, resource, dates, and hashes of the current access and refresh token | `connected_apps.json` (no hashes) | `purge_user`; revoking an app deletes the row |
+| `oauth_grants` | yes | one row per connection of an app the person connected with OAuth (ChatGPT, Claude, ...; each device or re-add is one): client id, scopes allowed, resource, dates, and hashes of the current access and refresh token | `connected_apps.json` (one entry per connection, no hashes) | `purge_user`; disconnecting an app deletes all its rows; a connection nobody refreshes stops working after 30 days and its row is deleted the next time the person opens Connected apps or anyone connects an app |
 | `oauth_retired_refresh_tokens` | yes | hashes of already-rotated OAuth refresh tokens, kept until they would expire, to detect a copied token | – (hashes only) | `purge_user`, and with their grant |
 | `oauth_consents` | yes | a consent screen shown and not yet answered: hash of a one-time nonce, the authorization request (client, redirect URI, scopes), 10 minutes | – (expire in minutes) | `purge_user`; deleted when answered or expired |
 | `oauth_codes` | yes | one-time authorization codes (hash, client, redirect URI, challenge; 60 seconds) | – (expire in a minute) | `purge_user`; deleted when expired |
@@ -65,7 +65,7 @@ per-user table:
 - `tests/test_tenancy.py` covers the cross-tenant cases. Extend it with every new
   endpoint that takes an id.
 
-- OAuth grants are listed and revoked by their owner only (`/api/v1/me/apps`, 404 otherwise) and, like personal access
+- OAuth grants are listed (grouped by app) and revoked by their owner only (`/api/v1/me/apps`, 404 otherwise) and, like personal access
   tokens, never carry account-level powers (`docs/mcp-oauth-threat-model.md`).
 
 ## Rights, and where they're implemented
