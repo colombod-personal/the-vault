@@ -7,7 +7,7 @@ provenance, never presented as the Vault's own. Pages that could not be read are
 | Source | Use | Status | Reason |
 |---|---|---|---|
 | Scryfall `oracle_cards`, `rulings`, `oracle_tags`, `default_cards` | Catalog, rulings, tags, cheapest prices | **Built, off by default** (`CATALOG_SOURCES`) | Terms to be read directly before enabling (compliance gate, #62) |
-| Wizards Comprehensive Rules | Rules text and search | **Parser and loader built, off by default** | Needs Wizards' permission or a decision to link and excerpt only (#62) |
+| Wizards Comprehensive Rules | Rules text and search | **Read live, nothing stored** (`vault/rules_live.py`; owner decision 2026-10-05, #142) | Cited one rule at a time with its number, the edition date, the Fan Content notice and a link; the file is fetched into memory per instance (`docs/rules-index.md`) |
 | Commander Spellbook | Combos for a deck | **On demand, no ingestion** (built in M2, `find_combos`) | Code is MIT, but no data licence was found; so no copy of their data is stored |
 | Cardmarket price guide | Prices | **Not used** | Their API is closed to new applications; the site is behind a bot check (2026-10-05), so its terms could not be read by a tool: the owner reads them |
 | Card Kingdom price list | Prices | **Not used** | `api.cardkingdom.com/api/pricelist` answers publicly, but the terms (read 2026-10-05) forbid robots and data extraction except search engines following robots.txt, and robots.txt disallows `/api/`: needs Card Kingdom's permission |

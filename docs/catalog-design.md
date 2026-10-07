@@ -39,8 +39,7 @@ All keys follow the existing schema: Scryfall ids as `varchar(36)`. Names are pr
 |---|---|---|
 | `oracle_cards` | `oracle_id` | name, layout, mana cost, cmc, type line, Oracle text, P/T/loyalty/defense, colors, color identity, keywords, produced mana, legalities (jsonb), game_changer, edhrec_rank, released_at, faces (jsonb, per-face text), Scryfall URI, representative printing id (for images), digital flag |
 | `rulings` | serial id; index on `oracle_id` | oracle_id, published_at, source (`wotc` or `scryfall`), comment |
-| `rules_versions` | `version` (CR effective date) | effective date, source URL, fetched_at |
-| `rules` | `(version, number)` | rule number (e.g. `613.1`), text, parent number, kind (rule, subrule, glossary) |
+| ~~`rules_versions`~~, ~~`rules`~~ | | **Not built; dropped by migration 0104.** The Comprehensive Rules are read live from Wizards and nothing of them is stored (owner decision 2026-10-05, #142; `docs/rules-index.md`) |
 | `oracle_tags` | tag id | slug, label, description, parent_ids, child_ids |
 | `oracle_tag_links` | `(tag_id, oracle_id)` | weight (strong/median/weak...). Curated subset only (see Tags) |
 | `oracle_prices` | `oracle_id` | cheapest acceptable printing id, usd, usd_foil, eur, day, source. **Current value only** (see Prices) |
@@ -63,8 +62,8 @@ Real data, Postgres 16, `VACUUM ANALYZE` done. Totals include indexes.
 | `oracle_tag_links` | 9 to 16 MB | the full 235k links measured **60 MB** with `varchar(36)` keys (32 MB with native `uuid`). A curated subset of about 586 tags and 55k links is 8.7 MB with `uuid`, roughly 16 MB with `varchar(36)` |
 | `oracle_tags` | 1.5 MB | all 4,560 tags |
 | `oracle_prices` | about 7 MB | 32,765 cards currently have a USD price |
-| `rules` (CR) | about 2 to 3 MB per version | estimate, not measured; about 3k rules plus glossary |
-| **Total, one CR version** | **about 110 to 125 MB** | |
+| ~~`rules` (CR)~~ | none | not stored any more: read live from Wizards (the estimate was 2 to 3 MB; the loaded table measured 3 MB on 2026-10-04) |
+| **Total** | **about 110 to 125 MB** (about 108 to 122 MB without the stored rules) | |
 
 Neon's free plan (checked 2026-10-04 against [Neon's FAQ](https://neon.com/faqs/free-plan-limits-and-quotas))
 gives **1 GB of storage per project** (the README said 0.5 GB; corrected), so the catalog is about an eighth
@@ -253,10 +252,10 @@ Findings that shape the design:
 
 - Rulings: loaded as-is, source preserved (`wotc` vs `scryfall`). Tools return the verbatim comment,
   date and source so quotes can be verified.
-- Comprehensive Rules ([#16](https://github.com/colombod-personal/the-vault/issues/16)): parse the
-  official text into numbered rows and keep each version (`rules_versions`). An answer records which
-  CR version it used, so a cited rule stays reproducible after the next update. **Open item:** check
-  Wizards' terms for reusing the CR text and how to credit it.
+- Comprehensive Rules ([#16](https://github.com/colombod-personal/the-vault/issues/16)): **not stored.** The first design parsed the official
+  text into rows and kept each version; the owner decided instead (2026-10-05, #142) to read the current edition live from Wizards
+  (`vault/rules_live.py`, `docs/rules-index.md`). An answer records which edition it used (its effective date) and links Wizards' document,
+  and Wizards, the Comprehensive Rules and the Fan Content notice are credited on `public/credits.html`.
 - Search: Postgres full-text (`to_tsvector('english', ...)`) as expression indexes, plus a
   trigram index on card names for typos. No extra services.
 
@@ -329,7 +328,7 @@ Proposed, still to confirm:
 
 ## Measured with the real loaders
 
-On 2026-10-04 the loaders were run on the real bulk files into Postgres 16: first load 39 seconds (36,462 oracle cards, 79,663 rulings, 4,560 tags with 55,557 links, 4,062 Comprehensive Rules rows); a repeat load with no changes 6 seconds and **zero rows written**. Sizes: oracle_cards 55 MB, rulings 34 MB, oracle_tag_links 16 MB, rules 3 MB, oracle_tags 3 MB; about 111 MB of the catalog in a 120 MB database. This matches the estimate above. Real data also caught one mistake in the first draft: glossary terms need a rule-number column of 120 characters, not 20.
+On 2026-10-04 the loaders were run on the real bulk files into Postgres 16: first load 39 seconds (36,462 oracle cards, 79,663 rulings, 4,560 tags with 55,557 links, and 4,062 Comprehensive Rules rows, which are no longer loaded: see "Rulings and rules"); a repeat load with no changes 6 seconds and **zero rows written**. Sizes: oracle_cards 55 MB, rulings 34 MB, oracle_tag_links 16 MB, rules 3 MB, oracle_tags 3 MB; about 111 MB of the catalog in a 120 MB database. This matches the estimate above. Real data also caught one mistake in the first draft: glossary terms need a rule-number column of 120 characters, not 20.
 
 ## Multi-faced cards: who reads what (audit for #197, 2026-10-07)
 
