@@ -127,3 +127,15 @@ from that list, never recalled, and the answer says what the read returned. This
 - Before writing a doc, a design, an issue or a script, search the repository and the issue (and its epic) for one that already exists, and
   extend it. Never overwrite a file you have not read: `git status` showing a file as modified that you thought was new means stop
   (`docs/collections.md` was overwritten once this way).
+
+### Picking, claiming and finishing work (these rules live here; `docs/triage.md` only explains the labels)
+
+Rules that bind an agent are written in this file, because this is the file it reads. A rule that exists only in a `docs/` page does not bind anyone.
+
+1. **Look before you start:** list the open issues and pull requests (`gh issue list`, `gh pr list`) and check for overlap and for work already claimed.
+2. **Pick only `status:ready`**, highest priority first, not `waiting-owner`. Never implement `status:needs-refinement` (help refine it: research, a draft in a PR, questions in a comment); skip `status:blocked`.
+3. **Claim before working** (section 8, step 1) and release the claim when the work stops.
+4. **Close with evidence** (section 8, steps 4 and 5): what merged, how it was checked, what is left.
+5. **File what you find:** a defect found while working gets its own issue with area, type, status, priority and milestone, linked to the work that found it.
+6. **Epics hold sub-issues** (GitHub sub-issues, "blocked by" for order); an epic stays open until its last item closes.
+7. **`waiting-owner` means the owner is the only one who can do the one thing left.** Read the issue and its epic before applying it, say the exact step, and put a decision that many issues wait on in one place (the sign-off issue), not in many threads.
