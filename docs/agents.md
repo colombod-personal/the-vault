@@ -97,7 +97,9 @@ shopping, collection, Archidekt helper, expert council) and the experts, so they
 ## MCP
 
 Stateless Streamable HTTP. Each JSON-RPC request gets one `application/json` answer, with no
-session id and no SSE, which fits serverless hosting. Protocol versions 2025-06-18, 2025-03-26
+server-side session and no SSE, which fits serverless hosting. `initialize` answers with a signed
+`Mcp-Session-Id` that only records whether the client advertised the MCP Apps extension (`docs/mcp-apps.md`);
+clients that never send it back are served as before. Protocol versions 2025-06-18, 2025-03-26
 and 2024-11-05 are supported. It was tested with the official MCP Python SDK client. A JSON-RPC
 batch (older protocol versions) holds 1 to 20 calls; an empty or larger one is refused (`-32600`).
 

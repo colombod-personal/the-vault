@@ -36,6 +36,10 @@ Microsoft's `amplifier-bundle-digital-twin-universe`.
 - **Archidekt decks are as heavy as real ones**: the twin sends every field of the real API (captured 2026-10-06 in
   `tests/fixtures/archidekt_real_keys.json`: 30 deck fields, 36 card-analysis fields, 27 price fields from Card Kingdom,
   Cardmarket and other shops), about 2 KB a card, so tests meet the size and the shop prices real answers carry.
+- **MCP Apps capability.** `McpClient.initialize(capabilities)` does the handshake as a Streamable HTTP client does (keeps the
+  `Mcp-Session-Id`, sends it back) and `APPS_CAPABILITIES` is what the ext-apps specification (2026-01-26) says a host puts in
+  `initialize`. Not yet a recording of claude.ai or ChatGPT: the server logs what they send (`docs/mcp-apps.md`); when that is
+  captured, put it here and in a conformance check.
 - **Clients too.** `twins/mcp_client.py` is the twin of an MCP client such as ChatGPT or Claude: it hosts
   Client ID Metadata Documents (and hostile ones: documents about another client, redirects to the cloud metadata
   address, oversized or slow answers, names that resolve to private addresses) and drives the whole OAuth flow
