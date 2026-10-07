@@ -62,7 +62,7 @@ code{{background:#8881;padding:1px 4px;border-radius:3px}}li{{margin-bottom:12px
 <p>For the Claude and ChatGPT directory reviews. The Vault is a free fan tool; see the <a href="{html.escape(base_url)}/terms.html">terms</a>,
 <a href="{html.escape(base_url)}/privacy.html">privacy notice</a> and <a href="{html.escape(base_url)}/support.html">support</a> pages.</p>
 <h2>The demo account</h2>
-<p>The account is <code>{html.escape(reviewer.EMAIL)}</code>. It holds only made-up data: about 150 copies of well-known cards and two decks,
+<p>The account is <code>{html.escape(reviewer.EMAIL)}</code>. It holds only made-up data: {sum(r[1] for r in reviewer.OWNED)} copies of well-known cards and two decks,
 <em>Sliver Swarm (demo)</em> (a five-colour Commander deck led by Sliver Overlord, partly owned) and <em>Pauper Burn (demo)</em> (fully owned).
 There is no second factor, e-mail or SMS step. Connecting an app opens the Vault's sign-in page, which has a <strong>Reviewer sign-in</strong>
 box: enter the passphrase you were given in the review portal, then choose what the app may do. The account can only see its own data.</p>

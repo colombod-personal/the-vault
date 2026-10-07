@@ -170,6 +170,12 @@ def test_a_short_passphrase_stops_the_server_from_starting(database_url):
         Settings(database_url=database_url, session_secret="test", reviewer_passphrase="short").check()
 
 
+def test_the_guide_states_the_real_number_of_copies_in_the_demo_collection(app):
+    """The live page said 'about 150 copies' while the demo holds 110: the number is computed from the data, not typed."""
+    guide = TestClient(app).get("/reviewers").text
+    assert f"{sum(row[1] for row in reviewer.OWNED)} copies of well-known cards" in guide and "about 150" not in guide
+
+
 def test_every_demo_card_names_a_real_printing_and_old_demo_data_is_replaced(app):
     """The first real Claude run (2026-10-07) found every demo price at $0: the rows had no set or collector number, so Scryfall
     could not match them. Now each row carries a printing, and a demo account holding an older version is put back at sign-in."""
