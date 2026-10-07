@@ -1,4 +1,4 @@
-"""Migration 0110 compacts price_snapshots (#63): integer cents, a native uuid key, the unread column dropped.
+"""Migration 0113 compacts price_snapshots (#63): integer cents, a native uuid key, the unread column dropped.
 
 Run on a copy of real-shaped rows: Scryfall ids (random v4 UUIDs, as Scryfall's are), a date, six float prices with the
 gaps real cards have (no foil, no etched), plus the junk an old table can hold: a price above the plausible maximum, infinity,
@@ -81,7 +81,7 @@ def test_the_migration_turns_real_shaped_rows_into_cents_under_a_uuid_key_and_th
             "SELECT scryfall_id, day, usd, usd_foil, usd_etched, eur, eur_foil FROM price_snapshots WHERE day < '2026-09-20'"))}
     assert len(everything) == ROWS
 
-    alembic(database, "0110")
+    alembic(database, "0113")
     after_bytes = bytes_a_row(database)
 
     with database.engine.connect() as conn:
@@ -110,7 +110,7 @@ def test_the_migration_turns_real_shaped_rows_into_cents_under_a_uuid_key_and_th
 
 
 def test_the_primary_key_still_stops_a_second_row_for_the_same_printing_and_day(database):
-    alembic(database, "0110")
+    alembic(database, "0113")
     with database.engine.begin() as conn:
         conn.execute(text("INSERT INTO price_snapshots (scryfall_id, day, usd_cents) VALUES ('11111111-1111-4111-8111-111111111111', '2026-10-01', 5)"))
     with pytest.raises(Exception, match="price_snapshots_pkey|duplicate key"):
@@ -119,7 +119,7 @@ def test_the_primary_key_still_stops_a_second_row_for_the_same_printing_and_day(
 
 
 def test_the_app_reads_and_writes_the_new_table_in_dollars(database):
-    alembic(database, "0110")
+    alembic(database, "0113")
     with database.sessions() as db:
         db.add(PriceSnapshot(scryfall_id="22222222-2222-4222-8222-222222222222", day=date(2026, 10, 1), usd=1.23, usd_foil=4.5,
                              eur=float("inf"), usd_etched=1.7e308))
@@ -139,7 +139,7 @@ def test_the_way_back_restores_the_old_table_with_the_same_prices(database):
     fill(database)
     ids = [f"00000000-0000-4000-8000-00000000000{i}" for i in (1, 3)]
     before = old_rows(database, ids)
-    alembic(database, "0110")
+    alembic(database, "0113")
     alembic(database, "0109", "downgrade")
     with database.engine.connect() as conn:
         columns = {c: t for c, t in conn.execute(text(
@@ -152,6 +152,6 @@ def test_a_database_made_by_create_all_of_the_current_models_is_left_alone(datab
     from vault.db import Base
 
     Base.metadata.create_all(database.engine)
-    database.migrate()  # 0110 sees usd_cents and does nothing
+    database.migrate()  # 0113 sees usd_cents and does nothing
     with database.engine.connect() as conn:
         assert conn.execute(text("SELECT count(*) FROM information_schema.columns WHERE table_name = 'price_snapshots'")).scalar() == 7

@@ -3,7 +3,7 @@
 The row was a varchar(36) key, a date and six double-precision prices. It becomes a 16-byte uuid, a date and five integer
 cents columns (``eur_etched`` is gone: no reader, no screen and no export used it). Measured on 300,000 real-shaped rows
 (docs/catalog-design.md, "Price history"): about 40% fewer bytes a row. Order of the steps, their cost and how to go back are
-in docs/catalog-design.md ("Migration plan for 0110").
+in docs/catalog-design.md ("Migration plan for 0113").
 
 One transaction (Alembic's), so a failure leaves the old table untouched:
  1. delete rows whose id is not a UUID (no Scryfall printing has such an id, so no reader could ever reach them);
@@ -11,7 +11,7 @@ One transaction (Alembic's), so a failure leaves the old table untouched:
     turning a price into whole cents (and a price no import would accept, or NaN or infinity, into no price) and dropping eur_etched;
  3. rename the five price columns to ``*_cents`` (metadata only).
 
-Revision ID: 0110
+Revision ID: 0113
 Revises: 0109
 Create Date: 2026-10-07 12:00:00
 """
@@ -21,7 +21,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = '0110'
+revision = '0113'
 down_revision = '0109'
 branch_labels = None
 depends_on = None

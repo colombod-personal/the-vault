@@ -463,7 +463,7 @@ def _cents_property(column: str):
 
 class PriceSnapshot(Base):
     """One row per owned printing per day: the Scryfall prices that day, in **integer cents** (``usd_cents`` and so on), under a
-    native 16-byte ``uuid`` key. Compacted from float prices under a ``varchar(36)`` key by migration 0110 (#63): about 40% fewer
+    native 16-byte ``uuid`` key. Compacted from float prices under a ``varchar(36)`` key by migration 0113 (#63): about 40% fewer
     bytes a row, measured in docs/catalog-design.md. Readers use the dollar properties ``usd``, ``usd_foil``... (None when there
     is no price); a price no import would accept is stored as no price (``vault.prices.to_cents``). Ids that are not UUIDs
     (a user's CSV can carry anything in its id column) never match a row: see ``vault.prices.valid_ids``. ``eur_etched`` was

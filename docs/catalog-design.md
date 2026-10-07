@@ -136,7 +136,7 @@ printings; measured, it is about 0.86 GB). Two things make it dangerous on a fre
 2. **It scales with users.** Every new user who owns cards nobody else owns adds printings, and each
    one adds a row every day, forever.
 
-Computed from the measured 237 bytes a row, and from the **measured** compact row after migration 0110 (107 bytes: see
+Computed from the measured 237 bytes a row, and from the **measured** compact row after migration 0113 (107 bytes: see
 "Compaction, measured" below, which replaces the earlier estimate of about 96):
 
 | Distinct printings | Daily, 365 days (237 B) | Tiered (122 points, 237 B) | Tiered, compact (measured 107 B) |
@@ -162,18 +162,18 @@ indefinite accumulation). But the table shows one year of *daily* points still d
 2. **Thin** (owner's decision): daily points for the last 90 days; then **weekly** points for the
    next 6 months (one per ISO week, the latest day with data); then **two points a month** (the
    1st and the 15th, or the nearest day with data) for the remaining months up to 365 days.
-3. **Compact** the row (**built: migration 0110, #63**): integer cents instead of double-precision prices, a native 16-byte `uuid`
+3. **Compact** the row (**built: migration 0113, #63**): integer cents instead of double-precision prices, a native 16-byte `uuid`
    key instead of `varchar(36)`, and `eur_etched` dropped (no reader, screen or export used it). See below.
 4. **Per-user value history** (`collection_values`, one row per user per day, a few bytes) keeps the
    same one-year cap for consistency; the chart still works.
 5. Cap the number of printings priced from the union of everyone's collections only if the budget
    guardrail trips; do not decide that now.
 
-Retention and compaction are separate from the catalog (`vault/retention.py`, migration 0110) and did not block it.
+Retention and compaction are separate from the catalog (`vault/retention.py`, migration 0113) and did not block it.
 
 ### Compaction, measured (#63)
 
-Migration 0110 run on 300,000 real-shaped rows (3,000 printings x 100 days; random v4 UUIDs, prices to the cent), Postgres 16, `VACUUM ANALYZE`,
+Migration 0113 run on 300,000 real-shaped rows (3,000 printings x 100 days; random v4 UUIDs, prices to the cent), Postgres 16, `VACUUM ANALYZE`,
 the bytes a row being `pg_total_relation_size / rows` (table plus primary-key index). Reproduce with the test that checks it
 (`tests/test_price_compaction.py` prints the numbers on a smaller table and fails if the row is not at least a quarter smaller).
 
@@ -189,7 +189,7 @@ The earlier **237 bytes** (126 + 110) was not reproduced: with all six prices pr
 index of 83 against 110; the earlier index was probably built or filled differently, which was not recorded). The saving is what
 matters and it is the same in every shape tried: **43% to 47%**. These are generated rows, **not production's**: production's table is
 measured every day by the budget guard (`db_budget: tables_mb`, `price_snapshots`, in the job log), so the real before and after are the
-logged sizes of the run before and the run after the deploy that carries 0110.
+logged sizes of the run before and the run after the deploy that carries 0113.
 
 Why a `uuid` and not the 4-byte integer the first estimate assumed: an integer key needs a printing-number table and a join in every
 reader; the native uuid gets most of the saving (the key is 16 bytes instead of 37, in the table and in the index) with no new table.
@@ -197,11 +197,11 @@ The cost is that a text id that is not a UUID can no longer be a key. Scryfall's
 whatever a user's CSV had in its id column, so every reader goes through `vault.prices.valid_ids` / `uuid_sql` (a malformed id is "no
 price", never a database error), and writers skip a card whose id is not a UUID.
 
-### Migration plan for 0110 (and for the catalog tables, #14)
+### Migration plan for 0113 (and for the catalog tables, #14)
 
 | Step | What happens | Size | Time measured | Rollback |
 |---|---|---|---|---|
-| 1. Deploy | The app applies migrations at startup (`Database.migrate`, behind an advisory lock). 0110 first deletes rows whose id is not a UUID (none can come from Scryfall) | none | instant | restore from a Neon branch / point-in-time restore taken before the deploy |
+| 1. Deploy | The app applies migrations at startup (`Database.migrate`, behind an advisory lock). 0113 first deletes rows whose id is not a UUID (none can come from Scryfall) | none | instant | restore from a Neon branch / point-in-time restore taken before the deploy |
 | 2. Backfill | One `ALTER TABLE` rewrites the table and its primary key once: key to `uuid`, each price to whole cents (`round(price x 100)`; NULL for NULL, NaN, infinity or above $10,000,000), `eur_etched` dropped. Transactional: a failure leaves the old table | needs room for a second copy while it runs: about 0.6 of the table plus its index (a 60 MB table needs about 35 MB spare), then the old one is freed | 1.2 s for 300,000 rows (about 4 s a million) | automatic with the transaction |
 | 3. Rename | The five price columns become `*_cents` (metadata only) | none | instant | in `downgrade` |
 | 4. Verify | The next daily job logs `price_snapshots` in `tables_mb`; compare with the previous run | | | |
@@ -218,7 +218,7 @@ enabled in `CATALOG_SOURCES`, one source at a time, after its terms are checked 
 | 3 | `rulings` | 34 MB | same |
 | 4 | `oracle_tags` (all tags, curated links) | 3 MB tags + 16 MB links | same |
 | 5 | `oracle_prices` (by the price job, from the file it already downloads) | about 7 MB | same |
-| 6 | retention and compaction of price history (0110, `vault/retention.py`) | frees space | above |
+| 6 | retention and compaction of price history (0113, `vault/retention.py`) | frees space | above |
 
 The first full load took 39 seconds in all (per-source times were not recorded); a repeat with nothing changed took 6 seconds and wrote
 no row. Every load is idempotent (content hashes), so a failed or repeated load is safe, and nothing here needs a backfill beyond that first load.

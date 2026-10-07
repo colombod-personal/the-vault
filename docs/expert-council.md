@@ -36,7 +36,7 @@ no Pioneer, Modern or Limited voice. A second format expert joins only when the 
 | Devil's advocate | Attacks the strongest claims and the proposed plan; must cite a reason | same as the claim it attacks |
 | Synergy analyst | What the deck is trying to do; engines, enablers, payoffs; combos | `deck_stats`, `find_combos`, `get_card_oracle`, `search_cards` |
 | Collection and budget analyst | What the person owns, what it costs, cards shared between their decks | `check_decklist`, `get_deck_overlap`, `find_upgrades`, `shopping_list` |
-| Casual table (Commander only) | How the deck plays at a casual table: power level fit for the pod, fun to play against, salt, the social contract and the Commander Brackets (reads the computed bracket floor from `deck_stats` with `include_combos`) | `deck_stats`, `find_combos`, `get_card_oracle` |
+| Casual table (Commander only) | How the deck plays at a casual table: power level fit for the pod, fun to play against, salt, the social contract and the Commander Brackets | `deck_stats`, `find_combos`, `get_card_oracle` |
 
 **Format experts** (one or two per run, chosen by the deck's format):
 
