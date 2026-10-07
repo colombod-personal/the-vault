@@ -172,3 +172,17 @@ def test_every_tool_has_a_title_and_a_read_only_or_destructive_annotation_as_the
             assert hints["readOnlyHint"] is False, f"{tool.name} writes but says it is read only"
         else:
             assert hints["readOnlyHint"] is True and hints["destructiveHint"] is False, tool.name
+
+
+def test_verify_citation_refuses_an_edition_it_cannot_read_and_says_so_in_its_description(agent, bot):
+    """#25: `version` is used, not ignored: the current edition is checked, any other is an error naming the current one."""
+    read = make_token(agent)
+    tool = {t["name"]: t for t in rpc(bot, "tools/list", token=read).json()["result"]["tools"]}["verify_citation"]
+    said = tool["inputSchema"]["properties"]["version"]["description"]
+    assert "current edition" in said and "no archive" in said
+    ok = call_tool(bot, read, "verify_citation", **SAMPLE_ARGS["verify_citation"], version="2027-03-03")
+    assert ok["isError"] is False and ok["structuredContent"]["verified"] is True
+    refused = call_tool(bot, read, "verify_citation", **SAMPLE_ARGS["verify_citation"], version="2026-06-19")
+    assert refused["isError"] is True
+    text = refused["content"][0]["text"]
+    assert "2026-06-19" in text and "2027-03-03" in text, text

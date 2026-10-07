@@ -101,11 +101,14 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              {"number": {"type": "string", "minLength": 1, "maxLength": 120}}, ["number"],
              path=lambda a: f"{V1}/catalog/rules/{quote(a['number'], safe='')}", provenance=("catalog",)),
         Tool("verify_citation", "Check that a quote is verbatim in the rule, Oracle text or ruling you attribute it to. Whitespace "
-             "and typographic quotes are forgiven; nothing else. If it fails you get the true text back.",
+             "and typographic quotes are forgiven; nothing else. If it fails you get the true text back. A rule is checked "
+             "against the current Comprehensive Rules edition, which the answer names.",
              {"kind": {"type": "string", "enum": ["rule", "oracle_text", "ruling"]},
               "ref": {"type": "string", "minLength": 1, "maxLength": 300, "description": "A rule number (or glossary:Term), or a card name or Oracle id"},
               "quote": {"type": "string", "minLength": 1, "maxLength": 4000},
-              "version": {"type": "string", "maxLength": 10}}, ["kind", "ref", "quote"],
+              "version": {"type": "string", "maxLength": 10, "description": "Rules edition (YYYY-MM-DD). Only the current edition can be read "
+                          "(Wizards publishes no archive of past editions and the Vault stores no copy), so any other date is refused "
+                          "with an error that names the current edition. Applies to kind 'rule'; leave it out or give 'latest' for the current one."}}, ["kind", "ref", "quote"],
              method="POST", path=lambda a: f"{V1}/catalog/verify-citation",
              body=lambda a: {k: a[k] for k in ("kind", "ref", "quote", "version") if a.get(k) is not None}, provenance=("catalog",)),
         Tool("deck_stats", "Counts, mana curve, color identity, roles (ramp, draw, removal, sweepers...), the Commander Game Changers "
@@ -157,7 +160,9 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
                   "text": {"type": "string", "minLength": 1, "maxLength": 700},
                   "rules": {"type": "array", "maxItems": 4, "items": {"type": "string", "maxLength": 20}}},
                   "required": ["text"], "additionalProperties": False}},
-              "version": {"type": "string", "maxLength": 10, "description": "Rules edition YYYY-MM-DD; default latest"}}, ["steps"],
+              "version": {"type": "string", "maxLength": 10, "description": "Rules edition (YYYY-MM-DD). Only the current edition "
+                          "can be read (Wizards publishes no archive of past editions); any other date is refused with an error naming "
+                          "the current one. Leave it out for the current edition."}}, ["steps"],
              method="POST", path=lambda a: f"{V1}/catalog/walkthrough",
              body=lambda a: {k: a[k] for k in ("title", "cards", "steps", "version") if a.get(k) is not None},
              provenance=("catalog",), ui="steps"),
