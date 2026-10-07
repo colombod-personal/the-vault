@@ -9,15 +9,30 @@ show the tool's normal text answer, which has the same information.
 | View (`ui://vault/...`) | Tool | What it shows |
 |---|---|---|
 | `card` | `get_card_oracle` | The card image (whole, artist credited), Oracle text, price (dated), legalities, Tagger tags labelled as opinion, rulings on request (calls `get_rulings`) |
-| `deck` | `deck_stats` | Mana curve, roles, color identity, estimated cost, unknown cards, and a legality check (calls `deck_legality`) |
-| `upgrades` | `find_upgrades` | Candidates per role with prices, cut candidates, a budget slider that re-asks for candidates, and "Check this plan" (calls `validate_deck_changes`) |
+| `deck` | `deck_stats` | Mana curve, roles, color identity, estimated cost, unknown cards. **Legality is shown on opening** (calls `deck_legality` for the deck's own format, or asks for one; all 20 formats the server checks), and a "Find combos" button (calls `find_combos`, attributed to Commander Spellbook). Works for a saved deck (`deck_id`) and for pasted text |
+| `combos` | `find_combos` | Combos in the deck and combos one card short, each with its cards, what it produces, Commander Spellbook's description and a link to its page; the tool's limits ("finding none does not mean there are no infinite combos") are shown |
+| `upgrades` | `find_upgrades` | Candidates per role with prices; each add is **paired with a cut** (the least-played card is suggested, changeable) and shows the **price difference** of the swap; "Check this plan" calls `validate_deck_changes` and shows the net price change and the deck's cost before and after; the **budget slider re-calls the validator** for the plan and `find_upgrades` for new candidates (the plan is kept). Works for a saved deck (`deck_id`) and for pasted text |
 | `steps` | `present_steps` | A numbered walkthrough; each step's cited rules expand to their verbatim text, unknown rule numbers are flagged |
-| `shopping` | `shopping_list` | The list with dated prices, a copy button, and the notes about stores |
+| `shopping` | `shopping_list` | The list with dated prices, a copy button, **a download as a text file** (a Blob link made in the page; if the host blocks downloads the text stays on screen and the page says so), a chooser when the tool returns several store formats, and the notes about stores |
+| `printings` | `update_owned_cards`, `show_owned_printings` | Printing pictures and the choice of printing (#205) |
 
 ## How it works here
 
-- `tools/list` gives each such tool `_meta.ui = {resourceUri, visibility: ["model", "app"]}`. The server is
-  stateless, so it cannot see which hosts advertised the extension; hosts without it ignore `_meta`.
+- `tools/list` gives each such tool `_meta.ui = {resourceUri, visibility: ["model", "app"]}` **only to a client that
+  advertised the extension** (#50, #51). The specification says clients advertise it in `initialize`
+  (`capabilities.extensions["io.modelcontextprotocol/ui"] = {"mimeTypes": ["text/html;profile=mcp-app"]}`) and that
+  servers "SHOULD check client capabilities" and keep a text fallback. The server is stateless, so what the client said
+  comes back in a signed `Mcp-Session-Id` returned by `initialize` (`vault/api/mcp_session.py`: a version, one bit, a
+  random part and an HMAC under the server secret; no person, no token, nothing stored). Streamable HTTP clients send
+  it on every later request. **Fail open:** a request with no session id (a client that ignores ids, or a connection from
+  before this existed) or an id that does not verify is treated as "unknown" and gets the view links exactly as before. Only
+  an id this server signed, saying the client connected without the extension, hides them. A host without the
+  extension gets the same tools and the same text answers, only without `_meta.ui`. `initialize` logs one line per
+  connection (`MCP initialize from <client>/<version>: MCP Apps extension advertised|not advertised`: name and version only), so the
+  log shows what each real host says.
+- **Risk to watch after a deploy:** a host that renders the views but does not advertise the extension would lose them after
+  reconnecting. The matrix below says which hosts were seen to render; re-check each after the release (reconnect the
+  connector first: hosts keep the tool list from when they connected) and read the log line above.
 - `resources/list` and `resources/read` serve the pages (`text/html;profile=mcp-app`) with `_meta.ui.csp`:
   no network at all, except `resourceDomains: ["https://cards.scryfall.io"]` for the card image. Nothing else
   is loaded: no scripts, fonts or stylesheets from elsewhere.
@@ -43,7 +58,18 @@ show the tool's normal text answer, which has the same information.
 
 Checked on 2026-10-04:
 
-- All five pages parse as JavaScript (`node --check`, in the tests) and pass the safety checks above.
+- All seven pages parse as JavaScript (`node --check`, in the tests) and pass the safety checks above.
+- Each view is also **run** (`tests/test_mcp_apps_run.py`, `tests/mcp_view_harness.js`): its script executes under node
+  against a small DOM stub and a fake host, on what the real tools answered (a saved deck by `deck_id` and a pasted list), and
+  the tests read what a person would see and which tools the view called with which arguments (legality on opening, combos,
+  pairs and deltas, the budget slider re-calling `validate_deck_changes` and `find_upgrades`, copy and download). A stub is not a
+  browser: no layout, no CSS, no real sandbox; the browser run below is the check for those.
+- The capability check is tested with the client twin (`twins/mcp_client.py`, `tests/test_mcp_apps_capability.py`):
+  advertised, not advertised, no session id, forged ids, odd capability shapes, batches. The twin sends the payload the
+  specification gives; **the payloads claude.ai and ChatGPT really send have not been captured yet** (the log line above
+  will show them), so the twin is the specification's client, not yet a recording of a real one.
+- Export (#55): the specification lists no download request and does not mention `allow-downloads` for the host's frame, so the
+  page makes a Blob link itself; whether a given host's sandbox allows it is not known until tried in each host.
 - A small test host (a page that speaks the host side of the protocol, in a sandboxed frame) drove every view in a
   real browser: the handshake, tool-input and tool-result, size reports, `tools/call` for the legality check,
   the plan validator and rulings, light and dark themes, and the real Scryfall image loading.
