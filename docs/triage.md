@@ -47,6 +47,8 @@ and also lists the blocker (GitHub "blocked by").
 
 ## Rules for agents
 
+The binding text is **AGENTS.md section 9** (an agent reads that file, not this page); this list is kept in step with it.
+
 1. **Look before you start.** List issues and PRs updated since your last look and check for overlap with your area.
 2. **Claim before working.** Add `in-progress`, assign yourself, and comment what you are doing. Remove the label when you
    finish or hand off.

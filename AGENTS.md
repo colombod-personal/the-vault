@@ -110,3 +110,32 @@ What happens, and who does it:
    it: a stale label is a lie. `needs-verification` is not used: the Progress block says what is left and why.
 
 If the board and the code disagree, the board is wrong: fix it in the same turn, before anything else.
+
+## 9. The GitHub repository is the backlog: read it, never remember it
+
+The owner's words (2026-10-07): "github repo is the backlog, not your memory". Every statement about the backlog (how many issues
+are open or closed, which ones, what an issue or its epic says, what a pull request holds, whether CI is green, who a thing waits
+on) comes from a read made **in the same turn**: `gh issue list`, `gh issue view`, `gh pr view`, `gh pr checks`. Counts are computed
+from that list, never recalled, and the answer says what the read returned. This is rule 1 of `docs/triage.md` ("Look before you start") made binding for every statement, not only before starting.
+
+- Your own earlier summaries, the Progress blocks and labels you wrote, and the session's notes are **claims to re-check**, not facts.
+  An issue marked "not started" is checked against the code and the tests before work is planned or reported (#83 said "not started" with
+  16 passing tests behind it).
+- A label, state or milestone applied to many issues (`waiting-owner`, `status:*`) is derived from each issue's own text **and its
+  epic's text**, read first, and the list is shown before it is applied (section 5). A bulk label written from memory marked 3 of 15
+  issues wrongly, and put the collections issues at `status:ready` against the epic's own "stays needs-refinement until the design is agreed".
+- Before writing a doc, a design, an issue or a script, search the repository and the issue (and its epic) for one that already exists, and
+  extend it. Never overwrite a file you have not read: `git status` showing a file as modified that you thought was new means stop
+  (`docs/collections.md` was overwritten once this way).
+
+### Picking, claiming and finishing work (these rules live here; `docs/triage.md` only explains the labels)
+
+Rules that bind an agent are written in this file, because this is the file it reads. A rule that exists only in a `docs/` page does not bind anyone.
+
+1. **Look before you start:** list the open issues and pull requests (`gh issue list`, `gh pr list`) and check for overlap and for work already claimed.
+2. **Pick only `status:ready`**, highest priority first, not `waiting-owner`. Never implement `status:needs-refinement` (help refine it: research, a draft in a PR, questions in a comment); skip `status:blocked`.
+3. **Claim before working** (section 8, step 1) and release the claim when the work stops.
+4. **Close with evidence** (section 8, steps 4 and 5): what merged, how it was checked, what is left.
+5. **File what you find:** a defect found while working gets its own issue with area, type, status, priority and milestone, linked to the work that found it.
+6. **Epics hold sub-issues** (GitHub sub-issues, "blocked by" for order); an epic stays open until its last item closes.
+7. **`waiting-owner` means the owner is the only one who can do the one thing left.** Read the issue and its epic before applying it, say the exact step, and put a decision that many issues wait on in one place (the sign-off issue), not in many threads.
