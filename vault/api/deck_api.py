@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .. import brackets
 from .. import catalog_queries as q
 from .. import combos
 from .. import deck_overview
@@ -45,6 +46,12 @@ class DeckIn(BaseModel):
         if (self.text is None) == (self.deck_id is None):
             raise ValueError("give either text (a decklist) or deck_id (a saved deck), not both and not neither")
         return self
+
+
+class StatsIn(DeckIn):
+    include_combos: bool = Field(default=False, description="Also ask Commander Spellbook for the deck's two-card combos, which one "
+                                 "input of the Commander Bracket hint needs. The deck's card names are sent to Commander Spellbook "
+                                 "only when this is true")
 
 
 class FormatIn(DeckIn):
@@ -137,10 +144,28 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
 
     @router.post("/stats", response_model=Answer, response_model_by_alias=True,
                  summary="Counts, curve, color identity, roles and estimated cost of a decklist")
-    def deck_stats(request: Request, body: DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    def deck_stats(request: Request, body: StatsIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         resolved = prepared(request, db, user, text_of(db, user, body))
-        return answer(db, "deck statistics", dt.stats(db, resolved), ("oracle_cards", "oracle_tags", "oracle_prices"), "stats",
-                      identity(db, user, body))
+        found = None
+        if body.include_combos:
+            found = {"checked": False, "reason": "Commander Spellbook could not be asked"}
+            try:
+                results = combos.ask([(e.name, e.line.quantity) for e in resolved.played() if e.line.section != "commander"],
+                                     [e.name for e in resolved.section("commander")], transport)
+                found = {"checked": True, "combos": combos.two_card_combos(results)}
+            except combos.ComboServiceError as exc:  # down, slow, rate-limited or breaker open: the rest of the answer stands
+                found = {"checked": False, "reason": str(exc)}
+        result = dt.stats(db, resolved, found)
+        out = answer(db, "deck statistics", result, ("oracle_cards", "oracle_tags", "oracle_prices"), "stats", identity(db, user, body))
+        # the bracket hint also rests on Wizards' published bracket pages (read on brackets.RULES_READ), and on Commander Spellbook
+        # when its combos were asked for: they are inputs of the computed block, so the answer never reads as the Vault's own
+        computed = out["provenance"][0]
+        computed.inputs = computed.inputs + [prov.source(s["source"], origin=s["what"], url=s["url"], as_of=brackets.RULES_READ,
+                                                         wizards_material=True) for s in brackets.SOURCES]
+        if found and found.get("checked"):
+            computed.inputs.append(prov.source("Commander Spellbook", origin="combos written by its community",
+                                               url="https://commanderspellbook.com", as_of=date.today(), wizards_material=True))
+        return out
 
     @router.post("/simulate", response_model=Answer, response_model_by_alias=True,
                  summary="How the mana curve plays: sample opening turns and the odds behind them (a simple goldfish)")

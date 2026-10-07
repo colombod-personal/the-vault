@@ -36,8 +36,9 @@ Rules, cards and prices - how to answer:
 - Numbers and verdicts in a deck review: report each number exactly as a tool returned it, with its name ("average
   mana value of the non-land cards: 3.5", "five mana by turn 5: 58% of simulated games"); never reword a figure into a
   different claim or add one a tool did not return. The Vault has no power score: do not call a deck weak, strong, low
-  or high power from its curve, roles or popularity; say what the tools show, and label any bracket placement as your
-  opinion (bracket_floor is only a floor from Game Changers). A deck of three or more colours: say that simulate_draws
+  or high power from its curve, roles or popularity; say what the tools show, and label any bracket placement above the
+  computed floor as your opinion (deck_stats with include_combos returns `bracket`, the lowest Commander Bracket the deck's
+  contents allow under Wizards' published rules, with its inputs). A deck of three or more colours: say that simulate_draws
   does not check colours (colour_warning), so its mana numbers are optimistic. Never quote a card's cost, type or text
   from memory: get_card_oracle.
 - Deck reviews, rules disputes and synergy questions: call council_brief and follow it. It seats the experts for
@@ -70,7 +71,8 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
         Tool("get_card_oracle", "A card's official Oracle text, types, legalities and Scryfall Tagger tags, by exact name "
              "(either face of a double-faced card) or Oracle id. For a card with two faces, each face's mana cost, text and "
              "stats are under `faces`; the top-level fields can be empty. Also lists the recorded changes of its legality "
-             "(`legality_changes`: a ban, an unban or a restriction, with the day the Vault saw it). A misspelled name returns "
+             "(`legality_changes`: a ban, an unban or a restriction, with the day the Vault saw it), and `computed_roles`: roles the Vault "
+             "worked out from the Oracle text where Scryfall's tags have none (computed, with the rule used). A misspelled name returns "
              "suggestions, never a guess. Works for any card, owned or not.",
              {"name": {"type": "string", "minLength": 1, "maxLength": 300, "description": "Exact card name"},
               "oracle_id": {"type": "string", "minLength": 36, "maxLength": 36}},
@@ -110,8 +112,14 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              method="POST", path=lambda a: f"{V1}/catalog/verify-citation",
              body=lambda a: {k: a[k] for k in ("kind", "ref", "quote", "version") if a.get(k) is not None}, provenance=("catalog",)),
         Tool("deck_stats", "Counts, mana curve, color identity, roles (ramp, draw, removal, sweepers...), the Commander Game Changers "
-             "in the deck (with a bracket floor from them alone) and estimated cost of a decklist, computed by the Vault from the catalog." + " Give `deck_id` (a saved deck, from list_decks) or `text`.", {"text": deck, "deck_id": DECK_ID}, [], method="POST",
-             path=lambda a: f"{V1}/decks/stats", body=lambda a: _deck_body(a), provenance=("computed",), ui="deck"),
+             "in the deck, estimated cost, and a Commander Bracket hint (`bracket`): the lowest bracket the deck's contents allow under "
+             "Wizards' published rules, from Game Changers, mass land denial, extra turns and, with `include_combos`, two-card combos "
+             "from Commander Spellbook. Each input is listed; the hint is a floor, not a placement. Computed by the Vault from the "
+             "catalog. Roles say whether each came from Scryfall's tags or from the Vault's rules over Oracle text." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
+             {"text": deck, "deck_id": DECK_ID,
+              "include_combos": {"type": "boolean", "default": False,
+                                 "description": "Also ask Commander Spellbook for two-card combos (sends the deck's card names to it)"}}, [], method="POST",
+             path=lambda a: f"{V1}/decks/stats", body=lambda a: _deck_body(a, "include_combos"), provenance=("computed",), ui="deck"),
         Tool("simulate_draws", "How a deck's mana curve plays: a few sample games of the first turns (opening hand, draws, land "
              "drops, what gets cast) and the odds over many games: land drops made, mana by turn, cards in hand, the chance of "
              "discarding to hand size, 'five mana by turn 5'. Says when discarding or a big hand is the deck's plan, and lists "

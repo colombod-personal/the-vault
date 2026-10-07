@@ -18,6 +18,7 @@ from mtg_toolkits import decklist
 from sqlalchemy import and_, false, func, or_, select
 from sqlalchemy.orm import Session
 
+from . import brackets, role_rules
 from .card_faces import all_text, front_mana_cost
 from .catalog_queries import card_priority
 from .models import OracleCard, OraclePrice, OracleTag, OracleTagLink
@@ -177,6 +178,23 @@ def roles_of(db: Session, oracle_ids: list[str]) -> dict[str, dict[str, str | No
     return out
 
 
+def role_entries(db: Session, cards: list[OracleCard]) -> dict[str, dict[str, dict]]:
+    """For each card: the roles it has and where each came from. Scryfall's Tagger tags win; for a role where the card has **no**
+    Tagger tag, a rule over its Oracle text (``vault.role_rules``) may add it, always marked ``basis: "computed"`` with the rule's id
+    (docs/card-roles-design.md). ``{oracle_id: {role: {"basis", "tag_weight", "rule"}}}``."""
+    tagged = roles_of(db, list({c.oracle_id for c in cards}))
+    out: dict[str, dict[str, dict]] = {}
+    for card in cards:
+        if card.oracle_id in out:
+            continue
+        entry = {role: {"basis": "scryfall_tagger", "tag_weight": weight, "rule": None}
+                 for role, weight in tagged.get(card.oracle_id, {}).items()}
+        for role, rule in role_rules.derive(card).items():
+            entry.setdefault(role, {"basis": "computed", "tag_weight": None, "rule": rule})
+        out[card.oracle_id] = entry
+    return out
+
+
 def prices_of(db: Session, oracle_ids: list[str]) -> dict[str, OraclePrice]:
     if not oracle_ids:
         return {}
@@ -190,11 +208,13 @@ def identity(entries: list[Entry]) -> list[str]:
 
 # -- stats --------------------------------------------------------------------------------------
 
-def stats(db: Session, resolved: Resolved) -> dict:
+def stats(db: Session, resolved: Resolved, combos: dict | None = None) -> dict:
+    """Counts, curve, roles, cost and the Commander Bracket hint. ``combos``: the two-card combos found by Commander Spellbook
+    (``{"checked": True, "combos": [...]}``), or ``{"checked": False, "reason": ...}``; None when they were not asked for."""
     played = resolved.played()
     known = [e for e in played if e.card]
     oids = list({e.card.oracle_id for e in known})
-    roles = roles_of(db, oids)
+    roles = role_entries(db, [e.card for e in known])
     prices = prices_of(db, oids)
     total = sum(e.line.quantity for e in played)
     lands = sum(e.line.quantity for e in known if is_land(e.card))
@@ -209,32 +229,43 @@ def stats(db: Session, resolved: Resolved) -> dict:
                 kinds[t] += e.line.quantity
     role_cards: dict[str, list[dict]] = {r: [] for r in ROLE_TAGS}
     for e in known:
-        for role, weight in roles.get(e.card.oracle_id, {}).items():
-            role_cards[role].append({"name": e.card.name, "quantity": e.line.quantity, "tag_weight": weight})
+        for role, found in roles.get(e.card.oracle_id, {}).items():
+            role_cards[role].append({"name": e.card.name, "quantity": e.line.quantity, "tag_weight": found["tag_weight"],
+                                     "basis": found["basis"], **({"rule": found["rule"]} if found["rule"] else {})})
     cost = sum((prices[e.card.oracle_id].usd or 0) * e.line.quantity for e in known if e.card.oracle_id in prices)
     priced = sum(e.line.quantity for e in known if e.card.oracle_id in prices and prices[e.card.oracle_id].usd is not None)
     cmcs = [(e.card.cmc or 0, e.line.quantity) for e in nonland]
     avg = sum(c * q for c, q in cmcs) / max(1, sum(q for _, q in cmcs))
     changers = [{"name": e.card.name, "quantity": e.line.quantity} for e in known if e.card.game_changer]
     n_changers = sum(c["quantity"] for c in changers)
+    signalled = {"mass_land_denial": [], "extra_turn": []}
+    for e in known:
+        for signal, rule in role_rules.signals(e.card).items():
+            signalled[signal].append({"name": e.card.name, "quantity": e.line.quantity, "basis": "computed", "rule": rule})
+    tutors = [{"name": c["name"], "quantity": c["quantity"], "basis": c["basis"]} for c in role_cards["tutor"]]
+    bracket = brackets.hint(changers, signalled["mass_land_denial"], signalled["extra_turn"], tutors, combos)
     return {
         "cards": total, "unique": len(played), "by_section": dict(Counter(e.line.section for e in resolved.entries for _ in range(e.line.quantity))),
         "lands": lands, "nonland": total - lands, "types": dict(kinds), "average_mana_value_nonland": round(avg, 2),
         "curve": {("7+" if k == 7 else str(k)): curve.get(k, 0) for k in range(8)},
         "color_identity": identity(known),
-        "roles": {r: {"count": sum(c["quantity"] for c in cards), "cards": cards[:MAX_LISTED]} for r, cards in role_cards.items()},
+        "roles": {r: {"count": sum(c["quantity"] for c in cards),
+                      "from_tagger": sum(c["quantity"] for c in cards if c["basis"] == "scryfall_tagger"),
+                      "computed": sum(c["quantity"] for c in cards if c["basis"] == "computed"), "cards": cards[:MAX_LISTED]}
+                  for r, cards in role_cards.items()},
         "estimated_cost_usd": round(cost, 2), "priced_cards": priced, "unpriced_cards": total - priced,
         "unmatched": resolved.unmatched,
         "game_changers": {
             "count": n_changers, "cards": changers,
             "bracket_floor": 4 if n_changers > 3 else 3 if n_changers else None,
-            "note": "Scryfall marks Wizards' Game Changers. Commander Brackets 1 and 2 allow none, Bracket 3 up to three, so this "
-                    "is a floor from Game Changers alone: mass land denial, chained extra turns, tutors and early two-card combos "
-                    "also decide the bracket and are not counted here (the limits are as reported by community guides: "
-                    "Wizards' own page was not readable by a tool, so check it).",
+            "note": "Scryfall marks Wizards' Game Changers. Brackets 1 and 2 allow none, Bracket 3 up to three (Wizards' Commander format "
+                    "page). This count alone gives `bracket_floor`; the full hint, with every input Wizards' rules name, is `bracket`.",
         },
+        "bracket": bracket,
         "price_note": "Cheapest priced paper printing of each card, from Scryfall; see provenance for the date.",
-        "role_note": "Roles are Scryfall Tagger tags, a community's opinion with weights, not rules.",
+        "role_note": "Roles are Scryfall Tagger tags, a community's opinion with weights, not rules. Where a card has no Tagger tag for a role, "
+                     "the Vault may add the role from rules over its Oracle text: those entries say basis 'computed' and name the rule "
+                     "(docs/card-roles-design.md), and are counted separately (from_tagger, computed).",
     }
 
 

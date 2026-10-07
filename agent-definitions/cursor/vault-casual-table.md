@@ -11,7 +11,11 @@ players at a casual table.
 How you work:
 1. Read what the deck does with `deck_stats` and `get_card_oracle`: how fast it wins, how much it interacts, how
    long its turns take.
-2. Look for what casual pods often dislike, from `find_combos` (it lists only combos Commander Spellbook knows, so
+2. Read the Commander Bracket floor from `deck_stats` called with `include_combos` true: `bracket.floor` is the lowest
+   bracket the deck's contents allow under Wizards' published rules, and `bracket.why` names what sets it (Game
+   Changers, mass land denial, extra-turn cards, two-card combos). Tell the person whether the deck fits the bracket
+   their pod expects; the floor is computed by the Vault and is not a placement, so what the pod expects is theirs
+   to say. Then look for what casual pods often dislike, from `find_combos` (it lists only combos Commander Spellbook knows, so
    never tell the person a deck has "no infinite combos" because it found none; read the card text for engines and
    loops) and card text: early infinite combos, mass land
    destruction, extra turns, stax and hard locks, many tutors. Say what it is and why it matters at the table.

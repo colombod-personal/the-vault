@@ -100,7 +100,8 @@ def test_stats_count_roles_curve_and_cost_with_provenance(loaded):
     assert r["estimated_cost_usd"] == 1.6 and r["unmatched"] == []  # 1.0 + 0.5 + 0.1 (the split card has no price)
     assert "opinion" in r["role_note"]
     inputs = {i["source"] for i in post(loaded, "stats", text=DECK).json()["provenance"][0]["inputs"]}
-    assert inputs == {"Scryfall", "Scryfall Tagger"}
+    # the bracket hint rests on Wizards' published bracket pages, so they are inputs of the computed block (Commander Spellbook only when asked)
+    assert inputs == {"Scryfall", "Scryfall Tagger", "Wizards of the Coast"}
 
 
 def test_unknown_cards_are_reported_not_guessed(loaded):
@@ -281,7 +282,9 @@ def test_stats_count_game_changers_and_give_a_bracket_floor_from_them_alone(load
     assert none["count"] == 0 and none["bracket_floor"] is None and none["cards"] == []
     one = loaded.post(f"{V1}/stats", json={"text": "1 Test Changer\n1 Test Rock"}).json()["result"]["game_changers"]
     assert one["count"] == 1 and one["bracket_floor"] == 3 and one["cards"] == [{"name": "Test Changer", "quantity": 1}]
-    assert "Wizards' own page was not readable" in one["note"]  # says what it did not check
+    # The old note said Wizards' page "was not readable by a tool": untrue (the page is readable, and the hint now follows it), so the
+    # test now pins the corrected note, which points at the full hint (tests/test_brackets.py covers every input).
+    assert "Commander format page" in one["note"] and "`bracket`" in one["note"] and "not readable" not in one["note"]
 
 
 def test_every_analysis_takes_a_saved_deck_by_id_instead_of_the_list(loaded):

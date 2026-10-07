@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import math
 import time
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
@@ -22,6 +23,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from .. import catalog_queries as q
+from .. import deck_tools, role_rules
 from .. import provenance as prov
 from ..models import User
 from ..ratelimit import WINDOW, hit
@@ -38,6 +40,9 @@ class CardOut(BaseModel):
     suggestions: list[str] = Field(default_factory=list, description="Close names, when the name was not found exactly")
     tags: list[dict] = Field(default_factory=list, description="Scryfall Tagger tags (community opinion, not rules)")
     rulings_total: int = 0
+    computed_roles: list[dict] = Field(default_factory=list, description="Roles the Vault worked out from this card's Oracle text where Scryfall's "
+                                       "Tagger has no tag for the role: role, rule, what the rule matches, what it is known to get wrong. "
+                                       "Computed by the Vault, not Scryfall's tags, and not facts about the card")
     legality_changes: list[dict] = Field(default_factory=list, description="Recorded changes of this card's legality (bans, unbans, restrictions), "
                                          "newest first: format, old, new, observed_on. Empty when none was recorded")
     legality_changes_note: str | None = Field(default=None, description="What the recorded changes are and are not")
@@ -226,9 +231,15 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
                 "provenance": q.provenance_for(db, *sources), "_links": {"self": link(f"{V1}/catalog/cards")}}
         if found:
             _, total = q.rulings_for(db, found.oracle_id, 1)
+            body["computed_roles"] = [{"role": role, "basis": "computed", **role_rules.describe(entry["rule"])}
+                                      for role, entry in deck_tools.role_entries(db, [found])[found.oracle_id].items()
+                                      if entry["basis"] == "computed"]
             body |= {"tags": q.card_tags(db, found.oracle_id), "rulings_total": total,
                      "legality_changes": q.legality_changes(db, [found.oracle_id]), "legality_changes_note": q.LEGALITY_NOTE}
             body["_links"]["rulings"] = link(f"{V1}/catalog/cards/{found.oracle_id}/rulings")
+            if body["computed_roles"]:  # a role from the Vault's own rules over Oracle text is computed, never Scryfall's tag
+                body["provenance"].append(prov.computed("roles worked out by the Vault's rules over this card's Oracle text, where Tagger has no tag "
+                                                        "(docs/card-roles-design.md)", q.provenance_for(db, "oracle_cards"), as_of=date.today()))
             if body["legality_changes"]:  # the change log is the Vault's own record of Scryfall's data, so it is labelled as computed
                 body["provenance"].append(prov.computed("legality change log: the Vault compared Scryfall's legalities between daily loads",
                                                         q.provenance_for(db, "oracle_cards"), as_of=body["legality_changes"][0]["observed_on"]))

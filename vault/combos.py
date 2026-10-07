@@ -150,6 +150,19 @@ def _variant(v: dict, have: set[str]) -> dict:
     }
 
 
+def two_card_combos(results: dict) -> list[dict]:
+    """The combos in the deck that use exactly two cards and that Commander Spellbook says are infinite or win the game (what
+    the Commander Brackets restrict). Uncapped; each carries Spellbook's own bracket tag as given, which is theirs, not Wizards'."""
+    found = []
+    for v in results.get("included") or []:
+        cards = list(dict.fromkeys(u["card"]["name"] for u in v.get("uses", []) if u.get("card")))
+        produces = [p["feature"]["name"] for p in v.get("produces", []) if p.get("feature")]
+        if len(cards) == 2 and any("infinite" in name.lower() or name.lower() == "win the game" for name in produces):
+            found.append({"cards": cards, "produces": produces[:6], "url": PAGE_URL + str(v["id"]), "bracket_tag": v.get("bracketTag"),
+                          "mana_needed": v.get("manaNeeded") or None, "source": "Commander Spellbook"})
+    return found
+
+
 def summarize(results: dict, deck_names: set[str]) -> dict:
     """The combos in the deck, and the ones a card short, shortened and capped."""
     have = {n.lower() for n in deck_names}
