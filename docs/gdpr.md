@@ -23,6 +23,7 @@ This is an engineering document, not legal advice: have the privacy notice
 | `users` | yes | display name, e-mail (from the sign-in provider) | `account.json` | `purge_user` |
 | `identities` | yes | provider, provider user id, e-mail | `account.json` | `purge_user` |
 | `imports` | yes | file name, date, change summary | `imports.json` | `purge_user` |
+| `collection_baselines` | yes | the cards (copies, condition, folder, price and date paid) of the last file you imported, so the next import can tell what changed in your app from what was edited here | `last_import_cards.json` | `purge_user` |
 | `entries` | yes | collection rows, incl. purchase price/date and folders | `collection.csv` (Dragon Shield), `collection-moxfield.csv`, `collection-generic.csv`, `collection.json` | `purge_user` |
 | `decks` | yes | saved decklists, with the link and author of the deck they came from | `decks.json`, `decks/*.txt` | `purge_user` |
 | `shares` | yes | who shared what with whom | `shares.json` (given and received) | `purge_user` (both directions) |

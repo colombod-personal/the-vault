@@ -62,7 +62,7 @@ VAULT_TWINS_URL=http://localhost:9000 uvicorn --factory vault.app:create_app --r
 api/index.py          Vercel entry point (all /api/* routes)
 vault/app.py          FastAPI app factory, sessions, static files for local dev
 vault/auth.py         Google / Microsoft / Apple / Facebook sign-in, account linking
-vault/models.py       users, identities, imports, entries, cards, price_snapshots, collection_values
+vault/models.py       users, identities, imports, entries, collection_baselines, cards, price_snapshots, collection_values
 vault/migrations/     schema migrations (Alembic), applied at startup; alembic.ini for writing new ones
 vault/importer.py     collection files (Dragon Shield, Moxfield, generic CSV) -> entries, and exports in every format
 vault/collection_view.py  one user's collection as items, sets, timeline, stats (cached per version)
