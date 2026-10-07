@@ -160,8 +160,8 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
         # the bracket hint also rests on Wizards' published bracket pages (read on brackets.RULES_READ), and on Commander Spellbook
         # when its combos were asked for: they are inputs of the computed block, so the answer never reads as the Vault's own
         computed = out["provenance"][0]
-        computed.inputs = computed.inputs + [prov.source(s["source"], origin=s["what"], url=s["url"], as_of=brackets.RULES_READ,
-                                                         wizards_material=True) for s in brackets.SOURCES]
+        computed.inputs = computed.inputs + [prov.source("Wizards of the Coast", origin=brackets.PROVENANCE_ORIGIN, url=brackets.SOURCES[0]["url"],
+                                                         as_of=brackets.RULES_READ, wizards_material=True)]
         if found and found.get("checked"):
             computed.inputs.append(prov.source("Commander Spellbook", origin="combos written by its community",
                                                url="https://commanderspellbook.com", as_of=date.today(), wizards_material=True))

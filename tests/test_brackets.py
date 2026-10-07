@@ -76,14 +76,18 @@ def deck_with(*names):
 
 
 def test_a_deck_with_none_of_the_inputs_has_floor_one_and_lists_every_input(loaded):
-    b = stats(loaded, DECK)["result"]["bracket"]
+    answer = stats(loaded, DECK)
+    b = answer["result"]["bracket"]
+    wizards = [i for i in answer["provenance"][0]["inputs"] if i["source"] == "Wizards of the Coast"]
+    assert len(wizards) == 1 and wizards[0]["url"] == brackets.SOURCES[0]["url"] and wizards[0]["as_of"] == "2026-10-07"
+    assert "Commander Brackets" in wizards[0]["origin"] and wizards[0]["notice"]  # the Fan Content notice travels with Wizards' material
     assert b["floor"] == 1 and "Bracket 1" in b["floor_means"]
     assert set(b["inputs"]) == {"game_changers", "mass_land_denial", "extra_turns", "tutors", "two_card_combos"}
     assert all(i["rule"] for i in b["inputs"].values())
     assert b["label"].startswith("Computed by the Vault") and "not a placement" in b["label"]
     assert b["inputs"]["two_card_combos"]["checked"] is False and "include_combos" in b["inputs"]["two_card_combos"]["reason"]
     assert any("not checked" in w for w in b["why"])  # the floor may be higher, and it says so
-    assert b["not_computed"] and b["rules_read_on"] == "2026-10-07" and len(b["sources"]) == 3
+    assert b["not_computed"] and b["rules_read_on"] == "2026-10-07" and "provenance" in b["sources"]
 
 
 def test_game_changers_set_floor_three_up_to_three_and_four_above(loaded):
@@ -108,7 +112,7 @@ def test_mass_land_denial_found_by_its_text_sets_floor_four_and_says_how_it_was_
 def test_an_extra_turn_card_sets_floor_two_and_is_only_counted(loaded):
     b = stats(loaded, deck_with("Test Time Warp"))["result"]["bracket"]
     assert b["floor"] == 2 and b["inputs"]["extra_turns"]["count"] == 1
-    assert any("chained" in n for n in b["not_computed"])
+    assert any("chained" in n for n in b["not_computed"])  # what it cannot see is said in the answer
 
 
 def test_tutors_are_listed_but_set_no_floor_because_wizards_removed_the_limit(loaded):

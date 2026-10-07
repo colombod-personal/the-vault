@@ -37,12 +37,14 @@ SOURCES = [
     {"source": "Wizards of the Coast", "what": "Commander Brackets Beta Update (Oct 2025): expectations per bracket, tutor limits removed",
      "url": "https://magic.wizards.com/en/news/announcements/commander-brackets-beta-update-october-21-2025"},
 ]
+PROVENANCE_ORIGIN = ("Commander Brackets and Game Changers: the commander format page, and the Feb 2025 and Oct 2025 bracket announcements "
+                     "(the pages are listed in vault.brackets.SOURCES)")
 NOT_COMPUTED = [
-    "intent: the brackets are about the experience the table expects, and a deck can sit above its floor",
-    "chained or looped extra turns (only the number of extra-turn cards is counted)",
-    "how early a two-card combo comes together, and any combo Commander Spellbook does not list",
-    "mass land denial worded in a way the Vault's text rules do not recognise (Wizards publishes examples, not a list)",
-    "Bracket 5 (cEDH) versus Bracket 4: nothing in the card list separates them",
+    "intent: a deck can sit above its floor",
+    "chained or looped extra turns (only their number is counted)",
+    "how early a two-card combo comes together, and combos Spellbook does not list",
+    "mass land denial worded in a way the text rules do not recognise",
+    "Bracket 5 (cEDH) versus 4",
 ]
 LABEL = ("Computed by the Vault from Wizards' published Commander Bracket rules: the lowest bracket this deck's contents allow. "
          "A floor, not a placement and not a power score.")
@@ -88,5 +90,5 @@ def hint(game_changers: list[dict], land_denial: list[dict], extra_turns: list[d
     if not inputs["two_card_combos"]["checked"]:
         why.append("two-card combos were not checked, so the floor may be higher")
     return {"label": LABEL, "floor": floor, "floor_means": FLOOR_MEANS[floor], "why": why or ["no checked input sets a floor above 1"],
-            "inputs": inputs, "rules_read_on": RULES_READ.isoformat(), "sources": SOURCES, "not_computed": NOT_COMPUTED,
-            "applies_to": "Commander decks (the brackets are Wizards' for Commander)"}
+            "inputs": inputs, "rules_read_on": RULES_READ.isoformat(), "not_computed": NOT_COMPUTED,
+            "sources": "Wizards' Commander Brackets pages, listed in this answer's provenance (read on rules_read_on)"}
