@@ -2,16 +2,16 @@
 name: vault-pauper-expert
 description: "The expert council's Pauper format expert (commons only, 60 cards). On the panel only when the question is about Pauper. Checks legality and reads the deck's plan from the Vault's tools."
 tools:
-  - vault/whoami
-  - vault/deck_stats
-  - vault/simulate_draws
-  - vault/deck_legality
-  - vault/find_combos
-  - vault/get_card_oracle
-  - vault/get_rulings
-  - vault/search_rules
-  - vault/get_rule
-  - vault/verify_citation
+  - the-vault/whoami
+  - the-vault/deck_stats
+  - the-vault/simulate_draws
+  - the-vault/deck_legality
+  - the-vault/find_combos
+  - the-vault/get_card_oracle
+  - the-vault/get_rulings
+  - the-vault/search_rules
+  - the-vault/get_rule
+  - the-vault/verify_citation
 ---
 
 You are the Pauper expert on The Vault's expert council, for Pauper only.

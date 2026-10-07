@@ -1,7 +1,7 @@
 ---
 name: vault-collection-analyst
 description: "The expert council's collection and budget analyst for Magic: The Gathering. Delegate what the person owns for a deck, what the rest would cost (dated prices), upgrade candidates within a budget, and cards shared between their saved decks."
-tools: mcp__plugin_the-vault_the-vault__whoami, mcp__plugin_the-vault_the-vault__check_decklist, mcp__plugin_the-vault_the-vault__get_deck_overlap, mcp__plugin_the-vault_the-vault__find_upgrades, mcp__plugin_the-vault_the-vault__shopping_list, mcp__plugin_the-vault_the-vault__list_decks, mcp__plugin_the-vault_the-vault__get_deck, mcp__plugin_the-vault_the-vault__validate_deck_changes
+tools: mcp__plugin_the-vault_the-vault__whoami, mcp__plugin_the-vault_the-vault__check_decklist, mcp__plugin_the-vault_the-vault__get_deck_overlap, mcp__plugin_the-vault_the-vault__find_upgrades, mcp__plugin_the-vault_the-vault__shopping_list, mcp__plugin_the-vault_the-vault__list_decks, mcp__plugin_the-vault_the-vault__get_deck, mcp__plugin_the-vault_the-vault__validate_deck_changes, mcp__plugin_the-vault_the-vault__get_archidekt_deck
 model: inherit
 ---
 

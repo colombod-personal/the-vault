@@ -6,7 +6,7 @@ description: >-
   build, a tune-up, or help with a weak role (ramp, draw, removal, sweepers).
 license: MIT
 metadata:
-  vault-tools: "list_decks deck_stats simulate_draws deck_legality find_upgrades validate_deck_changes find_combos get_card_oracle"
+  vault-tools: "list_decks get_deck import_deck_from_link get_archidekt_deck deck_stats simulate_draws deck_legality find_upgrades validate_deck_changes find_combos get_card_oracle"
 ---
 
 # Deck upgrader
@@ -17,12 +17,16 @@ the candidates it returns, explain why, and present only a plan that the validat
 
 ## Procedure
 
-1. **Get the deck and the constraints.** People name their decks: call `list_decks` with `query` set to their
-   words and use the matching deck's `id` (`closest` lists near names if nothing matches; otherwise ask for the list
-   or an Archidekt link). Each deck's `overview` has its format, commander(s), card count and colour identity: say
-   which deck you are working on that way ("Sliver Swarm: Commander, led by Sliver Overlord"). If `format_from` shows
-   the format was only read from the list, confirm it with the person. You need the format and a budget in USD (the most any single added card may cost; ask
-   whether there is also a total cap). Every deck tool below takes `deck_id`, so the list is never resent.
+1. **Get the deck and the constraints.** People name their decks ("tune my sliver deck"): call `list_decks` with `query`
+   set to their words and use the matching deck's `id`; `closest` lists near names if nothing matches (ask which one).
+   Show the saved deck with `get_deck`. **If the deck is not saved** and the person gives an Archidekt link, ask first,
+   then save it with `import_deck_from_link` (one deck, its author credited) and continue with its `deck_id`; for a look
+   without saving, `get_archidekt_deck` reads the one deck. Otherwise ask for the list. Each deck's `overview` has its
+   format, commander(s), card count and colour identity: say which deck you are working on that way ("Sliver Swarm:
+   Commander, led by Sliver Overlord"). If `format_from` shows the format was only read from the list, confirm it with
+   the person. You need the format and a budget in USD (the most any single added card may cost; ask whether there is
+   also a total cap). Every deck tool below takes `deck_id`, so the list is never resent. Never fetch other decks or
+   search Archidekt (see `archidekt-deck-helper`).
 2. **Read the deck.** Call `deck_stats` and `deck_legality`. Report what they say: size, lands, curve,
    color identity, the roles it counted, any legality issues. Fix legality problems first, and say if any
    card was not found (`unmatched`).
