@@ -73,3 +73,8 @@ React prototype as the front end (`public/`). Read `README.md` first.
   not deployed is not verified; PRs say `Refs #n`, never `Closes #n`); file defects you find as issues.
 - The Comprehensive Rules are not stored: they are read live from Wizards (`vault/rules_live.py`, `docs/rules-index.md`).
   Do not add a copy of the rules text to the database, the repository or a fixture that is not invented.
+
+## Before any push (AGENTS.md section 7)
+
+Run `python scripts/prepush.py` (add `--full` in the background when you changed shared behaviour) before pushing a branch or
+opening a pull request. A pull request that CI turns red wastes the owner's GitHub Actions minutes: fix it locally first.
