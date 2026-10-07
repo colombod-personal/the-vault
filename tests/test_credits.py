@@ -15,6 +15,7 @@ CREDITED_AS = {
     "Scryfall `oracle_cards`, `rulings`, `oracle_tags`, `default_cards`": ["Scryfall", "Scryfall Tagger"],
     "Wizards Comprehensive Rules": ["Wizards of the Coast", "Comprehensive Rules"],
     "Commander Spellbook": ["Commander Spellbook"],
+    "Wizards Commander Brackets and Game Changers list": ["Commander Brackets", "Game Changers"],
     "Archidekt": ["Archidekt"],
     "Moxfield, EDHREC": ["Moxfield"],  # Moxfield only as a CSV format; EDHREC is not fetched
 }

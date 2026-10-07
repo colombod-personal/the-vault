@@ -12,6 +12,7 @@ provenance, never presented as the Vault's own. Pages that could not be read are
 | Cardmarket price guide | Prices | **Not used** | Their API is closed to new applications; the site is behind a bot check (2026-10-05), so its terms could not be read by a tool: the owner reads them |
 | Card Kingdom price list | Prices | **Not used** | `api.cardkingdom.com/api/pricelist` answers publicly, but the terms (read 2026-10-05) forbid robots and data extraction except search engines following robots.txt, and robots.txt disallows `/api/`: needs Card Kingdom's permission |
 | Magic Madhouse product feed | Prices, stock | **Not used** | Offered to affiliate partners: a full product feed, Google Shopping format, four times a day (affiliate page, 2026-10-05). The terms forbid copying site content otherwise. Joining is the owner's decision |
+| Wizards Commander Brackets and Game Changers list | The bracket hint in `deck_stats` (`vault/brackets.py`) | **Read once, thresholds kept in code** (2026-10-07, #171); the pages are re-checked every night (`tests/conformance`) | The brackets are Wizards' published rules, cited with links as sources of the computed hint; the Game Changers flag comes from Scryfall's card data |
 | Archidekt | Public decks | **Used, read only**: one public deck when a person asks, credited with a link back | The Vault only reads, never writes, and does not crawl or search (see `compliance.md`) |
 | Moxfield, EDHREC | Decks, aggregates | **Not used for fetching** | Terms forbid or do not permit automated access (see `compliance.md`) |
 
