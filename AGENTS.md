@@ -58,3 +58,26 @@ merge**, never after: the first OAuth server reached `main` before its threat mo
 threat model). The pull request says so in two lines, `Threat model: ...` and `Security review before merge: ...`
 (`.github/pull_request_template.md`); `scripts/check_pr_rules.py` fails the pull request without them. CI cannot prove a
 review happened: whoever merges checks that the named review is real.
+
+## 7. Never push a pull request that is not already green on your machine
+
+Every push to a pull request runs the whole suite twice on GitHub, about ten minutes each, and the owner pays for those
+minutes. On 2026-10-07 seven parallel branches were pushed having run only "the tests of the files I touched": five of them
+failed in CI on things a local run would have shown (a stale generated file, a doc table that no test owned, a source missing
+from the compliance gate, a migration number two branches both took, a missing security line in the description). Do not
+repeat that.
+
+- Before the **first** push, and again before every push that follows a merge of `main`: `python scripts/prepush.py`
+  (branch contains today's `origin/main`, generated files up to date, the cross-cutting tests green). It stops at the first
+  failure; fix it, do not push around it.
+- If your change touches shared behaviour (tool answers, MCP tools or views, plugins, skills, the database or a migration,
+  auth, privacy, anything that more than one test file reads), also run the whole suite once locally first, in the background:
+  `python scripts/prepush.py --full` (about 25 minutes, your own Postgres database, never one another worktree uses).
+  Tests that need a Linux shell (`test_workflows.py::test_vercel_deploys_only_main`) fail on Windows only: say so, do not hide it.
+- Parallel branches: before you open the pull request, `git fetch` and merge `origin/main` again; if two branches add a
+  migration, the second to merge takes the next number (`alembic heads` must show one head).
+- A new tool answer field, a new source, a new generated file, a new doc table checked by a test: update everything that
+  checks it in the same commit (cost table, credits, compliance gate, ai-parity, README block, plugins) and read the test
+  you may have broken before you push, not CI's log after.
+- Pull requests that CI turns red are fixed by pushing **one** corrected commit after running `prepush.py`, never by trial
+  and error against CI. If you are not sure a push will pass, it is not ready.
