@@ -70,3 +70,12 @@ def test_the_entry_point_redacts_both_scripts_and_the_privacy_notice_says_what_i
     for needed in ("web analytics", "speed insights", "cookieless", "do not track", "global privacy control", "no query, no hash",
                    "sign-in and consent pages never load"):
         assert needed in privacy, needed
+
+
+def test_speed_insights_is_loaded_once_by_the_bundle_and_never_by_a_second_tag():
+    """The Vercel bot's own install (PR #271) added a plain Speed Insights tag to index.html next to our bundle: every page view would
+    have been measured twice, the second time without the path-only URL and the Do Not Track check."""
+    for page in sorted(PUBLIC.glob("*.html")):
+        html = text(page)
+        assert "/_vercel/speed-insights/script.js" not in html and "window.si" not in html, page.name
+        assert "/_vercel/insights/script.js" not in html, page.name
