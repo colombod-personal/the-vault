@@ -18,10 +18,6 @@ vault-tools:
   - search_cards
   - list_card_names
   - lookup_cards
-  - update_owned_cards
-  - confirm_owned_cards_update
-  - import_deck_from_link
-  - refresh_deck
 skills:
   - shopping-assistant
   - archidekt-deck-helper

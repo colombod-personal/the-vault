@@ -96,13 +96,14 @@ def _agent(path: Path):
 @pytest.mark.parametrize("path", AGENTS, ids=lambda p: p.stem)
 def test_an_agent_can_call_every_tool_its_skills_tell_it_to_and_only_real_tools(path):
     """#247: an agent that lists a skill but not the skill's tools is told to call things it is not allowed to; and a
-    council member must not list the council skill, which sends it to convene another council."""
+    council member must not list the council skill, which sends it to convene another council. Agents never change
+    data, so a skill's write steps are left to the main assistant (the generated note says so)."""
     meta, _ = _agent(path)
     allowed = set(meta["vault-tools"])
     assert allowed <= TOOLS, f"unknown tools: {allowed - TOOLS}"
     for name in meta.get("skills", []):
         skill, _ = parse(SKILLS / name)
-        needed = set(skill["metadata"]["vault-tools"].split())
+        needed = {t for t in skill["metadata"]["vault-tools"].split() if not mcp.BY_NAME[t].write}  # agents are read-only (tests/test_agent_definitions.py)
         assert needed <= allowed, f"{meta['name']} lists the skill {name} but may not call {sorted(needed - allowed)}"
     if "expert council" in meta["description"]:
         assert "expert-council" not in meta.get("skills", []), "a member of the council does not convene it"

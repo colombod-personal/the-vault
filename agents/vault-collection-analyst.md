@@ -13,8 +13,6 @@ vault-tools:
   - list_decks
   - get_deck
   - validate_deck_changes
-  - update_owned_cards
-  - confirm_owned_cards_update
 skills:
   - shopping-assistant
   - vault-attribution

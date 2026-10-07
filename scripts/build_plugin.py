@@ -272,7 +272,9 @@ def load_agents() -> list[dict]:
 
 
 def _skills_note(agent: dict) -> str:
-    return ("\n\nIf these skills are installed, follow them: " + ", ".join(agent["skills"]) + ".") if agent["skills"] else ""
+    return ("\n\nIf these skills are installed, follow them: " + ", ".join(agent["skills"]) + ". You are read-only: where a skill "
+            "says to change the person's collection, decks or shares, say what the change would be and leave it to the main assistant, "
+            "which asks the person first.") if agent["skills"] else ""
 
 
 def claude_agent(agent: dict) -> str:
