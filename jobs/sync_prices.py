@@ -45,8 +45,12 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
         with db.sessions() as session:
             report = sync_from_file(session, path)
             # Cheapest price of every card, only once that source is enabled (docs/compliance.md).
-            if "oracle_prices" in os.environ.get("CATALOG_SOURCES", "").split(","):
+            enabled = [x.strip() for x in os.environ.get("CATALOG_SOURCES", "").split(",")]
+            if "oracle_prices" in enabled:
                 report["oracle_prices"] = catalog_sync.sync_cheapest_from_file(session, path)
+            # The price of every printing (for shopping lists under a person's rules), only once that source is enabled.
+            if "oracle_printings" in enabled:
+                report["oracle_printings"] = catalog_sync.sync_printings_from_file(session, path)
             report["retention"] = retention.apply(session)  # one year at most, thinned (docs/catalog-design.md)
             print(json.dumps(report, indent=2))
         with db.sessions() as session:

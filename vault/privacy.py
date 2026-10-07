@@ -114,7 +114,8 @@ def export_archive(db: Session, user: User) -> bytes:
         ]))
         z.writestr("value_history.json", _json(history(db, user)))
         z.writestr("decks.json", _json([
-            {"id": d.id, "name": d.name, "source_url": d.source_url, "source_author": d.source_author, "created_at": d.created_at,
+            {"id": d.id, "name": d.name, "source_url": d.source_url, "source_author": d.source_author,
+             "source_fetched_at": d.source_fetched_at, "created_at": d.created_at,
              "updated_at": d.updated_at, "text": d.text}
             for d in decks
         ]))

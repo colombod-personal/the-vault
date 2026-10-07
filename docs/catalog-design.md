@@ -205,7 +205,7 @@ price", never a database error), and writers skip a card whose id is not a UUID.
 | 2. Backfill | One `ALTER TABLE` rewrites the table and its primary key once: key to `uuid`, each price to whole cents (`round(price x 100)`; NULL for NULL, NaN, infinity or above $10,000,000), `eur_etched` dropped. Transactional: a failure leaves the old table | needs room for a second copy while it runs: about 0.6 of the table plus its index (a 60 MB table needs about 35 MB spare), then the old one is freed | 1.2 s for 300,000 rows (about 4 s a million) | automatic with the transaction |
 | 3. Rename | The five price columns become `*_cents` (metadata only) | none | instant | in `downgrade` |
 | 4. Verify | The next daily job logs `price_snapshots` in `tables_mb`; compare with the previous run | | | |
-| Rollback after deploy | `alembic downgrade 0109` (the migration's `downgrade`): the key back to text, cents back to dollars (exact: `cents / 100.0` is the nearest double to the price), `eur_etched` restored empty. The app code before this release cannot read the new table, so a downgrade needs the previous release too | same as step 2 | 0.7 s for 300,000 rows | |
+| Rollback after deploy | `alembic downgrade 0111` (the migration's `downgrade`): the key back to text, cents back to dollars (exact: `cents / 100.0` is the nearest double to the price), `eur_etched` restored empty. The app code before this release cannot read the new table, so a downgrade needs the previous release too | same as step 2 | 0.7 s for 300,000 rows | |
 
 The catalog tables follow the same pattern (`vault/migrations`, #14): **0008** creates them empty at startup (no data, no size), **0009** adds the
 artist and image columns, **0104** drops the stored rules (the rules are read live, empty in production). Data arrives only when a source is
@@ -275,6 +275,8 @@ The Vault does not import older ban history, so an assistant must not say a card
 Tests: `tests/test_legality_history.py`.
 
 ## Prices for any card
+
+`oracle_printings` (#29) holds one row per priced paper printing (about 85,000): its set, language and the nonfoil, foil and etched USD price, so a shopping list can pick the cheapest printing under a person's finish, language and set rules. It is loaded by the same daily price job from the same file, as a diff (rows whose figures did not change are not rewritten), only when `oracle_printings` is in `CATALOG_SOURCES`, and its day is the `catalog_sources` row (no per-row day). Excluded: digital cards, tokens, emblems, art cards, oversized cards and memorabilia. The size is an estimate (about 25 MB with its indexes): measure `pg_total_relation_size('oracle_printings')` after the first load and record it in the next row of the budget table before leaving it enabled.
 
 `oracle_prices` holds one row per card: the cheapest printing that has a price, with its date and
 source. The daily price job already loads `default_cards`, so this is one extra pass over data we

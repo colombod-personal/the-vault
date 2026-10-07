@@ -418,6 +418,12 @@ window.VaultApi = (() => {
     // server-side refresh of your printings' card data and prices: {onProgress, force}
     refreshCollection,
     imports: () => all(V1 + '/imports'),
+    // The newest entries of the import history (files and changes made through an assistant), each with `undoable` when it
+    // is the one change that can be undone now. Undo asks first (preview: what it will change, and a confirmation), then
+    // applies exactly that preview: the same two steps an assistant takes (POST /collection/changes/undo).
+    recentImports: (limit = 20) => call(V1 + '/imports?limit=' + limit).then((p) => p.items),
+    undoPreview: () => call(V1 + '/collection/changes/undo', { method: 'POST', json: {} }),
+    undoApply: (confirmation) => call(V1 + '/collection/changes/undo', { method: 'POST', json: { confirmation } }),
     importCsv: (file) => {
       const body = new FormData();
       body.append('file', file);

@@ -12,7 +12,7 @@ One transaction (Alembic's), so a failure leaves the old table untouched:
  3. rename the five price columns to ``*_cents`` (metadata only).
 
 Revision ID: 0113
-Revises: 0109
+Revises: 0111
 Create Date: 2026-10-07 12:00:00
 """
 
@@ -22,7 +22,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = '0113'
-down_revision = '0109'
+down_revision = '0111'
 branch_labels = None
 depends_on = None
 

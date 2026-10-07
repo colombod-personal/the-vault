@@ -45,7 +45,7 @@ def bytes_a_row(database) -> float:
 
 
 def fill(database):
-    """The table as 0109 left it, with ROWS real-shaped rows plus the edge cases."""
+    """The table as 0111 left it, with ROWS real-shaped rows plus the edge cases."""
     with database.engine.begin() as conn:
         conn.execute(text(f"""
             INSERT INTO price_snapshots
@@ -73,7 +73,7 @@ def old_rows(database, ids):
 
 
 def test_the_migration_turns_real_shaped_rows_into_cents_under_a_uuid_key_and_the_row_gets_smaller(database):
-    alembic(database, "0109")
+    alembic(database, "0111")
     fill(database)
     before_bytes = bytes_a_row(database)
     with database.engine.connect() as conn:
@@ -135,12 +135,12 @@ def test_the_app_reads_and_writes_the_new_table_in_dollars(database):
 
 
 def test_the_way_back_restores_the_old_table_with_the_same_prices(database):
-    alembic(database, "0109")
+    alembic(database, "0111")
     fill(database)
     ids = [f"00000000-0000-4000-8000-00000000000{i}" for i in (1, 3)]
     before = old_rows(database, ids)
     alembic(database, "0113")
-    alembic(database, "0109", "downgrade")
+    alembic(database, "0111", "downgrade")
     with database.engine.connect() as conn:
         columns = {c: t for c, t in conn.execute(text(
             "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'price_snapshots'"))}

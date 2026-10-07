@@ -12,7 +12,7 @@ Use a throwaway Vault account with a small imported collection. Do not use someo
 - [ ] `https://<host>/.well-known/oauth-protected-resource/api/mcp` answers JSON whose `resource` is `https://<host>/api/mcp` and `authorization_servers` is `["https://<host>"]`.
 - [ ] `https://<host>/.well-known/oauth-authorization-server` lists `code_challenge_methods_supported: ["S256"]`, `client_id_metadata_document_supported: true` and the four endpoints.
 - [ ] `curl -i -X POST https://<host>/api/mcp -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"ping"}'` answers 401 with `WWW-Authenticate: Bearer ... resource_metadata="..."`.
-- [ ] A personal access token still works: `claude mcp add --transport http vault https://<host>/api/mcp --header "Authorization: Bearer vault_pat_..."` lists tools.
+- [ ] A personal access token still works: `claude mcp add --transport http vault https://<host>/api/mcp --header "Authorization: Bearer vault_pat_..."` lists tools, and its `whoami` answers (the account, scopes `read`, and the data versions).
 - [ ] The Vault's own logs are open somewhere (Vercel logs) so you can see failures.
 
 ## ChatGPT (developer mode)
@@ -23,7 +23,9 @@ Use a throwaway Vault account with a small imported collection. Do not use someo
    - [ ] If not signed in, the Vault's sign-in page shows the client name. Sign in (try a provider, then repeat once with a passkey).
    - [ ] The consent screen names the app and its web address (or says "Unverified" for a registered one), lists Read, offers Write **unticked**, and lists what is never allowed.
    - [ ] Allow with Read only. ChatGPT reports the connection and lists tools. No write tools appear.
-4. In a new chat, enable the connector and ask: "What is in my Vault collection summary?" Expected: it calls `get_collection_summary` and answers with your totals.
+4. In a new chat, enable the connector and ask: "Call the Vault's whoami tool." Expected: it names your account, the scopes you allowed (`read`, plus `write` only if ticked) and the data versions (Comprehensive Rules edition, card data and price dates).
+   - [ ] `whoami` answers with the Comprehensive Rules edition (`rules_version`), not null.
+   Then ask: "What is in my Vault collection summary?" Expected: it calls `get_collection_summary` and answers with your totals.
 5. Disconnect and reconnect, this time ticking **Write**. Ask it to save a small deck. Expected: `save_deck` works.
 6. Note exactly: the `client_id` ChatGPT used (from the Vault logs or the Connected apps list), whether it fetched a metadata document or registered itself, the `redirect_uri`, the scopes it asked for, and whether it sent `resource`.
    - [ ] Account, Connected apps lists it with its name, scopes and a recent "last used". Revoke it there; the next tool call in ChatGPT fails and asks to reconnect.
@@ -35,7 +37,7 @@ Use a throwaway Vault account with a small imported collection. Do not use someo
 1. Claude.ai, Settings, Connectors, **Add custom connector**. URL: `https://<host>/api/mcp`. Leave the advanced client id and secret empty.
 2. Connect. Expected: the same consent flow as above.
    - [ ] Sign-in page, consent screen and redirect back to claude.ai work. Claude lists the Vault's tools.
-3. In a chat, enable the connector and ask for the collection summary and the five most valuable cards (`search_cards` with `sort=-value`).
+3. In a chat, enable the connector and ask it to call the Vault's `whoami` tool (expected: your account, scopes and data versions), then ask for the collection summary and the five most valuable cards (`search_cards` with `sort=-value`).
    - [ ] Answers come back with data from your collection only.
 4. Note the same details as for ChatGPT (client id kind, redirect URI, scopes, resource).
 5. Claude Desktop and Claude Code (loopback redirect): `claude mcp add --transport http vault https://<host>/api/mcp` and run `/mcp` to authenticate.

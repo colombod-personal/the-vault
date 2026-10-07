@@ -107,6 +107,8 @@ out with Scryfall's set codes, so other apps recognise them.
 **Agents.** People can connect their own AI agents: OAuth for ChatGPT, Claude and other MCP clients
 (add the URL `/api/mcp`; the Vault is the authorization server, see `docs/mcp-oauth-threat-model.md`),
 personal access tokens (read, or read and write), an MCP server at `/api/mcp`, and `/llms.txt`. See [`docs/agents.md`](docs/agents.md).
+After connecting an assistant, check it: ask it to call the Vault's `whoami` tool. It names the account, the scopes
+(read, or also write) and the data versions the Vault holds (the Comprehensive Rules edition, card data and price dates).
 The web app computes nothing about a collection: each view asks the server for what it shows
 (totals, P&L, breakdowns, the value over time, pages of printings; see `docs/api.md` →
 Analytics). It keeps the server's answers in IndexedDB, keyed by the collection's version, so it

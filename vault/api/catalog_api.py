@@ -179,6 +179,18 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
             raise HTTPException(503, str(exc), headers={"Retry-After": "300"}) from exc
     agent = APIRouter(prefix=V1 + "/agent", tags=["agents"])
 
+    def current_edition(version: str | None):
+        """The Comprehensive Rules edition to answer from. ``version`` (YYYY-MM-DD) may only name the current edition (or
+        be omitted or "latest"): Wizards publishes just the current edition on its rules page and the Vault keeps no copy
+        of the rules, so an older one cannot be read. Any other value is refused by name, never silently ignored (#25)."""
+        edition = rules_edition()
+        wanted = (version or "").strip().lower()
+        if wanted not in ("", "latest", edition.version):
+            raise HTTPException(422, f"Comprehensive Rules edition {version.strip()} is not available: only the current edition, "
+                                     f"{edition.version}, can be read (Wizards publishes just that one, and the Vault stores no copy "
+                                     "of the rules). Leave version out, or pass 'latest' or " + edition.version + ".")
+        return edition
+
     def access(request: Request, user: User | None = Depends(optional_user)) -> User | None:
         """Signed-in people only (never anonymous: see the module docstring), at most CATALOG_RATE_LIMIT a minute."""
         if user is None:
@@ -253,7 +265,7 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
     @router.post("/walkthrough", response_model=WalkthroughOut, response_model_by_alias=True,
                  summary="Present a step-by-step explanation with each cited rule looked up and attached verbatim")
     def walkthrough(body: WalkthroughIn, user=Depends(access), db: Session = Depends(get_db)) -> dict:
-        edition = rules_edition()
+        edition = current_edition(body.version)
         version = edition.version
         steps, unknown = [], []
         for i, step in enumerate(body.steps, 1):
@@ -286,7 +298,7 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
     def rules_search(qs: str = Query(alias="q", min_length=2, max_length=200), limit: int = Query(default=5, ge=1, le=q.MAX_RULE_RESULTS),
                      version: str | None = Query(default=None, max_length=10), user=Depends(access),
                      db: Session = Depends(get_db)) -> dict:
-        edition = rules_edition()
+        edition = current_edition(version)
         results, matched = edition.search(qs, limit)
         return {"version": edition.version, "query": qs, "matched": matched, "results": results, "provenance": edition.provenance(),
                 "_links": {"self": link(f"{V1}/catalog/rules/search")}}
@@ -315,7 +327,7 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
                 summary="One rule by number (e.g. 613.1a) or glossary term (glossary:Trample), with its subrules")
     def rule(number: Annotated[str, Path(min_length=1, max_length=120)], version: str | None = Query(default=None, max_length=10),
              user=Depends(access), db: Session = Depends(get_db)) -> dict:
-        edition = rules_edition()
+        edition = current_edition(version)
         body = edition.rule(number)
         if body is None:
             raise HTTPException(404, "No such rule in the current edition")
@@ -325,8 +337,12 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
     @router.post("/verify-citation", response_model=CitationOut, response_model_by_alias=True,
                  summary="Is this quote verbatim in the rule, Oracle text or ruling it is attributed to?")
     def verify(body: CitationIn, user=Depends(access), db: Session = Depends(get_db)) -> dict:
+        if body.kind != "rule" and (body.version or "").strip().lower() not in ("", "latest"):
+            raise HTTPException(422, f"version {body.version.strip()} cannot be applied to {body.kind}: card text and rulings are "
+                                     "the current Scryfall data and have no editions; only kind 'rule' has a version, and then "
+                                     "only the current edition. Leave version out.")
         if body.kind == "rule":
-            edition = rules_edition()
+            edition = current_edition(body.version)
             rule = edition.find(body.ref)
             wanted = q._squash(body.quote)
             if rule is None:

@@ -5,65 +5,69 @@
 const { useState: useStateH, useEffect: useEffectH, useRef: useRefH } = React;
 
 // One section per topic. `views` lists the views whose "?" opens it.
+// The names of buttons, tabs, modes and Account sections are written in curly quotes (“Save to your decks”) exactly
+// as the app labels them; tests/test_help.py finds every one of them in the views, so a rename there fails there.
 const HELP_SECTIONS = [
   {
     id: 'import', title: 'Import your collection', views: ['dashboard'],
     body: [
-      'Export a CSV from the Dragon Shield Card Manager (Inventory, Export) or from Moxfield (Collection, More, Export CSV) and choose it with Import. The format is detected for you, and only the file you choose is read: the Vault never connects to your accounts there.',
+      'Export a CSV from the Dragon Shield Card Manager (Inventory, Export) or from Moxfield (Collection, More, Export CSV) and choose it with “Import CSV” (top right) or, in an empty vault, “Choose CSV file”. The format is detected for you, and only the file you choose is read: the Vault never connects to your accounts there.',
       'Import again any time. Each import replaces the collection with the new file and records what changed, so you can see copies added, removed and changed.',
+      'If an assistant you allowed to make changes edits which cards you own, that change is listed under “Collection history” in Account, with the app that made it. The latest one can be reverted there with “Undo” (you see what it will change first), until your collection changes again.',
     ],
   },
   {
     id: 'collection', title: 'Your collection and prices', views: ['browse', 'valuation'],
     body: [
-      'Browse lists every printing you own. Search by name or set and sort by value. Open a card to see your copies of it, every printing you own, its text and live Scryfall prices.',
-      'Prices are Scryfall\'s market prices in US dollars, refreshed daily and dated. "Paid" is what you paid, and profit and loss counts only the copies where a price paid is known. The Value view charts your collection\'s value by month.',
+      'Browse lists every printing you own. Search by card name or set, filter by set or printing, and sort by total value, quantity, name, or newest or oldest first. Open a card to see your copies of it, every printing you own, its text and its Scryfall prices.',
+      'Prices are Scryfall\'s market prices in US dollars, refreshed daily and dated. “Spent” is what you paid, and profit and loss (“P&L”) counts only the copies where a price paid is known. Open “Market value” on the Vault page to see how your collection\'s value moved, by month and by day.',
     ],
   },
   {
     id: 'sets', title: 'Sets', views: ['sets'],
     body: [
-      'Sets shows how much of each set you own and what it is worth. Open a set to see the cards you own from it, most valuable first.',
+      'Sets lists every set you own cards from, with how many cards and unique printings you own there and what they are worth. Search the list, sort it (by value, card count, release date, code or name) and open a set to see the cards you own from it, most valuable first.',
     ],
   },
   {
     id: 'decks', title: 'Decks', views: ['decks'],
     body: [
-      'Add a deck from an Archidekt link or by pasting a list, then press Save deck to keep it. The Vault reads a public Archidekt deck only when you ask; it never searches or crawls Archidekt, and it never changes anything there.',
-      'A deck shows which cards you own, partly own or are missing, with copy counts. The tabs cover stats and roles, legality, upgrade ideas, combos and a buy list. The buy list is plain text you can paste into a shop\'s own list tool: the Vault does not contact shops and shows prices as Scryfall\'s.',
+      'Add a deck from a public Archidekt link (“From a link”) or by pasting a list (“Paste a list”), then press “Save to your decks” to keep it; a saved deck offers “Update saved copy” and “Remove” instead. The Vault reads an Archidekt deck only when you ask, keeps a copy for ten minutes, and “Refresh” asks Archidekt again. It never searches or crawls Archidekt, and it never changes anything there: changes to the deck are made on Archidekt.',
+      'A deck shows which cards you own (“Have”), partly own (“Partial”) or are missing (“Need”), with copy counts. The tabs are “Cards”, “Stats” (counts, mana curve, roles), “Legality”, “Upgrades”, “Combos” and “Buy list”. The buy list is plain text (“Copy list”) you can paste into a shop\'s own list tool: the Vault does not contact shops and shows prices as Scryfall\'s.',
     ],
   },
   {
     id: 'lab', title: 'Lab', views: ['lab'],
     body: [
-      'The Lab shows what your numbers say: biggest gains and losses against what you paid, the cards you hold the most copies of, and your collection by colour, type and mana value. All numbers are computed by the server.',
+      'The Lab shows what your numbers say: the “Profit & loss” of your cards against what you paid, your “Biggest stockpiles” (the cards you hold the most copies of), “Acquisition spend by month”, and your collection by colour, type and mana value. All numbers are computed by the server.',
     ],
   },
   {
     id: 'graph', title: 'Graph', views: ['graph'],
     body: [
-      'The Graph draws your collection as a map of cards. It is being replaced by a deck ideas view that shows what a deck is missing and what you own that could stand in.',
+      'The Graph draws your collection as a map of cards in several ways, chosen with Mode: “Color galaxy”, “Type roster”, “Set clusters”, “Hierarchy”, “Affinity web” and “Mana / price”, plus “Deck map” once you overlay one of your saved decks. “Price tier” and “Depth” narrow which cards are drawn.',
+      'The Graph shows numbers the Vault already holds as pictures; it does not say what to buy or build. A deck ideas view, which would show what a deck is missing and what you own that could stand in, is planned to replace it. It is not built yet, so for now the Graph stays as it is.',
     ],
   },
   {
     id: 'sharing', title: 'Sharing', views: [],
     body: [
-      'Your collection and decks are private. In Account, Share your collection creates an invite link that gives one person read-only access, works once, and can be revoked at any time. You choose whether it includes what you paid. You can also share a single deck from Saved decks.',
-      'When someone shares with you, open their link while signed in and find it under Account, Shared with me.',
+      'Your collection and decks are private. Open Account (your name, top right): under “Share your collection”, “Create invite link for my collection” makes a link that gives one person read-only access, works once, and can be revoked at any time. Tick “Include what I paid for cards” if they may see what you paid. You can also share a single deck from “Saved decks”.',
+      'When someone shares with you, open their link while signed in and find it under “Shared with me” in Account.',
     ],
   },
   {
     id: 'assistant', title: 'Connect an AI assistant', views: [],
     body: [
-      'Use the Vault from Claude or ChatGPT: ask about your collection and decks, check rules with cited sources, and have an expert council review a deck. In Claude or ChatGPT you add The Vault and sign in with your Vault account: no token needed. You choose whether it may edit your collection and decks, and you can disconnect it any time under Account, Connected apps.',
-      'For Claude Code, Codex, Cursor or VS Code, create a personal access token under Account, Agents & API. The connect page has the steps for each.',
+      'Use the Vault from Claude or ChatGPT: ask about your collection and decks, check rules with cited sources, and have an expert council review a deck. In Claude or ChatGPT you add The Vault and sign in with your Vault account: no token needed. You choose whether it may edit your collection and decks, and you can disconnect it any time under “Connected apps” in Account.',
+      'For Claude Code, Codex, Cursor or VS Code, create a personal access token under “Agents & API” in Account. The connect page has the steps for each.',
     ],
     links: [{ href: '/connect.html', label: 'Open the connect page' }],
   },
   {
     id: 'privacy', title: 'Privacy and your data', views: [],
     body: [
-      'Your data is yours. Under Account, Your data, you can download everything the Vault holds about you as a zip, and delete your account and all its data.',
+      'Your data is yours. Under “Your data” in Account, you can download everything the Vault holds about you as a zip, and delete your account and all its data.',
       'Card data and images come from Scryfall, and Archidekt decks are credited to their authors. The Vault is unofficial fan content, not endorsed by Wizards of the Coast.',
     ],
     links: [{ href: '/privacy.html', label: 'Privacy notice' }, { href: '/credits.html', label: 'Credits' }],
@@ -92,9 +96,10 @@ function HelpHint({ view, shared }) {
 function Help({ section }) {
   const headingRef = useRefH(null);
   useEffectH(() => {
-    // Focus moves to the opened section's heading; the page scrolls to it.
+    // Focus moves to the opened section's heading, and the page scrolls so the heading is at the top, clear of the top bar
+    // (focus alone scrolls the least it can: on a phone the heading ended up under the bottom tab bar).
     const el = document.getElementById('help-' + section);
-    if (el) { el.setAttribute('tabindex', '-1'); el.focus({ preventScroll: false }); }
+    if (el) { el.setAttribute('tabindex', '-1'); el.focus({ preventScroll: true }); el.scrollIntoView({ block: 'start' }); }
     else if (headingRef.current) headingRef.current.focus();
   }, [section]);
   return (

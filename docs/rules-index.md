@@ -127,6 +127,8 @@ If Wizards' site cannot be reached, the rules tools say so (503) and never answe
 | `find_rules_term` | A glossary term or keyword ability ("trample", "state-based actions") → the defining rule(s) and the glossary definition |
 | `verify_citation`, `present_steps` | Unchanged for the agent; the text they check and attach comes from the live file |
 
+**Editions (#25).** Only the current edition can be read. Wizards' rules page links the current TXT and nothing else (checked 2026-10-07: no archive of past editions on that page or linked from it), and the Vault stores no copy, so an older edition has no source to read from. The `version` argument of `verify_citation`, `present_steps`, `get_rule` and `search_rules` therefore accepts the current edition's date or `latest`; any other value is refused with an error that names the current edition (`tests/test_catalog_api.py::test_the_version_argument_names_the_current_edition_or_is_refused_by_name`), and for card text and rulings, which have no editions, any date is refused. Reading an old edition would need an archive Wizards publishes, or a copy the owner decides to keep (against the design above).
+
 Every answer carries provenance: Wizards of the Coast, Comprehensive Rules, the edition date, the TXT link, the Fan
 Content notice.
 

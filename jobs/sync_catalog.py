@@ -28,7 +28,7 @@ from vault.db import Database
 
 USER_AGENT = "the-vault/0.1 (+https://github.com/colombod-personal/the-vault)"
 SOURCES = ("oracle_cards", "rulings", "oracle_tags")  # the Comprehensive Rules are read live (vault/rules_live.py), not stored
-OTHER_JOBS = ("oracle_prices",)  # loaded by jobs.sync_prices from the same CATALOG_SOURCES
+OTHER_JOBS = ("oracle_prices", "oracle_printings")  # loaded by jobs.sync_prices from the same CATALOG_SOURCES
 
 
 def bulk_version(entry: dict) -> str:

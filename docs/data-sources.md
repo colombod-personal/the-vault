@@ -26,8 +26,29 @@ provenance, never presented as the Vault's own. Pages that could not be read are
   come from TCGplayer and Cardmarket; they are shown as Scryfall's, with the date.
 - Not built: Card Kingdom and Cardmarket prices. Re-open if a licence or permission is obtained.
   Each stored price row already carries its `source`, so adding a source later does not mix numbers.
-- Shopping lists (M2) are plain text the user pastes into the store's own list tool (Card Kingdom's
-  Deck Builder accepts pasted lists). The Vault never fetches store pages, fills carts or scrapes.
+- Built (#29): the price of every printing, for shopping lists under a person's rules (`oracle_printings`: set, language,
+  and the nonfoil, foil and etched price of each priced paper printing; today only; the day is the `catalog_sources` row).
+  It comes from the same default-cards file, in the same daily price job, and loads only when `oracle_printings` is named in
+  `CATALOG_SOURCES`. It leaves out digital cards, tokens, emblems, art cards, oversized cards and gold-bordered
+  memorabilia, so a list never picks one for being cheap. Scryfall has **no price per condition**, so a condition rule is kept
+  and shown but changes no price; Scryfall prices few non-English printings, so a language rule often leaves a card with no
+  qualifying printing, and the answer says so per line.
+- Shopping lists are text the user pastes into the store's own list tool, in the syntax that tool reads (below). The Vault
+  never fetches store pages, fills carts or scrapes, and never says which store is cheapest.
+
+### Store paste formats (#29, #55; each read on the store's own help page, 2026-10-07)
+
+| Format | The line the store's tool reads | Page read | What the page says it cannot carry |
+|---|---|---|---|
+| `cardkingdom` | `4 Ancient Den`, `4x Ancient Den` or `Ancient Den` (the three formats the Deck Builder shows) | <https://blog.cardkingdom.com/deck-builder-craft-your-next-deck/> (the three formats are in the image on that page) | No set, finish or condition: the printing chosen is reported beside the list |
+| `tcgplayer` | `1 Lightning Bolt [SLD] 84`: quantity, name, set code in brackets, collector number; set and number optional (`1 Lightning Bolt [SLD]` = any art from that set) | <https://help.tcgplayer.com/hc/en-us/articles/360055768913-Getting-Started-With-Mass-Entry> | Finish and condition are Mass Entry preferences (printings, conditions: default Moderately Played and better), not part of a line. TCGplayer's own set-code list is the authority if a Scryfall code is not matched |
+| `cardmarket` | `4 Dark Ritual`, `Tarmogoyf`, `2 Dark Confidant (Modern Masters)`, `4x High Tide (V.1) (Fallen Empires)`: the expansion's name in parentheses, an optional version number (not written by the Vault) | <https://help.cardmarket.com/en/how-to-add-a-mtg-decklist-to-wants> | The page names no place for finish, language or condition, and does not say whether set codes are accepted (names are written); Cardmarket reports lines it could not match |
+| `plain`, `csv` | Quantity and name; a spreadsheet with the printing and the dated price | none (not a store) | |
+
+The syntaxes were read from the pages, not by pasting a list into each store (that needs each store's own site, and the
+Vault never contacts a store): the tool's text is written to the line shapes above and tested against them
+(`tests/test_shopping.py`). A real paste into each store's tool is still worth doing once by a person; if a store
+rejects a line shape, the fix is in `vault/shopping.py` (`STORES`, `render`) and this table.
 
 ## Combos (#20)
 
