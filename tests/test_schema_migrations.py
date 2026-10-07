@@ -125,3 +125,17 @@ def test_duplicate_grants_from_before_are_merged_when_the_unique_index_arrives(d
         rows = conn.execute(text("SELECT grantee_id, show_costs FROM shares ORDER BY id")).all()
     assert [(g, bool(s)) for g, s in rows] == [(2, True), (None, False)]  # one grant (the newest), the invite kept
     assert _diff(database) == []
+
+
+def test_the_migrations_have_exactly_one_head():
+    """Two branches that each add a migration after the same revision leave two heads and the app cannot start."""
+    from pathlib import Path
+
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    import vault.db
+
+    config = Config()
+    config.set_main_option("script_location", str(Path(vault.db.__file__).parent / "migrations"))
+    assert len(ScriptDirectory.from_config(config).get_heads()) == 1

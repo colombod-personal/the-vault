@@ -415,6 +415,7 @@ def connect_page() -> str:
     }});
   }});
 </script>
+<script src="analytics.bundle.js"></script>
 </body>
 </html>
 """

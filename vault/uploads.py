@@ -5,7 +5,8 @@ plain page, the file waits (staged, not imported), the assistant shows the previ
 - ``GET /upload?ticket=`` and ``POST /upload``: the page. The ticket is the only credential; it works for one hour,
   for this person only, and a new file replaces the staged one (to upload a fixed file).
 - ``GET /api/v1/uploads/{id}`` (read): waiting, or the same preview as an import (changes, unmatched rows).
-- ``POST /api/v1/uploads/{id}/apply`` (write): imports the staged file and deletes it.
+- ``POST /api/v1/uploads/{id}/apply`` (write): imports the staged file and deletes it. Like every import it applies
+  only what changed in the person's app and keeps edits made in the Vault (``vault.merge``).
 """
 
 from __future__ import annotations
@@ -19,7 +20,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from .api.idempotency import idempotent
-from .importer import MAX_UPLOAD_BYTES, ImportConflict, ImportError_, import_collection, preview_import
+from .api.import_params import import_options
+from .importer import MAX_UPLOAD_BYTES, ImportConflict, ImportError_, ImportOptions, import_collection, preview_import
 from .models import Import, StagedUpload, User
 from .oauth_routes import esc, page
 
@@ -49,9 +51,15 @@ def _preview_html(preview: dict) -> str:
     removed = changes.get("removed", 0)
     warning = (f"<p><strong>Importing this file would remove {n(removed, 'card', 'cards')} "
                f"({n(changes.get('copies_out', 0), 'copy', 'copies')}) from your collection.</strong> "
-               "An import replaces the whole collection.</p>") if removed else ""
+               "Your app's file says they are gone; edits you made through your assistant are kept.</p>") if removed else ""
+    merge = preview.get("merge") or {}
+    kept, conflicts = (merge.get("kept_vault_edits") or {}).get("count", 0), (merge.get("conflicts") or {}).get("count", 0)
+    kept_note = (f"<p>{n(kept, 'card you edited through your assistant is', 'cards you edited through your assistant are')} "
+                 "kept.</p>" if kept else "") + (
+        f"<p>{n(conflicts, 'card changed', 'cards changed')} both in your app and through your assistant: your assistant "
+        "will ask you which to keep (the edit made here is kept unless you say otherwise).</p>" if conflicts else "")
     return (f"<p>{n(preview['rows'], 'row', 'rows')}, {n(preview['copies'], 'copy', 'copies')} "
-            f"({esc(preview['source'])}).</p>" + warning +
+            f"({esc(preview['source'])}).</p>" + warning + kept_note +
             "<ul>"
             f"<li>Added: {n(changes.get('added', 0), 'card', 'cards')}</li>"
             f"<li>Removed: {n(removed, 'card', 'cards')}</li>"
@@ -85,32 +93,35 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         return staged
 
     @router.get(f"{V1}/uploads/{{upload_id}}", tags=["imports"], summary="A staged upload: waiting, or its preview")
-    def get_upload(upload_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    def get_upload(upload_id: int, user: User = Depends(current_user), db: Session = Depends(get_db),
+                   options: ImportOptions = Depends(import_options)) -> dict:
         staged = owned(db, user, upload_id)
         if staged.content is None:
             return {"id": staged.id, "status": "waiting", "expires_at": staged.expires_at.isoformat()}
         try:
-            preview = preview_import(db, user, staged.content)
+            preview = preview_import(db, user, staged.content, options)
         except ImportError_ as exc:
             return {"id": staged.id, "status": "unreadable", "filename": staged.filename, "detail": str(exc)}
         return {"id": staged.id, "status": "uploaded", "filename": staged.filename, **preview}
 
     @router.post(f"{V1}/uploads/{{upload_id}}/apply", tags=["imports"], status_code=201,
-                 summary="Import a staged upload (replaces the collection), then delete the staged file")
+                 summary="Import a staged upload (applies what changed in the person's app, keeps edits made in the Vault), "
+                         "then delete the staged file")
     def apply_upload(request: Request, upload_id: int, user: User = Depends(current_user),
-                     db: Session = Depends(get_db)):
+                     db: Session = Depends(get_db), options: ImportOptions = Depends(import_options)):
         def run():
             staged = owned(db, user, upload_id)
             if staged.content is None:
                 raise HTTPException(409, "Nothing uploaded yet")
             try:
-                imp: Import = import_collection(db, user, staged.filename or "upload.csv", staged.content)
+                imp: Import = import_collection(db, user, staged.filename or "upload.csv", staged.content, options)
             except ImportConflict as exc:
                 raise HTTPException(409, str(exc)) from exc
             except ImportError_ as exc:
                 raise HTTPException(400, str(exc)) from exc
             db.delete(staged)
-            return {"import_id": imp.id, "rows": imp.rows, "copies": imp.copies, "changes": imp.summary}
+            return {"import_id": imp.id, "rows": imp.rows, "copies": imp.copies, "changes": imp.summary,
+                    "merge": (imp.changes or {}).get("merge")}
 
         return idempotent(request, db, user, 201, run)
 

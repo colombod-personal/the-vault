@@ -97,7 +97,9 @@ SOURCES: tuple[Source, ...] = (
            "Sign-in by the account you already have."),
     Source("Vercel, Neon and GitHub", "https://github.com/colombod-personal/the-vault", "hosting",
            "Vercel hosts the app, Neon hosts the database, GitHub hosts the open source code and runs the daily data job.",
-           "They process what the Vault stores, as the privacy notice lists. The code is public under the MIT licence.",
+           "They process what the Vault stores, as the privacy notice lists. Vercel Web Analytics and Speed Insights count visits and "
+           "measure page speed anonymously, with no cookies and no page address beyond its path; they are skipped for visitors who send "
+           "Do Not Track or Global Privacy Control. The code is public under the MIT licence.",
            "Hosting and code: Vercel, Neon, GitHub."),
     Source("Open source software", "https://mtgvault.cards/credits.html", "community",
            "The libraries the Vault is built on, including mtg-toolkits, FastAPI, SQLAlchemy, React and Cytoscape.js.",
