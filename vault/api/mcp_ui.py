@@ -170,9 +170,21 @@ function render(root, r) {
   }
   right.appendChild(h("h1", { text: c.name + (c.mana_cost ? "  " + c.mana_cost : "") }));
   right.appendChild(h("div", { class: "muted", text: c.type_line || "" }));
-  if (c.oracle_text) { right.appendChild(h("div", { class: "box oracle", text: c.oracle_text })); }
-  if (c.power !== null && c.power !== undefined) { right.appendChild(h("div", { text: "Power/Toughness: " + c.power + "/" + c.toughness })); }
-  if (c.loyalty) { right.appendChild(h("div", { text: "Loyalty: " + c.loyalty })); }
+  var faces = (c.faces || []).filter(function (f) { return f.oracle_text || f.type_line; });
+  if (faces.length > 1) {
+    // a transform, modal double-faced, split, adventure or flip card: every face's own text, never only the first (#249)
+    faces.forEach(function (f) {
+      right.appendChild(h("h2", { text: f.name + (f.mana_cost ? "  " + f.mana_cost : "") }));
+      if (f.type_line) { right.appendChild(h("div", { class: "muted", text: f.type_line })); }
+      if (f.oracle_text) { right.appendChild(h("div", { class: "box oracle", text: f.oracle_text })); }
+      if (f.power !== null && f.power !== undefined) { right.appendChild(h("div", { text: "Power/Toughness: " + f.power + "/" + f.toughness })); }
+      if (f.loyalty) { right.appendChild(h("div", { text: "Loyalty: " + f.loyalty })); }
+    });
+  } else {
+    if (c.oracle_text) { right.appendChild(h("div", { class: "box oracle", text: c.oracle_text })); }
+    if (c.power !== null && c.power !== undefined) { right.appendChild(h("div", { text: "Power/Toughness: " + c.power + "/" + c.toughness })); }
+    if (c.loyalty) { right.appendChild(h("div", { text: "Loyalty: " + c.loyalty })); }
+  }
   if (r.price) {
     right.appendChild(h("p", { text: usd(r.price.usd) + " (cheapest priced paper printing; " + r.price.source + ", as of " + r.price.as_of + "; not a store's price today)" }));
   }

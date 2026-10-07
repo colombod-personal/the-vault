@@ -186,6 +186,54 @@ def test_every_catalog_endpoint_answers_with_provenance(loaded):
         assert res.json()["provenance"] and all(b["kind"] in ("source", "computed") and b["source"] for b in res.json()["provenance"])
 
 
+FACE_CARDS = [
+    ("33333333-3333-3333-3333-333333333331", "Delver of Secrets // Insectile Aberration", "transform",
+     [("Delver of Secrets", "At the beginning of your upkeep, look at the top card of your library. You may reveal that card. If an instant or sorcery card is revealed this way, transform Delver of Secrets."),
+      ("Insectile Aberration", "Flying")]),
+    ("33333333-3333-3333-3333-333333333332", "Valki, God of Lies // Tibalt, Cosmic Impostor", "modal_dfc",
+     [("Valki, God of Lies", "When Valki enters the battlefield, each opponent reveals their hand."),
+      ("Tibalt, Cosmic Impostor", "As Tibalt enters the battlefield, you get an emblem with the abilities of exiled cards.")]),
+    ("33333333-3333-3333-3333-333333333333", "Fire // Ice (faces)", "split",
+     [("Fire", "Fire deals 2 damage divided as you choose among one or two targets."), ("Ice", "Tap target permanent. Draw a card.")]),
+    ("33333333-3333-3333-3333-333333333334", "Bonecrusher Giant // Stomp", "adventure",
+     [("Bonecrusher Giant", "Whenever Bonecrusher Giant becomes the target of a spell, it deals 2 damage to that spell's controller."),
+      ("Stomp", "Damage can't be prevented this turn. Stomp deals 2 damage to any target.")]),
+    ("33333333-3333-3333-3333-333333333335", "Akki Lavarunner // Tok-Tok, Volcano Born", "flip",
+     [("Akki Lavarunner", "Haste"), ("Tok-Tok, Volcano Born", "If a source would deal damage to you, prevent 1 of that damage.")]),
+]
+
+
+def load_face_cards(app):
+    with app.state.db.sessions() as db:
+        cs.sync_oracle_cards(db, [card(oid, name, None, layout=layout, oracle_text=None,
+                                       card_faces=[{"name": n, "oracle_text": t, "type_line": "Creature"} for n, t in faces])
+                                  for oid, name, layout, faces in FACE_CARDS])
+        db.commit()
+
+
+@pytest.mark.parametrize("index", range(len(FACE_CARDS)))
+def test_a_quote_from_either_face_of_a_multi_face_card_verifies(loaded, app, index):
+    """#249: the front face of Delver, a modal DFC, a split card, an adventure or a flip card verifies verbatim, and a
+    quote spanning two faces is refused with every face's text so the caller can correct it."""
+    load_face_cards(app)
+    oid, name, layout, faces = FACE_CARDS[index]
+    for face_name, text in faces:
+        quote = text[: max(20, len(text) // 2)]
+        said = loaded.post(f"{V1}/verify-citation", json={"kind": "oracle_text", "ref": oid, "quote": quote}).json()
+        assert said["verified"] is True and said["detail"]["face"] == face_name, (layout, face_name, said)
+    both = faces[0][1][-12:] + " " + faces[1][1][:12]
+    refused = loaded.post(f"{V1}/verify-citation", json={"kind": "oracle_text", "ref": oid, "quote": both}).json()
+    assert refused["verified"] is False
+    assert [f["face"] for f in refused["detail"]["source_text"]] == [n for n, _ in faces]  # all faces' text, to correct it
+    invented = loaded.post(f"{V1}/verify-citation", json={"kind": "oracle_text", "ref": oid, "quote": "Draw seven cards."}).json()
+    assert invented["verified"] is False
+
+
+def test_the_card_panel_shows_every_face_not_only_the_first():
+    from vault.api.mcp_ui import CARD_JS
+    assert "c.faces" in CARD_JS and "faces.forEach" in CARD_JS and "f.oracle_text" in CARD_JS
+
+
 def test_status_and_whoami_report_the_live_rules_edition_even_on_a_cold_server(signed_in, app):
     """#244: whoami answered rules_version null while the rules tools answered from edition 2026-09-25."""
     from twins.universe import Universe
