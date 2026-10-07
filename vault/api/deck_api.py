@@ -217,6 +217,8 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
         main = [(e.name, e.line.quantity) for e in resolved.played() if e.line.section != "commander"]
         try:
             results = combos.ask(main, commanders, transport)
+        except combos.ComboServiceBusy as exc:  # the client's own rate limit or an open breaker: nothing was asked of them
+            raise HTTPException(503, str(exc), headers={"Retry-After": str(exc.retry_after)}) from exc
         except combos.ComboServiceError as exc:
             raise HTTPException(502, str(exc)) from exc
         out = combos.summarize(results, names)

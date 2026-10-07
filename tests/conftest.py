@@ -64,6 +64,17 @@ def frozen_rate_limit_clock(monkeypatch):
     monkeypatch.setattr(catalog_api, "time", frozen)
 
 
+@pytest.fixture(autouse=True)
+def fresh_upstream_guard():
+    """Commander Spellbook's client keeps a rate limit and a circuit breaker per process (vault.combos.GUARD): start every test
+    with both clear, so one test's failures never open the breaker for the next."""
+    from vault import combos
+
+    combos.GUARD.reset()
+    yield
+    combos.GUARD.reset()
+
+
 @pytest.fixture
 def database_url():
     """An empty Postgres database for this test, migrated to the latest schema."""
