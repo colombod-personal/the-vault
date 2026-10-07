@@ -67,7 +67,9 @@
 
   <h2>Service providers</h2>
   <ul>
-    <li><strong>Vercel</strong> hosts the app. Its request logs include IP addresses for a short period.</li>
+    <li><strong>Vercel</strong> hosts the app. Its request logs include IP addresses for a short period. It also runs
+      <strong>Web Analytics</strong> and <strong>Speed Insights</strong> on our public pages and the app: see
+      "Visitor statistics" below.</li>
     <li><strong>Neon</strong> hosts the database.</li>
     <li><strong>GitHub</strong> runs the daily job that updates card prices. It reads your
       collection's rows (card names, sets, numbers, quantities and prices) to match them with
@@ -96,6 +98,18 @@
     <li>You can complain to your data protection authority.</li>
   </ul>
 
+  <h2>Visitor statistics</h2>
+  <p>To see how many people use the Vault and how fast it loads, the pages and the app load Vercel's Web Analytics and
+    Speed Insights. Both are anonymous and cookieless: a visit is counted by a hash made from the request that is thrown
+    away after 24 hours, never by a cookie, and the Vault cannot tie a data point to you, to your account or to your IP
+    address. Each data point holds the page's address (without anything after the page name: no query, no hash, so an
+    invitation link or a sign-in return is never recorded), the time, the referring site, your country, your browser,
+    device type and operating system, and for Speed Insights the page's loading times and network speed. Nothing from your
+    collection or decks is included. If your browser sends Do Not Track or Global Privacy Control, nothing is sent at all.
+    The sign-in and consent pages never load these scripts. Vercel's own descriptions:
+    <a href="https://vercel.com/docs/analytics/privacy-policy" target="_blank" rel="noopener">Web Analytics</a>,
+    <a href="https://vercel.com/docs/speed-insights/privacy-policy" target="_blank" rel="noopener">Speed Insights</a>.</p>
+
   <h2>Cookies and local storage</h2>
   <p>The app keeps a copy of what the Vault's server sent about your collection in this browser
     (IndexedDB) so it opens quickly and works offline. It is deleted when you sign out or delete
@@ -104,7 +118,7 @@
   <p>Two strictly necessary cookies: one keeps you signed in, and the other holds an opaque code for
     the signed-in account, so this browser's copy of a collection is only ever shown to that
     account. Both are removed when you sign out. Your browser also stores your display preferences.
-    There are no tracking cookies.</p>
+    There are no tracking cookies, and the visitor statistics above use none.</p>
 
   <h2>Children</h2>
   <p>The Vault is not intended for children under 16.</p>
@@ -112,5 +126,7 @@
   <p style="margin-top: 32px"><a class="btn sm" href="/">Back to the Vault</a>
     <a class="btn sm ghost" href="credits.html">Credits &amp; thanks</a></p>
 </main>
+<!-- Vercel Web Analytics -->
+<script src="analytics.bundle.js"></script>
 </body>
 </html>
