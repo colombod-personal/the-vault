@@ -6,7 +6,7 @@ description: >-
   combo works, or wants a worked example of triggers, replacement effects, layers or priority.
 license: MIT
 metadata:
-  vault-tools: "get_card_oracle get_rulings search_rules get_rule verify_citation present_steps find_combos"
+  vault-tools: "whoami get_card_oracle get_rulings search_rules get_rule verify_citation present_steps find_combos"
 ---
 
 # Interaction explainer
@@ -14,6 +14,8 @@ metadata:
 Turn "how do these cards work together?" into a clear sequence a player can follow at the table. This
 builds on the `rules-judge` procedure: look everything up, verify every quote, cite every rule. Follow
 `vault-attribution` (if installed) when you show any source text or a combo.
+
+**Check the connection when something is off.** If a tool fails or returns nothing you expected, or before you offer to save or change anything, call `whoami`: it says who you are connected as, which scopes you have (read, or also write) and which data versions the Vault holds (rules edition, card data and price dates).
 
 ## Procedure
 

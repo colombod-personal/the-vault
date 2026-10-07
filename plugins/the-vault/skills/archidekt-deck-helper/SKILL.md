@@ -6,7 +6,7 @@ description: >-
   asks what they still need to buy for it, wants it upgraded, or wants to find the missing cards in a shop.
 license: MIT
 metadata:
-  vault-tools: "list_decks get_deck import_deck_from_link refresh_deck get_archidekt_deck deck_legality find_upgrades validate_deck_changes shopping_list"
+  vault-tools: "whoami list_decks get_deck import_deck_from_link refresh_deck get_archidekt_deck deck_legality find_upgrades validate_deck_changes shopping_list"
 ---
 
 # Archidekt deck helper
@@ -15,6 +15,8 @@ The person points at a deck on Archidekt (`archidekt.com/decks/<number>/...`). Y
 with their Vault collection, and give them a change list and a buying list. **You never edit Archidekt**:
 the person applies changes there themselves. Follow `vault-attribution` (if installed) for every price and
 every piece of Archidekt data.
+
+**Check the connection when something is off.** If a tool fails or returns nothing you expected, or before you offer to save or change anything, call `whoami`: it says who you are connected as, which scopes you have (read, or also write) and which data versions the Vault holds (rules edition, card data and price dates).
 
 ## Procedure
 

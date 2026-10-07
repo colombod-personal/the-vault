@@ -43,6 +43,9 @@ into each agent's skills folder.)
 Sign-in today is a personal access token (Account → Agents & API). Connecting ChatGPT and Claude.ai by
 address needs the OAuth server (milestone M4, `docs/mcp-oauth-host-checklist.md`).
 
+After connecting, ask the assistant to call `whoami`: it names the account, the scopes and the data versions the Vault
+holds. Every skill tells the assistant to call it when a tool fails or before offering to change anything.
+
 ## Where things live (one source of truth)
 
 - `skills/<name>/SKILL.md`: **the skills. Edit these.**

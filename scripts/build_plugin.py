@@ -88,6 +88,9 @@ and `.mcp.json`.
 
 Install and connect: see docs/skills.md in the repository, or {HOST}/connect.html.
 
+Check the connection: ask your assistant to call the Vault's `whoami` tool. It names you, your scopes and the data
+versions the Vault holds (the Comprehensive Rules edition, card data and price dates).
+
 The Vault is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards.
 Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC.
 """

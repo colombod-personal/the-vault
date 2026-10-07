@@ -6,7 +6,7 @@ description: >-
   build, a tune-up, or help with a weak role (ramp, draw, removal, sweepers).
 license: MIT
 metadata:
-  vault-tools: "list_decks deck_stats simulate_draws deck_legality find_upgrades validate_deck_changes find_combos get_card_oracle"
+  vault-tools: "whoami list_decks deck_stats simulate_draws deck_legality find_upgrades validate_deck_changes find_combos get_card_oracle"
 ---
 
 # Deck upgrader
@@ -14,6 +14,8 @@ metadata:
 The budget is a hard constraint, and the Vault enforces it with code. Your job is to choose well among
 the candidates it returns, explain why, and present only a plan that the validator accepts. Follow
 `vault-attribution` (if installed) when you show prices, tags or combos.
+
+**Check the connection when something is off.** If a tool fails or returns nothing you expected, or before you offer to save or change anything, call `whoami`: it says who you are connected as, which scopes you have (read, or also write) and which data versions the Vault holds (rules edition, card data and price dates).
 
 ## Procedure
 

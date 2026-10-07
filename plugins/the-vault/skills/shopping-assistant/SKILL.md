@@ -6,7 +6,7 @@ description: >-
   them, or wants a list to paste into Card Kingdom, Cardmarket or another store.
 license: MIT
 metadata:
-  vault-tools: "list_decks shopping_list validate_deck_changes update_owned_cards confirm_owned_cards_update"
+  vault-tools: "whoami list_decks shopping_list validate_deck_changes update_owned_cards confirm_owned_cards_update"
 ---
 
 # Shopping assistant
@@ -14,6 +14,8 @@ metadata:
 Turn a decklist into what the person actually has to buy, using their collection in the Vault. The Vault
 never contacts stores, fills carts or knows a store's price today; it gives a list and Scryfall's dated
 prices. Follow `vault-attribution` (if installed) when you show prices.
+
+**Check the connection when something is off.** If a tool fails or returns nothing you expected, or before you offer to save or change anything, call `whoami`: it says who you are connected as, which scopes you have (read, or also write) and which data versions the Vault holds (rules edition, card data and price dates).
 
 ## Procedure
 
