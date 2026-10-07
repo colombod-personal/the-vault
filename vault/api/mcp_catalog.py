@@ -72,8 +72,8 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              {"name": {"type": "string", "minLength": 1, "maxLength": 300, "description": "Exact card name"},
               "oracle_id": {"type": "string", "minLength": 36, "maxLength": 36}},
              path=lambda a: f"{V1}/catalog/cards", query=("name", "oracle_id"), provenance=("catalog",), ui="card"),
-        Tool("get_rulings", "A card's rulings (Wizards' text via Scryfall), newest first, at most 25 a page. When "
-             "`next_offset` is not null there are more: call again with it as `offset` before saying a ruling does not exist.",
+        Tool("get_rulings", "A card's rulings (Wizards' text via Scryfall), newest first, at most 25 a page. More "
+             "remain when `next_offset` is not null: pass it back as `offset` to read the next page.",
              {"oracle_id": {"type": "string", "minLength": 36, "maxLength": 36, "description": "From get_card_oracle"},
               "limit": {"type": "integer", "minimum": 1, "maximum": 25, "default": 25},
               "offset": {"type": "integer", "minimum": 0, "maximum": 10000, "default": 0, "description": "Skip this many of the newest rulings"}}, ["oracle_id"],
