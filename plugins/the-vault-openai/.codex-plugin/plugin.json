@@ -32,6 +32,7 @@
     ],
     "websiteURL": "https://mtgvault.cards",
     "privacyPolicyURL": "https://mtgvault.cards/privacy.html",
+    "termsOfServiceURL": "https://mtgvault.cards/terms.html",
     "defaultPrompt": [
       "What are my most valuable cards?",
       "Review my Commander deck with the expert council",

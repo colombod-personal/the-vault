@@ -217,12 +217,23 @@ def connect_page() -> str:
 
   <h2>3. Check it works</h2>
   <p>Ask your assistant: <em>“Call the Vault's whoami tool.”</em> It should name you, your scopes and which data
-    versions the Vault holds (the Comprehensive Rules edition, card data and price dates). Then try:</p>
-  <ul>
-    <li><em>“Does Lightning Bolt kill a creature with 3 toughness that has protection from red? Cite the rules.”</em></li>
-    <li><em>“Here is my Commander deck … suggest upgrades under $50 and check them.”</em></li>
-    <li><em>“What am I missing for this deck, and what will it cost?”</em></li>
-  </ul>
+    versions the Vault holds (the Comprehensive Rules edition, card data and price dates). Then try these five:</p>
+  <ol id="examples">
+    <li><em>“Does Lightning Bolt kill a creature with 3 toughness that has protection from red? Cite the rules.”</em>
+      The assistant looks up the card and the rules, quotes them, and names the rules edition.</li>
+    <li><em>“Review my sliver deck with the expert council.”</em>
+      It finds your saved deck, shows its name, format and commander first, then answers as the format expert, the casual
+      table, the judge and a devil's advocate, each citing what the tools returned.</li>
+    <li><em>“What am I missing for my sliver deck, and what will it cost?”</em>
+      Your collection against the deck: owned, partly owned and missing cards, with dated Scryfall prices.</li>
+    <li><em>“Show me the printings of Sol Ring that I own.”</em>
+      The printings in your collection, with pictures.</li>
+    <li><em>“Add a Sol Ring to my collection.”</em>
+      It shows exactly what would change and waits for your yes. You can undo it.</li>
+  </ol>
+  <p>The Vault will not do these, and a good assistant says so: <em>“Which shop is cheapest right now?”</em> (it has no
+    shop prices, only dated Scryfall ones), <em>“Buy me this deck”</em> (it never contacts stores), <em>“Delete my
+    account”</em> (account actions stay with you in the Vault).</p>
 
   <h2>What to expect</h2>
   <ul>
@@ -234,7 +245,8 @@ def connect_page() -> str:
   <div class="legal">
     <p>{FAN_NOTICE}</p>
     <p><a class="btn sm" href="/">Back to the Vault</a> <a class="btn sm ghost" href="credits.html">Credits</a>
-      <a class="btn sm ghost" href="privacy.html">Privacy notice</a></p>
+      <a class="btn sm ghost" href="privacy.html">Privacy notice</a> <a class="btn sm ghost" href="terms.html">Terms</a>
+      <a class="btn sm ghost" href="support.html">Support</a></p>
   </div>
 </main>
 <script>
@@ -365,6 +377,7 @@ OPENAI_MANIFEST = {
         "capabilities": ["Read", "Write"],
         "websiteURL": HOST,
         "privacyPolicyURL": f"{HOST}/privacy.html",
+        "termsOfServiceURL": f"{HOST}/terms.html",
         "defaultPrompt": ["What are my most valuable cards?",
                           "Review my Commander deck with the expert council",
                           "What am I missing for this deck, and what will it cost?"],

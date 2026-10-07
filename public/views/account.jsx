@@ -158,7 +158,7 @@ function SignIn() {
           )}
           <p className="signin-fine">
             We only receive your name and e-mail from the provider you choose. Your collection stays private unless you share it.{' '}
-            <a href="/privacy.html">Privacy notice</a> · <a href="/credits.html">Credits &amp; thanks</a>
+            <a href="/privacy.html">Privacy notice</a> · <a href="/terms.html">Terms</a> · <a href="/support.html">Support</a> · <a href="/credits.html">Credits &amp; thanks</a>
           </p>
         </section>
       </div>
@@ -497,6 +497,8 @@ function VaultFooter() {
         {' · '}Card art by the credited artists
         {' · '}<a href="/credits.html" style={style}><strong>Credits &amp; thanks</strong></a>
         {' · '}<a href="/privacy.html" style={style}>Privacy</a>
+        {' · '}<a href="/terms.html" style={style}>Terms</a>
+        {' · '}<a href="/support.html" style={style}>Support</a>
       </p>
       <p>
         The Vault is unofficial Fan Content permitted under the{' '}
