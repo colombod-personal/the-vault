@@ -245,7 +245,7 @@ class ConnectedApp(Hal):
     name: str = Field(description="The app's name as it described itself")
     domain: str | None = Field(None, description="The web address that identifies the app (absent for self-registered apps)")
     verified_by_address: bool = Field(description="False for an app that registered itself: the Vault can't confirm who made it")
-    scopes: list[str] = Field(description="What you allowed with the newest connection: read, and write if you chose it")
+    scopes: list[str] = Field(description="The most any of its connections was allowed: read, and write if any of them was given it")
     connections: int = Field(description="How many times the app is connected (each device or re-add is one); all of them share this row")
     connection_ids: list[int] = Field(description="The ids of those connections; DELETE on this row or any of them disconnects them all")
     created_at: str = Field(description="When the app was first connected")

@@ -251,7 +251,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         used = [g.last_used_at for g in group if g.last_used_at]
         idle = [g for g in group if oauth_server.is_idle(g)]
         return {"id": newest.id, "name": client.name if client else (domain or "Unknown app"), "domain": domain,
-                "verified_by_address": domain is not None, "scopes": newest.scopes.split(),
+                "verified_by_address": domain is not None,
+                "scopes": [s for s in oauth_server.SCOPES if any(s in g.scopes.split() for g in group)],
                 "connections": len(group), "connection_ids": sorted(g.id for g in group),
                 "created_at": _iso(min(g.created_at for g in group)), "last_used_at": _iso(max(used)) if used else None,
                 "idle": len(idle) == len(group), "idle_connections": len(idle),

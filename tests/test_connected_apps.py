@@ -60,6 +60,14 @@ def test_an_app_connected_three_times_is_one_row_with_its_connections_counted(ap
     assert "token" not in str(item) and "hash" not in str(item)
 
 
+def test_the_row_shows_the_widest_scopes_so_an_older_write_connection_is_not_hidden(app, client):
+    client.sign_in()
+    connect_again(client, write=True)
+    connect_again(client)  # the newest connection is read only
+    [item] = rows(client.browser)
+    assert item["connections"] == 2 and item["scopes"] == ["read", "write"]
+
+
 def test_the_first_connected_and_last_used_dates_span_all_connections(app, client):
     client.sign_in()
     client.connect()
@@ -124,6 +132,19 @@ def test_disconnect_stops_every_connection_of_the_app_each_one_by_its_id(app, cl
         assert client.refresh(s["refresh_token"]).status_code == 400
     assert other.mcp("ping").status_code == 200  # another app is untouched
     assert [r["domain"] for r in rows(client.browser)] == ["other.example"]
+
+
+def test_disconnect_is_one_transaction_all_or_nothing(app, client, monkeypatch):
+    client.sign_in()
+    client.connect()
+    connect_again(client)
+    commits = []
+    real = oauth_server.Session.commit
+    monkeypatch.setattr(oauth_server.Session, "commit", lambda self: (commits.append(1), real(self))[1])
+    [item] = rows(client.browser)
+    commits.clear()
+    client.browser.delete(item["_links"]["self"]["href"])
+    assert len(commits) == 1  # both connections went in one commit, so a failure leaves none revoked
 
 
 def test_disconnecting_by_an_older_connections_id_disconnects_the_whole_app(app, client):
@@ -218,6 +239,18 @@ def test_using_a_connection_keeps_it_from_expiring_because_each_refresh_renews_t
     assert client.refresh(tokens["refresh_token"]).status_code == 200
     renewed = db_do(app, lambda db: db.get(OAuthGrant, grant_id).refresh_expires)
     assert renewed - now() > timedelta(days=29)
+
+
+def test_connecting_an_app_clears_everyones_expired_connections_even_if_nobody_opens_the_list(app, client, make_client):
+    client.sign_in()
+    client.connect()
+    [stale] = oauth_server_ids(app)
+    age(app, stale, refresh_expires=now() - timedelta(days=1))
+    other = make_client(host="other.example", redirect_uris=("https://other.example/cb",))
+    other.redirect_uri = "https://other.example/cb"
+    other.sign_in("someone-else@example.com")
+    other.tokens = other.redeem(other.approve()["code"]).json()
+    assert stale not in oauth_server_ids(app)  # removed by the new connection, not by anyone reading a list
 
 
 def test_the_cap_counts_connections_but_the_list_counts_apps(app, client, monkeypatch):

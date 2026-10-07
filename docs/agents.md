@@ -76,7 +76,7 @@ URL. The threat model, with the tests that prove each mitigation, is in
   `OAUTH_CIMD_CAP` (5000) cached metadata documents, `OAUTH_FETCH_LIMIT` (60 a minute, all callers) and `OAUTH_FETCH_IP_LIMIT` (10 a minute per caller) metadata fetches.
 
 **Connected apps** (Account → Connected apps, or `GET /api/v1/me/apps`, `DELETE /api/v1/me/apps/{id}`): one row per app, however
-many times it was connected (a second device, or added again): its name, web address, what the newest connection was allowed, how
+many times it was connected (a second device, or added again): its name, web address, the most any connection was allowed, how
 many connections it has, when it first connected and last acted, and whether it is idle (not used for 14 days). Connecting an app
 again never signs out its other connections; disconnecting the row ends all of them at once (the page names an app used in the
 last hour). A connection nobody uses for 30 days expires. They are in the data

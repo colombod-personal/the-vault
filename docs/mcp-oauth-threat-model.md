@@ -271,13 +271,17 @@ A stranger sets `client_id=https://x/...` and the Vault fetches it. Mitigations 
   an app that has a verified address) and `DELETE /me/apps/{id}` on any grant of the row revokes **all** that person's grants
   of that app, with their retired refresh tokens (M `test_disconnect_stops_every_connection_of_the_app_each_one_by_its_id`,
   `test_disconnecting_by_an_older_connections_id_disconnects_the_whole_app`, `test_disconnect_removes_the_retired_refresh_tokens_of_every_connection`).
+  The row shows the widest scopes of its connections, so an older write connection is not hidden behind a newer read-only one
+  (M `test_the_row_shows_the_widest_scopes_*`); the revocation is one transaction (M `test_disconnect_is_one_transaction_all_or_nothing`).
   Grouping only ever reads the caller's own grants, so it widens nothing across people (`tests/test_tenancy.py::test_connected_apps_are_private`).
+  Residual: two unrelated self-registered apps that chose the same name share a row (Disconnect then revokes both: over-revoking,
+  never under-revoking), and the row is idle only when all its connections are, with the idle ones counted beside it.
   Residual: a stolen refresh token is not revoked by the app connecting again (it is by reuse detection, by the person pressing
   Disconnect, and when it is not used for 30 days); the Account page marks a connection unused for 14 days as idle so it is seen.
 - **Unused connections end by themselves.** A refresh token lasts 30 days from its last use (each refresh renews it, capped at 90
   days from consent). Connections past that are removed, with their retired tokens, whenever the person's list is read and
-  when a new connection is made, so they do not linger as rows (M `test_a_connection_is_removed_when_its_refresh_token_expires_but_its_siblings_stay`,
-  `test_an_app_whose_only_connection_expired_disappears_from_the_list`). A connection unused for 14 days is marked idle
+  whenever anyone makes a new connection (every person's expired ones go then), so they do not linger as rows (M `test_a_connection_is_removed_when_its_refresh_token_expires_but_its_siblings_stay`,
+  `test_an_app_whose_only_connection_expired_disappears_from_the_list`, `test_connecting_an_app_clears_everyones_expired_connections_even_if_nobody_opens_the_list`). A connection unused for 14 days is marked idle
   (M `test_a_connection_unused_for_14_days_is_marked_idle_and_the_app_is_idle_when_all_are`).
 - RFC 7009 revocation by the client (M `test_revoking_a_token_with_rfc_7009_*`); account deletion removes grants, codes and retired tokens
   (`vault.privacy.personal_data`, a test enforces the table list).

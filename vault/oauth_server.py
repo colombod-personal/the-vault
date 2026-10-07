@@ -121,7 +121,9 @@ def _check_code(row: OAuthCode, client_id: str, redirect_uri: str, verifier: str
 
 
 def _make_room(db: Session, user_id: int) -> None:
-    """At most MAX_APPS grants per person: connecting one more drops the oldest."""
+    """At most MAX_APPS grants per person: connecting one more drops the oldest. Connections nobody can use
+    any more (refresh token expired, anyone's) go with them."""
+    purge_expired_grants(db, commit=False)
     old = list(db.scalars(select(OAuthGrant.id).where(OAuthGrant.user_id == user_id).order_by(OAuthGrant.id.desc())
                           .offset(MAX_APPS - 1)))
     if old:  # not committed here: the caller's transaction (the code's redemption) commits it
@@ -268,16 +270,19 @@ IDLE_AFTER = timedelta(days=14)  # a connection nobody has used for this long is
 RECENT = timedelta(hours=1)  # an app used this recently is named in the "disconnect" confirmation
 
 
-def purge_expired_grants(db: Session, user_id: int) -> int:
-    """Delete this person's connections that can no longer be used: the refresh token ran out (30 days
-    without use, each refresh renews it) or the grant passed its 90 days. Their retired tokens go too."""
-    now = _now()
-    dead = [g.id for g in db.scalars(select(OAuthGrant).where(OAuthGrant.user_id == user_id))
-            if _aware(g.refresh_expires) < now or _aware(g.created_at) + GRANT_MAX_AGE < now]
+def purge_expired_grants(db: Session, user_id: int | None = None, *, commit: bool = True) -> int:
+    """Delete connections that can no longer be used (this person's, or everyone's when ``user_id`` is None): the
+    refresh token ran out (30 days without a refresh, each one renews it, never past the grant's 90 days). Their
+    retired tokens go too."""
+    query = select(OAuthGrant.id).where(OAuthGrant.refresh_expires < _now())
+    if user_id is not None:
+        query = query.where(OAuthGrant.user_id == user_id)
+    dead = list(db.scalars(query))
     if dead:
         db.execute(delete(OAuthRetiredRefresh).where(OAuthRetiredRefresh.grant_id.in_(dead)))
         db.execute(delete(OAuthGrant).where(OAuthGrant.id.in_(dead)))
-        db.commit()
+        if commit:
+            db.commit()
     return len(dead)
 
 
@@ -322,10 +327,12 @@ def connected_apps(db: Session, user_id: int) -> list[list[OAuthGrant]]:
 
 def revoke_user_app(db: Session, user_id: int, grant_id: int) -> int | None:
     """Disconnect the app one of this person's connections belongs to: every connection of that app
-    (each device) is revoked at once. The number revoked, or None when the id isn't theirs."""
+    (each device) is revoked at once, in one transaction. The number revoked, or None when the id isn't theirs."""
     for group in connected_apps(db, user_id):
         if any(g.id == grant_id for g in group):
-            for g in group:
-                revoke_grant(db, g.id)
-            return len(group)
+            ids = [g.id for g in group]
+            db.execute(delete(OAuthRetiredRefresh).where(OAuthRetiredRefresh.grant_id.in_(ids)))
+            db.execute(delete(OAuthGrant).where(OAuthGrant.id.in_(ids), OAuthGrant.user_id == user_id))
+            db.commit()
+            return len(ids)
     return None
