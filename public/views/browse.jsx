@@ -4,7 +4,9 @@ const { useEffect: useEffectB, useState: useStateB } = React;
 
 const BROWSE_PAGE = 60;
 // The view's sort choices, as the server's `sort` parameter.
-const BROWSE_SORTS = { value: '-value', qty: '-quantity', name: 'name', recent: '-acquired', oldest: 'acquired' };
+const BROWSE_SORTS = { value: '-value', qty: '-quantity', name: 'name', recent: '-acquired', oldest: 'acquired', mana: 'mana_value', manaDesc: '-mana_value' };
+// Magic's card types (a card's type line is matched word by word on the server, so any word of it also works through the API).
+const BROWSE_TYPES = ['Artifact', 'Battle', 'Creature', 'Enchantment', 'Instant', 'Kindred', 'Land', 'Planeswalker', 'Sorcery'];
 
 function Browse({ data, openCard, initialQuery }) {
   const api = data.api;
@@ -12,6 +14,8 @@ function Browse({ data, openCard, initialQuery }) {
   const [query, setQuery] = useStateB(q);  // the search sent to the server, a moment after typing stops
   const [setF, setSetF] = useStateB('');
   const [printingF, setPrintingF] = useStateB('');
+  const [typeF, setTypeF] = useStateB('');
+  const [manaF, setManaF] = useStateB('');  // a mana value, as typed ('' = any); the server matches it exactly
   const [sort, setSort] = useStateB(initialQuery?.sort || 'value');
   const [layout, setLayout] = useStateB('table');
   const [shown, setShown] = useStateB(null);   // { items, total, value_total, more }
@@ -23,9 +27,9 @@ function Browse({ data, openCard, initialQuery }) {
     return () => clearTimeout(t);
   }, [q]);
 
-  const params = { q: query, set: setF, printing: printingF, sort: BROWSE_SORTS[sort] || '-value' };
+  const params = { q: query, set: setF, printing: printingF, type: typeF, mana_value: manaF, sort: BROWSE_SORTS[sort] || '-value' };
   const first = window.useVaultQuery(() => api.cards({ ...params, limit: BROWSE_PAGE }),
-    [api.base, data.meta.version, query, setF, printingF, sort]);
+    [api.base, data.meta.version, query, setF, printingF, typeF, manaF, sort]);
   useEffectB(() => { if (first.data) { setShown(first.data); setError(null); } }, [first.data]);
   useEffectB(() => { if (first.error) setError(first.error.message); }, [first.error]);
 
@@ -87,7 +91,24 @@ function Browse({ data, openCard, initialQuery }) {
             <option value="name">Sort: name A→Z</option>
             <option value="recent">Sort: newest first</option>
             <option value="oldest">Sort: oldest first</option>
+            <option value="mana">Sort: mana value ↑ (cheapest first)</option>
+            <option value="manaDesc">Sort: mana value ↓</option>
           </select>
+          <select className="select" aria-label="Filter by card type" value={typeF} onChange={e => setTypeF(e.target.value)}>
+            <option value="">All card types</option>
+            {BROWSE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <input
+            className="input"
+            type="number"
+            min="0"
+            step="1"
+            inputMode="numeric"
+            placeholder="Mana value (any)"
+            aria-label="Filter by mana value"
+            value={manaF}
+            onChange={e => { const v = e.target.value; if (v === '' || /^[0-9]{1,7}$/.test(v)) setManaF(v); }}
+          />
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-2)' }}>
           <div aria-live="polite">
