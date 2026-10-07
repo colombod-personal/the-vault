@@ -199,16 +199,20 @@ def test_scryfall_requires_headers(real, twin):
 
 # -- Archidekt --------------------------------------------------------------------------------
 
-def test_archidekt_search_and_deck(real, twin):
-    r_page = real.get("https://archidekt.com/api/decks/v3/", params={"name": "elves", "orderBy": "-viewCount"}).json()
-    assert missing(r_page, ["count", "next", "results"]) == [] and r_page["results"]
-    twin.universe.archidekt.add_deck("Elves", "twin", [(1, "Llanowar Elves"), (1, "Sol Ring")])
-    t_page = twin.get("https://archidekt.com/api/decks/v3/", params={"name": "elves"}).json()
-    assert invented(t_page, r_page) == []
+# Archidekt is read only on a person's request, one public deck at a time, never searched or crawled, and never by a
+# scheduled job (owner rule, #79, #132; docs/compliance.md). So these live checks are manual: TWINS_LIVE_ARCHIDEKT=1,
+# one named deck (the owner's public one), no search. The nightly workflow does not set it (tests/test_workflows.py).
+manual_archidekt = pytest.mark.skipif(os.environ.get("TWINS_LIVE_ARCHIDEKT") != "1",
+                                      reason="by hand only: set TWINS_LIVE_ARCHIDEKT=1 (one public deck, no search, never scheduled)")
+CHECK_DECK = os.environ.get("ARCHIDEKT_CHECK_DECK", "6803907")  # the owner's public Sliver deck
 
-    deck_id = r_page["results"][0]["id"]
+
+@manual_archidekt
+def test_archidekt_deck(real, twin):
+    deck_id = CHECK_DECK
     r_deck = real.get(f"https://archidekt.com/api/decks/{deck_id}/").json()
-    t_deck = twin.get(f"https://archidekt.com/api/decks/{t_page['results'][0]['id']}/").json()
+    twin_deck = twin.universe.archidekt.add_deck("Elves", "twin", [(1, "Llanowar Elves"), (1, "Sol Ring")])
+    t_deck = twin.get(f"https://archidekt.com/api/decks/{twin_deck['id']}/").json()
     assert missing(r_deck, ["id", "name", "owner", "cards", "categories", "deckFormat"]) == []
     card = r_deck["cards"][0]
     assert missing(card, ["quantity", "categories", "modifier", "card"]) == []
@@ -348,6 +352,7 @@ def test_chatgpts_client_document_and_keys(real, twin):
     assert missing(r_keys["keys"][0], ["kty", "n", "e", "kid"]) == [] and invented(t_keys, r_keys) == []
 
 
+@manual_archidekt
 def test_archidekt_real_deck_keys_have_not_drifted_from_the_twin(real):
     """The key sets the twin reproduces (tests/fixtures/archidekt_real_keys.json, captured 2026-10-06) are still what the
     real API sends: a field added or removed there means the twin, and what the Vault reads, need updating."""
@@ -355,8 +360,7 @@ def test_archidekt_real_deck_keys_have_not_drifted_from_the_twin(real):
     from pathlib import Path
 
     fx = json.loads((Path(__file__).parents[1] / "fixtures" / "archidekt_real_keys.json").read_text(encoding="utf-8"))
-    page = real.get("https://archidekt.com/api/decks/v3/", params={"name": "elves", "orderBy": "-viewCount"}).json()
-    deck = real.get(f"https://archidekt.com/api/decks/{page['results'][0]['id']}/").json()
+    deck = real.get(f"https://archidekt.com/api/decks/{CHECK_DECK}/").json()  # one named deck: no search
     entry = deck["cards"][0]
     got = {"deck": deck, "entry": entry, "card": entry["card"], "oracleCard": entry["card"]["oracleCard"],
            "edition": entry["card"]["edition"], "prices": entry["card"]["prices"]}

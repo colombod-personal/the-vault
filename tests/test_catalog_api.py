@@ -232,3 +232,19 @@ def test_a_quote_from_either_face_of_a_multi_face_card_verifies(loaded, app, ind
 def test_the_card_panel_shows_every_face_not_only_the_first():
     from vault.api.mcp_ui import CARD_JS
     assert "c.faces" in CARD_JS and "faces.forEach" in CARD_JS and "f.oracle_text" in CARD_JS
+
+
+def test_status_and_whoami_report_the_live_rules_edition_even_on_a_cold_server(signed_in, app):
+    """#244: whoami answered rules_version null while the rules tools answered from edition 2026-09-25."""
+    from twins.universe import Universe
+    load(app)
+    universe = Universe(seed=False)
+    universe.wizards.publish(SAMPLE)
+    app.state.rules_live.reset(universe.transport)  # cold: nothing read yet on this instance
+    assert app.state.rules_live.cached_version is None
+    status = signed_in.get(f"{V1}/status").json()
+    assert status["rules_version"] == app.state.rules_live.cached_version and status["rules_version"]
+    universe.wizards.outage = True
+    app.state.rules_live.reset(universe.transport)  # cold again, and Wizards is down: no edition, and no failure
+    down = signed_in.get(f"{V1}/status")
+    assert down.status_code == 200 and down.json()["rules_version"] is None

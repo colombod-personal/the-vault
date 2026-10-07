@@ -69,3 +69,14 @@ def test_ramp_is_read_from_card_text():
 def test_too_small_a_deck_is_refused():
     with pytest.raises(ValueError):
         simulate([LAND] * 8, turns=6)
+
+
+def test_playing_a_land_with_no_maximum_hand_size_stops_the_discards():
+    """#137 (audit): only a cast spell lifted the limit; a land that is played (Reliquary Tower) never did, so the
+    numbers still counted discards while the text said discarding was the plan."""
+    tower = SimCard("Reliquary Tower", land=True, no_max_hand=True)
+    plain = SimCard("Plain Land", land=True)
+    big = [SimCard("Titan", cmc=9)] * 60
+    with_tower = simulate([tower] * 40 + big, multiplayer=True, seed=5)["headline"]["discarded_by_turn_5"]
+    without = simulate([plain] * 40 + big, multiplayer=True, seed=5)["headline"]["discarded_by_turn_5"]
+    assert without > 0 and with_tower == 0

@@ -180,7 +180,13 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
     def status_body(db: Session) -> dict:
         rows = q.sources(db)
         out = {n: {"version": s.version, "as_of": s.fetched_at.date().isoformat(), "rows": s.rows} for n, s in rows.items()}
-        return {"sources": out, "rules_version": live_rules.cached_version,
+        version = live_rules.cached_version
+        if version is None:  # a cold server instance: read the current edition now (cached for hours, as any rules tool would)
+            try:
+                version = live_rules.edition().version
+            except RulesUnavailable:
+                version = None  # Wizards' page cannot be read right now: say nothing rather than fail the status (#244)
+        return {"sources": out, "rules_version": version,
                 "provenance": q.provenance_for(db, *[n for n in prov.CATALOG_SOURCES if n in rows]),
                 "_links": {"self": link(f"{V1}/catalog/status")}}
 

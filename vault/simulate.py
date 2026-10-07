@@ -139,6 +139,7 @@ def _play_turn(g: _Game, turn: int, draws: bool) -> dict:
             g.tapped_lands += 1
         else:
             g.lands += 1
+        g.no_max_hand = g.no_max_hand or land.no_max_hand  # Reliquary Tower is a land: playing it is what lifts the limit (#137)
     mana = g.lands + g.rocks + g.dorks_ready
     available, cast = mana, []
     while True:
