@@ -120,7 +120,8 @@ def make_plan(base: dict | None, theirs: dict[str, dict], ours: dict[str, dict],
     mode = ("replace" if replace_everything else "first" if not entries_exist else "no_baseline" if base is None else "merge")
     plan = Plan(mode=mode)
     app = {"added": 0, "removed": 0, "increased": 0, "decreased": 0, "changed": 0, "copies_in": 0, "copies_out": 0}
-    effective_base = ours if base is None else base  # nothing recorded: treat the collection as unchanged since
+    # nothing recorded, or nothing in the collection (it was emptied): treat the collection as unchanged since the base
+    effective_base = ours if base is None or not entries_exist else base
     for ks in theirs.keys() | ours.keys() | effective_base.keys():
         b, t, o = effective_base.get(ks), theirs.get(ks), ours.get(ks)
         app_changed, vault_edited = not _same(t, b), not _same(o, b)

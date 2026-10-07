@@ -114,6 +114,11 @@ def test_without_a_base_the_file_replaces_the_collection_as_it_always_did():
     assert "no record of an earlier file" in merge.describe(plan, None)["how"]
 
 
+def test_an_emptied_collection_takes_the_file_whatever_the_base_says():
+    plan = merge.make_plan(merge.snapshot([x(2)]), merge.snapshot([x(2)]), {}, entries_exist=False)
+    assert plan.mode == "first" and plan.take and not plan.keep and not plan.kept_edits
+
+
 def test_replace_everything_discards_vault_edits_and_the_preview_counts_them():
     plan = plan_for([x(2), x(2, number="2")], [x(2), x(5, number="2")], [x(1), x(2, number="2")], replace_everything=True)
     assert plan.mode == "replace" and not plan.keep and plan.discards == 1
