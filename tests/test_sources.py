@@ -67,5 +67,6 @@ def test_the_plugin_manifests_carry_the_short_credit_line():
 
 def test_the_connect_page_credits_the_sources_and_says_the_vault_is_not_endorsed():
     page = text_of("public/connect.html")
-    assert "Scryfall" in page and "Commander Spellbook" in page and "Archidekt" in page and sources.CREDITS_URL.split(".cards")[1] in (ROOT / "public" / "connect.html").read_text(encoding="utf-8")
+    assert "Scryfall" in page and "Commander Spellbook" in page and "Archidekt" in page
+    assert 'href="credits.html"' in (ROOT / "public" / "connect.html").read_text(encoding="utf-8")
     assert "Not approved/endorsed by Wizards" in page

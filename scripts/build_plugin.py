@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from vault import reviewer  # noqa: E402  (the test cases live with the demo account they run on)
+from vault import reviewer, sources  # noqa: E402  (the test cases live with the demo account they run on)
 
 ROOT = Path(__file__).resolve().parent.parent
 SKILLS = ROOT / "skills"
@@ -48,7 +48,8 @@ VERSION = "0.1.0"
 HOST = "https://mtgvault.cards"
 REPO = "https://github.com/colombod-personal/the-vault"
 DESCRIPTION = ("Magic: The Gathering rules, cards, decks and collection tools for your AI assistant, grounded in "
-               "Scryfall and the Comprehensive Rules, with sources shown. Free and unofficial.")
+               "Scryfall and the Comprehensive Rules, with sources shown. Free and unofficial; credits to Scryfall, Wizards of "
+               "the Coast, Commander Spellbook, Archidekt and the other sources at " + sources.CREDITS_URL + ".")
 KEYWORDS = ["magic-the-gathering", "mtg", "rules", "decks", "scryfall", "collection"]
 AUTHOR = {"name": "The Vault", "url": REPO}
 
@@ -98,6 +99,15 @@ Install and connect: see docs/skills.md in the repository, or {HOST}/connect.htm
 The Vault is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards.
 Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC.
 """
+README = README.split("\nThe Vault is unofficial Fan Content")[0] + "\n" + sources.markdown(2)  # credits: vault/sources.py
+
+
+def credits_html() -> str:
+    """The connect page's credits: every source and how it is credited, from vault/sources.py."""
+    items = "".join(f'<li><strong>{html.escape(s.name)}</strong>: {html.escape(s.credit)}</li>' for s in sources.SOURCES)
+    return (f'<h2 id="credits">Who this is built on</h2><p>The Vault reads from these services on your behalf and says what it sends '
+            f'to each one (never your name, e-mail or collection). Every answer carries its source.</p><ul>{items}</ul>'
+            f'<p>How each is used, and thanks: <a href="credits.html">the credits page</a>.</p>')
 
 
 def dump(data: dict) -> str:
@@ -371,6 +381,8 @@ def connect_page() -> str:
     shop prices, only dated Scryfall ones), <em>“Buy me this deck”</em> (it never contacts stores), <em>“Delete my
     account”</em> (account actions stay with you in the Vault).</p>
 
+  {credits_html()}
+
   <h2>What to expect</h2>
   <ul>
     <li>Answers cite rule numbers and the rules edition, and say when the sources do not settle a question.</li>
@@ -540,7 +552,7 @@ OPENAI_MANIFEST = {
                             "find upgrades on a budget, get rules answers with cited rule numbers, and have an expert "
                             "council (Commander expert, casual table, judge, devil's advocate) review a deck. Card data "
                             "and prices are Scryfall's, rules are Wizards of the Coast's, shown with their sources. "
-                            "Free, unofficial Fan Content."),
+                            "Free, unofficial Fan Content. " + sources.short_credit_line()),
         "developerName": "The Vault",
         "category": "Lifestyle",
         "capabilities": ["Read", "Write"],
@@ -610,6 +622,7 @@ def expected() -> dict[Path, str | Path]:
         PLUGIN / ".claude-plugin" / "plugin.json": dump(CLAUDE_PLUGIN),
         PLUGIN / ".mcp.json": dump(CLAUDE_MCP),
         PLUGIN / "README.md": README,
+        ROOT / "README.md": sources.sync_block((ROOT / "README.md").read_text(encoding="utf-8").replace("\r\n", "\n")),
         MARKETPLACE: dump(MARKET),
         ROOT / "public" / "connect.html": connect_page(),
         ROOT / "public" / "llms.txt": llms_txt(),
@@ -623,7 +636,7 @@ def expected() -> dict[Path, str | Path]:
         files[DEFS / "codex" / f"{agent['name']}.toml"] = codex_agent(agent)
         files[DEFS / "cursor" / f"{agent['name']}.md"] = cursor_agent(agent)
         files[DEFS / "copilot" / f"{agent['name']}.agent.md"] = copilot_agent(agent)
-    files[DEFS / "README.md"] = DEFS_README
+    files[DEFS / "README.md"] = DEFS_README.rstrip("\n") + "\n\n" + sources.markdown(2)
     files[ROOT / "vault" / "experts_data.py"] = experts_module()
     files.update(openai_files())
     return files
