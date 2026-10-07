@@ -72,10 +72,12 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              {"name": {"type": "string", "minLength": 1, "maxLength": 300, "description": "Exact card name"},
               "oracle_id": {"type": "string", "minLength": 36, "maxLength": 36}},
              path=lambda a: f"{V1}/catalog/cards", query=("name", "oracle_id"), provenance=("catalog",), ui="card"),
-        Tool("get_rulings", "A card's rulings (Wizards' text via Scryfall), newest first, at most 25.",
+        Tool("get_rulings", "A card's rulings (Wizards' text via Scryfall), newest first, at most 25 a page. When "
+             "`next_offset` is not null there are more: call again with it as `offset` before saying a ruling does not exist.",
              {"oracle_id": {"type": "string", "minLength": 36, "maxLength": 36, "description": "From get_card_oracle"},
-              "limit": {"type": "integer", "minimum": 1, "maximum": 25, "default": 25}}, ["oracle_id"],
-             path=lambda a: f"{V1}/catalog/cards/{quote(a['oracle_id'], safe='')}/rulings", query=("limit",), provenance=("catalog",)),
+              "limit": {"type": "integer", "minimum": 1, "maximum": 25, "default": 25},
+              "offset": {"type": "integer", "minimum": 0, "maximum": 10000, "default": 0, "description": "Skip this many of the newest rulings"}}, ["oracle_id"],
+             path=lambda a: f"{V1}/catalog/cards/{quote(a['oracle_id'], safe='')}/rulings", query=("limit", "offset"), provenance=("catalog",)),
         Tool("search_rules", "Search the Comprehensive Rules for a topic (e.g. 'replacement effect damage'); best matches "
              "first, at most 10, each with its number and the edition. A keyword ability or glossary term in the query puts "
              "its defining rules first. The rules are read live from Wizards of the Coast's current edition.",
