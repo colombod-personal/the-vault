@@ -76,7 +76,7 @@ def test_the_connect_page_has_each_install_path_and_is_honest_about_oauth():
         assert needle in page, needle
     assert ("not switched on yet" in page) == (not bp.OAUTH_READY)
     assert 'id="claude"' in page and 'id="chatgpt"' in page and "Add custom MCP server" in page
-    assert "<script src" not in page  # nothing loaded from elsewhere
+    assert page.replace("<script src=\"analytics.bundle.js\"></script>", "").count("<script src") == 0  # nothing loaded from elsewhere (only our own analytics bundle)
 
 
 def test_the_connect_page_is_served(client):
