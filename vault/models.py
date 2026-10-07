@@ -152,6 +152,9 @@ class Deck(Base):
     source_url: Mapped[str | None] = mapped_column(String(500))
     # Who made the deck at its source (e.g. the Archidekt author), so a saved copy is still credited.
     source_author: Mapped[str | None] = mapped_column(String(200))
+    # When the list was last taken from source_url (read by the Vault, or pasted with the link); decks saved before this
+    # column existed carry their last saved time.
+    source_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # The deck's format as the person (or their assistant) set it; unset, it is read from the list (vault.deck_overview).
     format: Mapped[str | None] = mapped_column(String(30))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -355,7 +355,7 @@ MAX_OWNED_PRINTINGS = 50  # per deck line
 def price_coverage(db: Session, user_id: int, coverage: dict) -> dict:
     """Add prices to a deck's coverage: each line's ``unit_price`` (the cheapest known USD price of
     the line's printing when it names one the Vault knows, else of any printing of the card, in any
-    finish), ``missing_cost`` (that price times the copies missing; null when no price is known),
+    finish), ``price_date`` (the day of the snapshot that price came from), ``missing_cost`` (that price times the copies missing; null when no price is known),
     and ``owned_printings`` (the printings of the card in the collection, at today's prices). The
     deck's ``missing_cost`` totals the lines with a price; ``missing_unpriced`` counts the others."""
     return price_coverages(db, user_id, [coverage])[0]
@@ -367,6 +367,8 @@ def price_coverages(db: Session, user_id: int, coverages: list[dict], owned_prin
     fronts = sorted({_front(c["name"]) for cov in coverages for c in cov["cards"] if c["name"]})
     by_name: dict[str, float] = {}
     by_printing: dict[tuple, float] = {}
+    name_day: dict[str, date] = {}  # the day of the price snapshot each price above came from (#96: a dated price per card)
+    printing_day: dict[tuple, date] = {}
     owned: dict[str, list[dict]] = {}
     if fronts:
         cheapest = (f"least({_plausible('l.usd')}, {_plausible('l.usd_foil')}, {_plausible('l.usd_etched')})")
@@ -376,17 +378,19 @@ WITH named AS (
   WHERE lower(split_part(name, ' // ', 1)) = ANY(:fronts)
 ),
 latest AS (
-  SELECT DISTINCT ON (p.scryfall_id) p.scryfall_id, p.usd, p.usd_foil, p.usd_etched FROM price_snapshots p
+  SELECT DISTINCT ON (p.scryfall_id) p.scryfall_id, p.day, p.usd, p.usd_foil, p.usd_etched FROM price_snapshots p
   WHERE p.scryfall_id IN (SELECT scryfall_id FROM named) ORDER BY p.scryfall_id, p.day DESC
 )
-SELECT n.front, n.set_code, n.collector_number, {cheapest} AS price
+SELECT n.front, n.set_code, n.collector_number, {cheapest} AS price, l.day
 FROM named n JOIN latest l ON l.scryfall_id = n.scryfall_id"""), {"fronts": fronts}).all()
-        for front, set_code, number, price in priced_cards:
+        for front, set_code, number, price, day in priced_cards:
             if price is None:
                 continue
-            by_name[front] = min(by_name.get(front, price), price)
+            if front not in by_name or price < by_name[front]:
+                by_name[front], name_day[front] = price, day
             key = (front, (set_code or "").lower(), (number or "").lower())
-            by_printing[key] = min(by_printing.get(key, price), price)
+            if key not in by_printing or price < by_printing[key]:
+                by_printing[key], printing_day[key] = price, day
         if owned_printings:
             for r in db.execute(text(_priced("AND lower(split_part(name, ' // ', 1)) = ANY(:fronts)") + """
 SELECT lower(split_part(name, ' // ', 1)) AS front, set_code, collector_number, printing, finish,
@@ -401,16 +405,20 @@ ORDER BY 1, max(price) DESC, 2, 3"""), {"uid": user_id, "fronts": fronts}):
         out, total, unpriced = [], 0.0, 0
         for c in coverage["cards"]:
             front = _front(c["name"])
-            unit = by_printing.get((front, (c.get("set") or "").lower(), (c.get("number") or "").lower())) \
-                if c.get("set") and c.get("number") else None
-            unit = unit if unit is not None else by_name.get(front)
+            key = (front, (c.get("set") or "").lower(), (c.get("number") or "").lower())
+            unit = by_printing.get(key) if c.get("set") and c.get("number") else None
+            day = printing_day.get(key) if unit is not None else None
+            if unit is None:
+                unit, day = by_name.get(front), name_day.get(front)
             cost = round(unit * c["missing"], 2) if unit is not None else None
             if c["missing"]:
                 if cost is None:
                     unpriced += 1
                 else:
                     total += cost
-            out.append({**c, "unit_price": None if unit is None else round(unit, 2), "missing_cost": cost if c["missing"] else 0.0,
+            out.append({**c, "unit_price": None if unit is None else round(unit, 2),
+                        "price_date": day.isoformat() if unit is not None and day is not None else None,
+                        "missing_cost": cost if c["missing"] else 0.0,
                         **({"owned_printings": owned.get(front, [])[:MAX_OWNED_PRINTINGS]} if owned_printings else {})})
         results.append({**coverage, "cards": out, "missing_cost": round(total, 2), "missing_unpriced": unpriced})
     return results

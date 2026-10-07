@@ -308,3 +308,16 @@ def test_a_deck_id_must_be_the_callers_and_exactly_one_of_text_or_id_is_needed(l
     assert loaded.post(f"{V1}/stats", json={"deck_id": 999999}).status_code == 404
     assert loaded.post(f"{V1}/stats", json={}).status_code == 422
     assert loaded.post(f"{V1}/stats", json={"text": "1 Test Rock", "deck_id": mine["id"]}).status_code == 422
+
+
+def test_an_analysis_of_a_deck_from_archidekt_carries_its_credit_and_fetched_at(loaded):
+    """#96: deck answers carry provenance - the source link, the author's credit and when the list was taken."""
+    saved = loaded.post("/api/v1/decks", json={"name": "Rocks", "text": "1 Test Rock", "source_url": "https://archidekt.com/decks/6803907/x",
+                                               "source_author": "layer0"}).json()
+    for path, extra in (("stats", {}), ("shopping-list", {}), ("legality", {"format": "commander"})):
+        deck = loaded.post(f"{V1}/{path}", json={"deck_id": saved["id"], **extra}).json()["deck"]
+        credit = deck["credit"]
+        assert credit["source"] == "Archidekt" and credit["author"] == "layer0" and credit["url"].startswith("https://archidekt.com/decks/"), path
+        assert credit["fetched_at"] and "not the Vault's" in credit["notice"], path
+    pasted = loaded.post("/api/v1/decks", json={"name": "Mine", "text": "1 Test Rock"}).json()
+    assert "credit" not in loaded.post(f"{V1}/stats", json={"deck_id": pasted["id"]}).json()["deck"]

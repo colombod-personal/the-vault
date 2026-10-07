@@ -112,7 +112,11 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
         else:
             text, name, stored = body.text, None, None
         known = deck_overview.identities(db, deck_overview.read(text)["commanders"])
-        return {"id": body.deck_id, "name": name, "overview": deck_overview.overview(text, stored, known)}
+        out = {"id": body.deck_id, "name": name, "overview": deck_overview.overview(text, stored, known)}
+        credit = deck_overview.archidekt_credit(deck) if body.deck_id is not None else None
+        if credit:  # the deck is Archidekt's: every answer about it says whose it is and when the list was read (#96)
+            out["credit"] = credit
+        return out
 
     def text_of(db: Session, user: User, body: DeckIn) -> str:
         """The decklist: sent as text, or a saved deck of this person's by id."""
