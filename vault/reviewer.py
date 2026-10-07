@@ -19,7 +19,7 @@ import io
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from .models import Deck, Entry, Import, User
+from .models import CollectionBaseline, Deck, Entry, Import, User
 
 EMAIL = "reviewer@demo.invalid"
 NAME = "Demo reviewer"
@@ -142,6 +142,7 @@ def seed(db: Session, *, reset: bool = False) -> User:
     if reset:
         db.execute(delete(Deck).where(Deck.user_id == user.id))
         db.execute(delete(Entry).where(Entry.user_id == user.id))
+        db.execute(delete(CollectionBaseline).where(CollectionBaseline.user_id == user.id))
         db.execute(delete(Import).where(Import.user_id == user.id))
         db.commit()
     if db.scalar(select(Entry.id).where(Entry.user_id == user.id).limit(1)) is None:

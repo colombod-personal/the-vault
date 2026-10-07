@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import csv
 import math
+from collections import defaultdict
+from dataclasses import dataclass, field
 from datetime import date
 
 from mtg_toolkits import delta, formats
@@ -13,7 +15,8 @@ from mtg_toolkits.models import CollectionEntry, Finish
 from sqlalchemy import delete, select, tuple_, update
 from sqlalchemy.orm import Session
 
-from .models import Card, Entry, Import, User
+from . import merge
+from .models import Card, CollectionBaseline, Entry, Import, User, utcnow
 from .prices import MAX_PRICE, compute_values
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -38,13 +41,39 @@ def user_entries(db: Session, user: User) -> list[Entry]:
     return list(db.scalars(select(Entry).where(Entry.user_id == user.id).order_by(Entry.position, Entry.id)))
 
 
-def import_collection(db: Session, user: User, filename: str, content: bytes) -> Import:
-    """Replace the user's collection with the file's contents.
+@dataclass(frozen=True)
+class ImportOptions:
+    """How a re-import answers the questions of its three-way update (vault.merge)."""
+    replace_everything: bool = False  # the old behaviour: the file replaces the collection, Vault edits are discarded
+    conflicts: str = merge.DEFAULT_ANSWER  # the answer for every card changed on both sides: "vault" or "app"
+    use_app_value: frozenset = field(default_factory=frozenset)  # conflict ids answered "app" whatever `conflicts` says
+
+
+@dataclass
+class Prepared:
+    """Everything an import (or its preview) works out before touching a row."""
+    source: str
+    entries: list[CollectionEntry]
+    entry_keys: list[str]
+    old_rows: list[Entry]
+    row_keys: list[str]
+    plan: merge.Plan
+    baseline: dict | None  # who the base is: the import it came from
+    theirs: dict
+    result_rows: int
+    changes: dict  # the summary of what the collection does (shaped like delta's)
+
+
+def import_collection(db: Session, user: User, filename: str, content: bytes, options: ImportOptions | None = None) -> Import:
+    """Bring the user's collection up to the file's contents, keeping what was changed in the Vault.
 
     The format (Dragon Shield, Moxfield, generic CSV) is detected from the header. The file is
-    treated as a full snapshot. The change against the previous collection is stored on the
-    import (``summary``). Printings are matched to Scryfall right away where possible, so
-    prices show immediately:
+    a full snapshot of the person's app. Compared with the last imported file, it says what changed in
+    their app; only that is applied. Edits made in the Vault since (``vault.owned_changes``) stay, and a card
+    changed on both sides is a conflict that keeps the Vault's edit unless ``options`` say otherwise
+    (``vault.merge`` has the rules; ``options.replace_everything`` gives the old behaviour). The change to the
+    collection is stored on the import (``summary``, and ``changes["merge"]``). Printings are matched to
+    Scryfall right away where possible, so prices show immediately:
     - exact matches from the previous import are carried over
     - Scryfall ids in the file are used
     - set + collector number is looked up among the cards the server already knows
@@ -52,9 +81,29 @@ def import_collection(db: Session, user: User, filename: str, content: bytes) ->
     """
     source, entries = read_file(content)
     version = db.scalar(select(User.collection_version).where(User.id == user.id))
+    return _replace(db, user, filename, version, _prepare(db, user, source, entries, options or ImportOptions()))
+
+
+def _baseline(db: Session, user: User) -> tuple[dict | None, dict | None]:
+    row = db.get(CollectionBaseline, user.id)
+    if row is None:
+        return None, None
+    source = db.get(Import, row.import_id) if row.import_id else None
+    return merge.loaded(row.cards), {"import_id": row.import_id, "filename": source.filename if source else None,
+                                     "imported_at": row.created_at.isoformat()}
+
+
+def _prepare(db: Session, user: User, source: str, entries: list[CollectionEntry], options: ImportOptions) -> Prepared:
     old_rows = user_entries(db, user)
-    changes = delta.diff([r.to_collection_entry() for r in old_rows], entries)
-    return _replace(db, user, filename, source, entries, version, old_rows, changes)
+    old = [r.to_collection_entry() for r in old_rows]
+    row_keys, entry_keys = [merge.key_string(e) for e in old], [merge.key_string(e) for e in entries]
+    ours, theirs = merge.snapshot(old, row_keys), merge.snapshot(entries, entry_keys)
+    base, info = _baseline(db, user)
+    plan = merge.make_plan(base, theirs, ours, entries_exist=bool(old_rows), replace_everything=options.replace_everything,
+                           default=options.conflicts, use_app=options.use_app_value)
+    result_rows = sum(1 for ks in entry_keys if ks in plan.take) + sum(1 for ks in row_keys if ks in plan.keep)
+    return Prepared(source, entries, entry_keys, old_rows, row_keys, plan, info, theirs, result_rows,
+                    merge.summary({k: s["q"] for k, s in ours.items()}, plan.new_copies))
 
 
 def read_file(content: bytes):
@@ -78,18 +127,24 @@ def read_file(content: bytes):
     return source, entries
 
 
-def preview_import(db: Session, user: User, content: bytes) -> dict:
-    """What importing the file would change, without changing anything (an assistant shows it first)."""
+def preview_import(db: Session, user: User, content: bytes, options: ImportOptions | None = None) -> dict:
+    """What importing the file would change, without changing anything (an assistant shows it first).
+
+    ``changes`` is what happens to the collection; ``merge`` says how: what your app changed and is applied, which
+    edits made in the Vault are kept, and which cards changed on both sides (with the answer each will get)."""
     source, entries = read_file(content)
-    old_rows = user_entries(db, user)
-    changes = delta.diff([r.to_collection_entry() for r in old_rows], entries)
-    matches = _match_printings(db, entries, old_rows)
+    prep = _prepare(db, user, source, entries, options or ImportOptions())
+    matches = _match_printings(db, entries, prep.old_rows)
     unmatched = [{"row": i, "name": e.name, "set": e.set_code, "number": e.collector_number, "quantity": e.quantity}
                  for i, (e, (sid, _, _)) in enumerate(zip(entries, matches), 1) if sid is None]
     return {"source": source, "rows": len(entries), "copies": sum(e.quantity for e in entries),
-            "changes": changes.summary(), "matched_rows": len(entries) - len(unmatched),
+            "changes": prep.changes, "merge": merge.describe(prep.plan, prep.baseline),
+            "matched_rows": len(entries) - len(unmatched),
             "unmatched_rows": len(unmatched), "unmatched": unmatched[:PREVIEW_UNMATCHED],
             "note": "row is the n-th card row of the file, not counting header lines. "
+                    "`changes` is what happens to the collection; `merge` says what comes from the person's app, which "
+                    "edits made in the Vault are kept and which cards changed on both sides (conflicts keep the "
+                    "Vault's edit unless the person answers otherwise). "
                     "Unmatched rows have no printing the Vault can identify (missing or unknown set and number). "
                     "They are kept and matched later by name, which can pick the wrong printing and price. "
                     "Fix the set code and collector number in the file before importing if you can."}
@@ -127,11 +182,13 @@ def _match_printings(db: Session, entries, old_rows) -> list[tuple]:
     return out
 
 
-def _replace(db: Session, user: User, filename: str, source, entries, version, old_rows, changes) -> Import:
-    matches = _match_printings(db, entries, old_rows)
+def _replace(db: Session, user: User, filename: str, version, prep: Prepared) -> Import:
+    entries, plan = prep.entries, prep.plan
+    matches = _match_printings(db, entries, prep.old_rows)
     imp = Import(
-        user_id=user.id, filename=filename[:255], source=source, rows=len(entries),
-        copies=sum(e.quantity for e in entries), summary=changes.summary(),
+        user_id=user.id, filename=filename[:255], source=prep.source, rows=prep.result_rows,
+        copies=sum(plan.new_copies.values()), summary=prep.changes,
+        changes={"merge": merge.describe(plan, prep.baseline, limit=merge.STORED_LIMIT)},
     )
     # Claim the collection: only one import replaces the version it read. Another import that
     # got there first (committed, or still running and holding the row) makes this one fail
@@ -142,13 +199,43 @@ def _replace(db: Session, user: User, filename: str, source, entries, version, o
         raise ImportConflict("Another import of this collection just finished. Reload and try again.")
     db.add(imp)
     db.flush()
-    db.execute(delete(Entry).where(Entry.user_id == user.id))
-    for position, (e, (scryfall_id, method, price_finish)) in enumerate(zip(entries, matches)):
-        e.scryfall_id = scryfall_id
-        db.add(Entry.from_collection_entry(
-            e, user_id=user.id, import_id=imp.id, position=position, match_method=method,
-            price_finish=price_finish,
-        ))
+    # The rows of the cards the file wins go; the Vault's edits stay (their rows are only moved into place).
+    kept: dict[str, list[Entry]] = defaultdict(list)
+    drop: list[int] = []
+    for row, ks in zip(prep.old_rows, prep.row_keys):
+        if ks in plan.keep:
+            kept[ks].append(row)
+        else:
+            drop.append(row.id)
+    if not kept:
+        db.execute(delete(Entry).where(Entry.user_id == user.id).execution_options(synchronize_session=False))
+    else:
+        for i in range(0, len(drop), 5000):
+            db.execute(delete(Entry).where(Entry.id.in_(drop[i:i + 5000])).execution_options(synchronize_session=False))
+    position, placed = 0, set()
+    for e, ks, (scryfall_id, method, price_finish) in zip(entries, prep.entry_keys, matches):
+        if ks in plan.take:
+            e.scryfall_id = scryfall_id
+            db.add(Entry.from_collection_entry(
+                e, user_id=user.id, import_id=imp.id, position=position, match_method=method,
+                price_finish=price_finish,
+            ))
+            position += 1
+        elif ks in kept and ks not in placed:  # an edited card stays where the file has it
+            placed.add(ks)
+            for row in kept[ks]:
+                row.position, position = position, position + 1
+    for ks, rows in kept.items():  # kept cards the file does not have (added in the Vault) go after the file's
+        if ks not in placed:
+            for row in rows:
+                row.position, position = position, position + 1
+    # The new file is the base of the next re-import, whatever was answered: what was kept stays kept (vault.merge).
+    cards = merge.stored(prep.theirs)
+    baseline = db.get(CollectionBaseline, user.id)
+    if baseline is None:
+        db.add(CollectionBaseline(user_id=user.id, import_id=imp.id, cards=cards))
+    else:
+        baseline.import_id, baseline.cards, baseline.created_at = imp.id, cards, utcnow()
     # Today's value right away, so the value-over-time chart starts with the first import (the
     # daily sync writes it again with that day's prices). Same transaction as the import, left
     # for the caller to commit (with the Idempotency-Key answer): all of it or nothing.

@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from .importer import export_collection
 from .sharing import display_name
-from .models import AccessToken, ApiSession, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionValue, Deck, Entry, Identity, Import, Share, StagedUpload, User
+from .models import AccessToken, ApiSession, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionBaseline, CollectionValue, Deck, Entry, Identity, Import, Share, StagedUpload, User
 from .prices import history
 from .collection_view import CollectionView
 
@@ -36,7 +36,8 @@ collection.csv       your collection in Dragon Shield's CSV format (re-importabl
 collection-moxfield.csv   the same, ready for Moxfield (Collection → More → Import CSV)
 collection-generic.csv    the same with every field and Scryfall ids, for any other app
 collection.json      your collection as the app shows it, with current prices
-imports.json         every CSV you imported, with what changed each time
+imports.json         every CSV you imported, with what changed each time (and which edits made in the Vault were kept)
+last_import_cards.json  the cards of the last file you imported, as they were: what the next import is compared with
 value_history.json   your collection's daily market value and cost
 decks.json           your saved decks (each also as a .txt file in decks/)
 shares.json          who you have given access to, and what others have shared with you
@@ -109,9 +110,15 @@ def export_archive(db: Session, user: User) -> bytes:
                                              "cards": [view.item(g) for g in view.groups]}))
         z.writestr("imports.json", _json([
             {"filename": i.filename, "imported_at": i.created_at, "rows": i.rows, "copies": i.copies,
-             "changes": i.summary}
+             "changes": i.summary, **({"merge": i.changes["merge"]} if (i.changes or {}).get("merge") else {})}
             for i in imports
         ]))
+        baseline = db.get(CollectionBaseline, user.id)
+        z.writestr("last_import_cards.json", _json({
+            "imported_at": baseline.created_at if baseline else None,
+            "cards": [{"name": c["n"], "set": c["s"], "number": c["c"], "finish": c["f"], "copies": c["q"], "rows": c["r"]}
+                      for c in (baseline.cards if baseline else [])],
+            "columns_of_rows": ["condition", "language", "folder", "price_paid", "date_paid", "quantity", "trade_quantity"]}))
         z.writestr("value_history.json", _json(history(db, user)))
         z.writestr("decks.json", _json([
             {"id": d.id, "name": d.name, "source_url": d.source_url, "source_author": d.source_author,
@@ -173,6 +180,7 @@ def personal_data(user_id: int) -> dict:
         "shares": delete(Share).where(or_(Share.owner_id == user_id, Share.grantee_id == user_id)),
         "decks": delete(Deck).where(Deck.user_id == user_id),
         "entries": delete(Entry).where(Entry.user_id == user_id),
+        "collection_baselines": delete(CollectionBaseline).where(CollectionBaseline.user_id == user_id),
         "imports": delete(Import).where(Import.user_id == user_id),
         "collection_values": delete(CollectionValue).where(CollectionValue.user_id == user_id),
         "identities": delete(Identity).where(Identity.user_id == user_id),
