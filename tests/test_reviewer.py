@@ -12,7 +12,7 @@ from vault import reviewer
 from vault.api import mcp
 from vault.app import create_app
 from vault.config import Settings
-from vault.models import Deck, Entry, User
+from vault.models import Deck, Entry, Import, User
 
 V1 = "/api/v1"
 SECRET = "correct horse battery staple"
@@ -157,3 +157,18 @@ def test_the_passphrase_check_is_exact_and_an_empty_one_never_matches():
 def test_a_short_passphrase_stops_the_server_from_starting(database_url):
     with pytest.raises(RuntimeError, match="at least 16"):
         Settings(database_url=database_url, session_secret="test", reviewer_passphrase="short").check()
+
+
+def test_every_demo_card_names_a_real_printing_and_old_demo_data_is_replaced(app):
+    """The first real Claude run (2026-10-07) found every demo price at $0: the rows had no set or collector number, so Scryfall
+    could not match them. Now each row carries a printing, and a demo account holding an older version is put back at sign-in."""
+    assert all(row[2] and row[3] and row[4] for row in reviewer.OWNED), "a demo row without a printing cannot be priced"
+    with app.state.db.sessions() as db:
+        user = reviewer.seed(db)
+        db.query(Import).filter_by(user_id=user.id).update({"filename": "demo-collection.csv"})  # the old version's name
+        db.query(Entry).filter_by(user_id=user.id).update({"set_code": None, "collector_number": None})
+        db.commit()
+        assert db.query(Entry).filter_by(user_id=user.id, set_code=None).count() == len(reviewer.OWNED)
+        reviewer.seed(db)  # signing in again
+        assert db.query(Entry).filter_by(user_id=user.id, set_code=None).count() == 0
+        assert db.query(Import).filter_by(user_id=user.id, filename=reviewer.COLLECTION_FILE).count() == 1

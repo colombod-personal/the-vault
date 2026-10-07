@@ -24,7 +24,9 @@ from .models import CollectionBaseline, Deck, Entry, Import, User
 EMAIL = "reviewer@demo.invalid"
 NAME = "Demo reviewer"
 PROVIDER = "reviewer"
-COLLECTION_FILE = "demo-collection.csv"
+# The file name is the demo data's version: a different name in the account's imports means the data is old and is put back (v2: real
+# printings, so Scryfall prices match; v1 had no set or number and every price was 0).
+COLLECTION_FILE = "demo-collection-v2.csv"
 
 # The five test prompts every store asks for, and three that must be refused or answered honestly. One list, used by the
 # /reviewers page and by the plugin manifest the OpenAI directory reads (scripts/build_plugin.py).
@@ -69,29 +71,48 @@ def passphrase_ok(given: str, expected: str) -> bool:
 # (name, quantity, set code, set name, collector number, finish, price paid per copy). Rows without a printing are matched
 # to one by the daily sync, like any import.
 OWNED = [
-    ("Sol Ring", 1, "c21", "Commander 2021", "263", "Foil", 2.00), ("Lightning Bolt", 4, "", "", "", "Normal", 0.75),
-    ("Counterspell", 2, "", "", "", "Normal", 1.10), ("Swords to Plowshares", 1, "", "", "", "Normal", 3.50),
-    ("Path to Exile", 1, "", "", "", "Normal", 2.80), ("Arcane Signet", 2, "", "", "", "Normal", 0.60),
-    ("Command Tower", 2, "", "", "", "Normal", 0.30), ("Cultivate", 1, "", "", "", "Normal", 0.25),
-    ("Kodama's Reach", 1, "", "", "", "Normal", 0.25), ("Rampant Growth", 2, "", "", "", "Normal", 0.15),
-    ("Rhystic Study", 1, "", "", "", "Normal", 18.00), ("Smothering Tithe", 1, "", "", "", "Normal", 22.00),
-    ("Cyclonic Rift", 1, "", "", "", "Normal", 20.00), ("Evolving Wilds", 3, "", "", "", "Normal", 0.10),
-    ("Terramorphic Expanse", 2, "", "", "", "Normal", 0.10), ("Exotic Orchard", 1, "", "", "", "Normal", 0.60),
-    ("Reflecting Pool", 1, "", "", "", "Normal", 4.00), ("City of Brass", 1, "", "", "", "Normal", 3.00),
-    ("Mana Confluence", 1, "", "", "", "Normal", 5.00), ("Path of Ancestry", 1, "", "", "", "Normal", 0.50),
-    ("Llanowar Elves", 4, "", "", "", "Normal", 0.30), ("Birds of Paradise", 2, "", "", "", "Normal", 1.20),
-    # the Sliver deck, partly owned
-    ("Sliver Hive", 1, "", "", "", "Normal", 1.00), ("Muscle Sliver", 1, "", "", "", "Normal", 0.20),
-    ("Winged Sliver", 1, "", "", "", "Normal", 0.15), ("Metallic Sliver", 2, "", "", "", "Normal", 0.10),
-    ("Sinew Sliver", 1, "", "", "", "Normal", 0.15), ("Crystalline Sliver", 1, "", "", "", "Normal", 1.50),
-    ("Heart Sliver", 1, "", "", "", "Normal", 0.15), ("Spined Sliver", 1, "", "", "", "Normal", 0.15),
-    ("Gemhide Sliver", 1, "", "", "", "Normal", 0.80), ("Manaweft Sliver", 1, "", "", "", "Normal", 0.60),
-    ("Cloudshredder Sliver", 1, "", "", "", "Normal", 0.20), ("Galerider Sliver", 1, "", "", "", "Normal", 0.20),
-    ("Sliver Queen", 1, "", "", "", "Normal", 6.00), ("Sliver Legion", 1, "", "", "", "Normal", 12.00),
-    # the Pauper deck, fully owned
-    ("Chain Lightning", 4, "", "", "", "Normal", 0.80), ("Burst Lightning", 4, "", "", "", "Normal", 0.60),
-    ("Firebolt", 4, "", "", "", "Normal", 0.30), ("Skred", 4, "", "", "", "Normal", 0.25),
-    ("Fireblast", 3, "", "", "", "Normal", 2.50), ("Mountain", 40, "", "", "", "Normal", 0.05),
+    ("Sol Ring", 1, "c21", "Commander 2021", "263", "Normal", 2.0),
+    ("Lightning Bolt", 4, "clb", "Commander Legends: Battle for Baldur's Gate", "187", "Normal", 0.75),
+    ("Counterspell", 2, "sta", "Strixhaven Mystical Archive", "15", "Normal", 1.1),
+    ("Swords to Plowshares", 1, "brc", "The Brothers' War Commander", "75", "Normal", 3.5),
+    ("Path to Exile", 1, "acr", "Assassin's Creed", "81", "Normal", 2.8),
+    ("Arcane Signet", 2, "woc", "Wilds of Eldraine Commander", "145", "Normal", 0.6),
+    ("Command Tower", 2, "cmm", "Commander Masters", "420", "Normal", 0.3),
+    ("Cultivate", 1, "pw23", "Wizards Play Network 2023", "6", "Normal", 0.25),
+    ("Kodama's Reach", 1, "dmc", "Dominaria United Commander", "134", "Normal", 0.25),
+    ("Rampant Growth", 2, "nec", "Neon Dynasty Commander", "125", "Normal", 0.15),
+    ("Rhystic Study", 1, "wot", "Wilds of Eldraine: Enchanting Tales", "71", "Normal", 18.0),
+    ("Smothering Tithe", 1, "wot", "Wilds of Eldraine: Enchanting Tales", "67", "Normal", 22.0),
+    ("Cyclonic Rift", 1, "rvr", "Ravnica Remastered", "419", "Normal", 20.0),
+    ("Evolving Wilds", 3, "fdn", "Foundations", "262", "Normal", 0.1),
+    ("Terramorphic Expanse", 2, "afc", "Forgotten Realms Commander", "267", "Normal", 0.1),
+    ("Exotic Orchard", 1, "woc", "Wilds of Eldraine Commander", "159", "Normal", 0.6),
+    ("Reflecting Pool", 1, "clb", "Commander Legends: Battle for Baldur's Gate", "358", "Normal", 4.0),
+    ("City of Brass", 1, "tmc", "Teenage Mutant Ninja Turtles Eternal", "62", "Normal", 3.0),
+    ("Mana Confluence", 1, "jou", "Journey into Nyx", "163", "Normal", 5.0),
+    ("Path of Ancestry", 1, "khc", "Kaldheim Commander", "117", "Normal", 0.5),
+    ("Llanowar Elves", 4, "fdn", "Foundations", "227", "Normal", 0.3),
+    ("Birds of Paradise", 2, "msc", "Marvel Super Heroes Commander", "170", "Normal", 1.2),
+    ("Sliver Hive", 1, "m15", "Magic 2015", "247", "Normal", 1.0),
+    ("Muscle Sliver", 1, "tmp", "Tempest", "238", "Normal", 0.2),
+    ("Winged Sliver", 1, "cmm", "Commander Masters", "860", "Normal", 0.15),
+    ("Metallic Sliver", 2, "tpr", "Tempest Remastered", "226", "Normal", 0.1),
+    ("Sinew Sliver", 1, "cmm", "Commander Masters", "837", "Normal", 0.15),
+    ("Crystalline Sliver", 1, "cmm", "Commander Masters", "920", "Normal", 1.5),
+    ("Heart Sliver", 1, "tmp", "Tempest", "182", "Normal", 0.15),
+    ("Spined Sliver", 1, "tpr", "Tempest Remastered", "213", "Normal", 0.15),
+    ("Gemhide Sliver", 1, "cmm", "Commander Masters", "896", "Normal", 0.8),
+    ("Manaweft Sliver", 1, "cmm", "Commander Masters", "900", "Normal", 0.6),
+    ("Cloudshredder Sliver", 1, "cmm", "Commander Masters", "919", "Normal", 0.2),
+    ("Galerider Sliver", 1, "cmm", "Commander Masters", "849", "Normal", 0.2),
+    ("Sliver Queen", 1, "sth", "Stronghold", "129", "Normal", 6.0),
+    ("Sliver Legion", 1, "tsr", "Time Spiral Remastered", "261", "Normal", 12.0),
+    ("Chain Lightning", 4, "dmr", "Dominaria Remastered", "113", "Normal", 0.8),
+    ("Burst Lightning", 4, "fdn", "Foundations", "192", "Normal", 0.6),
+    ("Firebolt", 4, "mh1", "Modern Horizons", "122", "Normal", 0.3),
+    ("Skred", 4, "csp", "Coldsnap", "97", "Normal", 0.25),
+    ("Fireblast", 3, "dmr", "Dominaria Remastered", "119", "Normal", 2.5),
+    ("Mountain", 40, "c17", "Commander 2017", "304", "Normal", 0.05),
 ]
 
 # Decks as plain text (the form the Vault saves), with their sections.
@@ -139,6 +160,9 @@ def seed(db: Session, *, reset: bool = False) -> User:
     from .importer import import_collection
 
     user = find_or_create(db, profile(), None)
+    has_entries = db.scalar(select(Entry.id).where(Entry.user_id == user.id).limit(1)) is not None
+    current = db.scalar(select(Import.id).where(Import.user_id == user.id, Import.filename == COLLECTION_FILE).limit(1))
+    reset = reset or (has_entries and current is None)  # data from an older version of the demo
     if reset:
         db.execute(delete(Deck).where(Deck.user_id == user.id))
         db.execute(delete(Entry).where(Entry.user_id == user.id))
