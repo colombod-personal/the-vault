@@ -575,7 +575,9 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
         if method == "tools/list":
             # A client that connected here and said it cannot show MCP Apps gets no view links; one that did, or one we
             # have no session for (an older connection, a client that ignores session ids), gets them, as before.
-            views = mcp_session.read(request.app.state.settings.session_secret, request.headers.get(mcp_session.HEADER)) is not False
+            settings = request.app.state.settings
+            views = (not settings.mcp_apps_require_capability
+                     or mcp_session.read(settings.session_secret, request.headers.get(mcp_session.HEADER)) is not False)
             return _result(id_, {"tools": [t.schema(ui=views) for t in TOOLS if not t.write or "write" in scopes]})
         if method == "resources/list":  # the MCP Apps views (ui:// pages); there is nothing else to read
             return _result(id_, {"resources": mcp_ui.resources()})
