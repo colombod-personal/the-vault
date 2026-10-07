@@ -154,8 +154,12 @@ def demo_user(db: Session) -> User | None:
     return db.scalar(select(User).where(User.email == EMAIL))
 
 
-def seed(db: Session, *, reset: bool = False) -> User:
-    """Make sure the demo account and its data exist; with ``reset``, put the data back as it was. Idempotent."""
+def seed(db: Session, *, reset: bool = False, collection: bytes | None = None) -> User:
+    """Make sure the demo account and its data exist; with ``reset``, put the data back as it was. Idempotent.
+
+    ``collection`` is a Dragon Shield CSV to load instead of the made-up one, for a private copy of the Vault (jobs/seed_reviewer.py
+    --csv). It is stored under the demo file name, so the next sign-in keeps it rather than putting the made-up data back.
+    """
     from .auth import find_or_create
     from .importer import import_collection
 
@@ -170,7 +174,7 @@ def seed(db: Session, *, reset: bool = False) -> User:
         db.execute(delete(Import).where(Import.user_id == user.id))
         db.commit()
     if db.scalar(select(Entry.id).where(Entry.user_id == user.id).limit(1)) is None:
-        import_collection(db, user, COLLECTION_FILE, collection_csv().encode("utf-8"))
+        import_collection(db, user, COLLECTION_FILE, collection if collection is not None else collection_csv().encode("utf-8"))
     have = {d.name for d in db.scalars(select(Deck).where(Deck.user_id == user.id))}
     for name, text, fmt in DECKS:
         if name not in have:
