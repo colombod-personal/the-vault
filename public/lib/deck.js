@@ -19,26 +19,21 @@ window.DeckSrc = (() => {
     return null;
   }
 
-  async function fetchArchidekt(id) {
-    // Fetched by the Vault server (no browser CORS problems, no third-party proxies).
-    const json = await window.VaultApi.archidektDeck(id);
-    // json.cards: [{ quantity, categories, card: { oracleCard: { name }, edition: { editioncode }, collectorNumber } }, ...]
+  async function fetchArchidekt(id, refresh = false) {
+    // Fetched by the Vault server (no browser CORS problems, no third-party proxies). With detail=cards the answer has
+    // json.cards: [{ quantity, name, set, collector_number, categories, section }, ...], json.deck and json.vault_cache.
+    const json = await window.VaultApi.archidektDeck(id, refresh);
     const cards = [];
     for (const c of (json.cards || [])) {
-      const cats = c.categories || [];
-      // skip sideboard / maybeboard
-      if (cats.some(x => /sideboard|maybeboard|considering/i.test(x))) continue;
-      const name = c.card?.oracleCard?.name || c.card?.name;
-      const set = (c.card?.edition?.editioncode || '').toLowerCase();
-      const num = c.card?.collectorNumber || '';
-      const qty = c.quantity || 1;
-      if (name) cards.push({ name, set, collector_number: num, qty, categories: cats });
+      if (c.section !== 'Deck' && c.section !== 'Commander') continue; // skip sideboard / maybeboard
+      cards.push({ name: c.name, set: c.set || '', collector_number: c.collector_number || '', qty: c.quantity || 1, categories: c.categories || [] });
     }
     return {
-      title: json.name || `Archidekt #${id}`,
+      title: json.deck?.name || `Archidekt #${id}`,
       url: `https://archidekt.com/decks/${id}`,
-      author: json.owner?.username || '',
+      author: json.deck?.author || '',
       cards,
+      cache: json.vault_cache || null, // { from_cache, fetched_at, age_seconds }
     };
   }
 
@@ -82,10 +77,10 @@ window.DeckSrc = (() => {
     return { title: 'Pasted decklist', url: '', author: '', cards, unparsed: res.unparsed };
   }
 
-  async function fetchUrl(url) {
+  async function fetchUrl(url, refresh = false) {
     const parsed = parseId(url);
     if (!parsed) throw new Error('Unrecognised URL. Try Archidekt or Moxfield.');
-    if (parsed.kind === 'archidekt') return await fetchArchidekt(parsed.id);
+    if (parsed.kind === 'archidekt') return await fetchArchidekt(parsed.id, refresh);
     if (parsed.kind === 'moxfield') return await fetchMoxfield(parsed.id);
   }
 

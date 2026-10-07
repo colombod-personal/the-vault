@@ -26,6 +26,23 @@ def section_of(categories: list[str]) -> str:
     return "Deck"
 
 
+def card_lines(raw: dict) -> list[dict]:
+    """Every card of the deck with the printing Archidekt names, for the web app (``?detail=cards``): quantity, name, set
+    code, collector number, categories and the section it sits in. No prices: other shops' prices are not passed on."""
+    out = []
+    for entry in raw.get("cards") or []:
+        card = entry.get("card") or {}
+        name = ((card.get("oracleCard") or {}).get("name") or card.get("name") or "").strip()
+        if not name:
+            continue
+        categories = [str(c) for c in entry.get("categories") or []]
+        out.append({"quantity": max(1, int(entry.get("quantity") or 1)), "name": name,
+                    "set": ((card.get("edition") or {}).get("editioncode") or "").lower(),
+                    "collector_number": card.get("collectorNumber") or "", "categories": categories,
+                    "section": section_of(categories)})
+    return out
+
+
 # Archidekt's deckFormat numbers, only those checked against a real deck (3: Commander, "Sliver Swarm", 2026-10-06).
 # Unknown numbers leave the format to be read from the list (vault.deck_overview) rather than guessed.
 ARCHIDEKT_FORMATS = {3: "commander"}
