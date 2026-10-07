@@ -3,6 +3,8 @@ docs/owned-cards-updates.md): previews change nothing, a confirmation applies ex
 else, stale or tampered confirmations are refused, the printing is the person's choice, caps hold, every change set
 is in the history with its app and can be undone, and nobody else's collection is touched."""
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -231,3 +233,12 @@ def test_showing_owned_printings_is_read_only_and_private(agent, cards, bot):
         bob.post("/api/auth/dev-login", params={"email": "bob@example.com"})
         bob_read = make_token(bob)
     assert call_tool(bot, bob_read, "show_owned_printings", name="Sol Ring")["structuredContent"]["printings"] == []
+
+
+def test_the_preview_does_not_promise_what_re_import_does_not_do(bot, write):
+    """The audit (#242) found the preview saying 'a later re-import keeps these edits' while _replace wipes the collection:
+    until the three-way re-import (#194) exists, the answer must say the opposite."""
+    note = preview(bot, write, ADD_CMR)["note"].lower()
+    assert "replaces the whole collection" in note and "keeps these edits and applies" not in note
+    skill = (Path(__file__).resolve().parents[1] / "skills" / "collection-analyst" / "SKILL.md").read_text(encoding="utf-8")
+    assert "keeps these edits." not in skill and "replaces the whole collection" in skill
