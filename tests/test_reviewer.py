@@ -172,3 +172,26 @@ def test_every_demo_card_names_a_real_printing_and_old_demo_data_is_replaced(app
         reviewer.seed(db)  # signing in again
         assert db.query(Entry).filter_by(user_id=user.id, set_code=None).count() == 0
         assert db.query(Import).filter_by(user_id=user.id, filename=reviewer.COLLECTION_FILE).count() == 1
+
+
+def test_the_first_reviewer_prompt_gets_five_priced_cards_once_the_demo_is_matched_to_the_catalog(browser, app):
+    """Acceptance for 'What are my five most valuable cards?' on the demo account (#239): the demo rows, matched to a Scryfall-shaped
+    catalog the way the daily sync does it, give five priced cards, not the $0 list the first real Claude run saw."""
+    from datetime import date
+
+    from mtg_toolkits.scryfall import Card as SfCard
+
+    from tests.ids import sid
+    from vault.sync import sync
+
+    assert browser.post("/api/auth/reviewer-login", json={"passphrase": SECRET}).status_code == 200
+    bulk = [SfCard.from_json({"id": sid(f"demo-{i}"), "name": name, "set": code, "collector_number": number, "finishes": ["nonfoil"],
+                              "prices": {"usd": f"{max(paid, 0.1) * 3:.2f}"}, "type_line": "Card", "color_identity": [], "cmc": 1,
+                              "rarity": "rare", "artist": "A", "image_uris": {"small": "https://img.test/s.jpg", "normal": "https://img.test/n.jpg"}})
+            for i, (name, _q, code, _sn, number, _f, paid) in enumerate(reviewer.OWNED)]
+    with app.state.db.sessions() as db:
+        report = sync(db, bulk, day=date(2026, 10, 7))
+        unmatched = db.query(Entry).filter(Entry.scryfall_id.is_(None)).count()
+    assert unmatched == 0, f"{unmatched} demo rows have no matching printing: {report}"
+    top = browser.get(f"{V1}/collection/stats").json()["most_valuable"]
+    assert len(top) >= 5 and all((card.get("market_value") or card.get("value") or 0) > 0 for card in top[:5]) and top[0]["name"] == "Smothering Tithe"
