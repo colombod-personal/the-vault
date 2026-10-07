@@ -8,9 +8,42 @@ The Vault depends on other people's data and says so, always. Two rules sit abov
    Vault computes (a legality check, a budget, a deck count) is labelled as computed by the Vault, from
    which inputs. The Vault is not produced or endorsed by Scryfall, Wizards, Moxfield or Archidekt.
 
-Status of this document: written 2026-10-04 from public pages that were reachable then; Scryfall's terms read first-hand on 2026-10-05. Several
-primary pages returned errors (marked **unverified**). Nothing marked unverified may be relied on
+Status of this document: written 2026-10-04 from public pages that were reachable then; Scryfall's terms read first-hand on 2026-10-05;
+Moxfield's terms, Card Kingdom's, Magic Madhouse's and Archidekt's read first-hand on 2026-10-07 (Cardmarket's General Terms
+are behind a bot check and are **not read**, see `docs/data-sources.md`). Anything marked unverified may not be relied on
 until someone has read the primary text. This is engineering diligence, not legal advice.
+
+## Source gate (enforced)
+
+A catalog source is loaded only when its terms have been read first-hand and the row below says so. The rule is a test,
+not a promise: `tests/test_compliance_gate.py` fails when the code can load a source (`jobs/sync_catalog.py` `SOURCES`,
+`OTHER_JOBS`, `vault/provenance.py` `CATALOG_SOURCES`) that has no row here with Gate `read`, a date and a terms URL, and
+when a new `jobs/sync_*.py` job or `sync-*.yml` workflow appears without this table being looked at. What the test cannot
+see is the GitHub repository variable `CATALOG_SOURCES` (production); the job itself refuses names outside its own
+list, so production can only enable sources the test has checked.
+
+| Key | Source | Gate | Read on | Terms | What the terms mean for us |
+|---|---|---|---|---|---|
+| `oracle_cards` | Scryfall bulk `oracle_cards` | read | 2026-10-05 | https://scryfall.com/docs/api | Free for "creating additional Magic software"; must add value, no proxying; accurate User-Agent; credit |
+| `rulings` | Scryfall bulk `rulings` | read | 2026-10-05 | https://scryfall.com/docs/api | As above; rulings are Wizards' text and are shown as such |
+| `oracle_tags` | Scryfall Tagger tags | read | 2026-10-05 | https://scryfall.com/docs/api/tags | Track by id, be able to hide tags (`HIDDEN_TAGS`), labelled community opinion |
+| `oracle_prices` | Scryfall prices (TCGplayer, Cardmarket via Scryfall) | read | 2026-10-05 | https://scryfall.com/docs/api | Shown as Scryfall's, with date and marketplace |
+| `rules` | Wizards' Comprehensive Rules | read | 2026-10-04 | https://company.wizards.com/en/legal/fancontentpolicy | Read live, nothing stored (#142); Fan Content notice shown |
+
+Sources the Vault does **not** load, recorded so the next person does not have to find out again:
+
+| Key | Source | Gate | Read on | Terms | Verdict |
+|---|---|---|---|---|---|
+| `moxfield` | Moxfield decks | read: automation forbidden | 2026-10-07 | https://moxfield.com/help/terms | Not used for fetching; see "Moxfield" below |
+| `archidekt` | Archidekt public decks | read: not clear, owner position recorded | 2026-10-07 | https://archidekt.com/terms | One public deck per person's request only; see "Archidekt" below |
+| `cardkingdom` | Card Kingdom site and price list | read: automation forbidden | 2026-10-07 | https://www.cardkingdom.com/static/tos | Not used; ask first (`docs/data-sources.md`) |
+| `magicmadhouse` | Magic Madhouse site and affiliate feed | read: written permission needed | 2026-10-07 | https://magicmadhouse.co.uk/terms-conditions/ | Not used; the affiliate feed is the legitimate route (`docs/data-sources.md`) |
+| `cardmarket` | Cardmarket site | not read | n/a | https://www.cardmarket.com/en/Magic/Policies/GeneralTermsAndConditions | Not used; behind a bot check, owner reads it in a browser |
+| `commander_spellbook` | Commander Spellbook API | not read: no data licence found | n/a | https://commanderspellbook.com | On demand per request, nothing stored |
+
+The questions we planned to put to the sources' owners are **not part of this test** and are still open owner actions:
+see "Open with the owner" below. Until the owner decides otherwise, an unanswered question means "not allowed yet" for
+anything beyond what the read terms already permit.
 
 ## Requirements by source
 
@@ -52,14 +85,26 @@ No email to Scryfall is needed to load the card data on these terms.
 
 ### Moxfield
 
-[moxfield.com/terms](https://moxfield.com/terms) returned **403**. From public statements and
-developer discussion (unverified): no official API; scraping is against the terms; Moxfield has said
-legitimate developers should contact them on Discord or at support@moxfield.com to establish a
-relationship.
+Read first-hand on **2026-10-07**: [moxfield.com/help/terms](https://moxfield.com/help/terms) ("Effective Date: July 9, 2026";
+the old address `moxfield.com/terms` is a 404, and the page is rendered by the app, so it was read from the app's own
+script bundle). The clauses that matter:
 
-Rules for us: no automated fetching of Moxfield decks. The user's own CSV or pasted list is fine.
-Any Moxfield-derived deck is labelled "Deck from Moxfield", with its author and a link. Ask Moxfield
-before building anything automated.
+- Licence: "you may access and use the Site for your non-commercial personal use, and only as expressly permitted in these Terms."
+- Automation: you may not "(5) use any robot, spider or other automatic device, process or means to access the Site for any
+  purpose, including monitoring or copying any information or material on the Site, except as expressly approved by Moxfield;
+  or (6) use any manual process to monitor or copy any of the material on the Site or for any other unauthorized purpose
+  without Moxfield's prior, written consent."
+- Competitors need written consent to use the Services at all.
+- Contact for questions: support@moxfield.com (section 17).
+
+**API policy:** none is published. The terms do not mention an API; no developer or API page was found on the
+site or by web search on 2026-10-07 (community libraries exist, unofficial). The statement we had before, that
+Moxfield asks legitimate developers to get in touch, is still second-hand (developer discussion) and unverified.
+
+Rules for us: no automated fetching of Moxfield decks (the terms forbid it without Moxfield's approval).
+The user's own CSV or pasted list is fine. Any Moxfield-derived deck is labelled "Deck from Moxfield", with its author and a
+link. Moxfield must be asked before anything automated is built (draft in `docs/outreach-drafts.md`, **not sent**: owner).
+`tests/test_deck_import.py` rejects Moxfield links, so nothing is fetched in the meantime.
 
 ### Archidekt
 
@@ -105,15 +150,30 @@ What the Vault does:
 
 Code review that nothing writes to Archidekt, with a guard test: #132.
 
+**`search_decks` (the toolkit library's search) is one page on a person's request, and the Vault does not use it at all
+(#132, 2026-10-07).** `mtg_toolkits.archidekt.ArchidektClient.search_decks(...)` is a generator that **follows `next`
+across every page of results**, so called without `limit` it crawls Archidekt page after page. The rule: it is never
+called from a job, a loop, a scheduled run or an agent tool; the Vault's only Archidekt call is `get_deck` for one named
+public deck. If #94 (a person's own public decks) ever needs a list, it may call a search **once, on that person's
+request, with `limit` no larger than one page, never inside a loop**, and the test below must be changed together with
+this paragraph and shown to the owner. `tests/test_archidekt_readonly.py::test_the_vault_never_calls_search_decks_from_a_job_or_a_loop`
+fails if `search_decks` appears in `vault/`, `jobs/`, `api/` or `scripts/`, or if any job imports the Archidekt client.
+
 Planned (#94): listing a person's **own** public decks by their Archidekt username, as one read on that person's
 request, paced and cached. It is not built. Today's support is the single deck a person gives or has saved, and the
 `archidekt-deck-helper` skill (and its generated plugin copy) tells agents to fetch only that one deck; they will need
 updating together with #94.
 
-### Other sources (to read before ingestion)
+### Other sources (read 2026-10-07)
 
-Commander Spellbook (data licence), Cardmarket public price guide (licence), Card Kingdom price
-list (terms), Neon and Vercel (limits, in `catalog-design.md`). Each gets a row here once read.
+Shops are in `docs/data-sources.md` with the source URL and date per row: Card Kingdom (terms forbid robots and data
+extraction; robots.txt disallows `/api/`), Magic Madhouse (copying or exploiting needs written permission "granted either
+directly or through a legitimate reselling programme"; the affiliate programme offers a full product feed, no rate
+published), Cardmarket (**General Terms not read**: bot check; API closed to new applications).
+
+Still unread: Commander Spellbook's data licence (none found; on demand only, nothing stored) and the **Fan Content Policy's
+rules on monetisation**, which must be read before the owner joins any affiliate programme. Neon and Vercel limits are in
+`catalog-design.md`.
 
 ## The two real risks
 
@@ -124,6 +184,9 @@ sign-in (OAuth providers, which give us an email, or a passkey, which does not).
 allows free accounts. Today the README treats sign-in as protecting private collections, not
 content, and the public pages stay open. The new design puts rules, card text and rulings behind
 tokens, which is closer to the line.
+
+**Superseded (owner, 2026-10-06, #62): see Decisions. Every feature needs a free account and there is no anonymous catalog;
+the options below are the analysis that led to that decision, kept for the record.**
 
 Options, in order of safety:
 
@@ -186,18 +249,26 @@ block looks like this:
 
 ## Open with the owner
 
-Nothing here blocks a current feature: the Vault fetches nothing from Moxfield and needs no permission from Scryfall
-for what it does today.
+These are **open owner actions**, not optional extras: the audit of #62 and #79 found them not done, and no decision to drop
+them is recorded. The drafts are final and ready (`docs/outreach-drafts.md`); nothing has been sent. Nobody but the owner
+sends them.
 
-- **Moxfield's terms: still unread first-hand** (their page refuses automated fetches). Owner: the repo owner, only if
-  the Vault ever reads anything from Moxfield beyond the person's own exported file. Until then the rule above holds:
-  no automated fetching of Moxfield decks.
-- **Emails to Scryfall and Moxfield: optional, not sent.** Drafts are in `docs/outreach-drafts.md`. Owner: the repo
-  owner decides whether to send them; nothing in the Vault depends on an answer.
+| Ask | Why | State | Owner step |
+|---|---|---|---|
+| Scryfall: do the planned tools count as added value? (#62) | Their terms require "additional value"; the answer shapes the lookup tools | **Not sent** | Send the Scryfall draft from the contact route on https://scryfall.com/docs/api, record the answer here with date and who answered |
+| Moxfield: legitimate access before any automated deck fetching (#62) | Their terms forbid robots without written approval (read 2026-10-07) | **Not sent** | Send the Moxfield draft to support@moxfield.com or their Discord; until an answer, nothing is fetched |
+| Archidekt: is one public deck per person's request acceptable? (#79) | Their terms exclude "automated searches, requests, or queries"; the owner's position is that one request on a person's action is within them, but Archidekt has never been asked | **Not sent** | Send the Archidekt draft via https://archidekt.com/contact or their Discord (link on the terms page) |
+| Wizards: Fan Content Policy (optional since #142) | The rules are read live and nothing is stored, so nothing needs their permission today | Not sent, optional | Only if the owner wants it in writing |
+| Cardmarket's terms | Could not be read by a tool | **Not read** | Open the General Terms in a browser and record the clauses on automated access and price data in `docs/data-sources.md` |
+| Fan Content monetisation terms | Needed before joining an affiliate programme | Not read | Read https://company.wizards.com/en/legal/fancontentpolicy before joining |
 
-Done and no longer open: Scryfall's API terms were read first-hand (2026-10-05, #141, see "Scryfall (API terms)" above); the
-registration question is decided (see Decisions); the rules are cited live from Wizards with no copy kept, so there is
-nothing to ask Wizards about rules text (see Decisions).
+The gate (the table at the top) is met for what the Vault loads today, because the terms of those sources have been read.
+The asks above are **not** a technical precondition that the code checks; they are the owner's commitments from #62, and
+the status line here stays honest about them: **not sent**.
+
+Done and no longer open: Scryfall's API terms were read first-hand (2026-10-05, #141, see "Scryfall (API terms)" above); Moxfield's
+terms were read first-hand (2026-10-07, see "Moxfield"); the registration question is decided (see Decisions); the rules
+are cited live from Wizards with no copy kept (see Decisions).
 
 ## Decisions
 
