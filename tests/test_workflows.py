@@ -34,7 +34,8 @@ def load(path):
 
 # The only jobs that may write issues (#64: the budget guard opens or updates a GitHub issue, which needs `issues: write`). Each one
 # holds no secret and no environment (test_the_issue_writers_hold_nothing_else): a read-only token everywhere else.
-ISSUE_WRITERS = {("sync-prices.yml", "alert"), ("sync-catalog.yml", "alert"), ("neon-monthly-check.yml", "remind")}
+ISSUE_WRITERS = {("sync-prices.yml", "alert"), ("sync-catalog.yml", "alert"), ("neon-monthly-check.yml", "remind"),
+                 ("issue-progress.yml", "progress")}  # writes the Progress block of the issues a PR names (AGENTS.md section 8)
 
 
 @pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
@@ -267,6 +268,15 @@ def test_the_issue_writers_hold_nothing_else_and_nothing_else_writes_issues():
             found.add((path.name, name))
             assert "secrets." not in yaml.safe_dump(job), f"{path.name}/{name}: an issue writer holds no secret"
             assert "environment" not in job, f"{path.name}/{name}: and no environment (the vercel-production one carries the secrets)"
+            if (path.name, name) == ("issue-progress.yml", "progress"):
+                # The one exception: it must run when a pull request opens or merges, to write that pull request's Progress block
+                # into the issues it names. It stays safe by running the DEFAULT branch's copy of the script (never the pull request's),
+                # reading the description only as data, holding no secret, and writing nothing but issue comments and bodies.
+                assert set(triggers) == {"pull_request"} and "pull_request_target" not in triggers
+                checkout = next(s for s in job["steps"] if "checkout" in s.get("uses", ""))
+                assert "default_branch" in checkout["with"]["ref"], "never check out the pull request's own code with a write token"
+                assert all("github.event.pull_request.head" not in str(s) for s in job["steps"])
+                continue
             assert not {"push", "pull_request", "pull_request_target"} & set(triggers), f"{path.name}/{name}: no push or PR trigger"
             assert "refs/heads/main" in str(job.get("if", "")), f"{path.name}/{name}: only for main"
             runs = [s["run"] for s in job["steps"] if "run" in s]

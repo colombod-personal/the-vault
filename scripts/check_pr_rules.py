@@ -66,6 +66,21 @@ def check(changed: list[str], body: str) -> list[str]:
     return problems
 
 
+ISSUE_LINE = re.compile(r"(?im)^\s*(?:Refs\s+#\d+|No issue:\s*\S.{8,})")
+CLOSING = re.compile(r"(?i)\b(?:closes|closed|close|fixes|fixed|fix|resolves|resolved|resolve)\s+#\d+")
+
+
+def issue_link_problems(body: str) -> list[str]:
+    """Every pull request is tied to its issue so the issue's Progress block can follow it (AGENTS.md section 8), and never closes one."""
+    problems = []
+    if CLOSING.search(body or ""):
+        problems.append("the description uses a closing keyword (Closes/Fixes/Resolves #n): GitHub would close the issue on merge, before "
+                        "anything was verified. Write `Refs #n`; the issue is closed by hand once every criterion has its evidence")
+    if not ISSUE_LINE.search(body or ""):
+        problems.append("the description names no issue: start it with `Refs #n` (or `No issue: <why this needs none>`)")
+    return problems
+
+
 def changed_files(base: str, head: str) -> list[str]:
     out = subprocess.run(["git", "diff", "--name-only", f"{base}...{head}"], check=True, capture_output=True, text=True)
     return [line.strip() for line in out.stdout.splitlines() if line.strip()]
@@ -76,7 +91,8 @@ def main() -> int:
     if not base or not head:
         print("BASE_SHA and HEAD_SHA are required", file=sys.stderr)
         return 2
-    problems = check(changed_files(base, head), os.environ.get("PR_BODY", ""))
+    body = os.environ.get("PR_BODY", "")
+    problems = check(changed_files(base, head), body) + issue_link_problems(body)
     for problem in problems:
         print(f"::error::{problem}")
     return 1 if problems else 0

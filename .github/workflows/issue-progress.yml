@@ -1,0 +1,30 @@
+name: issue progress
+# When a pull request opens, reopens or merges, the issues it names (`Refs #n`) get their Progress block and a comment, so the
+# issue always says where the work is (scripts/issue_progress.py, AGENTS.md section 8). It runs the script from the DEFAULT
+# branch, never the pull request's own copy, and reads the description only as data (a regex for `Refs #n`).
+on:
+  pull_request:
+    types: [opened, reopened, closed]
+permissions:
+  contents: read
+jobs:
+  progress:
+    permissions:
+      contents: read
+      issues: write
+    if: github.event.action != 'closed' || github.event.pull_request.merged == true
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Update the issues this pull request names
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          ACTION: ${{ github.event.action }}
+        run: |
+          if [ "$ACTION" = "closed" ]; then cmd=pr-merged; else cmd=pr-opened; fi
+          python3 scripts/issue_progress.py "$cmd" --pr "$PR"
