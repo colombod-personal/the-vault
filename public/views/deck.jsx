@@ -190,6 +190,12 @@ function DeckLibrary({ myDecks, onOpen, onRetry, notice }) {
                  <div className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', marginTop: 2 }}>
                    {d.source_url ? d.source_url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/decks\//, ' · ') : 'pasted list'}
                  </div>
+                 <div className="deck-tile-what" style={{ fontSize: 12, marginTop: 6, lineHeight: 1.4 }}>
+                   <strong>{d.overview && d.overview.format ? d.overview.format : 'format unknown'}</strong>
+                   {d.overview && d.overview.commanders && d.overview.commanders.length > 0
+                     ? <span> · {d.overview.commanders.join(' + ')}</span>
+                     : <span className="muted"> · {d.source_url ? 'no commander recorded: open the deck and press Refresh' : 'no commander'}</span>}
+                 </div>
                  {!c ? <p className="muted label-mono" style={{ marginTop: 12 }}>Checking your collection…</p> :
                   c === 'error' ? <p className="muted label-mono" style={{ marginTop: 12 }}>Couldn't check this deck</p> : (
                    <>

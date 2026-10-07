@@ -150,6 +150,7 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
         credit = deck_overview.archidekt_credit(deck) if body.deck_id is not None else None
         if credit:  # the deck is Archidekt's: every answer about it says whose it is and when the list was read (#96)
             out["credit"] = credit
+            deck_overview.refresh_note(deck, out["overview"])
         return out
 
     def text_of(db: Session, user: User, body: DeckIn) -> str:

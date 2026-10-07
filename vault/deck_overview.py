@@ -91,6 +91,15 @@ def overview(text: str, stored_format: str | None, known: dict[str, list[str]] |
     return out
 
 
+def refresh_note(d, overview: dict) -> None:
+    """A deck saved from an Archidekt link before the import kept its Commander section has no commander in its stored list: say
+    how to get it (the answer was 'Not detected', which left the person and their assistant guessing), without fetching anything."""
+    if overview.get("commanders") or d is None or archidekt_credit(d) is None or overview.get("note"):
+        return
+    overview["note"] = ("No commander is recorded: this deck was saved from its Archidekt link before the Commander section was kept. "
+                        "refresh_deck re-reads the link on the person's request, shows what changes and asks first.")
+
+
 def archidekt_credit(d) -> dict | None:
     """The credit a saved deck from Archidekt carries in every answer about it: the source, the link, the author, when the
     Vault last took the list from that link (``fetched_at``), and the notice to repeat. None for any other deck."""
