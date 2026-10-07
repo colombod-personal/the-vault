@@ -37,7 +37,7 @@ from ..auth import IdentityInUse, Profile, find_or_create
 from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, import_days, view_version
 from .. import archidekt_cache, deck_import, deck_match, deck_overview, deck_refresh, experts, owned_changes
-from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, export_collection, import_collection,
+from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, ImportOptions, export_collection, import_collection,
                         preview_import as preview_collection_import, user_entries)
 from ..models import AccessToken, ApiSession, Card, Deck, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
 from ..native import LEEWAY as NATIVE_LEEWAY, NativeTokenError, NativeVerifier, ProviderUnavailable
@@ -49,6 +49,7 @@ from ..sharing import accept_invite, create_invite, display_name, incoming_share
 from . import schemas as S
 from .hal import clamp_limit, decode_cursor, encode_cursor, etag_response, link, page_body, paginate
 from .idempotency import idempotent
+from .import_params import import_options
 
 V1 = "/api/v1"
 Id = Annotated[int, Path(ge=1, le=S.MAX_ID)]  # a row id: anything larger can't exist (and would overflow the column)
@@ -587,18 +588,21 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                "created_at": _iso(i.created_at), "_links": {"self": link(f"{V1}/imports/{i.id}")}}
         if i.kind in ("assistant", "undo"):
             out |= {"app": i.app, "lines": (i.changes or {}).get("lines")}
+        elif (i.changes or {}).get("merge"):
+            out["merge"] = i.changes["merge"]  # what the app changed, which Vault edits were kept, the conflicts
         return out
 
     @router.post("/imports", tags=["imports"], response_model=S.ImportItem, status_code=201,
-                 summary="Upload a collection file: Dragon Shield, Moxfield or generic CSV, detected automatically "
-                         "(replaces the collection, records what changed)")
+                 summary="Upload a collection file: Dragon Shield, Moxfield or generic CSV, detected automatically. "
+                         "Applies only what changed in the person's app since the last import and keeps edits made in the "
+                         "Vault (conflicts keep the Vault's edit unless answered); records what changed")
     async def create_import(request: Request, file: UploadFile, user: User = Depends(current_user),
-                            db: Session = Depends(get_db)):
+                            db: Session = Depends(get_db), options: ImportOptions = Depends(import_options)):
         content = await file.read(MAX_UPLOAD_BYTES + 1)  # enough to reject an oversized file, no more
 
         def run():
             try:
-                return _import(import_collection(db, user, file.filename or "upload.csv", content))
+                return _import(import_collection(db, user, file.filename or "upload.csv", content, options))
             except ImportConflict as exc:
                 raise HTTPException(409, str(exc)) from exc
             except ImportError_ as exc:
@@ -608,10 +612,11 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     @router.post("/imports/preview", tags=["imports"],
                  summary="What uploading this collection file would change, without changing anything")
-    async def preview_import(file: UploadFile, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    async def preview_import(file: UploadFile, user: User = Depends(current_user), db: Session = Depends(get_db),
+                             options: ImportOptions = Depends(import_options)) -> dict:
         content = await file.read(MAX_UPLOAD_BYTES + 1)
         try:
-            return preview_collection_import(db, user, content)
+            return preview_collection_import(db, user, content, options)
         except ImportError_ as exc:
             raise HTTPException(400, str(exc)) from exc
 
