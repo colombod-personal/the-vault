@@ -665,18 +665,29 @@ function CollectionHistorySection({ onCollectionChanged }) {
 }
 
 
-// Apps connected with OAuth (ChatGPT, Claude, ...): what each may do, when it last acted, and a way to cut it off.
+// Apps connected with OAuth (ChatGPT, Claude, ...): one row per app however many times it was connected (each device or
+// re-add is a connection); what it may do, when it last acted, and one click that cuts all of its connections off.
 function ConnectedAppsSection() {
   const api = window.VaultApi;
   const [apps, setApps] = useStateAcc(null);
   const [error, setError] = useStateAcc(null);
   const reload = () => { api.apps().then(setApps).catch((e) => setError(e.message)); };
   useEffectAcc(reload, []);
-  const disconnect = async (id) => { setError(null); try { await api.disconnectApp(id); reload(); } catch (e) { setError(e.message); } };
+  const disconnect = async (row) => {
+    setError(null);
+    let a = row;
+    try { a = (await api.apps()).find((x) => x.id === row.id) || row; } catch (e) { /* ask with what the page has */ }
+    const m = a.used_minutes_ago;  // set only when the app acted within the last hour: the confirmation names it
+    const note = m == null ? '' : `${a.name} was used ${m < 1 ? 'less than a minute' : m + ' minute' + (m === 1 ? '' : 's')} ago. `;
+    const stops = a.connections > 1 ? `All ${a.connections} of its connections stop` : 'It stops';
+    if (!confirm(`${note}Disconnect ${a.name}? ${stops} at once and it has to ask you again.`)) return;
+    try { await api.disconnectApp(a.id); reload(); } catch (e) { setError(e.message); }
+  };
   return (
     <Section title="Connected apps">
       <p className="label-mono" style={{ marginBottom: 8 }}>
-        Apps you allowed to use your vault, such as ChatGPT or Claude. Disconnecting one stops it at once; it has to ask you again.
+        Apps you allowed to use your vault, such as ChatGPT or Claude: one row per app, even if you connected it on several
+        devices or added it again. Disconnecting an app stops all of its connections at once; it has to ask you again.
         Add the address <code>{window.location.origin}/api/mcp</code> in the app to connect it.
       </p>
       {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
@@ -685,10 +696,13 @@ function ConnectedAppsSection() {
         <div key={a.id} style={rowStyle}>
           <span className="label-mono">
             <strong>{a.name}</strong>{a.domain ? ` (${a.domain})` : ' · unverified'} ·{' '}
-            {a.scopes.includes('write') ? 'read & write' : 'read-only'} · connected {new Date(a.created_at).toLocaleDateString()} ·{' '}
+            {a.scopes.includes('write') ? 'read & write' : 'read-only'} ·{' '}
+            {a.connections} connection{a.connections === 1 ? '' : 's'} · first connected {new Date(a.created_at).toLocaleDateString()} ·{' '}
             {a.last_used_at ? 'used ' + new Date(a.last_used_at).toLocaleDateString() : 'never used'}
+            {a.idle && ' · idle (not used for 14 days)'}
+            {!a.idle && a.idle_connections > 0 && ` · ${a.idle_connections} idle connection${a.idle_connections === 1 ? '' : 's'}`}
           </span>
-          <button className="btn xs ghost" onClick={() => disconnect(a.id)}>Disconnect</button>
+          <button className="btn xs ghost" onClick={() => disconnect(a)}>Disconnect</button>
         </div>
       ))}
     </Section>

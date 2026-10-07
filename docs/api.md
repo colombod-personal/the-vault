@@ -171,7 +171,7 @@ ignored and the connection's address is used.
 | GET / PATCH / DELETE | `/api/v1/me` | profile / change display name / delete account (`{"confirm": "DELETE"}`) |
 | GET | `/api/v1/me/export` | everything held about you, as a ZIP (GDPR) |
 | GET / DELETE | `/api/v1/me/sessions[/{id}]` | signed-in apps |
-| GET / DELETE | `/api/v1/me/apps[/{id}]` | apps connected with OAuth (ChatGPT, Claude, ...): name, domain, scopes, created, last used; disconnect one. Account endpoints: not for tokens, no MCP tool |
+| GET / DELETE | `/api/v1/me/apps[/{id}]` | apps connected with OAuth (ChatGPT, Claude, ...): one row per app: name, domain, scopes, number of connections, first connected, last used, idle; disconnect revokes all its connections. Account endpoints: not for tokens, no MCP tool |
 | GET | `/.well-known/oauth-protected-resource[/api/mcp]`, `/.well-known/oauth-authorization-server` | OAuth discovery (RFC 9728, RFC 8414) |
 | GET / POST | `/oauth/authorize` | OAuth authorization request (PKCE S256, `resource`) and the consent answer; HTML pages, see `agents.md` |
 | POST | `/oauth/token`, `/oauth/revoke`, `/oauth/register` | OAuth token endpoint (authorization_code, refresh_token), revocation, dynamic client registration |

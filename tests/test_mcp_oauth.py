@@ -691,7 +691,7 @@ def test_connected_apps_are_listed_and_can_be_revoked(app, client):
     assert item["verified_by_address"] is True and item["created_at"] and item["last_used_at"]
     assert "token" not in str(item) and "hash" not in str(item)
     assert client.browser.get(f"{V1}/me").json()["_links"]["apps"]["href"] == f"{V1}/me/apps"
-    assert client.browser.delete(item["_links"]["self"]["href"]).json() == {"deleted": True}
+    assert client.browser.delete(item["_links"]["self"]["href"]).json() == {"deleted": True, "connections": 1}
     assert client.mcp("ping").status_code == 401  # revoked: the tokens stop working at once
     assert client.refresh().status_code == 400
     assert client.browser.get(f"{V1}/me/apps").json()["items"] == []
@@ -745,7 +745,7 @@ def test_the_grant_cap_keeps_a_person_from_piling_up_apps(app, client, monkeypat
     client.sign_in()
     for _ in range(4):
         client.tokens = client.redeem(client.approve()["code"]).json()
-    assert client.browser.get(f"{V1}/me/apps").json()["total"] == 2
+    assert db_do(app, lambda db: len(oauth_server.user_grants(db, grant_of(app).user_id))) == 2  # connections; the list groups them by app
 
 
 # -- rate limits, logging ----------------------------------------------------------------------
