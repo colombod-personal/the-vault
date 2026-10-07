@@ -242,3 +242,30 @@ def test_the_preview_does_not_promise_what_re_import_does_not_do(bot, write):
     assert "replaces the whole collection" in note and "keeps these edits and applies" not in note
     skill = (Path(__file__).resolve().parents[1] / "skills" / "collection-analyst" / "SKILL.md").read_text(encoding="utf-8")
     assert "keeps these edits." not in skill and "replaces the whole collection" in skill
+
+
+def test_the_history_marks_the_one_change_that_can_be_undone_and_the_web_session_can_undo_it(app, agent, bot, write):
+    """The web app's Undo (#81, rule 5): the import history says which entry can be undone, and the signed-in person's
+    own session previews and applies the undo, with no assistant involved."""
+    from test_agents import CSV
+    seen = preview(bot, write, ADD_CMR)
+    assert not confirm(bot, write, [ADD_CMR], seen["confirmation"]).get("isError")
+    entry = agent.get(f"{V1}/imports").json()["items"][0]
+    assert entry["kind"] == "assistant" and entry["undoable"] is True and entry["undone"] is False and entry["lines"]
+    shown = agent.post(f"{V1}/collection/changes/undo", json={})  # what the web app's Undo button asks first
+    assert shown.status_code == 200 and shown.json()["undoes"] == entry["id"] and shown.json()["ready"]
+    assert agent.get(f"{V1}/imports").json()["items"][0]["undoable"] is True  # a preview changed nothing
+    done = agent.post(f"{V1}/collection/changes/undo", json={"confirmation": shown.json()["confirmation"]})
+    assert done.status_code == 200 and done.json()["undone"] == entry["id"]
+    items = agent.get(f"{V1}/imports").json()["items"]
+    assert items[0]["kind"] == "undo" and items[1]["id"] == entry["id"] and items[1]["undoable"] is False and items[1]["undone"] is True
+    assert agent.get(f"{V1}/imports/{entry['id']}").json()["undone"] is True
+    # an older change set is not undoable once something else changed the collection
+    seen = preview(bot, write, ADD_CMR)
+    assert not confirm(bot, write, [ADD_CMR], seen["confirmation"]).get("isError")
+    newest = agent.get(f"{V1}/imports").json()["items"][0]["id"]
+    agent.post(f"{V1}/imports", files={"file": ("e.csv", CSV, "text/csv")})
+    again = agent.get(f"{V1}/imports").json()["items"]
+    assert again[0]["kind"] == "import" and again[0]["undoable"] is None  # a file import is not an assistant change
+    assert next(i for i in again if i["id"] == newest)["undoable"] is False
+    assert agent.post(f"{V1}/collection/changes/undo", json={}).status_code == 409

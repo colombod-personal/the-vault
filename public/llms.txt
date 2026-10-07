@@ -190,7 +190,8 @@ be revoked (Account → Connected apps for OAuth).
   - connection check: `whoami` (who you are, your scopes, and which data versions the Vault holds)
   - rules and cards, from the Comprehensive Rules and Oracle data: `get_card_oracle`, `get_rulings`,
     `find_rules_term`, `search_rules`, `rules_outline`, `get_rule` (with parent, children, siblings and
-    references), `verify_citation`, `present_steps`; the rules are read live from Wizards (no copy kept)
+    references), `verify_citation`, `present_steps`; the rules are read live from Wizards (no copy kept, so only the current
+    edition can be read: another `version` is refused with the current one named)
   - the expert council (the same experts the plugin installs): `council_brief` (the panel for a format and
     goal, each member's brief, the chair's procedure), `expert_brief` (one expert)
   - deck analysis, computed by the Vault: `deck_stats`, `simulate_draws`, `deck_legality`, `find_upgrades`,
@@ -211,7 +212,9 @@ be revoked (Account → Connected apps for OAuth).
   not power. Prices are dated and come from Scryfall, not from a store.
 - Budgets and legality are enforced by the Vault: call `validate_deck_changes` before presenting a list of
   swaps and present it only if `valid` is true. The Vault never contacts stores or fills carts;
-  `shopping_list` gives a list to paste into a store's own tool.
+  `shopping_list` gives a list to paste into a store's own tool: `format` writes it for Card Kingdom's Deck Builder,
+  TCGplayer Mass Entry, a Cardmarket want list, a spreadsheet (csv) or plain text; `finish`, `language`, `sets` and
+  `condition` pick the cheapest printing that fits (Scryfall's price of each printing; not per condition).
 
 ## Or use the HTTP API directly
 

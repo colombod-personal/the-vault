@@ -80,3 +80,51 @@ def test_playing_a_land_with_no_maximum_hand_size_stops_the_discards():
     with_tower = simulate([tower] * 40 + big, multiplayer=True, seed=5)["headline"]["discarded_by_turn_5"]
     without = simulate([plain] * 40 + big, multiplayer=True, seed=5)["headline"]["discarded_by_turn_5"]
     assert without > 0 and with_tower == 0
+
+
+# -- #137: "a 40-land 100-card deck makes every land drop" ---------------------------------------------------------
+# As worded this cannot be true of any shuffled deck: with 40 lands in 100 cards a miss is possible (and the simulation, like the
+# real game, shows one in about five games by turn 4). The audit found the only test used 100 lands, which makes every drop
+# trivially. What can be checked, and is checked here with 40 lands: the early drops are all but certain, the chance of
+# missing one later matches the exact odds, and more lands means fewer misses.
+
+def hypergeometric_at_least(lands: int, deck: int, drawn: int, k: int) -> float:
+    from math import comb
+    return sum(comb(lands, i) * comb(deck - lands, drawn - i) for i in range(k, min(lands, drawn) + 1)) / comb(deck, drawn)
+
+
+def forty_lands(seed: int, **kwargs) -> dict:
+    return simulate(deck(40, [], 100), multiplayer=True, seed=seed, games=5000, turns=6, **kwargs)
+
+
+def test_a_40_land_100_card_deck_makes_the_first_two_land_drops_all_but_always():
+    for seed in (1, 2, 3):
+        turns = forty_lands(seed)["per_turn"]
+        assert turns[0]["all_land_drops_so_far"] >= 99.5 and turns[1]["all_land_drops_so_far"] >= 99.5, seed
+
+
+def test_a_40_land_100_card_deck_can_miss_a_drop_and_the_miss_rate_matches_the_exact_odds():
+    """The mulligan rate is exactly the chance a 7-card hand does not hold 2 to 5 lands; the chance of making every drop to
+    turn N is at least the exact no-mulligan odds of N lands in the first 7+N cards (mulligans only help here)."""
+    from math import comb
+
+    p = lambda k: comb(40, k) * comb(60, 7 - k) / comb(100, 7)  # noqa: E731
+    exact_mulligan = 100 * (p(0) + p(1) + p(6) + p(7))
+    for seed in (1, 2, 3):
+        out = forty_lands(seed)
+        assert abs(out["headline"]["mulligan_rate"] - exact_mulligan) < 1.5, (seed, out["headline"]["mulligan_rate"], exact_mulligan)
+        for turn in (3, 4, 5, 6):
+            made_all = out["per_turn"][turn - 1]["all_land_drops_so_far"]
+            floor = 100 * hypergeometric_at_least(40, 100, 7 + turn, turn)  # on the draw / multiplayer: 7 + one draw a turn
+            assert floor - 1.5 < made_all < floor + 12, (seed, turn, made_all, floor)
+        by_turn_4 = out["per_turn"][3]["all_land_drops_so_far"]
+        assert 75 < by_turn_4 < 86  # about one game in five misses a drop by turn 4: "every drop" is not what 40 of 100 gives
+        assert abs(out["headline"]["missed_a_land_drop_by_turn_4"] - (100 - by_turn_4)) < 0.2
+
+
+def test_more_lands_means_fewer_missed_drops():
+    seven = lambda lands: simulate(deck(lands, [], 100), multiplayer=True, seed=5, games=3000, turns=6)["per_turn"]  # noqa: E731
+    thirty, forty, hundred = seven(30), seven(40), seven(100)
+    for turn in range(2, 6):
+        assert thirty[turn]["all_land_drops_so_far"] < forty[turn]["all_land_drops_so_far"] < hundred[turn]["all_land_drops_so_far"] + 0.001
+    assert hundred[5]["all_land_drops_so_far"] == 100.0  # 100 lands: every drop, which is all the old test showed

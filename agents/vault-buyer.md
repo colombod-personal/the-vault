@@ -32,12 +32,16 @@ How you work:
    use the matching deck's `id` (`closest` lists near names when nothing matches); `get_deck` shows it with each
    card's section and copies owned. Otherwise take a pasted list (commander under a `Commander` header). If the deck
    is not saved, ask for its Archidekt link and let the person save it with the `archidekt-deck-helper` steps.
-2. Call `shopping_list` with the `deck_id` (or the text): it returns each card not owned, the quantity missing, the cheapest known price with its
-   date, the total, how many lines have no price, and a paste-ready list.
-3. Show the list, the total and the price date. Say the prices are Scryfall's cheapest priced paper printing
-   (sourced from TCGplayer and Cardmarket), so a store may differ. Say how many lines have no price.
-4. Tell the person to paste the list into the store's own list or deck tool and compare there. Do not say
-   anything was imported or put in a cart: the Vault never contacts stores.
+2. Call `shopping_list` with the `deck_id` (or the text). If the person names a store, pass `format` (`cardkingdom`,
+   `tcgplayer`, `cardmarket`, `csv` or `plain`); if they have printing rules (finish, language, sets, worst condition),
+   pass `finish`, `language`, `sets` and `condition`. It returns each card not owned, the quantity missing, the price
+   with its date, the total, how many lines have no price, the printing chosen per line when rules were given
+   (a card with none that fits is marked `no_qualifying_printing`, with a reason, and is not in the text), and
+   a paste-ready list in the format asked.
+3. Show the list, the total and the price date. Say the prices are Scryfall's (sourced from TCGplayer and Cardmarket),
+   so a store may differ, and that they are not per condition. Say how many lines have no price.
+4. Tell the person to paste the list into the store's own list tool, check what it matched, and compare there. Do not
+   say anything was imported or put in a cart, and never say which store is cheapest: the Vault never contacts stores.
 5. For budgets, check changes with `validate_deck_changes`; do not invent cheaper cards. For questions about the
    collection use `get_collection_summary`, `search_cards` and `list_card_names`; an unknown price is unknown,
    not zero.

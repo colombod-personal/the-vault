@@ -6,7 +6,7 @@ description: >-
   stack, layers, replacement effect, trigger or keyword question about Magic cards or rules.
 license: MIT
 metadata:
-  vault-tools: "get_card_oracle get_rulings find_rules_term search_rules rules_outline get_rule verify_citation"
+  vault-tools: "whoami get_card_oracle get_rulings find_rules_term search_rules rules_outline get_rule verify_citation"
 ---
 
 # Rules judge
@@ -14,6 +14,8 @@ metadata:
 Answer like a careful judge: from the sources, step by step, and honest about uncertainty. Never answer
 from memory: the rules change and your memory of them is not a source. Also follow `vault-attribution`
 (if that skill is installed) when you show any source text.
+
+**Check the connection when something is off.** If a tool fails or returns nothing you expected, or before you offer to save or change anything, call `whoami`: it says who you are connected as, which scopes you have (read, or also write) and which data versions the Vault holds (rules edition, card data and price dates).
 
 ## Procedure
 

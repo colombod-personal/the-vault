@@ -298,6 +298,9 @@ class ImportItem(Hal):
     kind: str = Field("import", description="import (a file), assistant (edits made through an assistant) or undo")
     app: str | None = Field(None, description="For assistant edits: the app that made them")
     lines: list[dict] | None = Field(None, description="For assistant edits: each printing, copies before and after")
+    undoable: bool | None = Field(None, description="For assistant edits: true on the one change set that can be undone now "
+                                  "(the latest, until the collection changes again); POST /collection/changes/undo")
+    undone: bool | None = Field(None, description="For assistant edits: true once it was undone")
 
 
 class ImportPage(Page):
@@ -423,6 +426,8 @@ class CoverageLine(BaseModel):
     status: Literal["owned", "partial", "missing"]
     unit_price: float | None = Field(None, description="Cheapest known USD market price of the card (of the line's "
                                      "printing when it names one the Vault knows), any finish; null when unknown")
+    price_date: str | None = Field(None, description="The day unit_price is from (the price snapshot it was read from; Scryfall's "
+                                   "figure, not a shop's today); null when the price is unknown")
     missing_cost: float | None = Field(None, description="unit_price times missing; null when no price is known")
     owned_printings: list[OwnedPrinting] = Field([], description="The card's printings in the collection (first 50)")
     maybe_owned: list[NamedQuantity] = Field([], description="On a line you own none of: cards in the collection whose "
@@ -470,7 +475,8 @@ class Deck(Hal):
     source_url: str | None = None
     source: str | None = Field(None, description="Where the deck came from: archidekt, moxfield, link (another address) or pasted")
     source_author: str | None = None
-    credit: dict | None = Field(None, description="For a deck from Archidekt: its source, link, author and the notice to repeat")
+    credit: dict | None = Field(None, description="For a deck from Archidekt: its source, link, author, `fetched_at` (when the "
+                                "Vault last took the list from that link) and the notice to repeat")
     coverage: Coverage | None = None
     text: str | None = Field(None, description="The decklist (left out of the AI tools' brief deck list)")
     created_at: str
