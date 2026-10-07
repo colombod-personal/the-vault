@@ -139,6 +139,10 @@ class McpClient:
     def sign_in(self, email: str = "dev@localhost") -> None:
         assert self.browser.post(f"/api/auth/dev-login?email={email}").status_code == 200
 
+    def sign_in_as_reviewer(self, passphrase: str) -> httpx.Response:
+        """The store reviewers' way in (#239): one fixed demo account, only while REVIEWER_PASSPHRASE is set."""
+        return self.browser.post("/api/auth/reviewer-login", json={"passphrase": passphrase})
+
     def authorize_params(self, **override) -> dict:
         params = {"response_type": "code", "client_id": self.client_id, "redirect_uri": self.redirect_uri,
                   "state": self.state, "scope": "read", "code_challenge": self.challenge,

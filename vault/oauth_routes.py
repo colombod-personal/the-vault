@@ -147,8 +147,10 @@ async function passkey(){try{
  const r=c.response;const j=typeof c.toJSON==='function'?c.toJSON():{id:c.id,rawId:toB64u(c.rawId),type:c.type,clientExtensionResults:c.getClientExtensionResults(),response:{clientDataJSON:toB64u(r.clientDataJSON),authenticatorData:toB64u(r.authenticatorData),signature:toB64u(r.signature),userHandle:r.userHandle?toB64u(r.userHandle):null}};
  await post('/api/auth/passkey/login/verify',{credential:j});location.reload()}catch(e){note('Could not sign in with a passkey: '+e.message)}}
 async function dev(){await post('/api/auth/dev-login',{});location.reload()}
+async function reviewer(){try{await post('/api/auth/reviewer-login',{passphrase:document.getElementById('rp').value});location.reload()}catch(e){note('Could not sign in: '+e.message)}}
 document.getElementById('passkey')?.addEventListener('click',passkey);
 document.getElementById('dev')?.addEventListener('click',dev);
+document.getElementById('reviewer')?.addEventListener('click',reviewer);
 """
 
 
@@ -201,7 +203,7 @@ def where_it_returns(redirect_uri: str) -> str:
     return f"<p class=small>After you answer, you are sent back to <code>{esc(urlsplit(redirect_uri).netloc)}</code>.</p>"
 
 
-def sign_in_page(req: AuthRequest, providers: list[str], passkeys: bool, dev_login: bool) -> HTMLResponse:
+def sign_in_page(req: AuthRequest, providers: list[str], passkeys: bool, dev_login: bool, reviewers: bool = False) -> HTMLResponse:
     nonce = secrets.token_urlsafe(16)
     buttons = "".join(f'<a class=button href="/api/auth/login/{esc(p)}?continue=oauth">Continue with {esc(p.capitalize())}</a>'
                       for p in providers)
@@ -209,6 +211,9 @@ def sign_in_page(req: AuthRequest, providers: list[str], passkeys: bool, dev_log
         buttons += '<button type="button" id="passkey">Sign in with a passkey</button>'
     if dev_login:
         buttons += '<button type="button" id="dev">Developer sign-in</button>'
+    if reviewers:  # only while REVIEWER_PASSPHRASE is set (vault.reviewer): for the stores' review accounts
+        buttons += ('</p><p class="small"><label>Reviewer sign-in (for app store reviewers) <input type="password" id="rp" '
+                    'autocomplete="off" aria-label="Reviewer passphrase"></label> <button type="button" id="reviewer">Sign in</button>')
     body = (f"<h1>Sign in to connect {esc(client_label(req.client))}</h1><p>{who_is_asking(req.client)}</p>"
             f"<p>Sign in to your Vault account to choose what it may do.</p><p>{buttons}</p>"
             '<p id="note" class="small" role="status"></p>'
@@ -315,7 +320,7 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
         user = session_user(db, request)
         if user is None:
             request.session["oauth_pending"] = {"q": raw, "t": int(time.time())}
-            return sign_in_page(req, auth.offered, _passkeys_on(), settings.dev_login)
+            return sign_in_page(req, auth.offered, _passkeys_on(), settings.dev_login, bool(settings.reviewer_passphrase))
         request.session.pop("oauth_pending", None)
         nonce = secrets.token_urlsafe(24)
         server.save_consent(db, user.id, nonce, raw)

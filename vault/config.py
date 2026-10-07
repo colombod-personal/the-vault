@@ -29,6 +29,9 @@ class Settings:
     session_secret: str = field(default_factory=lambda: _env("SESSION_SECRET", "dev-insecure-secret"))
     base_url: str = field(default_factory=lambda: _default_base_url().rstrip("/"))
     dev_login: bool = field(default_factory=lambda: _env("DEV_LOGIN") in ("1", "true", "yes"))
+    # The store reviewers' way in (vault.reviewer): unset, there is none. Set once by the owner, and the same value goes
+    # into the directories' private credentials field.
+    reviewer_passphrase: str = field(default_factory=lambda: _env("REVIEWER_PASSPHRASE"))
 
     google_client_id: str = field(default_factory=lambda: _env("GOOGLE_CLIENT_ID"))
     google_client_secret: str = field(default_factory=lambda: _env("GOOGLE_CLIENT_SECRET"))
@@ -96,3 +99,5 @@ class Settings:
             raise RuntimeError("VAULT_TWINS_URL is for local development only")
         if self.secure_cookies and self.dev_login:
             raise RuntimeError("DEV_LOGIN must not be enabled on a public deployment")
+        if self.reviewer_passphrase and len(self.reviewer_passphrase) < 16:
+            raise RuntimeError("REVIEWER_PASSPHRASE must be at least 16 characters (it is the way in for the stores' reviewers)")

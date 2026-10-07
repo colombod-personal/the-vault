@@ -120,3 +120,14 @@ def test_a_directory_listing_turns_the_steps_into_an_add_button(monkeypatch):
     assert 'href="https://chatgpt.com/apps/the-vault"' in chatgpt and "Add The Vault to ChatGPT" in chatgpt
     assert "Add custom MCP server" not in chatgpt
     assert "Add custom connector" in page.split('id="claude"')[1].split("</div>")[0]  # Claude still has its steps
+
+
+def test_the_chatgpt_plugin_carries_five_positive_and_three_negative_review_cases_naming_real_tools():
+    """#240: the OpenAI directory review runs these on the demo account."""
+    from vault.api import mcp
+    cases = load(bp.OPENAI / ".codex-plugin" / "plugin.json")["review"]["test_cases"]
+    assert len(cases["positive"]) == 5 and len(cases["negative"]) == 3
+    for case in cases["positive"]:
+        assert case["description"] and case["prompt"] and case["expected_behavior"]
+        assert {t.strip() for t in case["tools_triggered"].split(",")} <= set(mcp.BY_NAME)
+    assert all(c["description"] and c["prompt"] for c in cases["negative"])

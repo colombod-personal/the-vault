@@ -189,6 +189,11 @@ with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic
 - CDN scripts carry integrity hashes, so a tampered copy won't run.
 - `tests/test_workflows.py` fails if a workflow breaks one of these rules.
 
+**Store reviewers:** the Claude and ChatGPT directories need a demo account that works without a second factor. Set
+`REVIEWER_PASSPHRASE` (16+ characters) in the Vercel production environment and the sign-in page gains a "Reviewer sign-in"
+box that opens one fixed account of made-up data (`vault/reviewer.py`, guide at `/reviewers`); unset, the way in does not exist.
+`python -m jobs.seed_reviewer --reset` puts the demo data back.
+
 **Costs:**
 - Vercel Hobby: $0.
 - Neon: free for 1 GB of storage per project and 100 compute-hours a month (checked 2026-10-04;
