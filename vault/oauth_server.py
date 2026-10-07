@@ -296,7 +296,7 @@ def minutes_since_use(group: list[OAuthGrant]) -> int | None:
     """Whole minutes since this app last acted when that was within the last hour, else None."""
     used = [_aware(g.last_used_at) for g in group if g.last_used_at]
     ago = _now() - max(used) if used else None
-    return int(ago.total_seconds() // 60) if ago is not None and ago < RECENT else None
+    return ago // timedelta(minutes=1) if ago is not None and ago < RECENT else None
 
 
 def app_key(grant: OAuthGrant, client: OAuthClient | None) -> tuple:
