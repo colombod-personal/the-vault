@@ -45,3 +45,10 @@ def test_a_deck_from_a_link_keeps_its_cards_printings_and_age_and_skips_the_side
 def test_the_api_client_asks_for_the_cards_and_refresh_only_when_told():
     source = (ROOT / "public" / "lib" / "api.js").read_text(encoding="utf-8")
     assert "'?detail=cards' + (refresh ? '&refresh=true' : '')" in source
+
+
+def test_the_deck_library_tiles_show_each_deck_s_format_and_commanders():
+    """#216/#280: the web app's tiles said the deck's name and link only; the format and commander(s) come from the answer's overview."""
+    source = (ROOT / "public" / "views" / "deck.jsx").read_text(encoding="utf-8")
+    tile = source.split('className="deck-tile-what"', 1)[1].split("</div>", 1)[0]
+    assert "d.overview.format" in tile and "d.overview.commanders.join(' + ')" in tile and "no commander recorded" in tile

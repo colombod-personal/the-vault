@@ -702,6 +702,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         credit = deck_overview.archidekt_credit(d)
         if credit:
             out["credit"] = credit
+        deck_overview.refresh_note(d, out["overview"])
         return out
 
     @router.post("/decks/parse", tags=["decks"], response_model=S.ParsedDeck,

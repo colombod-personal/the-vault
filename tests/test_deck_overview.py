@@ -205,3 +205,22 @@ def test_a_hundred_card_deck_with_nothing_owned_stays_under_the_cap(agent, bot, 
     assert len(lean["coverage"]["cards"]) == 40 and lean["coverage"]["cards_total"] == 95 and lean["coverage"]["fully_owned"] == 0
     assert "the 40 dearest of the 95 cards not fully owned" in lean["coverage"]["shown"]
     assert len(json.dumps(lean)) < 15_000 < len(json.dumps(full)), (len(json.dumps(lean)), len(json.dumps(full)))
+
+
+def test_an_archidekt_deck_saved_before_sections_were_kept_says_how_to_get_its_commander(agent, bot, catalog):
+    """#280: three of the owner's four decks answered 'Not set / Not detected' with nothing to say what to do about it."""
+    write = make_token(agent, scopes=["read", "write"])
+    old = agent.post(f"{V1}/decks", json={"name": "Old import", "text": "1 Sol Ring\n99 Forest", "source_url": "https://archidekt.com/decks/123"}).json()
+    new = agent.post(f"{V1}/decks", json={"name": "Sliver Swarm", "text": SLIVERS, "source_url": "https://archidekt.com/decks/456"}).json()
+    pasted = agent.post(f"{V1}/decks", json={"name": "Pasted", "text": "1 Sol Ring\n99 Forest"}).json()
+    lookalike = agent.post(f"{V1}/decks", json={"name": "Not Archidekt", "text": "1 Sol Ring\n99 Forest",
+                                                "source_url": "https://evilarchidekt.com/decks/9"}).json()
+    items = {d["name"]: d for d in call_tool(bot, write, "list_decks")["structuredContent"]["items"]}
+    assert "refresh_deck" in items["Old import"]["overview"]["note"] and items["Old import"]["overview"]["commanders"] == []
+    assert not items["Sliver Swarm"]["overview"].get("note")  # it has its commander
+    assert not items["Pasted"]["overview"].get("note") and not items["Not Archidekt"]["overview"].get("note")  # nothing to re-read from
+    one = call_tool(bot, write, "get_deck", deck_id=old["id"])["structuredContent"]
+    assert "refresh_deck" in one["overview"]["note"]
+    stats = call_tool(bot, write, "deck_stats", deck_id=old["id"])["structuredContent"]
+    assert "refresh_deck" in stats["deck"]["overview"]["note"]
+    assert new["id"] and pasted["id"] and lookalike["id"]
