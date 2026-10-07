@@ -192,6 +192,14 @@ Taken from `oracle_cards.legalities` (jsonb with 23 formats). A small `legality_
 `deck_legality` can say "as of" and a later answer can be compared. Detailed design is in
 [#17](https://github.com/colombod-personal/the-vault/issues/17).
 
+**Read path (#17).** The log is read by `vault.catalog_queries.legality_changes`: `GET /api/v1/catalog/cards` (tool
+`get_card_oracle`) returns the card's changes as `legality_changes`, newest first (at most 25), and `POST /api/v1/decks/legality`
+(tool `deck_legality`) returns the changes of the deck's cards in the asked format as `changes`. Both carry a note that says
+what the record is: the day the Vault *saw* a change (not the day Wizards announced it), and nothing before the Vault first
+loaded the card data. The card answer adds a `computed` provenance block (the Vault's comparison of Scryfall's legalities).
+The Vault does not import older ban history, so an assistant must not say a card "was never banned" from an empty list.
+Tests: `tests/test_legality_history.py`.
+
 ## Prices for any card
 
 `oracle_prices` holds one row per card: the cheapest printing that has a price, with its date and
