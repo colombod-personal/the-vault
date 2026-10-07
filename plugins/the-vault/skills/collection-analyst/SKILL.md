@@ -7,13 +7,15 @@ description: >-
   in the collection, and small edits when they bought, sold or traded cards.
 license: MIT
 metadata:
-  vault-tools: "get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline list_card_names check_decklist list_shared_with_me lookup_cards refresh_prices whoami update_owned_cards confirm_owned_cards_update undo_owned_cards_update show_owned_printings"
+  vault-tools: "whoami get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline list_card_names check_decklist list_shared_with_me lookup_cards refresh_prices whoami update_owned_cards confirm_owned_cards_update undo_owned_cards_update show_owned_printings"
 ---
 
 # Collection analyst
 
 This is the person's own private data plus Scryfall's prices. Report what the tools return; do not
 estimate or fill gaps. Follow `vault-attribution` (if installed) for card data and prices.
+
+**Check the connection when something is off.** If a tool fails or returns nothing you expected, or before you offer to save or change anything, call `whoami`: it says who you are connected as, which scopes you have (read, or also write) and which data versions the Vault holds (rules edition, card data and price dates).
 
 ## Procedure
 

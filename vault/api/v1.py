@@ -684,10 +684,9 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             out["text"] = d.text
         if coverage is not None:
             out["coverage"] = coverage
-        if _source_kind(d.source_url) == "archidekt":
-            out["credit"] = {"source": "Archidekt", "url": d.source_url, "author": d.source_author,
-                             "notice": "Deck list from Archidekt" + (f" by {d.source_author}" if d.source_author else "")
-                                       + ". The deck is theirs, not the Vault's."}
+        credit = deck_overview.archidekt_credit(d)
+        if credit:
+            out["credit"] = credit
         return out
 
     @router.post("/decks/parse", tags=["decks"], response_model=S.ParsedDeck,
@@ -777,7 +776,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
         def run():
             deck = Deck(user_id=user.id, name=body.name.strip()[:200] or "Untitled deck", text=body.text,
-                        source_url=body.source_url, source_author=body.source_author, format=body.format)
+                        source_url=body.source_url, source_author=body.source_author, format=body.format,
+                        source_fetched_at=datetime.now(timezone.utc) if body.source_url else None)
             db.add(deck)
             db.flush()
             return _deck(deck)
@@ -792,7 +792,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         lines = covered["cards"]
         todo = sorted((c for c in lines if c["status"] != "owned"),
                       key=lambda c: (-(c.get("missing_cost") or 0), -(c["missing"]), c["name"]))
-        keep = ("name", "section", "set", "number", "need", "have", "missing", "status", "unit_price", "missing_cost")
+        keep = ("name", "section", "set", "number", "need", "have", "missing", "status", "unit_price", "price_date", "missing_cost")
         shown = [{k: c[k] for k in keep} for c in todo[:LEAN_LINES]]
         need = sum(c["need"] for c in lines)
         have = sum(min(c["have"], c["need"]) for c in lines)
@@ -831,6 +831,9 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                   "updated_at": datetime.now(timezone.utc)}
         if "source_url" in body.model_fields_set:  # omitted: keep it (null clears it)
             values["source_url"] = body.source_url
+            values["source_fetched_at"] = values["updated_at"] if body.source_url else None
+        else:  # a new list for the link the deck has: taken from it now
+            values["source_fetched_at"] = case((Deck.source_url.is_not(None), values["updated_at"]), else_=None)
         if "format" in body.model_fields_set:  # likewise
             values["format"] = body.format
         if "source_author" in body.model_fields_set:
@@ -894,6 +897,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                          "overview": deck_overview.overview(parsed["text"], parsed["format"], known)},
                 "archidekt_bracket": raw.get("edhBracket"), "counts": parsed["counts"], "text": parsed["text"],
                 "credit": {"source": "Archidekt", "url": url, "author": parsed["author"],
+                           "fetched_at": (raw.get("vault_cache") or {}).get("fetched_at"),
                            "notice": "Deck list from Archidekt" + (f" by {parsed['author']}" if parsed["author"] else "")
                                      + ". The deck is theirs, not the Vault's."},
                 "note": "Archidekt's per-card shop prices are not passed on: the Vault quotes only Scryfall's dated prices.",
@@ -934,6 +938,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 if body.fingerprint != deck_refresh.fingerprint(parsed["text"]):
                     raise HTTPException(409, "Archidekt's list is not the one previewed (or no fingerprint was given): preview again")
                 same.text, same.updated_at = parsed["text"], datetime.now(timezone.utc)
+                same.source_fetched_at = same.updated_at
                 same.format = parsed["format"] or same.format
                 same.source_url, same.source_author = url, parsed["author"] or same.source_author
                 if body.name:
@@ -941,7 +946,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 db.flush()
                 return {"created": False, "updated": True, "deck": _deck(same), "counts": parsed["counts"]}
             deck = Deck(user_id=user.id, name=(body.name or parsed["name"] or "Archidekt deck").strip()[:200], text=parsed["text"],
-                        source_url=url, source_author=parsed["author"], format=parsed["format"])
+                        source_url=url, source_author=parsed["author"], format=parsed["format"],
+                        source_fetched_at=datetime.now(timezone.utc))
             db.add(deck)
             db.flush()
             return {"created": True, "updated": False, "deck": _deck(deck), "counts": parsed["counts"]}
@@ -979,6 +985,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         def run():
             changes = deck_refresh.diff(deck.text, parsed["text"])
             deck.text, deck.updated_at = parsed["text"], datetime.now(timezone.utc)
+            deck.source_fetched_at = deck.updated_at
             deck.format = parsed["format"] or deck.format
             deck.source_author = parsed["author"] or deck.source_author
             db.flush()

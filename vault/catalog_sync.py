@@ -18,7 +18,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 
-from .models import (CatalogSource, LegalityChange, OracleCard, OraclePrice, OracleTag, OracleTagLink, Ruling)
+from .models import (CatalogSource, LegalityChange, OracleCard, OraclePrice, OraclePrinting, OracleTag, OracleTagLink, Ruling)
 
 # Layouts that are not playable cards (art series cards have their own Oracle ids but no rules).
 SKIPPED_LAYOUTS = {"art_series"}
@@ -216,6 +216,58 @@ def cheapest_prices(objects: Iterable[dict], day: date) -> list[dict]:
                 "day": day, "source": "scryfall",
             }
     return list(best.values())
+
+
+# Printings that are not cards a person would put in a deck: tokens, emblems, art cards, oversized and gold-bordered
+# memorabilia. They are left out of the printing choice so a shopping list never picks one for being cheap.
+NOT_FOR_DECKS_LAYOUTS = {"token", "double_faced_token", "emblem", "art_series"}
+NOT_FOR_DECKS_SET_TYPES = {"memorabilia", "token"}
+
+
+def printing_prices(objects: Iterable[dict]) -> list[dict]:
+    """Every priced paper printing from a default-cards stream, with the prices Scryfall lists (sourced from TCGplayer and
+    Cardmarket). A printing with no USD price in any finish is left out: it cannot be priced."""
+    rows = []
+    for obj in objects:
+        if obj.get("object") != "card" or obj.get("digital") or obj.get("oversized") or not obj.get("oracle_id"):
+            continue
+        if obj.get("layout") in NOT_FOR_DECKS_LAYOUTS or obj.get("set_type") in NOT_FOR_DECKS_SET_TYPES:
+            continue
+        prices = obj.get("prices") or {}
+        usd, foil, etched = (_number(prices.get(k)) for k in ("usd", "usd_foil", "usd_etched"))
+        if usd is None and foil is None and etched is None:
+            continue
+        rows.append({"scryfall_id": obj["id"], "oracle_id": obj["oracle_id"], "set_code": (obj.get("set") or "")[:10],
+                     "set_name": obj["set_name"][:100] if obj.get("set_name") else None,
+                     "collector_number": str(obj.get("collector_number") or "")[:20], "lang": (obj.get("lang") or "en")[:5],
+                     "usd": usd, "usd_foil": foil, "usd_etched": etched})
+    return rows
+
+
+def sync_oracle_printings(db: Session, rows: list[dict]) -> dict:
+    """Today's printing prices, as a diff: only rows that are new or whose figures changed are written, and printings
+    that no longer have a price are deleted (no history; docs/catalog-design.md)."""
+    columns = ("oracle_id", "set_code", "set_name", "collector_number", "lang", "usd", "usd_foil", "usd_etched")
+    old = {r[0]: r[1:] for r in db.execute(select(OraclePrinting.scryfall_id, *[getattr(OraclePrinting, c) for c in columns]))}
+    changed = [r for r in rows if old.get(r["scryfall_id"]) != tuple(r[c] for c in columns)]
+    _upsert(db, OraclePrinting, changed, ("scryfall_id",))
+    keep = {r["scryfall_id"] for r in rows}
+    gone = [k for k in old if k not in keep] if keep else []  # an empty file is a failed load, not a reason to empty the table
+    for part in chunks(gone):
+        db.execute(delete(OraclePrinting).where(OraclePrinting.scryfall_id.in_(part)))
+    return {"printings": len(rows), "written": len(changed), "removed": len(gone)}
+
+
+def sync_printings_from_file(db: Session, path, day: date | None = None) -> dict:
+    """Printing prices from a downloaded default-cards file (the daily price job already has it)."""
+    from mtg_toolkits.scryfall import iter_bulk_file
+
+    day = day or date.today()
+    result = sync_oracle_printings(db, printing_prices(iter_bulk_file(path)))
+    record_source(db, "oracle_printings", version=day.isoformat(), rows=result["printings"],
+                  url="https://scryfall.com/docs/api/cards")
+    db.commit()
+    return result
 
 
 def _number(value) -> float | None:
