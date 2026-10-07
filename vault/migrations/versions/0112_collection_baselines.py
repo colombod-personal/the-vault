@@ -5,8 +5,8 @@ collection now are the last file's, except the cards an assistant change set tou
 first change are in the change set's record). Those cards are compared by copies only (state ``null``). Without
 this, the first re-import after the upgrade would still wipe the edits made through an assistant.
 
-Revision ID: 0110
-Revises: 0109
+Revision ID: 0112
+Revises: 0111
 Create Date: 2026-10-07 10:00:00
 """
 
@@ -18,8 +18,8 @@ from datetime import date
 import sqlalchemy as sa
 from alembic import op
 
-revision = '0110'
-down_revision = '0109'
+revision = '0112'
+down_revision = '0111'
 branch_labels = None
 depends_on = None
 

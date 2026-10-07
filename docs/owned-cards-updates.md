@@ -83,7 +83,7 @@ Other kinds of conflict: `removed_in_vault` (the assistant removed every copy, t
   until the collection changes again, and an import changes it, so an edit cannot be undone after an import (it stays,
   and the history says so). There is no undo of an import itself (there never was); importing the earlier file again does
   it, and keeps what was edited in the Vault since.
-- **No base** (a collection imported before this existed and never imported since): migration `0110` rebuilds one from
+- **No base** (a collection imported before this existed and never imported since): migration `0112` rebuilds one from
   what the Vault recorded: the rows of the collection are the last file's, except the cards an assistant change set
   touched since, whose copies before the first change are in the change set's record; those are compared by copies only.
   A person with no import file on record (and any collection whose base was lost) gets `mode: no_baseline`: nothing can be

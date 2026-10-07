@@ -44,6 +44,9 @@ Sign in with your Vault account where the tool offers it (OAuth: ChatGPT, Claude
 `public/connect.html`), or with a personal access token (Account → Agents & API) kept in an environment variable
 or the tool's own prompt.
 
+After connecting, ask the assistant to call `whoami`: it names the account, the scopes and the data versions the Vault
+holds. Every skill tells the assistant to call it when a tool fails or before offering to change anything.
+
 ## Where things live (one source of truth)
 
 - `skills/<name>/SKILL.md`: **the skills. Edit these.**

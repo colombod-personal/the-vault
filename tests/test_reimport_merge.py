@@ -533,7 +533,7 @@ def test_the_migration_rebuilds_a_base_so_the_first_re_import_after_the_upgrade_
         conn.execute(text("CREATE SCHEMA public"))
     with engine.begin() as conn:  # the schema as it was before the base existed
         config.attributes["connection"] = conn
-        command.upgrade(config, "0109")
+        command.upgrade(config, "0111")
     changes = {"lines": [{"card": "Sol Ring", "set": "cmr", "number": "472", "finish": "nonfoil", "before": 0, "after": 2},
                          {"card": "A Killer Among Us", "set": "mkm", "number": "167", "finish": "nonfoil", "before": 4, "after": 3}]}
     with engine.begin() as conn:
