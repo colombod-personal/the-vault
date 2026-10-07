@@ -201,7 +201,34 @@ def test_the_cost_table_in_the_design_doc_is_what_the_flows_and_the_answers_meas
         DOC.write_text(head + table + tail, encoding="utf-8")
         text = DOC.read_text(encoding="utf-8")
     assert BEGIN in text and END in text, "docs/expert-council.md has no cost section"
-    assert table in text, "the doc's cost table is out of date: UPDATE_COUNCIL_COST=1 pytest tests/test_council_cost.py\n" + table
+    in_doc = text.split(BEGIN, 1)[1].split(END, 1)[0]
+    assert same_within_tolerance(table.replace(BEGIN, "").replace(END, ""), in_doc), \
+        "the doc's cost table is out of date (a count differs, or a size is off by more than 25%): UPDATE_COUNCIL_COST=1 pytest tests/test_council_cost.py\n" + table
+
+
+NUMBER = re.compile(r"\d[\d,]*")
+
+
+def same_within_tolerance(measured: str, written: str, tolerance: float = 0.25) -> bool:
+    """The doc's wording is identical and its numbers agree: counts (under 50) exactly, token sizes within 25%. Exact equality
+    broke CI whenever any tool answer grew by a field, which says nothing about the cost of a council run."""
+    if NUMBER.sub("#", measured) != NUMBER.sub("#", written):
+        return False
+    values = lambda s: [int(n.replace(",", "")) for n in NUMBER.findall(s)]  # noqa: E731
+    for a, b in zip(values(measured), values(written)):
+        if min(a, b) < 50:
+            if a != b:
+                return False
+        elif abs(a - b) > tolerance * max(a, b):
+            return False
+    return True
+
+
+def test_the_tolerance_accepts_small_drift_in_sizes_and_refuses_a_changed_count_or_wording():
+    assert same_within_tolerance("| a | 12 | 1,000 tokens |", "| a | 12 | 1,100 tokens |")
+    assert not same_within_tolerance("| a | 12 | 1,000 tokens |", "| a | 13 | 1,000 tokens |")  # a call count is exact
+    assert not same_within_tolerance("| a | 12 | 1,000 tokens |", "| a | 12 | 1,500 tokens |")  # a size off by a third
+    assert not same_within_tolerance("| a | 12 | 1,000 tokens |", "| b | 12 | 1,000 tokens |")  # wording differs
 
 
 def test_every_call_counted_for_a_member_is_one_its_brief_names_and_its_definition_allows():
