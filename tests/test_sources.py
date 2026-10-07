@@ -70,3 +70,11 @@ def test_the_connect_page_credits_the_sources_and_says_the_vault_is_not_endorsed
     assert "Scryfall" in page and "Commander Spellbook" in page and "Archidekt" in page
     assert 'href="credits.html"' in (ROOT / "public" / "connect.html").read_text(encoding="utf-8")
     assert "Not approved/endorsed by Wizards" in page
+
+
+def test_llms_txt_tells_an_assistant_whose_material_it_is_showing():
+    text = (ROOT / "public" / "llms.txt").read_text(encoding="utf-8").lower()
+    for key in ("scryfall", "tcgplayer", "cardmarket", "cardhoarder", "wizards of the coast", "tagger", "edhrec", "commander spellbook",
+                "archidekt", "dragon shield", "moxfield", sources.CREDITS_URL):
+        assert key.lower() in text, key
+    assert "nothing about the person is ever sent" in text
