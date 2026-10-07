@@ -244,28 +244,37 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return {"deleted": True}
 
     # -- connected apps (OAuth grants to AI apps such as ChatGPT and Claude) ----------------------
-    def _app(grant: OAuthGrant, client: OAuthClient | None) -> dict:
-        domain = urlsplit(grant.client_id).hostname if grant.client_id.startswith("https://") else None
-        return {"id": grant.id, "name": client.name if client else (domain or "Unknown app"), "domain": domain,
-                "verified_by_address": domain is not None, "scopes": grant.scopes.split(),
-                "created_at": _iso(grant.created_at), "last_used_at": _iso(grant.last_used_at),
-                "_links": {"self": link(f"{V1}/me/apps/{grant.id}")}}
+    def _app(group: list[OAuthGrant], client: OAuthClient | None) -> dict:
+        """One row per app: the newest connection speaks for it (name, scopes), the rest are counted."""
+        newest = group[0]
+        domain = urlsplit(newest.client_id).hostname if newest.client_id.startswith("https://") else None
+        used = [g.last_used_at for g in group if g.last_used_at]
+        idle = [g for g in group if oauth_server.is_idle(g)]
+        return {"id": newest.id, "name": client.name if client else (domain or "Unknown app"), "domain": domain,
+                "verified_by_address": domain is not None, "scopes": newest.scopes.split(),
+                "connections": len(group), "connection_ids": sorted(g.id for g in group),
+                "created_at": _iso(min(g.created_at for g in group)), "last_used_at": _iso(max(used)) if used else None,
+                "idle": len(idle) == len(group), "idle_connections": len(idle),
+                "used_minutes_ago": oauth_server.minutes_since_use(group),
+                "_links": {"self": link(f"{V1}/me/apps/{newest.id}")}}
 
     @router.get("/me/apps", tags=["account"], response_model=S.ConnectedAppPage,
-                summary="Apps connected to your account with OAuth (ChatGPT, Claude, ...), with their last use")
+                summary="Apps connected to your account with OAuth (ChatGPT, Claude, ...): one row per app, however many times it was connected")
     def list_apps(request: Request, cursor: str | None = None, limit: int | None = None,
                   user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
-        rows = oauth_server.user_grants(db, user.id)
+        rows = oauth_server.connected_apps(db, user.id)
         names = {c.client_id: c for c in db.scalars(select(OAuthClient).where(
-            OAuthClient.client_id.in_({g.client_id for g in rows})))} if rows else {}
-        page, nxt = paginate(rows, lambda g: (-g.id,), lambda g: g.id, cursor=cursor, limit=limit)
-        return page_body(request, [_app(g, names.get(g.client_id)) for g in page], nxt, len(rows), limit=limit)
+            OAuthClient.client_id.in_({g.client_id for grp in rows for g in grp})))} if rows else {}
+        page, nxt = paginate(rows, lambda grp: (-grp[0].id,), lambda grp: grp[0].id, cursor=cursor, limit=limit)
+        return page_body(request, [_app(grp, names.get(grp[0].client_id)) for grp in page], nxt, len(rows), limit=limit)
 
-    @router.delete("/me/apps/{app_id}", tags=["account"], summary="Disconnect an app: its tokens stop working at once")
+    @router.delete("/me/apps/{app_id}", tags=["account"],
+                   summary="Disconnect an app: every connection of it (each device) stops working at once")
     def disconnect_app(app_id: Id, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
-        if not oauth_server.revoke_user_grant(db, user.id, app_id):
+        revoked = oauth_server.revoke_user_app(db, user.id, app_id)
+        if revoked is None:
             raise HTTPException(404, "App not found")
-        return {"deleted": True}
+        return {"deleted": True, "connections": revoked}
 
     # -- passkeys ------------------------------------------------------------------------------
     def _passkey(p: Passkey) -> dict:

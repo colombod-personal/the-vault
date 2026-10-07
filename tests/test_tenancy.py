@@ -299,4 +299,32 @@ def test_connected_apps_are_private(client):
     assert client.delete("/api/v1/me/apps/999999").status_code == 404  # same answer for ids that don't exist
 
     login(client, "alice@example.com")
-    assert client.delete(f"/api/v1/me/apps/{grant_id}").json() == {"deleted": True}
+    assert client.delete(f"/api/v1/me/apps/{grant_id}").json() == {"deleted": True, "connections": 1}
+
+
+def test_disconnecting_an_app_never_touches_another_persons_connections_of_the_same_app(client):
+    """Grouping by app (#246) reads only the caller's own grants: Bob disconnecting an app Alice also connected is his alone."""
+    from datetime import datetime, timedelta, timezone
+
+    from vault.models import OAuthGrant
+
+    now = datetime.now(timezone.utc)
+    ids = {}
+    for n, email in enumerate(("alice@example.com", "bob@example.com")):
+        login(client, email)
+        user = client.get("/api/v1/me").json()["id"]
+        with client.app.state.db.sessions() as db:
+            grants = [OAuthGrant(user_id=user, client_id="https://app.example/c.json", scopes="read", access_scopes="read",
+                                 resource="http://testserver/api/mcp", access_hash=f"{n}{i}".ljust(64, "a"),
+                                 access_expires=now + timedelta(hours=1), refresh_hash=f"{n}{i}".ljust(64, "b"),
+                                 refresh_expires=now + timedelta(days=1)) for i in range(2)]
+            db.add_all(grants)
+            db.commit()
+            ids[email] = [g.id for g in grants]
+    assert client.delete(f"/api/v1/me/apps/{ids['alice@example.com'][0]}").status_code == 404  # Bob can't name Alice's
+    [row] = client.get("/api/v1/me/apps").json()["items"]
+    assert row["connections"] == 2 and sorted(row["connection_ids"]) == sorted(ids["bob@example.com"])
+    assert client.delete(f"/api/v1/me/apps/{row['id']}").json() == {"deleted": True, "connections": 2}
+    login(client, "alice@example.com")
+    [row] = client.get("/api/v1/me/apps").json()["items"]
+    assert row["connections"] == 2  # Alice still has both

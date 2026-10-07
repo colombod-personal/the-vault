@@ -75,8 +75,11 @@ URL. The threat model, with the tests that prove each mitigation, is in
   `OAUTH_REGISTER_RATE_LIMIT` (20) for registration, `OAUTH_CLIENT_CAP` (2000) registered clients,
   `OAUTH_CIMD_CAP` (5000) cached metadata documents, `OAUTH_FETCH_LIMIT` (60 a minute, all callers) and `OAUTH_FETCH_IP_LIMIT` (10 a minute per caller) metadata fetches.
 
-**Connected apps** (Account → Connected apps, or `GET /api/v1/me/apps`, `DELETE /api/v1/me/apps/{id}`): each app with its
-name, web address, what was allowed, when it connected and last acted. Disconnecting ends it at once. They are in the data
+**Connected apps** (Account → Connected apps, or `GET /api/v1/me/apps`, `DELETE /api/v1/me/apps/{id}`): one row per app, however
+many times it was connected (a second device, or added again): its name, web address, what the newest connection was allowed, how
+many connections it has, when it first connected and last acted, and whether it is idle (not used for 14 days). Connecting an app
+again never signs out its other connections; disconnecting the row ends all of them at once (the page names an app used in the
+last hour). A connection nobody uses for 30 days expires. They are in the data
 export (`connected_apps.json`, no tokens) and erased with the account. These endpoints need the person (not a token) and
 have no MCP tool.
 
