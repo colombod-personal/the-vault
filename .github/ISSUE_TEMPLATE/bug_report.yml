@@ -1,0 +1,32 @@
+name: Bug report
+description: Something in The Vault (the website, the MCP tools, a skill) does not do what it should.
+labels: ["bug", "status:needs-refinement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Starts at `status:needs-refinement`; the owner or a triage pass adds the area (`area:*`) and priority (`P1`-`P3`) and moves
+        it to `status:ready` when the acceptance criteria are agreed (`docs/triage.md`). Do not put personal data (your collection,
+        e-mail address, tokens) in an issue.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: In the app you used (Claude, ChatGPT, the website), in your own words. Quote what you asked and what it answered.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to see it
+      description: Steps, the deck link (public decks only), the tool or page involved.
+    validations:
+      required: false
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Acceptance criteria (proposed)
+      description: Each one testable and stated as what a person can do or see, not what the code contains. The owner confirms them before work starts.
+      placeholder: "- [ ] When I ask ..., I see ..."
+    validations:
+      required: false

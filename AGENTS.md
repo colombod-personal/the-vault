@@ -48,3 +48,13 @@ agent and every session (Claude, Codex, Copilot, Cursor). `CLAUDE.md` has the co
 - Do not change many issues, PRs or settings at once without showing the list first.
 - Never ask the owner for personal data, or to relax a security setting as a shortcut; keep Vercel and Neon clean.
 - When the owner reports a problem, fix **every** place it occurs (all tools, all panels), not the one they pointed at.
+
+## 6. Security-sensitive changes: threat model and review come before the merge
+
+Sign-in, tokens, consent, the OAuth server, privacy and sharing (`vault/oauth_*.py`, `client_auth.py`, `auth.py`,
+`passkeys.py`, `tokens.py`, `native.py`, `reviewer*.py`, `privacy.py`, `sharing.py`) are changed only with the threat model
+(`docs/mcp-oauth-threat-model.md`) updated or explained **in the same pull request**, and a security review done **before the
+merge**, never after: the first OAuth server reached `main` before its threat model and its review (the history is in the
+threat model). The pull request says so in two lines, `Threat model: ...` and `Security review before merge: ...`
+(`.github/pull_request_template.md`); `scripts/check_pr_rules.py` fails the pull request without them. CI cannot prove a
+review happened: whoever merges checks that the named review is real.

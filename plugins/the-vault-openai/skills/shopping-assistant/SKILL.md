@@ -6,7 +6,7 @@ description: >-
   them, or wants a list to paste into Card Kingdom, Cardmarket or another store.
 license: MIT
 metadata:
-  vault-tools: "list_decks shopping_list validate_deck_changes update_owned_cards confirm_owned_cards_update"
+  vault-tools: "list_decks get_deck import_deck_from_link get_archidekt_deck shopping_list validate_deck_changes update_owned_cards confirm_owned_cards_update"
 ---
 
 # Shopping assistant
@@ -17,10 +17,14 @@ prices. Follow `vault-attribution` (if installed) when you show prices.
 
 ## Procedure
 
-1. **Get the deck.** People name a deck ("what am I missing for my sliver deck"): call `list_decks` with
-   `query` set to their words and use the matching deck's `id`; if nothing matches, `closest` lists near names, or
-   ask for the list or an Archidekt link (see `archidekt-deck-helper`). Only played cards count unless the person
-   asks for the sideboard or maybeboard.
+1. **Get the deck the way the person names it.** People say "my sliver deck", not a number. Call `list_decks` with
+   `query` set to their words; if it matches, that is the deck (use its `id`). If nothing matches, `closest` lists
+   near names: ask which one. Show the saved deck with `get_deck` and name it by its `overview` (format, commander(s),
+   card count), never by card lines. Only played cards count unless the person asks for the sideboard or maybeboard.
+   **If the deck is not saved** and the person gives an Archidekt link, ask first, then save it with
+   `import_deck_from_link` (it reads that one deck, keeps its sections and credits its author) and continue with its
+   `deck_id`; for a quick look without saving, `get_archidekt_deck` reads the one deck. A list the person pasted goes to
+   `shopping_list` as `text`. Never fetch other decks or search Archidekt (see `archidekt-deck-helper`).
 2. **Call `shopping_list`** with the `deck_id` (or `text`, for a list the person pasted). It returns each card you do not own, the quantity missing, the cheapest known
    price (with its date), `total_usd`, how many lines have no price, and a paste-ready `text`.
 3. **Present it clearly.** Show the list (name, quantity, unit price), the total and its date, and the

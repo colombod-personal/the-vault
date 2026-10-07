@@ -1,0 +1,31 @@
+name: Feature request
+description: Something The Vault should be able to do.
+labels: ["type:feature", "status:needs-refinement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Starts at `status:needs-refinement`: the design is open, so agents help refine it (research, a design draft) but do not
+        implement it until it is `status:ready` with agreed acceptance criteria (`docs/triage.md`). Add the area (`area:*`) and
+        priority (`P1`-`P3`) labels, or leave them to triage. Do not put personal data in an issue.
+  - type: textarea
+    id: ask
+    attributes:
+      label: What do you want to be able to do?
+      description: In your own words, in the app you use (Claude, ChatGPT, the website). Your words are quoted in the criteria.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why does it matter?
+    validations:
+      required: false
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Acceptance criteria (proposed)
+      description: Each one testable and stated as what a person can do or see. Compliance rule for anything that uses outside data (Scryfall, Wizards, Moxfield, Archidekt, shops) - say which source and what its terms allow.
+      placeholder: "- [ ] I can ..., and I see where the data came from"
+    validations:
+      required: false

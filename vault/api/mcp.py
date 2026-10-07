@@ -1,8 +1,9 @@
 """The Vault as an MCP server, so people can point their own AI agents at their collection.
 
 ``POST /api/mcp`` speaks the Model Context Protocol over Streamable HTTP. It is stateless:
-no session id and no server-sent events. Each JSON-RPC request gets one JSON answer, which
-suits serverless hosting. Authenticate with ``Authorization: Bearer <token>``: a personal
+no server-side sessions and no server-sent events. Each JSON-RPC request gets one JSON answer, which
+suits serverless hosting. (The one thing a client says at ``initialize`` that later answers depend on, whether it
+supports MCP Apps, comes back in a signed ``Mcp-Session-Id``: see ``mcp_session.py``.) Authenticate with ``Authorization: Bearer <token>``: a personal
 access token from Account → Agents & API (or ``POST /api/v1/me/tokens``).
 
 Every tool is a thin wrapper around a ``/api/v1`` endpoint, called in-process with the
@@ -28,7 +29,7 @@ from fastapi.responses import JSONResponse, Response
 from .. import experts
 from ..deck_tools import FORMATS
 from ..models import User
-from . import mcp_ui
+from . import mcp_session, mcp_ui
 from .mcp_catalog import GROUNDING, PROMPTS, catalog_tools, provenance_blocks, render_prompt
 from .schemas import MAX_ID
 
@@ -78,7 +79,7 @@ class Tool:
     provenance: tuple[str, ...] = ()
     ui: str = ""  # the MCP Apps view (vault/api/mcp_ui.py) a host may show next to this tool's result
 
-    def schema(self) -> dict:
+    def schema(self, ui: bool = True) -> dict:
         out = {
             "name": self.name, "title": self.title or self.name.replace("_", " ").capitalize(),
             "description": self.description,
@@ -86,7 +87,7 @@ class Tool:
                             "additionalProperties": False},
             "annotations": {"readOnlyHint": not self.write, "destructiveHint": self.destructive, "openWorldHint": False},
         }
-        if self.ui:  # MCP Apps: hosts that support it show the view; others ignore this and show the text answer
+        if self.ui and ui:  # MCP Apps: hosts that support it show the view; others ignore this and show the text answer
             out["_meta"] = {"ui": {"resourceUri": mcp_ui.uri(self.ui), "visibility": ["model", "app"]}}
         return out
 
@@ -543,9 +544,13 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
                 why = "an empty batch" if not message else f"a batch holds at most {MAX_BATCH} calls"
                 return JSONResponse(_rpc_error(None, -32600, f"Invalid request: {why}"), status_code=400)
             answers = [a for a in [await handle(request, m, i) for i, m in enumerate(message)] if a is not None]
-            return JSONResponse(answers) if answers else Response(status_code=202)
+            return JSONResponse(answers, headers=session_headers(request)) if answers else Response(status_code=202)
         answer = await handle(request, message)
-        return JSONResponse(answer) if answer is not None else Response(status_code=202)
+        return JSONResponse(answer, headers=session_headers(request)) if answer is not None else Response(status_code=202)
+
+    def session_headers(request: Request) -> dict[str, str]:
+        issued = getattr(request.state, "new_session", None)
+        return {mcp_session.HEADER: issued} if issued else {}
 
     @router.get("/api/mcp", include_in_schema=False)
     @router.delete("/api/mcp", include_in_schema=False)
@@ -565,6 +570,13 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
         scopes = request.state.scopes
         if method == "initialize":
             asked = params.get("protocolVersion")
+            ui = mcp_session.advertises_ui(params.get("capabilities"))
+            info = params.get("clientInfo") if isinstance(params.get("clientInfo"), dict) else {}
+            # Which hosts say they can show MCP Apps is what the next tools/list depends on; the log shows it per host
+            # (name and version only, no person, no token). Control characters are dropped, the length is bounded.
+            who = re.sub(r"[^ -~]", "", f"{info.get('name')}/{info.get('version')}")[:60]
+            log.info("MCP initialize from %s: MCP Apps extension %s", who, "advertised" if ui else "not advertised")
+            request.state.new_session = mcp_session.issue(request.app.state.settings.session_secret, ui)
             return _result(id_, {
                 "protocolVersion": asked if asked in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
                 "capabilities": {"tools": {"listChanged": False}, "prompts": {"listChanged": False},
@@ -581,7 +593,12 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
         if method == "ping":
             return _result(id_, {})
         if method == "tools/list":
-            return _result(id_, {"tools": [t.schema() for t in TOOLS if not t.write or "write" in scopes]})
+            # A client that connected here and said it cannot show MCP Apps gets no view links; one that did, or one we
+            # have no session for (an older connection, a client that ignores session ids), gets them, as before.
+            settings = request.app.state.settings
+            views = (not settings.mcp_apps_require_capability
+                     or mcp_session.read(settings.session_secret, request.headers.get(mcp_session.HEADER)) is not False)
+            return _result(id_, {"tools": [t.schema(ui=views) for t in TOOLS if not t.write or "write" in scopes]})
         if method == "resources/list":  # the MCP Apps views (ui:// pages); there is nothing else to read
             return _result(id_, {"resources": mcp_ui.resources()})
         if method == "resources/templates/list":
