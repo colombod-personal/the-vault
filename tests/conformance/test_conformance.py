@@ -367,3 +367,70 @@ def test_archidekt_real_deck_keys_have_not_drifted_from_the_twin(real):
     for part in ("deck", "entry", "card", "edition", "prices"):
         assert set(fx[part]) - {"vault_cache", "provenance"} == set(got[part]), (part, sorted(set(fx[part]) ^ set(got[part])))
     assert set(fx["oracleCard"]) <= set(got["oracleCard"])  # a card may have more (double-faced cards), never fewer
+
+
+# -- Wizards of the Coast: the rules page and the Comprehensive Rules TXT (twins/wizards.py, #21, #143) ------------------------
+
+RULES_HEADERS = {"User-Agent": HEADERS["User-Agent"], "Accept": "*/*"}
+
+
+def _rules_links(client, page_url="https://magic.wizards.com/en/rules"):
+    import re
+
+    html = client.get(page_url, headers=RULES_HEADERS).text
+    anchors = re.findall(r'<a [^>]*href="([^"]*MagicCompRules[^"]*)"', html)
+    return html, anchors
+
+
+def test_wizards_rules_page_names_the_current_edition_in_the_link_the_vault_reads(real, twin):
+    """vault.rules_live finds the edition by reading Wizards' page: the link to the TXT on media.wizards.com, whose file name
+    carries the edition date. If Wizards redesigns the page, this fails the night it happens, not when a person asks a rules
+    question. The twin must have the same links in the same order, with the same shape."""
+    import re
+
+    from vault.rules_live import TXT_LINK
+
+    twin.universe.wizards.publish("Magic: The Gathering Comprehensive Rules\n\nThese rules are effective as of March 3, 2027.\n", "20270303")
+    shape = re.compile(r"^https://media\.wizards\.com/(\d{4})/downloads/MagicCompRules[ %20]+(\d{8})\.(docx|pdf|txt)$")
+    seen = {}
+    for who, client in (("real", real), ("twin", twin)):
+        html, anchors = _rules_links(client)
+        found = TXT_LINK.findall(html)
+        assert found, f"{who}: the Vault's pattern finds no TXT link on the page"
+        matches = [shape.match(a) for a in anchors]
+        assert all(matches), f"{who}: unexpected link shape in {anchors}"
+        assert [m.group(3) for m in matches] == ["docx", "pdf", "txt"], f"{who}: links in another order or set: {anchors}"
+        assert all(m.group(2)[:4] == m.group(1) for m in matches), f"{who}: the year folder is not the edition's year"
+        assert len({m.group(2) for m in matches}) == 1, f"{who}: the three files name different editions"
+        assert 'class="cta"' in html and "Comprehensive Rules" in html
+        seen[who] = matches[-1].group(2)
+    assert re.fullmatch(r"20\d{6}", seen["real"])  # a date: the Vault reads the edition from the file itself, but this is how it is named
+
+
+def test_wizards_rules_text_is_plain_text_the_vault_can_parse_and_the_twin_answers_alike(real, twin):
+    """The TXT the page links: answers HEAD and GET as text/plain with an ETag, parses with the Vault's own parser into thousands
+    of rules, and its 'effective as of' date is the date in its file name or later (a new edition may be published before it
+    takes effect). The twin serves its file with the same headers."""
+    import re
+    from datetime import date
+
+    from vault import rules_parser
+    from vault.rules_live import TXT_LINK
+
+    twin.universe.wizards.publish("Magic: The Gathering Comprehensive Rules\n\nThese rules are effective as of March 3, 2027.\n\n"
+                                  "1. Game Concepts\n\n100. General\n\n100.1. These rules apply to any game.\n\n"
+                                  "100.2. Invented for the conformance run.\n\n100.3. Also invented.\n\nGlossary\n\nCredits\n", "20270303")
+    urls = {}
+    for who, client in (("real", real), ("twin", twin)):
+        html, _ = _rules_links(client)
+        urls[who] = TXT_LINK.findall(html)[0].replace(" ", "%20")
+    heads = {who: client.head(urls[who], headers=RULES_HEADERS) for who, client in (("real", real), ("twin", twin))}
+    for who, head in heads.items():
+        assert head.status_code == 200, who
+        assert head.headers["content-type"].startswith("text/plain"), who
+        assert head.headers.get("etag") and head.headers.get("last-modified"), who
+    text = real.get(urls["real"], headers=RULES_HEADERS).content.decode("utf-8-sig")
+    parsed = rules_parser.parse(text)
+    assert sum(r["kind"] == "rule" for r in parsed.rules) > 3000 and sum(r["kind"] == "glossary" for r in parsed.rules) > 100
+    named = re.search(r"MagicCompRules%20(\d{8})\.txt", urls["real"]).group(1)
+    assert parsed.effective_date >= date(int(named[:4]), int(named[4:6]), int(named[6:])), "effective before the date in its own file name"
