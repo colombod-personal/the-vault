@@ -146,6 +146,9 @@ def test_hosts_without_the_skills_still_get_the_shop_and_deck_rules():
     'current' prices and a cart, and did not credit Archidekt. The rules must be in what every host reads."""
     from vault.api import mcp
     assert "Never say which shop is cheapest" in GROUNDING and "never say anything goes into a cart" in GROUNDING
+    # #295: an assistant with browser tools opened a shop's Mass Entry to fill a cart after "buy my missing cards"
+    flat = " ".join(GROUNDING.split())
+    assert "Never place or fill an order for the person" in flat and "never use a browser or any other tool to open a shop, fill its cart" in flat
     assert "find it with list_decks" in GROUNDING and "credit Archidekt" in GROUNDING
     assert "never say which store is cheapest" in mcp.BY_NAME["shopping_list"].description
     assert "credit Archidekt" in mcp.BY_NAME["get_archidekt_deck"].description
