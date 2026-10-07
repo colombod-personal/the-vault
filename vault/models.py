@@ -592,6 +592,26 @@ class OraclePrice(Base):
     source: Mapped[str] = mapped_column(String(40), default="scryfall")  # whose numbers these are
 
 
+class OraclePrinting(Base):
+    """Every priced paper printing of every card, today's figures only (Scryfall's, from TCGplayer and Cardmarket), so a
+    shopping list can pick the cheapest printing that fits a person's rules (set, language, finish; #29). Third-party data:
+    shown with its provenance, never as the Vault's. The day of the figures is the ``oracle_printings`` row of
+    ``catalog_sources`` (rows whose figures did not change are not rewritten, so no row carries its own day). No history; no
+    personal data."""
+
+    __tablename__ = "oracle_printings"
+
+    scryfall_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    oracle_id: Mapped[str] = mapped_column(String(36), index=True)
+    set_code: Mapped[str] = mapped_column(String(10))
+    set_name: Mapped[str | None] = mapped_column(String(100))
+    collector_number: Mapped[str] = mapped_column(String(20))
+    lang: Mapped[str] = mapped_column(String(5), default="en")
+    usd: Mapped[float | None] = mapped_column(Float)
+    usd_foil: Mapped[float | None] = mapped_column(Float)
+    usd_etched: Mapped[float | None] = mapped_column(Float)
+
+
 class CatalogSource(Base):
     """What was loaded, when, from where. Feeds ``whoami`` and every "as of" line."""
 

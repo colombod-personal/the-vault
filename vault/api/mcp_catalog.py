@@ -170,11 +170,25 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              "on demand. Descriptions are theirs and are attributed; the Vault keeps no copy of their data. It lists only combos Commander Spellbook knows: finding none does not mean the deck has " "no infinite combos." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
              {"text": deck, "deck_id": DECK_ID}, [], method="POST", path=lambda a: f"{V1}/decks/combos", body=lambda a: _deck_body(a),
              provenance=("computed",)),
-        Tool("shopping_list", "The cards of a decklist the person does not own, with the cheapest known price of each (dated, from Scryfall) "
-             "and a paste-ready list to put into a store's own list or deck tool. The Vault never contacts stores or fills carts, "
-             "and knows no store's price: never say which store is cheapest." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
-             {"text": deck, "deck_id": DECK_ID}, [], method="POST", path=lambda a: f"{V1}/decks/shopping-list",
-             body=lambda a: _deck_body(a), provenance=("computed",), ui="shopping"),
+        Tool("shopping_list", "The cards of a decklist the person does not own, with a dated Scryfall price of each, as paste-ready text for a "
+             "store's own list tool: `format` is plain, cardkingdom (Card Kingdom's Deck Builder), tcgplayer (Mass Entry with set and "
+             "collector number), cardmarket (want list with the expansion's name), csv, or all; each was checked against the store's own "
+             "help page, which `store_format` names, with what the paste cannot carry. With `finish`, `language`, `sets` or "
+             "`condition` it picks the cheapest printing that fits (Scryfall's price of each printing) and reports which printing it "
+             "chose per line, or that none qualifies; Scryfall's prices are not per condition, so `condition` never changes a price. "
+             "The Vault never contacts stores or fills carts, and knows no store's price: never say which store is cheapest."
+             + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
+             {"text": deck, "deck_id": DECK_ID,
+              "format": {"type": "string", "enum": ["plain", "cardkingdom", "tcgplayer", "cardmarket", "csv", "all"], "default": "plain",
+                         "description": "How `text` is written (all: every format in `texts`)"},
+              "finish": {"type": "string", "enum": ["nonfoil", "foil", "etched"], "description": "Only printings in this finish"},
+              "language": {"type": "string", "maxLength": 30, "description": "Only printings in this language: a Scryfall code (en, ja, de ...) or its name"},
+              "sets": {"type": "array", "maxItems": 30, "items": {"type": "string", "maxLength": 10},
+                       "description": "Only printings from these Scryfall set codes, e.g. ['2xm', 'mh2']"},
+              "condition": {"type": "string", "enum": ["NM", "LP", "MP", "HP", "DMG"],
+                            "description": "The worst condition accepted; Scryfall's prices are not per condition, so it changes no price"}},
+             [], method="POST", path=lambda a: f"{V1}/decks/shopping-list",
+             body=lambda a: _deck_body(a, "format", "finish", "language", "sets", "condition"), provenance=("computed",), ui="shopping"),
     ]
 
 
@@ -207,8 +221,9 @@ PROMPTS = [
      "description": "Work out which cards are missing from the collection and how to buy them.",
      "arguments": [_arg("deck", "The decklist")],
      "text": "Work out what this deck still needs from the person's collection and give them a list to buy:\n\n{deck}\n\n" + GROUNDING +
-             "\nCall shopping_list. Show the paste-ready list and the dated total. Tell them to paste it into the store's own list or deck tool "
-             "and compare prices there; the Vault does not contact stores."},
+             "\nCall shopping_list (format: cardkingdom, tcgplayer or cardmarket for the store they name; finish, language and sets for "
+             "printing rules they give). Show the paste-ready list, the printings it chose if any, and the dated total. Tell them to paste it "
+             "into the store's own list tool and compare prices there; the Vault does not contact stores."},
     {"name": "council_review", "title": "Review a deck with an expert council",
      "description": "On-topic experts review a deck independently, a devil's advocate challenges them, and you get a checked plan.",
      "arguments": [_arg("deck", "The deck: a saved deck's name, a link, or the decklist"), _arg("format", "The format, e.g. commander"),

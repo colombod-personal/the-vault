@@ -121,3 +121,10 @@ def test_deck_panels_lead_with_the_deck_not_with_card_counts(view):
     assert "deckHeader(" in page and "var head = deckHeader(env.deck)" in page
     assert page.index("deckHeader(env.deck)") < page.index('h("h2"')  # the deck comes before the panel's own title
     assert "Commander: " in page and "Format not given" in page and "Format read from the list" in page
+
+
+def test_the_shopping_view_names_the_store_and_what_its_paste_cannot_carry_and_switches_between_formats():
+    """#55: store formats in the view - the heading names the store, its limits are shown, and `format: all` offers each text."""
+    page = mcp_ui.html("shopping")
+    assert "r.store_format" in page and "one.store" in page and "one.limits" in page
+    assert "r.texts" in page and "pick.onchange" in page

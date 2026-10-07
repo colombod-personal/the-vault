@@ -344,8 +344,11 @@ function render(root, env) {
     root.appendChild(t);
     if (r.unpriced_lines) { root.appendChild(h("p", { class: "muted", text: r.unpriced_lines + " line(s) have no known price." })); }
     var ta = h("textarea", { readonly: "readonly", rows: String(Math.min(12, r.lines.length + 1)), style: "width:100%;font-family:monospace" }); ta.value = r.text;
-    root.appendChild(h("h2", { text: "List to paste into a store's own list or deck tool" }));
+    var sf = r.store_format || {}, one = sf.store ? sf : null;  // format "all": every store's text is in r.texts
+    root.appendChild(h("h2", { text: "List to paste into " + (one ? one.store : "a store's own list or deck tool") }));
+    if (r.texts) { var pick = h("select", {}); Object.keys(r.texts).forEach(function (k) { pick.appendChild(h("option", { value: k, text: (sf[k] && sf[k].store) || k })); }); pick.onchange = function () { ta.value = r.texts[pick.value]; }; root.appendChild(pick); }
     root.appendChild(ta);
+    if (one && one.limits) { root.appendChild(h("p", { class: "small muted", text: one.limits })); }
     var msg = h("span", { class: "small muted", text: "" });
     root.appendChild(h("button", { text: "Copy list", onclick: function () { ta.select(); try { document.execCommand("copy"); msg.textContent = " Copied."; } catch (e) { msg.textContent = " Select the text and copy it."; } } }));
     root.appendChild(msg);
