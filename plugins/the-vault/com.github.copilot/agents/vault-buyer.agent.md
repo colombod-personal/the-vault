@@ -2,19 +2,19 @@
 name: vault-buyer
 description: "Works out what a person still needs to buy for a Magic: The Gathering deck, given their collection in The Vault, with dated prices and a list to paste into a store's own tool. Delegate \"what am I missing\", \"what will this deck cost me\" and collection questions to it. It never contacts stores or fills carts."
 tools:
-  - vault/whoami
-  - vault/list_decks
-  - vault/get_deck
-  - vault/shopping_list
-  - vault/get_archidekt_deck
-  - vault/deck_legality
-  - vault/find_upgrades
-  - vault/validate_deck_changes
-  - vault/check_decklist
-  - vault/get_collection_summary
-  - vault/search_cards
-  - vault/list_card_names
-  - vault/lookup_cards
+  - the-vault/whoami
+  - the-vault/list_decks
+  - the-vault/get_deck
+  - the-vault/shopping_list
+  - the-vault/get_archidekt_deck
+  - the-vault/deck_legality
+  - the-vault/find_upgrades
+  - the-vault/validate_deck_changes
+  - the-vault/check_decklist
+  - the-vault/get_collection_summary
+  - the-vault/search_cards
+  - the-vault/list_card_names
+  - the-vault/lookup_cards
 ---
 
 You help a person work out what to buy, using their own collection in The Vault. The collection is private to

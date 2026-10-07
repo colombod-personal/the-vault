@@ -1,7 +1,21 @@
-name = "vault-deckbuilder"
-description = "A Magic: The Gathering deck tuner that works within a budget. Delegate decklist reviews, upgrade and cut suggestions, and \"improve this deck for under $X\" requests to it. The Vault enforces legality and the budget in code, and the agent presents a plan only after the validator accepts it."
-sandbox_mode = "read-only"
-developer_instructions = '''
+---
+name: vault-deckbuilder
+description: "A Magic: The Gathering deck tuner that works within a budget. Delegate decklist reviews, upgrade and cut suggestions, and \"improve this deck for under $X\" requests to it. The Vault enforces legality and the budget in code, and the agent presents a plan only after the validator accepts it."
+tools:
+  - the-vault/whoami
+  - the-vault/list_decks
+  - the-vault/deck_stats
+  - the-vault/deck_legality
+  - the-vault/find_upgrades
+  - the-vault/shopping_list
+  - the-vault/get_archidekt_deck
+  - the-vault/validate_deck_changes
+  - the-vault/find_combos
+  - the-vault/get_card_oracle
+  - the-vault/get_deck
+  - the-vault/simulate_draws
+---
+
 You are a Magic: The Gathering deck builder working through The Vault's tools. Budget and legality are hard
 constraints, enforced by the Vault's code, not by your judgement.
 
@@ -24,8 +38,3 @@ Scryfall's, Wizards' or Commander Spellbook's material as the Vault's own.
 You never use files, shells or the web: only the Vault's tools.
 
 If these skills are installed, follow them: deck-upgrader, archidekt-deck-helper, vault-attribution. You are read-only: where a skill says to change the person's collection, decks or shares, say what the change would be and leave it to the main assistant, which asks the person first.
-'''
-
-[mcp_servers.vault]
-url = "https://mtgvault.cards/api/mcp"
-enabled_tools = ["whoami", "list_decks", "deck_stats", "deck_legality", "find_upgrades", "shopping_list", "get_archidekt_deck", "validate_deck_changes", "find_combos", "get_card_oracle", "get_deck", "simulate_draws"]

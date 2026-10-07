@@ -19,6 +19,7 @@ Skills are installed on their own with ``npx skills add colombod-personal/the-va
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import shutil
 import sys
@@ -38,6 +39,11 @@ OPENAI = ROOT / "plugins" / "the-vault-openai"
 MARKETPLACE = ROOT / ".claude-plugin" / "marketplace.json"
 
 NAME = "the-vault"
+# Agent Plugins 1.0 has no agent concept ("commands, hooks, agents ... outside the v1 format", spec section on why only
+# skills and MCP), so agents are client extensions: spec section 8 puts client files in a top-level directory named for
+# the client's reverse-domain namespace. VS Code documents that it reads GitHub Copilot's agents from
+# ``com.github.copilot/agents/`` in a plugin (docs/skills.md); no other client's namespace is documented, so none is made.
+COPILOT_NAMESPACE = "com.github.copilot"
 VERSION = "0.1.0"
 HOST = "https://mtgvault.cards"
 REPO = "https://github.com/colombod-personal/the-vault"
@@ -83,8 +89,9 @@ and every answer shows where it came from. This folder is **generated** by `scri
 from `skills/` in the repository; do not edit it by hand.
 
 Contents: `skills/` (rules judge, interaction explainer, deck upgrader, shopping assistant, collection
-analyst, attribution), `mcp.json` (the Vault's MCP server), and Claude Code extras in `.claude-plugin/`
-and `.mcp.json`.
+analyst, attribution), `mcp.json` (the Vault's MCP server), Claude Code extras in `.claude-plugin/` and
+`.mcp.json`, the Claude Code agents in `agents/`, and the GitHub Copilot agents in `com.github.copilot/agents/`
+(Agent Plugins has no agent component, so agents live under the client's reverse-domain namespace).
 
 Install and connect: see docs/skills.md in the repository, or {HOST}/connect.html.
 
@@ -105,6 +112,133 @@ OAUTH_READY = True
 # page's manual steps for that app into an "Add to ..." button, everywhere at once.
 LISTINGS = {"claude": None, "chatgpt": None}
 
+MCP_URL = f"{HOST}/api/mcp"
+TOKEN_ENV = "VAULT_TOKEN"
+# When the docs below were read for the blocks (docs/onboarding.md, "The connect page's blocks"). Nothing here has been
+# run in the harness itself, except Claude Code and the plugin validators: the page says what the docs say.
+HARNESSES_CHECKED = "2026-10-07"
+
+TOKEN_HOW = (f"Without browser sign-in: create a personal access token (Account → Agents & API; read-only is enough), "
+             f"keep it in an environment variable named {TOKEN_ENV}")
+
+
+def _json(data: dict) -> str:
+    return json.dumps(data, indent=2)
+
+
+# Every harness's connection instructions, in its own format, read from its own documentation. connect.html and
+# llms.txt are both generated from this list (connect_page(), llms_txt()), so they cannot disagree with each other or
+# with HOST and OAUTH_READY (tests/test_plugin.py). A step is {kind, label, lang, code}: "oauth" steps show only when
+# OAUTH_READY, a token never appears in a command line (it would land in shell history and the chat): it is read from
+# an environment variable or typed into the harness's own prompt.
+HARNESSES = [
+    {"id": "claude-code", "title": "Claude Code",
+     "docs": [("Claude Code: MCP", "https://code.claude.com/docs/en/mcp")],
+     "steps": [
+         {"kind": "oauth", "label": "Add the server for all your projects, then sign in with your Vault account:", "lang": "bash",
+          "code": f"claude mcp add --transport http vault --scope user {MCP_URL}\nclaude mcp login vault"},
+         {"kind": "token", "label": f"{TOKEN_HOW}, and put this in the project's .mcp.json (Claude Code fills in the variable):", "lang": "json",
+          "code": _json({"mcpServers": {"vault": {"type": "http", "url": MCP_URL,
+                                                 "headers": {"Authorization": f"Bearer ${{{TOKEN_ENV}}}"}}}})},
+     ],
+     "note": "Inside a session, /mcp does the sign-in too. The plugin above asks for the token once and stores it securely."},
+    {"id": "codex", "title": "Codex (CLI and IDE extension)",
+     "docs": [("Codex: MCP", "https://learn.chatgpt.com/docs/extend/mcp?surface=cli")],
+     "steps": [
+         {"kind": "oauth", "label": "Add the server, then sign in with your Vault account:", "lang": "bash",
+          "code": f"codex mcp add vault --url {MCP_URL}\ncodex mcp login vault"},
+         {"kind": "config", "label": "Or by hand in ~/.codex/config.toml (Codex uses TOML here, not JSON):", "lang": "toml",
+          "code": f'[mcp_servers.vault]\nurl = "{MCP_URL}"'},
+         {"kind": "token", "label": f"{TOKEN_HOW}, and name it in the same table:", "lang": "toml",
+          "code": f'[mcp_servers.vault]\nurl = "{MCP_URL}"\nbearer_token_env_var = "{TOKEN_ENV}"'},
+     ],
+     "note": "The CLI and the IDE extension share this configuration."},
+    {"id": "cursor", "title": "Cursor",
+     "docs": [("Cursor: MCP", "https://cursor.com/docs/context/mcp")],
+     "steps": [
+         {"kind": "oauth", "label": "In .cursor/mcp.json (this project) or ~/.cursor/mcp.json (all projects); Cursor documents OAuth for servers that need it; if it shows no sign-in, use the token block below:", "lang": "json",
+          "code": _json({"mcpServers": {"vault": {"url": MCP_URL}}})},
+         {"kind": "token", "label": f"{TOKEN_HOW}; Cursor fills in the variable:", "lang": "json",
+          "code": _json({"mcpServers": {"vault": {"url": MCP_URL, "headers": {"Authorization": f"Bearer ${{env:{TOKEN_ENV}}}"}}}})},
+     ],
+     "note": "The root key is mcpServers."},
+    {"id": "vscode", "title": "VS Code (GitHub Copilot)",
+     "docs": [("VS Code: MCP servers", "https://code.visualstudio.com/docs/copilot/customization/mcp-servers"),
+              ("VS Code: MCP configuration reference", "https://code.visualstudio.com/docs/agents/reference/mcp-configuration")],
+     "steps": [
+         {"kind": "oauth", "label": "In .vscode/mcp.json (or run “MCP: Open User Configuration” for all workspaces); VS Code documents OAuth for servers that need it; if it shows no sign-in, use the token block below:", "lang": "json",
+          "code": _json({"servers": {"vault": {"type": "http", "url": MCP_URL}}})},
+         {"kind": "token", "label": "Without browser sign-in: create a personal access token (Account → Agents & API); VS Code asks for it once, hides it and stores it:", "lang": "json",
+          "code": _json({"inputs": [{"type": "promptString", "id": "vault-token", "description": "The Vault personal access token", "password": True}],
+                         "servers": {"vault": {"type": "http", "url": MCP_URL,
+                                               "headers": {"Authorization": "Bearer ${input:vault-token}"}}}})},
+     ],
+     "note": "The root key is servers here, not mcpServers."},
+    {"id": "copilot-cli", "title": "GitHub Copilot CLI",
+     "docs": [("GitHub Docs: add MCP servers to Copilot CLI",
+               "https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers")],
+     "steps": [
+         {"kind": "config", "label": "Add the server:", "lang": "bash", "code": f"copilot mcp add --transport http vault {MCP_URL}"},
+         {"kind": "config", "label": "Or by hand in ~/.copilot/mcp-config.json:", "lang": "json",
+          "code": _json({"mcpServers": {"vault": {"type": "http", "url": MCP_URL, "tools": ["*"]}}})},
+         {"kind": "token", "label": ("Without browser sign-in: create a personal access token (Account → Agents & API). In a Copilot CLI session run "
+                                     "/mcp add, choose HTTP, enter the address above and type this into the HTTP Headers prompt (not into a command):"),
+          "lang": "json", "code": _json({"Authorization": "Bearer vault_pat_..."})},
+     ],
+     "note": "The Copilot CLI documentation we read describes headers for remote servers and does not describe a browser sign-in, so this block uses the token."},
+]
+
+
+def harness_steps(harness: dict) -> list[dict]:
+    """The steps to show: the OAuth ones only when sign-in is switched on (OAUTH_READY)."""
+    return [s for s in harness["steps"] if OAUTH_READY or s["kind"] != "oauth"]
+
+
+def llms_connection() -> str:
+    """The connection part of public/llms.txt, from the same HARNESSES, HOST and OAUTH_READY as connect.html."""
+    host = HOST
+    lines = [
+        f"- MCP server: `{MCP_URL}` (Streamable HTTP, stateless JSON).",
+    ]
+    if OAUTH_READY:
+        lines += [
+            f"- OAuth (ChatGPT, Claude.ai, any MCP client): add the connector URL `{MCP_URL}`. The",
+            "  401 from `/api/mcp` points at `/.well-known/oauth-protected-resource/api/mcp`; the server",
+            "  metadata is at `/.well-known/oauth-authorization-server`. PKCE S256, the `resource` parameter",
+            f"  (`{MCP_URL}`), a Client ID Metadata Document URL or `POST /oauth/register` as",
+            "  `client_id`, scopes `read` (default) and `write` (the person must tick it). Access tokens last",
+            "  an hour; refresh tokens rotate, and a reused one revokes the connection. OAuth tokens work on",
+            "  `/api/mcp` only, and can never manage the account.",
+        ]
+    else:
+        lines.append("- OAuth sign-in is not switched on yet: use a personal access token.")
+    lines += [
+        "- Token: header `Authorization: Bearer vault_pat_...` (a personal access token from Account → Agents & API). Keep it in an",
+        f"  environment variable or the client's own secret prompt, never in a command line (shell history, the chat).",
+        f"- Each client has its own format, taken from its documentation (read {HARNESSES_CHECKED}); the host is {host}:",
+    ]
+    for h in HARNESSES:
+        docs = "; ".join(f"{t}: {u}" for t, u in h["docs"])
+        lines.append(f"  - {h['title']} ({docs})")
+        for s in harness_steps(h):
+            lines.append(f"    {s['label']}")
+            lines += ["", f"    ```{s['lang']}"] + [f"    {c}" if c else "" for c in s["code"].split("\n")] + ["    ```", ""]
+        lines.append(f"    {h['note']}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+LLMS_BEGIN = "<!-- connect:begin generated by scripts/build_plugin.py from HARNESSES, HOST and OAUTH_READY: edit them there -->"
+LLMS_END = "<!-- connect:end -->"
+
+
+def llms_txt() -> str:
+    """public/llms.txt with its generated connection section filled in (the rest is hand-written)."""
+    path = ROOT / "public" / "llms.txt"
+    text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    head, rest = text.split(LLMS_BEGIN + "\n", 1)
+    _, tail = rest.split(LLMS_END + "\n", 1)
+    return head + LLMS_BEGIN + "\n" + llms_connection() + LLMS_END + "\n" + tail
+
 FAN_NOTICE = ("The Vault is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. "
               "Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC.")
 
@@ -116,10 +250,7 @@ def _block(code: str) -> str:
 
 def connect_page() -> str:
     """public/connect.html, generated from the same constants as the plugin so it cannot go stale."""
-    mcp_url = f"{HOST}/api/mcp"
-    claude_mcp = f'claude mcp add --transport http vault {mcp_url} --header "Authorization: Bearer vault_pat_..."'
-    editor_json = json.dumps({"mcpServers": {"vault": {"type": "http", "url": mcp_url,
-                                                       "headers": {"Authorization": "Bearer vault_pat_..."}}}}, indent=2)
+    mcp_url = MCP_URL
     def app_card(app: str, title: str, steps: str, after_update: str) -> str:
         listing = LISTINGS.get(app)
         if listing:
@@ -143,6 +274,13 @@ def connect_page() -> str:
                             "In ChatGPT: <strong>Plugins → Add → Add custom MCP server</strong>, name it The Vault, paste this "
                             "address and keep OAuth:",
                             "ChatGPT reads the tools only when the app is added: delete it (not only uninstall) and add it again.")
+    def harness_card(h: dict) -> str:
+        steps = "".join(f"<p>{html.escape(s['label'])}</p>" + _block(s["code"]) for s in harness_steps(h))
+        docs = ", ".join(f'<a href="{u}" target="_blank" rel="noopener">{html.escape(t)}</a>' for t, u in h["docs"])
+        return (f'<div class="card" id="{h["id"]}"><h3>{html.escape(h["title"])}</h3>{steps}'
+                f'<p class="note">{html.escape(h["note"])} Format from the tool\'s own documentation ({docs}), read {HARNESSES_CHECKED}.</p></div>')
+
+    harness_cards = "\n  ".join(harness_card(h) for h in HARNESSES)
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -181,9 +319,11 @@ def connect_page() -> str:
   {claude_card}
   {chatgpt_card}
 
-  <h2>2. Developers: Claude Code, Codex, Cursor, VS Code</h2>
-  <p>Sign in to the Vault, open <strong>Account → Agents &amp; API</strong>, and create a personal access token.
-    Read-only is enough for rules, cards, deck analysis and your collection. The token is shown once; keep it private.</p>
+  <h2>2. Developers: Claude Code, Codex, Cursor, VS Code, GitHub Copilot CLI</h2>
+  <p>Each tool below has its own format, so each has its own block. Where the tool offers it you sign in with your Vault
+    account in the browser and no token is involved. Otherwise open <strong>Account → Agents &amp; API</strong> and create a
+    personal access token (read-only is enough for rules, cards, deck analysis and your collection; it is shown once).
+    The blocks never put the token in a command: it is read from an environment variable or typed into the tool's own prompt.</p>
 
   <div class="card">
     <h3>Claude Code (plugin: skills and tools together)</h3>
@@ -201,21 +341,14 @@ def connect_page() -> str:
   <div class="card">
     <h3>Ready-made agents: a rules judge, a budget deck builder, a buyer</h3>
     <p>The Claude Code plugin above includes them (<code>the-vault:vault-judge</code>, <code>vault-deckbuilder</code>,
-      <code>vault-buyer</code>); they can only use the Vault's tools. For Codex, Cursor and GitHub Copilot, copy the
-      matching files from <a href="{REPO}/tree/main/agent-definitions">agent-definitions</a> into the folder named there.</p>
+      <code>vault-buyer</code>); in Claude Code they can only use the Vault's tools. For Codex, Cursor and GitHub Copilot,
+      copy the matching files from <a href="{REPO}/tree/main/agent-definitions">agent-definitions</a> into the folder
+      named there; what each tool actually restricts is in the README next to them (Copilot: only the Vault's tools;
+      Codex: the Vault's read-only tools, read-only sandbox; Cursor: read-only mode and instructions only).</p>
   </div>
 
-  <div class="card">
-    <h3>Claude Code: the tools only</h3>
-    {_block(claude_mcp)}
-  </div>
-
-  <div class="card">
-    <h3>Cursor, VS Code, Codex and other editors: the tools</h3>
-    <p>Add this to the editor's MCP settings (the file is often <code>.cursor/mcp.json</code> or <code>.vscode/mcp.json</code>;
-      some editors call the key <code>servers</code> instead of <code>mcpServers</code>):</p>
-    {_block(editor_json)}
-  </div>
+  <h3>The tools (MCP server) in each tool</h3>
+  {harness_cards}
 
 
   <h2>3. Check it works</h2>
@@ -300,10 +433,15 @@ def claude_agent(agent: dict) -> str:
 
 
 def codex_agent(agent: dict) -> str:
+    """Codex custom agent: read-only sandbox, and the Vault server limited to this agent's tools (``enabled_tools`` is
+    Codex's allow list for one server). Codex has no documented way to take away its other tools (shell reads, other MCP
+    servers) from one agent, so those are limited by the instructions only: see DEFS_README."""
     body = agent["body"] + _skills_note(agent)
     assert "'''" not in body
+    tools = ", ".join(json.dumps(t) for t in agent["tools"])
     return (f"name = {json.dumps(agent['name'])}\ndescription = {json.dumps(agent['description'])}\nsandbox_mode = \"read-only\"\n"
-            f"developer_instructions = '''\n{body}\n'''\n")
+            f"developer_instructions = '''\n{body}\n'''\n\n[mcp_servers.vault]\nurl = {json.dumps(MCP_URL)}\n"
+            f"enabled_tools = [{tools}]\n")
 
 
 def cursor_agent(agent: dict) -> str:
@@ -311,8 +449,12 @@ def cursor_agent(agent: dict) -> str:
             + agent["body"] + _skills_note(agent) + "\n")
 
 
-def copilot_agent(agent: dict) -> str:
-    return (f"---\nname: {agent['name']}\ndescription: {json.dumps(agent['description'])}\n---\n\n"
+def copilot_agent(agent: dict, server: str = "vault") -> str:
+    """GitHub Copilot / VS Code custom agent. ``tools`` is the agent's allow list (documented: only the listed tools are
+    available; a name that is not available is ignored), so listing only ``<server>/<tool>`` for the Vault's tools leaves
+    it no files, shell or web. ``server`` is the name the Vault's MCP server is connected under."""
+    tools = "".join(f"  - {server}/{t}\n" for t in agent["tools"])
+    return (f"---\nname: {agent['name']}\ndescription: {json.dumps(agent['description'])}\ntools:\n{tools}---\n\n"
             + agent["body"] + _skills_note(agent) + "\n")
 
 
@@ -322,20 +464,39 @@ Generated by `scripts/build_plugin.py` from `agents/` (edit those, never these).
 (rules and interactions), `vault-deckbuilder` (budget upgrades, validated by the Vault), `vault-buyer` (what
 to buy, from your collection), `vault-collection-analyst`, and the expert council's voices (one per format:
 Commander, Standard, Pioneer, Pauper, Limited, Two-Headed Giant; plus the casual table, the synergy analyst and the
-devil's advocate). Each answers only through the Vault's tools and passes on provenance.
+devil's advocate). Each is told to answer only through the Vault's tools and to pass on provenance.
+
+## What each assistant actually enforces
+
+The instructions tell every agent to use only the Vault's tools. Whether the assistant *stops* it from using anything
+else differs, and these files claim only what each format documents:
+
+| Assistant | Enforced by the assistant | Not enforced (the instructions only ask) |
+|---|---|---|
+| Claude Code (the plugin) | An allow list (`tools:`): only the Vault's read-only tools; no files, shell or web | nothing else |
+| GitHub Copilot and VS Code | An allow list (`tools:` with `vault/<tool>`): only the Vault's read-only tools; no built-in tools | nothing else, if the server is connected under the name `vault` (a different name leaves the agent with no tools, never more) |
+| Codex | The Vault server's tools limited to the agent's read-only ones (`enabled_tools`), and a read-only sandbox (no writes) | Codex's other tools: reading files with the shell, other MCP servers, web search |
+| Cursor | A read-only mode (`readonly: true`: no writes) | Which tools it uses: Cursor's subagent format has no tool allow list and subagents inherit the parent's tools, including every MCP server |
+
+The Vault's write tools are not in any list. A person's own assistant, not an agent, makes changes, after asking.
+
+## Install
 
 The Claude Code plugin already includes them (`plugins/the-vault/agents/`; they appear as `the-vault:vault-judge`
-and so on). For the others, copy the files into the folder your assistant reads:
+and so on). The same plugin carries the Copilot versions in `plugins/the-vault/com.github.copilot/agents/`, the
+namespace VS Code documents for GitHub Copilot components in an Agent Plugins package. For the others, copy the files
+into the folder your assistant reads:
 
-| Assistant | Copy `{folder}` to |
+| Assistant | Copy |
 |---|---|
 | Codex | `codex/*.toml` to `.codex/agents/` (project) or `~/.codex/agents/` (personal) |
 | Cursor | `cursor/*.md` to `.cursor/agents/` (project) or `~/.cursor/agents/` (personal) |
 | GitHub Copilot | `copilot/*.agent.md` to `.github/agents/` |
 
-These formats follow the assistants' published documentation as read on 2026-10-04 but have not been run in the
-assistants themselves: check that the agent appears and can call the Vault's tools (ask it to call `whoami`).
-The MCP server must be connected under the name `the-vault` or `vault` (see `public/connect.html`). Install the skills
+These formats follow the assistants' published documentation as read on 2026-10-07 but have not been run in the
+assistants themselves: check that the agent appears and can call the Vault's tools (ask it to call `whoami`), and, for
+Copilot, that it has no other tools. The Vault's MCP server must be connected under the name `vault` (the name in
+`public/connect.html`) for Copilot's allow list and Codex's `[mcp_servers.vault]` table to match it. Install the skills
 the agents name with `npx skills add colombod-personal/the-vault`.
 """
 
@@ -451,12 +612,14 @@ def expected() -> dict[Path, str | Path]:
         PLUGIN / "README.md": README,
         MARKETPLACE: dump(MARKET),
         ROOT / "public" / "connect.html": connect_page(),
+        ROOT / "public" / "llms.txt": llms_txt(),
     }
     for source in sorted(SKILLS.rglob("*")):
         if source.is_file():
             files[PLUGIN / "skills" / source.relative_to(SKILLS)] = source
     for agent in load_agents():
         files[PLUGIN / "agents" / f"{agent['name']}.md"] = claude_agent(agent)
+        files[PLUGIN / COPILOT_NAMESPACE / "agents" / f"{agent['name']}.agent.md"] = copilot_agent(agent, server=NAME)
         files[DEFS / "codex" / f"{agent['name']}.toml"] = codex_agent(agent)
         files[DEFS / "cursor" / f"{agent['name']}.md"] = cursor_agent(agent)
         files[DEFS / "copilot" / f"{agent['name']}.agent.md"] = copilot_agent(agent)

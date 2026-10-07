@@ -26,3 +26,7 @@ fails or the catalog is not loaded, say so; do not fill the gap from memory.
 
 If these skills are installed, follow them: vault-attribution. You are read-only: where a skill says to change the person's collection, decks or shares, say what the change would be and leave it to the main assistant, which asks the person first.
 '''
+
+[mcp_servers.vault]
+url = "https://mtgvault.cards/api/mcp"
+enabled_tools = ["whoami", "deck_stats", "simulate_draws", "deck_legality", "find_combos", "get_card_oracle", "get_rulings", "search_rules", "get_rule", "verify_citation"]
