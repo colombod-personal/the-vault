@@ -400,21 +400,28 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         def cards(request: Request, q: str | None = None, set: str | None = None, name: str | None = None,
                   finish: str | None = None, condition: str | None = None, sort: str = "name",
                   cursor: str | None = None, limit: int | None = None, ctx: Ctx = Depends(ctx_dep),
-                  printing: str | None = Query(None, description="Printing label: Normal, Foil, Etched, … (any case)")):
+                  printing: str | None = Query(None, description="Printing label: Normal, Foil, Etched, … (any case)"),
+                  card_type: str | None = Query(None, alias="type", min_length=1, max_length=40,
+                                                description="A word of the card's type line, any case: Creature, Artifact, Land, "
+                                                            "Legendary, Sliver ... Printings whose card data is not stored yet are left out"),
+                  mana_value: float | None = Query(None, ge=0, le=1_000_000,
+                                                   description="Exactly this mana value (0 for lands). Printings whose card data "
+                                                               "is not stored yet are left out")):
             if sort not in SORTS:
                 raise HTTPException(400, f"sort must be one of {sorted(SORTS)}")
             view = ctx.view()
 
             def body():
-                items = filtered(view, q=q, set_code=set, finish=finish, condition=condition, name=name)
+                items = filtered(view, q=q, set_code=set, finish=finish, condition=condition, name=name,
+                                 card_type=card_type, mana_value=mana_value)
                 items = filtered_printing(items, printing)
                 page, nxt = paginate(items, SORTS[sort], lambda g: g.id, cursor=cursor, limit=limit)
                 cards = view.cards(page)  # card data for the whole page in one query
                 out = [{**view.item(g), "card": card_out(cards.get(g.scryfall_id)), "_links": card_links(ctx, g)}
                        for g in page]
                 return {**page_body(request, out, nxt, len(items), q=q, set=set, name=name, finish=finish,
-                                    condition=condition, printing=printing, sort=None if sort == "name" else sort,
-                                    limit=limit),
+                                    condition=condition, printing=printing, type=card_type, mana_value=mana_value,
+                                    sort=None if sort == "name" else sort, limit=limit),
                         "value_total": round(sum(g.value for g in items), 2)}
 
             return etag_response(request, view.version, body)

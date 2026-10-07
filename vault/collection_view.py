@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 import threading
 from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
@@ -64,6 +65,8 @@ class Group:
     first_acquired: str | None = None
     last_acquired: str | None = None
     scryfall_id: str | None = None
+    type_line: str | None = None  # Scryfall's, once the printing is matched (None until then); for the type filter
+    cmc: float | None = None  # mana value, same source; for the mana value filter and sort
     copies: list[dict] = field(default_factory=list, repr=False)  # the imported rows, as plain data
 
     @property
@@ -109,7 +112,9 @@ class CollectionView:
         ids = {r.scryfall_id for r in rows if r.scryfall_id}
         prices = latest_prices(db, ids)
         # Files without set names (Moxfield) get Scryfall's, once the printing is matched.
-        set_names = dict(db.execute(select(Card.scryfall_id, Card.set_name).where(Card.scryfall_id.in_(ids))).all()) if ids else {}
+        known = {c[0]: c for c in db.execute(select(Card.scryfall_id, Card.set_name, Card.type_line, Card.cmc)
+                                             .where(Card.scryfall_id.in_(ids))).all()} if ids else {}
+        set_names = {i: c[1] for i, c in known.items()}
         groups: dict[str, Group] = {}
         months: Counter = Counter()
         worth: Counter = Counter()  # today's market value of the copies bought each month
@@ -149,6 +154,10 @@ class CollectionView:
                 months[day[:7]] += r.quantity
                 worth[day[:7]] += price * r.quantity
                 spend[day[:7]] += (paid or 0.0) * r.quantity
+        for g in groups.values():  # what the type and mana value filters read; None until the printing is matched
+            card = known.get(g.scryfall_id)
+            if card is not None:
+                g.type_line, g.cmc = card[2], card[3]
         ordered = sorted(groups.values(), key=lambda g: (g.name.lower(), g.set_code, g.number, g.id))
         # every finish's latest price, as plain data (the view outlives this session), for card data
         snapshots = {i: {**{k: plausible_price(getattr(p, k, None)) for k in PRICE_KEYS}, "day": p.day.isoformat()}
@@ -265,7 +274,8 @@ class CollectionView:
 
 
 def filtered(view: CollectionView, *, q: str | None = None, set_code: str | None = None,
-             finish: str | None = None, condition: str | None = None, name: str | None = None) -> list[Group]:
+             finish: str | None = None, condition: str | None = None, name: str | None = None,
+             card_type: str | None = None, mana_value: float | None = None) -> list[Group]:
     out = view.groups
     if q:
         needle = q.lower()
@@ -279,7 +289,18 @@ def filtered(view: CollectionView, *, q: str | None = None, set_code: str | None
         out = [g for g in out if g.finish == finish]
     if condition:
         out = [g for g in out if g.condition == condition]
+    if card_type:
+        out = [g for g in out if g.type_line and type_matches(g.type_line, card_type)]
+    if mana_value is not None:  # printings whose card data is not stored yet have no mana value and are left out
+        out = [g for g in out if g.cmc is not None and g.cmc == mana_value]
     return out
+
+
+def type_matches(type_line: str, wanted: str) -> bool:
+    """A type matches the words of the card's type line, any case: 'Creature' matches 'Legendary Creature — Sliver', and so
+    does 'Sliver'. A word is a whole word ('Art' does not match 'Artifact')."""
+    word = wanted.strip().lower()
+    return bool(word) and word in re.findall(r"[\w'-]+", type_line.lower())
 
 
 SORTS = {
@@ -329,6 +350,8 @@ def _descending(s: str) -> list[int]:
 SORTS["acquired"] = lambda g: (date.fromisoformat(g.first_acquired).toordinal() if g.first_acquired else 10**7,
                                g.name.lower())
 SORTS["-name"] = lambda g: (_descending(g.name.lower()), _descending(g.set_code), _descending(g.number))
+SORTS["mana_value"] = lambda g: (g.cmc is None, g.cmc or 0, g.name.lower(), g.set_code, g.number)
+SORTS["-mana_value"] = lambda g: (g.cmc is None, -(g.cmc or 0), g.name.lower(), g.set_code, g.number)
 
 
 def filtered_printing(groups: list[Group], printing: str | None) -> list[Group]:

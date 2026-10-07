@@ -208,13 +208,20 @@ TOOLS = [
           "finish": {"type": "string", "enum": ["nonfoil", "foil", "etched"]},
           "condition": {"type": "string", "enum": ["mint", "near_mint", "excellent", "good", "light_played", "played", "poor"]},
           "printing": {"type": "string", "maxLength": 40, "description": "Printing label, e.g. 'Foil', 'Normal', 'Etched'"},
-          "sort": {"type": "string", "enum": ["name", "-name", "-value", "value", "-quantity", "set", "-acquired", "acquired"],
+          "type": {"type": "string", "minLength": 1, "maxLength": 40,
+                   "description": "A word of the card's type line, any case: 'Creature', 'Artifact', 'Land', 'Legendary', 'Sliver'. "
+                                  "Printings whose card data is not stored yet are left out"},
+          "mana_value": {"type": "number", "minimum": 0, "maximum": 1000000,
+                         "description": "Exactly this mana value (0 for lands). Printings whose card data is not stored yet are left out"},
+          "sort": {"type": "string", "enum": ["name", "-name", "-value", "value", "-quantity", "set", "-acquired", "acquired",
+                                              "mana_value", "-mana_value"],
                    "default": "name",
                    "description": "'-value' = most valuable first, '-acquired' = most recently bought first, "
-                                  "'acquired' = first bought first"},
+                                  "'acquired' = first bought first, 'mana_value' = cheapest to cast first "
+                                  "('-mana_value' the reverse; cards without data last)"},
           **PAGING, **SHARE},
          path=lambda a: _base(a) + "/cards",
-         query=("q", "set", "name", "finish", "condition", "printing", "sort", "limit", "cursor")),
+         query=("q", "set", "name", "finish", "condition", "printing", "type", "mana_value", "sort", "limit", "cursor")),
     Tool("get_card", "One printing in detail: every copy (condition, language, folder, price paid, date), "
          "Scryfall card data (type, text, image with artist credit) and 90 days of prices.",
          {"card_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$", "description": "The id from search_cards"},
