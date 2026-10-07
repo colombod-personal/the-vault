@@ -92,6 +92,19 @@ class Tool:
         return out
 
 
+# How a re-import answers its three-way update (vault.merge): shared by import_collection_csv and confirm_staged_upload.
+MERGE_ARGS = {
+    "conflicts": {"type": "string", "enum": ["vault", "app"], "default": "vault",
+                  "description": "For cards changed both in the person's app and in the Vault since the last import: keep "
+                                 "the Vault's edit (the default) or take the app's value, for all of them"},
+    "use_app_value": {"type": "array", "items": {"type": "string", "maxLength": 40}, "maxItems": 500,
+                      "description": "Conflict ids from the preview to take the app's value for, whatever conflicts says"},
+    "replace_everything": {"type": "boolean", "default": False,
+                           "description": "Replace the whole collection with the file and discard edits made in the Vault "
+                                          "(the preview says how many)"},
+}
+MERGE_QUERY = tuple(MERGE_ARGS)
+
 JSON_TYPES = {"string": (str,), "integer": (int,), "number": (int, float), "boolean": (bool,),
               "array": (list,), "object": (dict,), "null": (type(None),)}
 
@@ -277,8 +290,9 @@ TOOLS = [
          path=lambda a: f"{V1}/decks/overlap"),
     Tool("get_deck", "A saved deck: its name, `overview` (format, commander(s), card count, colour identity), a `summary` "
          "of how much of it the person owns (copies needed, owned, missing, cost to finish), the cards not fully owned "
-         "(the dearest 40), and the decklist. all_cards adds every card's ownership with the printings owned (about 80 KB "
-         "for 100 cards).",
+         "(the dearest 40, each with its Scryfall unit price and the `price_date` that price is from), and the decklist. For a "
+         "deck from Archidekt, `credit` gives its link, author and `fetched_at` (when the list was last taken from the link). "
+         "all_cards adds every card's ownership with the printings owned (about 80 KB for 100 cards).",
          {"deck_id": ID, "all_cards": {"type": "boolean", "default": False,
                                        "description": "Every card's ownership and owned printings (large)"}}, ["deck_id"],
          path=lambda a: f"{V1}/decks/{int(a['deck_id'])}?detail={'cards' if a.get('all_cards') else 'summary'}"),
@@ -324,25 +338,32 @@ TOOLS = [
          {"deck_id": ID}, ["deck_id"], path=lambda a: f"{V1}/archidekt/decks/{int(a['deck_id'])}"),
     Tool("list_imports", "Past collection imports, newest first, with what changed each time.", dict(PAGING),
          path=lambda a: f"{V1}/imports", query=("limit", "cursor")),
-    Tool("import_collection_csv", "Replaces the collection with a collection file and records what changed. Dragon "
-         "Shield, Moxfield and generic CSV exports are detected automatically. With confirm false or absent it returns "
-         "what would change (added, removed, changed) and changes nothing; with confirm true it imports the file.",
+    Tool("import_collection_csv", "Imports a collection file and records what changed: it applies what changed in the "
+         "person's app since their last import and keeps edits made in the Vault (for example through update_owned_cards). "
+         "Dragon Shield, Moxfield and generic CSV exports are detected automatically. With confirm false or absent it "
+         "returns what would change, what comes from the app, which Vault edits are kept and the conflicts (cards changed "
+         "on both sides; each keeps the Vault's edit unless answered otherwise), and changes nothing; with confirm true it "
+         "imports the file. replace_everything makes the file replace the whole collection instead.",
          {"csv": {"type": "string", "description": "The CSV file's content"},
-          "filename": {"type": "string", "default": "agent-import.csv"}, "confirm": CONFIRM}, ["csv"],
+          "filename": {"type": "string", "default": "agent-import.csv"}, "confirm": CONFIRM, **MERGE_ARGS}, ["csv"],
          method="POST", path=lambda a: f"{V1}/imports" if a.get("confirm") is True else f"{V1}/imports/preview",
-         write=True, destructive=True),
+         query=MERGE_QUERY, write=True, destructive=True),
     Tool("start_collection_upload", "For a collection file too big to paste: a one-time link (one hour) for the "
          "person to upload the file. Nothing is imported: the file waits until they confirm. Give them the link, then "
          "call get_staged_upload when they say it is uploaded.", method="POST", path=lambda a: f"{V1}/uploads", write=True),
     Tool("get_staged_upload", "A file the person uploaded through start_collection_upload: still waiting, or what "
-         "importing it would change and which rows match no known printing (fix those in the file and upload again).",
-         {"upload_id": ID}, ["upload_id"], path=lambda a: f"{V1}/uploads/{int(a['upload_id'])}"),
-    Tool("confirm_staged_upload", "Imports a file uploaded through start_collection_upload, replacing the collection. "
-         "With confirm false or absent it returns the preview and changes nothing; with confirm true it imports it.",
-         {"upload_id": ID, "confirm": CONFIRM}, ["upload_id"],
+         "importing it would change (what comes from their app, which Vault edits are kept, the conflicts) and which rows "
+         "match no known printing (fix those in the file and upload again).",
+         {"upload_id": ID, **MERGE_ARGS}, ["upload_id"], path=lambda a: f"{V1}/uploads/{int(a['upload_id'])}",
+         query=MERGE_QUERY),
+    Tool("confirm_staged_upload", "Imports a file uploaded through start_collection_upload: applies what changed in the "
+         "person's app since their last import and keeps edits made in the Vault. With confirm false or absent it returns "
+         "the preview (including the conflicts) and changes nothing; with confirm true it imports it. "
+         "replace_everything makes the file replace the whole collection instead.",
+         {"upload_id": ID, "confirm": CONFIRM, **MERGE_ARGS}, ["upload_id"],
          method=lambda a: "POST" if a.get("confirm") is True else "GET",
          path=lambda a: f"{V1}/uploads/{int(a['upload_id'])}" + ("/apply" if a.get("confirm") is True else ""),
-         write=True, destructive=True),
+         query=MERGE_QUERY, write=True, destructive=True),
     Tool("show_owned_printings", "Pictures of the printings of one card the person owns (set, number, finish, copies, "
          "Scryfall image with artist credit), most copies first. Use it when they ask to see which ones they have, or "
          "to help them match a card in their hand. Hosts with MCP Apps show the pictures; otherwise give the list.",

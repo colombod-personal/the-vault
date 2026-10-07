@@ -75,8 +75,11 @@ URL. The threat model, with the tests that prove each mitigation, is in
   `OAUTH_REGISTER_RATE_LIMIT` (20) for registration, `OAUTH_CLIENT_CAP` (2000) registered clients,
   `OAUTH_CIMD_CAP` (5000) cached metadata documents, `OAUTH_FETCH_LIMIT` (60 a minute, all callers) and `OAUTH_FETCH_IP_LIMIT` (10 a minute per caller) metadata fetches.
 
-**Connected apps** (Account → Connected apps, or `GET /api/v1/me/apps`, `DELETE /api/v1/me/apps/{id}`): each app with its
-name, web address, what was allowed, when it connected and last acted. Disconnecting ends it at once. They are in the data
+**Connected apps** (Account → Connected apps, or `GET /api/v1/me/apps`, `DELETE /api/v1/me/apps/{id}`): one row per app, however
+many times it was connected (a second device, or added again): its name, web address, the most any connection was allowed, how
+many connections it has, when it first connected and last acted, and whether it is idle (not used for 14 days). Connecting an app
+again never signs out its other connections; disconnecting the row ends all of them at once (the page names an app used in the
+last hour). A connection nobody uses for 30 days expires. They are in the data
 export (`connected_apps.json`, no tokens) and erased with the account. These endpoints need the person (not a token) and
 have no MCP tool.
 
@@ -175,11 +178,11 @@ Nothing is dumped: a tool returns the card, rule or deck asked about, capped.
 | `get_card_oracle` | `GET /catalog/cards` | exact name (either face) or Oracle id; a misspelling gets suggestions, never a guess |
 | `get_rulings` | `GET /catalog/cards/{oracle_id}/rulings` | newest first, at most 25 |
 | `search_rules`, `get_rule` | `GET /catalog/rules/search`, `/catalog/rules/{number}` | Comprehensive Rules with the edition; at most 10 results; glossary as `glossary:Term` |
-| `verify_citation` | `POST /catalog/verify-citation` | is a quote verbatim in the rule, Oracle text or ruling? Whitespace and typographic quotes are forgiven; nothing else; a failure returns the true text |
+| `verify_citation` | `POST /catalog/verify-citation` | is a quote verbatim in the rule, Oracle text or ruling? Whitespace and typographic quotes are forgiven; nothing else; a failure returns the true text. `version` may only name the current Comprehensive Rules edition (or `latest`): Wizards publishes no archive of past editions and the Vault keeps no copy, so another date is refused with an error naming the current edition |
 | `deck_stats`, `deck_legality` | `POST /decks/stats`, `/decks/legality` | counts, curve, color identity, roles (Tagger tags), estimated cost; legality, copies, size, commander identity, and what was not checked |
 | `find_upgrades`, `validate_deck_changes` | `POST /decks/upgrades`, `/decks/validate-changes` | candidates are legal, in colors, not in the deck, within budget (with `use_collection: true`, cards you own are suggested first whatever their price, each with `owned_copies`); the validator checks the final plan (legality, colors, resulting deck, total price) |
 | `find_combos` | `POST /decks/combos` | asked of Commander Spellbook on demand; nothing stored |
-| `shopping_list` | `POST /decks/shopping-list` | what you do not own, cheapest known price (dated), a list to paste into a store's own tool |
+| `shopping_list` | `POST /decks/shopping-list` | what you do not own, a dated Scryfall price, and a list to paste into a store's own tool: `format` = plain, cardkingdom (Deck Builder), tcgplayer (Mass Entry), cardmarket (want list), csv, all (syntax checked against each store's help page, `docs/data-sources.md`). With `finish`, `language`, `sets` or `condition` it picks the cheapest printing that fits and reports which one per line, or that none qualifies; needs the `oracle_printings` source. Scryfall's prices are not per condition |
 
 Prompts (`prompts/list`, `prompts/get`): `rules_judge`, `explain_interaction`, `upgrade_deck`,
 `shopping_help`. The server's `instructions` and every prompt carry the grounding rules: look things up,

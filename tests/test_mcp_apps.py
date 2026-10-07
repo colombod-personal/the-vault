@@ -124,6 +124,13 @@ def test_deck_panels_lead_with_the_deck_not_with_card_counts(view):
     assert "Commander: " in page and "Format not given" in page and "Format read from the list" in page
 
 
+def test_the_shopping_view_names_the_store_and_what_its_paste_cannot_carry_and_switches_between_formats():
+    """#55: store formats in the view - the heading names the store, its limits are shown, and `format: all` offers each text."""
+    page = mcp_ui.html("shopping")
+    assert "r.store_format" in page and "one.store" in page and ".limits" in page
+    assert 'var several = r.texts' in page and "limits.textContent" in page  # `all`: one entry per store, limits follow the choice
+
+
 def test_the_deck_view_offers_every_format_the_server_checks():
     """#52: it offered 15 of the 20; the list is now the server's own (vault.deck_tools.FORMATS), not a copy that can drift."""
     from vault.deck_tools import FORMATS

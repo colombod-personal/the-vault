@@ -308,7 +308,7 @@ function Section({ title, children }) {
 
 const rowStyle = { display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', padding: '6px 0' };
 
-function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged }) {
+function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged, onCollectionChanged }) {
   const [name, setName] = useStateAcc(me?.name || '');
   const [shares, setShares] = useStateAcc([]);
   const [incoming, setIncoming] = useStateAcc([]);
@@ -426,6 +426,8 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged }) {
       <SignInMethods me={me} onChanged={onMeChanged} />
 
       <MoveSection />
+
+      <CollectionHistorySection onCollectionChanged={onCollectionChanged} />
 
       <AgentsSection />
 
@@ -578,18 +580,114 @@ function AgentsSection() {
 }
 
 
-// Apps connected with OAuth (ChatGPT, Claude, ...): what each may do, when it last acted, and a way to cut it off.
+// What changed your collection, newest first: every import and every change an assistant made. The latest assistant
+// change can be undone here (docs/owned-cards-updates.md, rule 5): Undo shows what it will put back, and only a second
+// press, "Undo this change", applies exactly that.
+function CollectionHistorySection({ onCollectionChanged }) {
+  const api = window.VaultApi;
+  const [items, setItems] = useStateAcc(null);
+  const [error, setError] = useStateAcc(null);
+  const [asking, setAsking] = useStateAcc(null);   // the undo preview being confirmed: { id, preview }
+  const [busy, setBusy] = useStateAcc(false);
+  const [note, setNote] = useStateAcc(null);
+  const reload = () => api.recentImports().then(setItems).catch((e) => setError(e.message));
+  useEffectAcc(() => { reload(); }, []);
+  const kindText = (i) => i.kind === 'assistant' ? `Change by ${i.app || 'an assistant'}` : i.kind === 'undo' ? 'Undo of an assistant change' : `Import: ${i.filename}`;
+  const lineText = (l) => `${l.card}${l.set ? ` (${String(l.set).toUpperCase()} ${l.number})` : ''}: ${l.before} → ${l.after}`;
+  const ask = async () => {
+    setError(null); setNote(null); setBusy(true);
+    try { const preview = await api.undoPreview(); setAsking({ id: preview.undoes, preview }); }
+    catch (e) { setError(e.message); reload(); }
+    setBusy(false);
+  };
+  const confirmUndo = async () => {
+    setError(null); setBusy(true);
+    try {
+      await api.undoApply(asking.preview.confirmation);
+      setAsking(null);
+      setNote('Undone: the copies are back as they were before that change.');
+      onCollectionChanged && onCollectionChanged();
+    } catch (e) { setError(e.message); setAsking(null); }
+    setBusy(false);
+    reload();
+  };
+  return (
+    <Section title="Collection history">
+      <p className="label-mono" style={{ marginBottom: 8 }}>
+        Every import and every change an assistant made to which cards you own. The latest assistant change can be undone
+        until your collection changes again.
+      </p>
+      {error && <p role="alert" style={{ color: 'var(--danger)' }}>{error}</p>}
+      {note && <p role="status" className="label-mono" style={{ color: 'var(--good)' }}>{note}</p>}
+      {items && items.length === 0 && <p className="label-mono">Nothing yet. Import a collection to start.</p>}
+      {(items || []).slice(0, 8).map((i) => (
+        <div key={i.id} style={{ padding: '6px 0', borderTop: '1px solid var(--border)' }} data-history-id={i.id}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+            <span className="label-mono">
+              <strong>{kindText(i)}</strong> · {new Date(i.created_at).toLocaleString()} · {window.describeChanges(i.changes)}
+            </span>
+            {i.undoable && !asking && <button className="btn xs" disabled={busy} onClick={ask}>Undo</button>}
+          </div>
+          {i.kind === 'assistant' && (i.lines || []).length > 0 && (
+            <p className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', lineHeight: 1.5, margin: '4px 0 0' }}>
+              {i.lines.slice(0, 4).map(lineText).join(' · ')}{i.lines.length > 4 ? ` · +${i.lines.length - 4} more` : ''}
+            </p>
+          )}
+          {i.kind === 'assistant' && !i.undoable && (
+            <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>
+              {i.undone ? 'Undone.' : "Can't be undone any more: your collection changed after it."}
+            </p>
+          )}
+          {asking && asking.id === i.id && (
+            <div className="panel panel-tight" style={{ marginTop: 8 }} role="group" aria-label="Confirm the undo">
+              <p className="label-mono" style={{ marginBottom: 6 }}>
+                Undoing this puts back:
+              </p>
+              {asking.preview.lines.map((l, n) => (
+                <p key={n} style={{ fontSize: 13, margin: '2px 0' }}>
+                  {l.card}{l.printing && l.printing.set ? ` (${String(l.printing.set).toUpperCase()} ${l.printing.number})` : ''}: {l.copies_before} → {l.copies_after} copies
+                </p>
+              ))}
+              <p className="label-mono" style={{ margin: '6px 0' }}>
+                {asking.preview.copies_added} copies added, {asking.preview.copies_removed} removed
+                {asking.preview.value_change_usd ? `, value ${asking.preview.value_change_usd > 0 ? '+' : '−'}$${Math.abs(asking.preview.value_change_usd).toFixed(2)} (Scryfall prices)` : ''}.
+              </p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button className="btn sm primary" disabled={busy} onClick={confirmUndo}>Undo this change</button>
+                <button className="btn sm ghost" disabled={busy} onClick={() => setAsking(null)}>Keep it</button>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </Section>
+  );
+}
+
+
+// Apps connected with OAuth (ChatGPT, Claude, ...): one row per app however many times it was connected (each device or
+// re-add is a connection); what it may do, when it last acted, and one click that cuts all of its connections off.
 function ConnectedAppsSection() {
   const api = window.VaultApi;
   const [apps, setApps] = useStateAcc(null);
   const [error, setError] = useStateAcc(null);
   const reload = () => { api.apps().then(setApps).catch((e) => setError(e.message)); };
   useEffectAcc(reload, []);
-  const disconnect = async (id) => { setError(null); try { await api.disconnectApp(id); reload(); } catch (e) { setError(e.message); } };
+  const disconnect = async (row) => {
+    setError(null);
+    let a = row;
+    try { a = (await api.apps()).find((x) => x.id === row.id) || row; } catch (e) { /* ask with what the page has */ }
+    const m = a.used_minutes_ago;  // set only when the app acted within the last hour: the confirmation names it
+    const note = m == null ? '' : `${a.name} was used ${m < 1 ? 'less than a minute' : m + ' minute' + (m === 1 ? '' : 's')} ago. `;
+    const stops = a.connections > 1 ? `All ${a.connections} of its connections stop` : 'It stops';
+    if (!confirm(`${note}Disconnect ${a.name}? ${stops} at once and it has to ask you again.`)) return;
+    try { await api.disconnectApp(a.id); reload(); } catch (e) { setError(e.message); }
+  };
   return (
     <Section title="Connected apps">
       <p className="label-mono" style={{ marginBottom: 8 }}>
-        Apps you allowed to use your vault, such as ChatGPT or Claude. Disconnecting one stops it at once; it has to ask you again.
+        Apps you allowed to use your vault, such as ChatGPT or Claude: one row per app, even if you connected it on several
+        devices or added it again. Disconnecting an app stops all of its connections at once; it has to ask you again.
         Add the address <code>{window.location.origin}/api/mcp</code> in the app to connect it.
       </p>
       {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
@@ -598,10 +696,13 @@ function ConnectedAppsSection() {
         <div key={a.id} style={rowStyle}>
           <span className="label-mono">
             <strong>{a.name}</strong>{a.domain ? ` (${a.domain})` : ' · unverified'} ·{' '}
-            {a.scopes.includes('write') ? 'read & write' : 'read-only'} · connected {new Date(a.created_at).toLocaleDateString()} ·{' '}
+            {a.scopes.includes('write') ? 'read & write' : 'read-only'} ·{' '}
+            {a.connections} connection{a.connections === 1 ? '' : 's'} · first connected {new Date(a.created_at).toLocaleDateString()} ·{' '}
             {a.last_used_at ? 'used ' + new Date(a.last_used_at).toLocaleDateString() : 'never used'}
+            {a.idle && ' · idle (not used for 14 days)'}
+            {!a.idle && a.idle_connections > 0 && ` · ${a.idle_connections} idle connection${a.idle_connections === 1 ? '' : 's'}`}
           </span>
-          <button className="btn xs ghost" onClick={() => disconnect(a.id)}>Disconnect</button>
+          <button className="btn xs ghost" onClick={() => disconnect(a)}>Disconnect</button>
         </div>
       ))}
     </Section>

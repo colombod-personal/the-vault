@@ -194,6 +194,8 @@ Taken from `oracle_cards.legalities` (jsonb with 23 formats). A small `legality_
 
 ## Prices for any card
 
+`oracle_printings` (#29) holds one row per priced paper printing (about 85,000): its set, language and the nonfoil, foil and etched USD price, so a shopping list can pick the cheapest printing under a person's finish, language and set rules. It is loaded by the same daily price job from the same file, as a diff (rows whose figures did not change are not rewritten), only when `oracle_printings` is in `CATALOG_SOURCES`, and its day is the `catalog_sources` row (no per-row day). Excluded: digital cards, tokens, emblems, art cards, oversized cards and memorabilia. The size is an estimate (about 25 MB with its indexes): measure `pg_total_relation_size('oracle_printings')` after the first load and record it in the next row of the budget table before leaving it enabled.
+
 `oracle_prices` holds one row per card: the cheapest printing that has a price, with its date and
 source. The daily price job already loads `default_cards`, so this is one extra pass over data we
 already download. Cardmarket's public price guide and Card Kingdom's price list are separate

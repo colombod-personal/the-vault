@@ -37,7 +37,7 @@ from ..auth import IdentityInUse, Profile, find_or_create
 from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, import_days, view_version
 from .. import archidekt_cache, deck_import, deck_match, deck_overview, deck_refresh, experts, owned_changes
-from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, export_collection, import_collection,
+from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, ImportOptions, export_collection, import_collection,
                         preview_import as preview_collection_import, user_entries)
 from ..models import AccessToken, ApiSession, Card, Deck, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
 from ..native import LEEWAY as NATIVE_LEEWAY, NativeTokenError, NativeVerifier, ProviderUnavailable
@@ -49,6 +49,7 @@ from ..sharing import accept_invite, create_invite, display_name, incoming_share
 from . import schemas as S
 from .hal import clamp_limit, decode_cursor, encode_cursor, etag_response, link, page_body, paginate
 from .idempotency import idempotent
+from .import_params import import_options
 
 V1 = "/api/v1"
 Id = Annotated[int, Path(ge=1, le=S.MAX_ID)]  # a row id: anything larger can't exist (and would overflow the column)
@@ -244,28 +245,38 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return {"deleted": True}
 
     # -- connected apps (OAuth grants to AI apps such as ChatGPT and Claude) ----------------------
-    def _app(grant: OAuthGrant, client: OAuthClient | None) -> dict:
-        domain = urlsplit(grant.client_id).hostname if grant.client_id.startswith("https://") else None
-        return {"id": grant.id, "name": client.name if client else (domain or "Unknown app"), "domain": domain,
-                "verified_by_address": domain is not None, "scopes": grant.scopes.split(),
-                "created_at": _iso(grant.created_at), "last_used_at": _iso(grant.last_used_at),
-                "_links": {"self": link(f"{V1}/me/apps/{grant.id}")}}
+    def _app(group: list[OAuthGrant], client: OAuthClient | None) -> dict:
+        """One row per app: the newest connection speaks for it (name, scopes), the rest are counted."""
+        newest = group[0]
+        domain = urlsplit(newest.client_id).hostname if newest.client_id.startswith("https://") else None
+        used = [g.last_used_at for g in group if g.last_used_at]
+        idle = [g for g in group if oauth_server.is_idle(g)]
+        return {"id": newest.id, "name": client.name if client else (domain or "Unknown app"), "domain": domain,
+                "verified_by_address": domain is not None,
+                "scopes": [s for s in oauth_server.SCOPES if any(s in g.scopes.split() for g in group)],
+                "connections": len(group), "connection_ids": sorted(g.id for g in group),
+                "created_at": _iso(min(g.created_at for g in group)), "last_used_at": _iso(max(used)) if used else None,
+                "idle": len(idle) == len(group), "idle_connections": len(idle),
+                "used_minutes_ago": oauth_server.minutes_since_use(group),
+                "_links": {"self": link(f"{V1}/me/apps/{newest.id}")}}
 
     @router.get("/me/apps", tags=["account"], response_model=S.ConnectedAppPage,
-                summary="Apps connected to your account with OAuth (ChatGPT, Claude, ...), with their last use")
+                summary="Apps connected to your account with OAuth (ChatGPT, Claude, ...): one row per app, however many times it was connected")
     def list_apps(request: Request, cursor: str | None = None, limit: int | None = None,
                   user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
-        rows = oauth_server.user_grants(db, user.id)
+        rows = oauth_server.connected_apps(db, user.id)
         names = {c.client_id: c for c in db.scalars(select(OAuthClient).where(
-            OAuthClient.client_id.in_({g.client_id for g in rows})))} if rows else {}
-        page, nxt = paginate(rows, lambda g: (-g.id,), lambda g: g.id, cursor=cursor, limit=limit)
-        return page_body(request, [_app(g, names.get(g.client_id)) for g in page], nxt, len(rows), limit=limit)
+            OAuthClient.client_id.in_({g.client_id for grp in rows for g in grp})))} if rows else {}
+        page, nxt = paginate(rows, lambda grp: (-grp[0].id,), lambda grp: grp[0].id, cursor=cursor, limit=limit)
+        return page_body(request, [_app(grp, names.get(grp[0].client_id)) for grp in page], nxt, len(rows), limit=limit)
 
-    @router.delete("/me/apps/{app_id}", tags=["account"], summary="Disconnect an app: its tokens stop working at once")
+    @router.delete("/me/apps/{app_id}", tags=["account"],
+                   summary="Disconnect an app: every connection of it (each device) stops working at once")
     def disconnect_app(app_id: Id, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
-        if not oauth_server.revoke_user_grant(db, user.id, app_id):
+        revoked = oauth_server.revoke_user_app(db, user.id, app_id)
+        if revoked is None:
             raise HTTPException(404, "App not found")
-        return {"deleted": True}
+        return {"deleted": True, "connections": revoked}
 
     # -- passkeys ------------------------------------------------------------------------------
     def _passkey(p: Passkey) -> dict:
@@ -581,24 +592,29 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     router.include_router(collection_routes(shared_ctx), prefix="/shared/{share_id}/collection")
 
     # -- imports ------------------------------------------------------------------------------
-    def _import(i: Import) -> dict:
+    def _import(i: Import, undoable_id: int | None = None) -> dict:
         out = {"id": i.id, "filename": i.filename, "source": i.source, "rows": i.rows, "copies": i.copies,
                "changes": i.summary, "kind": i.kind or "import",
                "created_at": _iso(i.created_at), "_links": {"self": link(f"{V1}/imports/{i.id}")}}
         if i.kind in ("assistant", "undo"):
             out |= {"app": i.app, "lines": (i.changes or {}).get("lines")}
+        elif (i.changes or {}).get("merge"):
+            out["merge"] = i.changes["merge"]  # what the app changed, which Vault edits were kept, the conflicts
+        if i.kind == "assistant":  # the web app shows Undo on the entry that can be undone (docs/owned-cards-updates.md, rule 5)
+            out |= {"undoable": i.id == undoable_id, "undone": bool((i.changes or {}).get("undone_by"))}
         return out
 
     @router.post("/imports", tags=["imports"], response_model=S.ImportItem, status_code=201,
-                 summary="Upload a collection file: Dragon Shield, Moxfield or generic CSV, detected automatically "
-                         "(replaces the collection, records what changed)")
+                 summary="Upload a collection file: Dragon Shield, Moxfield or generic CSV, detected automatically. "
+                         "Applies only what changed in the person's app since the last import and keeps edits made in the "
+                         "Vault (conflicts keep the Vault's edit unless answered); records what changed")
     async def create_import(request: Request, file: UploadFile, user: User = Depends(current_user),
-                            db: Session = Depends(get_db)):
+                            db: Session = Depends(get_db), options: ImportOptions = Depends(import_options)):
         content = await file.read(MAX_UPLOAD_BYTES + 1)  # enough to reject an oversized file, no more
 
         def run():
             try:
-                return _import(import_collection(db, user, file.filename or "upload.csv", content))
+                return _import(import_collection(db, user, file.filename or "upload.csv", content, options))
             except ImportConflict as exc:
                 raise HTTPException(409, str(exc)) from exc
             except ImportError_ as exc:
@@ -608,10 +624,11 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     @router.post("/imports/preview", tags=["imports"],
                  summary="What uploading this collection file would change, without changing anything")
-    async def preview_import(file: UploadFile, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    async def preview_import(file: UploadFile, user: User = Depends(current_user), db: Session = Depends(get_db),
+                             options: ImportOptions = Depends(import_options)) -> dict:
         content = await file.read(MAX_UPLOAD_BYTES + 1)
         try:
-            return preview_collection_import(db, user, content)
+            return preview_collection_import(db, user, content, options)
         except ImportError_ as exc:
             raise HTTPException(400, str(exc)) from exc
 
@@ -620,14 +637,16 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                      user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         rows = list(db.scalars(select(Import).where(Import.user_id == user.id)))
         page, nxt = paginate(rows, lambda i: (-i.id,), lambda i: i.id, cursor=cursor, limit=limit)
-        return page_body(request, [_import(i) for i in page], nxt, len(rows), limit=limit)
+        last = owned_changes.last_undoable(db, user)
+        return page_body(request, [_import(i, last.id if last else None) for i in page], nxt, len(rows), limit=limit)
 
     @router.get("/imports/{import_id}", tags=["imports"], response_model=S.ImportItem)
     def get_import(import_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         imp = db.get(Import, import_id)
         if imp is None or imp.user_id != user.id:
             raise HTTPException(404, "Import not found")
-        return _import(imp)
+        last = owned_changes.last_undoable(db, user)
+        return _import(imp, last.id if last else None)
 
     # -- decks ----------------------------------------------------------------------------------
     def _parse(text: str) -> decklist.Decklist:
@@ -680,10 +699,9 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             out["text"] = d.text
         if coverage is not None:
             out["coverage"] = coverage
-        if _source_kind(d.source_url) == "archidekt":
-            out["credit"] = {"source": "Archidekt", "url": d.source_url, "author": d.source_author,
-                             "notice": "Deck list from Archidekt" + (f" by {d.source_author}" if d.source_author else "")
-                                       + ". The deck is theirs, not the Vault's."}
+        credit = deck_overview.archidekt_credit(d)
+        if credit:
+            out["credit"] = credit
         return out
 
     @router.post("/decks/parse", tags=["decks"], response_model=S.ParsedDeck,
@@ -773,7 +791,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
         def run():
             deck = Deck(user_id=user.id, name=body.name.strip()[:200] or "Untitled deck", text=body.text,
-                        source_url=body.source_url, source_author=body.source_author, format=body.format)
+                        source_url=body.source_url, source_author=body.source_author, format=body.format,
+                        source_fetched_at=datetime.now(timezone.utc) if body.source_url else None)
             db.add(deck)
             db.flush()
             return _deck(deck)
@@ -788,7 +807,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         lines = covered["cards"]
         todo = sorted((c for c in lines if c["status"] != "owned"),
                       key=lambda c: (-(c.get("missing_cost") or 0), -(c["missing"]), c["name"]))
-        keep = ("name", "section", "set", "number", "need", "have", "missing", "status", "unit_price", "missing_cost")
+        keep = ("name", "section", "set", "number", "need", "have", "missing", "status", "unit_price", "price_date", "missing_cost")
         shown = [{k: c[k] for k in keep} for c in todo[:LEAN_LINES]]
         need = sum(c["need"] for c in lines)
         have = sum(min(c["have"], c["need"]) for c in lines)
@@ -827,6 +846,9 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                   "updated_at": datetime.now(timezone.utc)}
         if "source_url" in body.model_fields_set:  # omitted: keep it (null clears it)
             values["source_url"] = body.source_url
+            values["source_fetched_at"] = values["updated_at"] if body.source_url else None
+        else:  # a new list for the link the deck has: taken from it now
+            values["source_fetched_at"] = case((Deck.source_url.is_not(None), values["updated_at"]), else_=None)
         if "format" in body.model_fields_set:  # likewise
             values["format"] = body.format
         if "source_author" in body.model_fields_set:
@@ -890,6 +912,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                          "overview": deck_overview.overview(parsed["text"], parsed["format"], known)},
                 "archidekt_bracket": raw.get("edhBracket"), "counts": parsed["counts"], "text": parsed["text"],
                 "credit": {"source": "Archidekt", "url": url, "author": parsed["author"],
+                           "fetched_at": (raw.get("vault_cache") or {}).get("fetched_at"),
                            "notice": "Deck list from Archidekt" + (f" by {parsed['author']}" if parsed["author"] else "")
                                      + ". The deck is theirs, not the Vault's."},
                 "note": "Archidekt's per-card shop prices are not passed on: the Vault quotes only Scryfall's dated prices.",
@@ -930,6 +953,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 if body.fingerprint != deck_refresh.fingerprint(parsed["text"]):
                     raise HTTPException(409, "Archidekt's list is not the one previewed (or no fingerprint was given): preview again")
                 same.text, same.updated_at = parsed["text"], datetime.now(timezone.utc)
+                same.source_fetched_at = same.updated_at
                 same.format = parsed["format"] or same.format
                 same.source_url, same.source_author = url, parsed["author"] or same.source_author
                 if body.name:
@@ -937,7 +961,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 db.flush()
                 return {"created": False, "updated": True, "deck": _deck(same), "counts": parsed["counts"]}
             deck = Deck(user_id=user.id, name=(body.name or parsed["name"] or "Archidekt deck").strip()[:200], text=parsed["text"],
-                        source_url=url, source_author=parsed["author"], format=parsed["format"])
+                        source_url=url, source_author=parsed["author"], format=parsed["format"],
+                        source_fetched_at=datetime.now(timezone.utc))
             db.add(deck)
             db.flush()
             return {"created": True, "updated": False, "deck": _deck(deck), "counts": parsed["counts"]}
@@ -975,6 +1000,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         def run():
             changes = deck_refresh.diff(deck.text, parsed["text"])
             deck.text, deck.updated_at = parsed["text"], datetime.now(timezone.utc)
+            deck.source_fetched_at = deck.updated_at
             deck.format = parsed["format"] or deck.format
             deck.source_author = parsed["author"] or deck.source_author
             db.flush()

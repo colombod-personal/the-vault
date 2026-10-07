@@ -3,6 +3,7 @@
 Per user (tenant data, private unless shared): ``users``, ``identities`` (one per
 linked sign-in method (OAuth provider or passkey)), ``imports`` (each uploaded CSV with its change summary),
 ``entries`` (the collection, one row per source-file row so exports round-trip),
+``collection_baselines`` (the last imported file's cards, for the next re-import's three-way update),
 ``decks`` and ``collection_values``. ``shares`` records access a user has granted
 to someone else. :func:`vault.privacy.purge_user` removes all of it.
 
@@ -140,6 +141,19 @@ class Entry(Base):
         )
 
 
+class CollectionBaseline(Base):
+    """The last imported file as it was imported (per person), the base of the next re-import's three-way update
+    (vault.merge, #194): each card with its copies and their state. Replaced by every import; never changed by the
+    Vault's own edits, which is how a re-import can tell them from what changed in the person's app."""
+
+    __tablename__ = "collection_baselines"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    import_id: Mapped[int | None] = mapped_column(ForeignKey("imports.id", ondelete="SET NULL"))
+    cards: Mapped[list] = mapped_column(JSON)  # vault.merge.stored()
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Deck(Base):
     """A saved decklist (plain text, any common format)."""
 
@@ -152,6 +166,9 @@ class Deck(Base):
     source_url: Mapped[str | None] = mapped_column(String(500))
     # Who made the deck at its source (e.g. the Archidekt author), so a saved copy is still credited.
     source_author: Mapped[str | None] = mapped_column(String(200))
+    # When the list was last taken from source_url (read by the Vault, or pasted with the link); decks saved before this
+    # column existed carry their last saved time.
+    source_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # The deck's format as the person (or their assistant) set it; unset, it is read from the list (vault.deck_overview).
     format: Mapped[str | None] = mapped_column(String(30))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -587,6 +604,26 @@ class OraclePrice(Base):
     eur: Mapped[float | None] = mapped_column(Float)
     day: Mapped[date] = mapped_column(Date)
     source: Mapped[str] = mapped_column(String(40), default="scryfall")  # whose numbers these are
+
+
+class OraclePrinting(Base):
+    """Every priced paper printing of every card, today's figures only (Scryfall's, from TCGplayer and Cardmarket), so a
+    shopping list can pick the cheapest printing that fits a person's rules (set, language, finish; #29). Third-party data:
+    shown with its provenance, never as the Vault's. The day of the figures is the ``oracle_printings`` row of
+    ``catalog_sources`` (rows whose figures did not change are not rewritten, so no row carries its own day). No history; no
+    personal data."""
+
+    __tablename__ = "oracle_printings"
+
+    scryfall_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    oracle_id: Mapped[str] = mapped_column(String(36), index=True)
+    set_code: Mapped[str] = mapped_column(String(10))
+    set_name: Mapped[str | None] = mapped_column(String(100))
+    collector_number: Mapped[str] = mapped_column(String(20))
+    lang: Mapped[str] = mapped_column(String(5), default="en")
+    usd: Mapped[float | None] = mapped_column(Float)
+    usd_foil: Mapped[float | None] = mapped_column(Float)
+    usd_etched: Mapped[float | None] = mapped_column(Float)
 
 
 class CatalogSource(Base):

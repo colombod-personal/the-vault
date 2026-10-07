@@ -245,9 +245,14 @@ class ConnectedApp(Hal):
     name: str = Field(description="The app's name as it described itself")
     domain: str | None = Field(None, description="The web address that identifies the app (absent for self-registered apps)")
     verified_by_address: bool = Field(description="False for an app that registered itself: the Vault can't confirm who made it")
-    scopes: list[str] = Field(description="What you allowed: read, and write if you chose it")
-    created_at: str
-    last_used_at: str | None = None
+    scopes: list[str] = Field(description="The most any of its connections was allowed: read, and write if any of them was given it")
+    connections: int = Field(description="How many times the app is connected (each device or re-add is one); all of them share this row")
+    connection_ids: list[int] = Field(description="The ids of those connections; DELETE on this row or any of them disconnects them all")
+    created_at: str = Field(description="When the app was first connected")
+    last_used_at: str | None = Field(None, description="When any of its connections last acted")
+    idle: bool = Field(description="True when none of its connections was used for 14 days")
+    used_minutes_ago: int | None = Field(None, description="Whole minutes since any connection acted, only when that was within the last hour (the Account page names it when you disconnect; the Vault records use at most every 5 minutes)")
+    idle_connections: int = Field(description="How many connections were not used for 14 days; a connection nobody refreshes is removed after 30")
 
 
 class ConnectedAppPage(Page):
@@ -293,6 +298,11 @@ class ImportItem(Hal):
     kind: str = Field("import", description="import (a file), assistant (edits made through an assistant) or undo")
     app: str | None = Field(None, description="For assistant edits: the app that made them")
     lines: list[dict] | None = Field(None, description="For assistant edits: each printing, copies before and after")
+    merge: dict | None = Field(None, description="For imports: how the file was applied (mode, what came from the person's app, "
+                                                 "which edits made in the Vault were kept, the conflicts and their answers)")
+    undoable: bool | None = Field(None, description="For assistant edits: true on the one change set that can be undone now "
+                                  "(the latest, until the collection changes again); POST /collection/changes/undo")
+    undone: bool | None = Field(None, description="For assistant edits: true once it was undone")
 
 
 class ImportPage(Page):
@@ -418,6 +428,8 @@ class CoverageLine(BaseModel):
     status: Literal["owned", "partial", "missing"]
     unit_price: float | None = Field(None, description="Cheapest known USD market price of the card (of the line's "
                                      "printing when it names one the Vault knows), any finish; null when unknown")
+    price_date: str | None = Field(None, description="The day unit_price is from (the price snapshot it was read from; Scryfall's "
+                                   "figure, not a shop's today); null when the price is unknown")
     missing_cost: float | None = Field(None, description="unit_price times missing; null when no price is known")
     owned_printings: list[OwnedPrinting] = Field([], description="The card's printings in the collection (first 50)")
     maybe_owned: list[NamedQuantity] = Field([], description="On a line you own none of: cards in the collection whose "
@@ -465,7 +477,8 @@ class Deck(Hal):
     source_url: str | None = None
     source: str | None = Field(None, description="Where the deck came from: archidekt, moxfield, link (another address) or pasted")
     source_author: str | None = None
-    credit: dict | None = Field(None, description="For a deck from Archidekt: its source, link, author and the notice to repeat")
+    credit: dict | None = Field(None, description="For a deck from Archidekt: its source, link, author, `fetched_at` (when the "
+                                "Vault last took the list from that link) and the notice to repeat")
     coverage: Coverage | None = None
     text: str | None = Field(None, description="The decklist (left out of the AI tools' brief deck list)")
     created_at: str

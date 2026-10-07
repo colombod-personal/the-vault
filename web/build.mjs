@@ -5,12 +5,14 @@
 // nothing in the views changes. The output, public/app.bundle.js, is committed; its header
 // holds a hash of the sources, and tests/test_frontend_build.py fails when it is out of date.
 //
+// Also builds public/analytics.bundle.js (Vercel Web Analytics and Speed Insights) from web/analytics/.
+//
 //   npm --prefix web ci && npm --prefix web run build     (or: run watch)
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, watch } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { transformSync } from 'esbuild';
+import { transformSync, buildSync } from 'esbuild';
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
 export const SOURCES = [
@@ -27,6 +29,34 @@ export const SOURCES = [
   'views/help.jsx',
   'app.jsx',
 ];
+
+// Vercel Web Analytics and Speed Insights: web/analytics/entry.mjs with its two packages bundled into one classic script.
+// The banner holds a hash of the sources and of the installed package versions (tests/test_analytics.py checks it).
+export const ANALYTICS_SOURCES = ['analytics/entry.mjs', 'analytics/url.mjs'];
+export function analyticsHash() {
+  const webDir = dirname(fileURLToPath(import.meta.url));
+  const hash = createHash('sha256');
+  const text = (file) => readFileSync(join(webDir, file), 'utf8').replace(/\r\n/g, '\n');
+  for (const file of ANALYTICS_SOURCES) hash.update(file + '\0' + text(file) + '\0');
+  const lock = JSON.parse(text('package-lock.json')).packages;
+  for (const name of ['@vercel/analytics', '@vercel/speed-insights']) hash.update(name + '@' + lock['node_modules/' + name].version + '\0');
+  return hash.digest('hex');
+}
+
+function buildAnalytics() {
+  const webDir = dirname(fileURLToPath(import.meta.url));
+  buildSync({
+    entryPoints: [join(webDir, 'analytics', 'entry.mjs')],
+    bundle: true,
+    minify: true,
+    format: 'iife',
+    target: 'es2020',
+    outfile: join(PUBLIC, 'analytics.bundle.js'),
+    banner: { js: `/* analytics-sha256: ${analyticsHash()} */` },
+    logLevel: 'warning',
+  });
+  console.log('public/analytics.bundle.js: Vercel Web Analytics and Speed Insights');
+}
 
 function build() {
   const hash = createHash('sha256');
@@ -49,8 +79,10 @@ function build() {
   console.log(`public/app.bundle.js: ${SOURCES.length} files`);
 }
 
+buildAnalytics();
 build();
 if (process.argv.includes('--watch')) {
+  watch(join(dirname(fileURLToPath(import.meta.url)), 'analytics'), () => { try { buildAnalytics(); } catch (e) { console.error(e.message); } });
   for (const file of SOURCES) {
     watch(join(PUBLIC, file), () => { try { build(); } catch (e) { console.error(e.message); } });
   }
