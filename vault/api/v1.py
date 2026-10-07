@@ -581,12 +581,14 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     router.include_router(collection_routes(shared_ctx), prefix="/shared/{share_id}/collection")
 
     # -- imports ------------------------------------------------------------------------------
-    def _import(i: Import) -> dict:
+    def _import(i: Import, undoable_id: int | None = None) -> dict:
         out = {"id": i.id, "filename": i.filename, "source": i.source, "rows": i.rows, "copies": i.copies,
                "changes": i.summary, "kind": i.kind or "import",
                "created_at": _iso(i.created_at), "_links": {"self": link(f"{V1}/imports/{i.id}")}}
         if i.kind in ("assistant", "undo"):
             out |= {"app": i.app, "lines": (i.changes or {}).get("lines")}
+        if i.kind == "assistant":  # the web app shows Undo on the entry that can be undone (docs/owned-cards-updates.md, rule 5)
+            out |= {"undoable": i.id == undoable_id, "undone": bool((i.changes or {}).get("undone_by"))}
         return out
 
     @router.post("/imports", tags=["imports"], response_model=S.ImportItem, status_code=201,
@@ -620,14 +622,16 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                      user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         rows = list(db.scalars(select(Import).where(Import.user_id == user.id)))
         page, nxt = paginate(rows, lambda i: (-i.id,), lambda i: i.id, cursor=cursor, limit=limit)
-        return page_body(request, [_import(i) for i in page], nxt, len(rows), limit=limit)
+        last = owned_changes.last_undoable(db, user)
+        return page_body(request, [_import(i, last.id if last else None) for i in page], nxt, len(rows), limit=limit)
 
     @router.get("/imports/{import_id}", tags=["imports"], response_model=S.ImportItem)
     def get_import(import_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         imp = db.get(Import, import_id)
         if imp is None or imp.user_id != user.id:
             raise HTTPException(404, "Import not found")
-        return _import(imp)
+        last = owned_changes.last_undoable(db, user)
+        return _import(imp, last.id if last else None)
 
     # -- decks ----------------------------------------------------------------------------------
     def _parse(text: str) -> decklist.Decklist:

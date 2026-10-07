@@ -261,3 +261,18 @@ test('an older copy keeps the author it recorded, never the author of a link it 
   await api.rememberDeckAuthor({ id: 9, source_url: A, source_author: null }, '   ');
   assert.equal(calls.length, before);
 });
+
+test('the web app\'s Undo asks first, then applies exactly the preview it was shown (#81)', async () => {
+  const { api, calls } = load((url, init) => {
+    const body = init.body ? JSON.parse(init.body) : {};
+    if (url === '/api/v1/collection/changes/undo') return json(200, body.confirmation ? { undone: 7 } : { undoes: 7, ready: true, confirmation: 'tok', lines: [] });
+    return json(200, { items: [{ id: 7, kind: 'assistant', undoable: true }] });
+  });
+  const shown = await api.undoPreview();
+  assert.equal(shown.confirmation, 'tok');
+  assert.deepEqual(calls[0], { url: '/api/v1/collection/changes/undo', method: 'POST', body: {} });  // no confirmation: a preview
+  assert.deepEqual(await api.undoApply(shown.confirmation), { undone: 7 });
+  assert.deepEqual(calls[1].body, { confirmation: 'tok' });
+  assert.equal((await api.recentImports())[0].undoable, true);
+  assert.equal(calls[2].url, '/api/v1/imports?limit=20');
+});

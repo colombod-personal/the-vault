@@ -293,6 +293,9 @@ class ImportItem(Hal):
     kind: str = Field("import", description="import (a file), assistant (edits made through an assistant) or undo")
     app: str | None = Field(None, description="For assistant edits: the app that made them")
     lines: list[dict] | None = Field(None, description="For assistant edits: each printing, copies before and after")
+    undoable: bool | None = Field(None, description="For assistant edits: true on the one change set that can be undone now "
+                                  "(the latest, until the collection changes again); POST /collection/changes/undo")
+    undone: bool | None = Field(None, description="For assistant edits: true once it was undone")
 
 
 class ImportPage(Page):
