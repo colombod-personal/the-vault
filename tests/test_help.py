@@ -53,3 +53,95 @@ def test_the_welcome_is_non_blocking_dismissible_and_remembered_safely():
     assert "onClick={onDismiss}" in HELP and "welcomeDone()" in APP
     assert "try { return localStorage" in HELP and "try { localStorage.setItem" in HELP
     assert "useStateApp(() => !welcomeSeen())" in APP
+
+
+# -- the wording is checked against the app (#152): every name the help puts in curly quotes is a label in the views ----
+
+VIEW_FILES = [p for p in sorted((PUBLIC / "views").glob("*.jsx")) if p.name != "help.jsx"] + [PUBLIC / "app.jsx"]
+VIEW_TEXT = "\n".join(p.read_text(encoding="utf-8") for p in VIEW_FILES).replace("&amp;", "&")
+DECK = (PUBLIC / "views" / "deck.jsx").read_text(encoding="utf-8")
+GRAPH = (PUBLIC / "views" / "graph.jsx").read_text(encoding="utf-8")
+
+
+def sections() -> dict[str, str]:
+    """Each help section's text, by id (the strings of its `body` and `links`)."""
+    out = {}
+    chunks = re.split(r"\n  \{\n    id: '", HELP)[1:]
+    for chunk in chunks:
+        sid = chunk.split("'", 1)[0]
+        out[sid] = " ".join(re.findall(r"^\s+'((?:[^'\\]|\\.)*)',?$", chunk, re.M)).replace("\\'", "'")
+    return out
+
+
+def quoted(text: str) -> list[str]:
+    return re.findall(r"“([^”]+)”", text)
+
+
+def shown_in_app(label: str) -> bool:
+    """The label is a string the views render: a JSX text node, an attribute value or a string literal, whole."""
+    return re.search(r"(^|[>\"'`{(\s])" + re.escape(label) + r"($|[<\"'`})\s,.…:])", VIEW_TEXT, re.M) is not None
+
+
+def test_help_parsing_finds_every_section():
+    assert set(sections()) == set(SECTION_IDS) and all(len(t) > 80 for t in sections().values())
+
+
+def test_every_name_in_curly_quotes_is_a_label_the_app_shows():
+    names = {name for text in sections().values() for name in quoted(text)}
+    assert len(names) >= 30, "the help lost its named labels"
+    missing = sorted(n for n in names if not shown_in_app(n))
+    assert not missing, f"the help names labels the app does not have (renamed or removed?): {missing}"
+
+
+def test_the_checker_rejects_a_label_the_app_does_not_have():
+    assert shown_in_app("Save to your decks") and shown_in_app("Update saved copy") and shown_in_app("Buy list")
+    assert not shown_in_app("Save deck")  # what the help used to say; the button says "Save to your decks"
+    assert not shown_in_app("Deck ideas") and not shown_in_app("The Value view")
+
+
+def test_the_decks_section_names_every_tab_and_the_pills_and_buttons_of_a_deck():
+    tabs = re.findall(r"\['[a-z]+', '([^']+)'\]", DECK.split("const TABS =", 1)[1].split("];", 1)[0])
+    assert tabs == ["Cards", "Stats", "Legality", "Upgrades", "Combos", "Buy list"]
+    named = set(quoted(sections()["decks"]))
+    assert set(tabs) <= named, set(tabs) - named
+    assert {"From a link", "Paste a list", "Save to your decks", "Update saved copy", "Refresh", "Remove", "Have", "Partial", "Need", "Copy list"} <= named
+    assert 'label="Have"' in DECK and 'label="Partial"' in DECK and 'label="Need"' in DECK
+
+
+def test_the_graph_section_names_every_mode_the_graph_has_and_does_not_claim_a_view_that_is_not_built():
+    modes = re.findall(r"setMode\('[a-z]+'\)\}>([^<]+)</button>", GRAPH)
+    assert len(modes) == 7, modes  # six modes and the Deck map: if a mode is cut or added, the help changes with it
+    text = sections()["graph"]
+    assert set(modes) <= set(quoted(text)), set(modes) - set(quoted(text))
+    assert {"Price tier", "Depth"} <= set(quoted(text))
+    # The deck ideas view (#161/#163) does not exist: no view, no route, no help link. The help says so.
+    assert "not built yet" in text and "is being replaced" not in text
+    assert not re.search(r"ideas", APP + HELP.split("const HELP_SECTIONS", 1)[0], re.I)
+    assert VIEWS == ["dashboard", "browse", "sets", "decks", "lab", "graph", "valuation", "help"]
+
+
+def test_the_lab_section_names_the_lab_sections_it_has():
+    lab = (PUBLIC / "views" / "lab.jsx").read_text(encoding="utf-8").replace("&amp;", "&")
+    for name in quoted(sections()["lab"]):
+        assert name.lower() in lab.lower(), name
+    assert "Cards by P&L" in lab and "Biggest stockpiles" in lab and "Acquisition spend by month" in lab
+
+
+def test_the_decks_section_matches_how_archidekt_is_used():
+    """Read only, on request, credited (README Attribution, tests/test_archidekt_readonly.py)."""
+    from vault import archidekt_cache
+
+    text = sections()["decks"]
+    assert archidekt_cache.TTL.total_seconds() == 600 and "keeps a copy for ten minutes" in text
+    assert "only when you ask" in text and "never searches or crawls Archidekt" in text and "never changes anything there" in text
+    assert "deck list from Archidekt, thanks to its author" in DECK  # the credit the page shows on every Archidekt deck
+    privacy = sections()["privacy"]
+    assert "Scryfall" in privacy and "Archidekt decks are credited to their authors" in privacy and "not endorsed by Wizards" in privacy
+
+
+def test_the_sections_no_longer_say_what_the_app_does_not_do():
+    all_text = " ".join(sections().values())
+    for stale in ("press Save deck", "The Value view", "live Scryfall", "is being replaced", "Share your collection creates",
+                  "Account, Connected apps", "Account, Your data", "Account, Shared with me"):
+        assert stale not in all_text, stale
+    assert "Each import replaces the collection with the new file" in sections()["import"]  # true today (the three-way re-import is #194)
