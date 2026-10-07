@@ -1,5 +1,4 @@
 import os
-import time
 from pathlib import Path
 
 import pytest
@@ -49,19 +48,21 @@ def _empty_postgres(url: str) -> None:
 @pytest.fixture(autouse=True)
 def frozen_rate_limit_clock(monkeypatch):
     """Rate limits count in clock-aligned one-minute windows, so a burst that crossed a minute
-    boundary would start a fresh window and miss its 429 (#112). Freeze the limiter's clock (its
-    own ``time`` reference only, not ``time.time`` everywhere) at the test's start; a test that
-    moves time sets ``ratelimit.time.time`` itself. The catalog and deck-analysis limiter
-    (``catalog_api.throttle``) keeps its own clock, so it is frozen at the same instant too."""
-    import types
+    boundary would start a fresh window and miss its 429 or 503 (#112). Freeze the clock every
+    per-minute counter reads (``tests/frozen_clock.py`` lists the modules: the sign-in and OAuth
+    limiter, the catalog and deck-analysis limiter, the metadata-fetch budget) at the test's start.
+    Only the module's own ``time`` reference is replaced, and only its ``time()``: ``monotonic``
+    and every other clock stay real. A test that moves time sets ``ratelimit.time.time`` itself (the one shared clock).
+    ``tests/test_clock_is_frozen.py`` fails when a new per-minute counter is not in the list."""
+    import importlib
+    import time as real_time
 
-    from vault import ratelimit
-    from vault.api import catalog_api
+    from frozen_clock import FROZEN_CLOCK_MODULES, FrozenClock
 
-    now = time.time()
-    frozen = types.SimpleNamespace(time=lambda: now)
-    monkeypatch.setattr(ratelimit, "time", frozen)
-    monkeypatch.setattr(catalog_api, "time", frozen)
+    now = real_time.time()
+    frozen = FrozenClock(real_time, now)  # one clock for all of them, so a test that moves it moves every counter
+    for name in FROZEN_CLOCK_MODULES:
+        monkeypatch.setattr(importlib.import_module(name), "time", frozen)
 
 
 @pytest.fixture

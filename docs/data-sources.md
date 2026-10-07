@@ -1,19 +1,22 @@
 # Data sources: what we use, what we do not, and why
 
-Evaluated 2026-10-04 for issues #19 (extra price sources) and #20 (combos). The rule from
+Evaluated 2026-10-04 for issues #19 (extra price sources) and #20 (combos); shops re-read 2026-10-07 (#80). The rule from
 `docs/compliance.md` applies: a source is used only when its terms are confirmed, always with
 provenance, never presented as the Vault's own. Pages that could not be read are marked unverified.
+**The gate is enforced:** every catalog source the code can load needs a row marked read in the "Source gate" table of
+`docs/compliance.md`, and `tests/test_compliance_gate.py` fails otherwise.
 
 | Source | Use | Status | Reason |
 |---|---|---|---|
-| Scryfall `oracle_cards`, `rulings`, `oracle_tags`, `default_cards` | Catalog, rulings, tags, cheapest prices | **Built, off by default** (`CATALOG_SOURCES`) | Terms to be read directly before enabling (compliance gate, #62) |
-| Wizards Comprehensive Rules | Rules text and search | **Parser and loader built, off by default** | Needs Wizards' permission or a decision to link and excerpt only (#62) |
+| Scryfall `oracle_cards`, `rulings`, `oracle_tags`, `default_cards` | Catalog, rulings, tags, cheapest prices | **Built; loads only the sources named in `CATALOG_SOURCES`**, each only with a row marked read in the Source gate of `docs/compliance.md` | Scryfall's API terms read first-hand 2026-10-05; asking Scryfall about added value is still an open owner action (#62) |
+| Wizards Comprehensive Rules | Rules text and search | **Not stored: read live from Wizards** (`vault/rules_live.py`, owner decision #142) | Nothing to load, so no gate row beyond the live-read rule |
 | Commander Spellbook | Combos for a deck | **On demand, no ingestion** (built in M2, `find_combos`) | Code is MIT, but no data licence was found; so no copy of their data is stored |
-| Cardmarket price guide | Prices | **Not used** | Their API is closed to new applications; the site is behind a bot check (2026-10-05), so its terms could not be read by a tool: the owner reads them |
-| Card Kingdom price list | Prices | **Not used** | `api.cardkingdom.com/api/pricelist` answers publicly, but the terms (read 2026-10-05) forbid robots and data extraction except search engines following robots.txt, and robots.txt disallows `/api/`: needs Card Kingdom's permission |
-| Magic Madhouse product feed | Prices, stock | **Not used** | Offered to affiliate partners: a full product feed, Google Shopping format, four times a day (affiliate page, 2026-10-05). The terms forbid copying site content otherwise. Joining is the owner's decision |
+| Cardmarket price guide | Prices | **Not used** | Their API is closed to new applications (help centre, 2026-10-07); the terms are behind a bot check and **have not been read** (owner step in "Shops" below) |
+| Card Kingdom price list | Prices | **Not used** | `api.cardkingdom.com/api/pricelist` answers publicly, but the terms (read 2026-10-07) forbid robots and data extraction except search engines following robots.txt, and robots.txt disallows `/api/`: needs Card Kingdom's permission |
+| Magic Madhouse product feed | Prices, stock | **Not used** | Offered to affiliate partners: a full product feed, Google Shopping format, four times a day (affiliate page, 2026-10-07). Its terms forbid copying or exploiting the site without written permission, "granted either directly or through a legitimate reselling programme". Joining is the owner's decision; no commission rate is published on the page |
 | Archidekt | Public decks | **Used, read only**: one public deck when a person asks, credited with a link back | The Vault only reads, never writes, and does not crawl or search (see `compliance.md`) |
-| Moxfield, EDHREC | Decks, aggregates | **Not used for fetching** | Terms forbid or do not permit automated access (see `compliance.md`) |
+| Moxfield | Decks | **Not used for fetching** | Terms of Service read first-hand 2026-10-07: no "robot, spider or other automatic device" and no manual copying without written approval; no API policy is published (see `compliance.md`) |
+| EDHREC | Aggregates | **Not used for fetching** | Terms do not permit automated access (see `compliance.md`) |
 
 ## Prices (#19)
 
@@ -35,18 +38,32 @@ provenance, never presented as the Vault's own. Pages that could not be read are
 - Their client needs a descriptive `User-Agent`, a timeout, a small rate limit and a circuit
   breaker so a slow upstream never slows the Vault.
 
-## Shops: links, terms and price feeds (issue #80, read 2026-10-05)
+## Shops: links, terms and price feeds (issue #80)
 
-| Shop | Plain search links | Automated price or stock lookups | A legitimate route to live prices | Saved searches / alerts for users |
+Re-read first-hand on **2026-10-07** (the earlier pass of 2026-10-05 is superseded). Each row says where each fact came
+from and when. "Read" means the page text itself was read in a browser or by a tool that returned the page; second-hand
+listings are marked as such. The Vault fetches no shop page and no shop feed (see "Prices" above).
+
+| Shop | Link format (checked 2026-10-07) | Terms on automation and use of prices or stock | Feed available? | Saved search, alert, wishlist features for users |
 |---|---|---|---|---|
-| Card Kingdom | Allowed: the terms only forbid linking that damages them or implies endorsement. Format checked: `https://www.cardkingdom.com/catalog/search?search=header&filter%5Bname%5D=NAME` | Forbidden ("data mining, robots ... except in accordance with ... robot.txt ... only to compile for search results"); `/api/` disallowed | Ask Card Kingdom (public price list exists; affiliate cart paths exist) | Restock notices on product pages (signed in) |
-| Magic Madhouse | Not restricted by the terms; format checked: `https://magicmadhouse.co.uk/?q=NAME` | Copying or exploiting site content needs written permission | **Affiliate programme with a full product feed** (prices and stock, 4x a day) | Not checked |
-| Cardmarket | Format used: `https://www.cardmarket.com/en/Magic/Products/Search?searchString=NAME` (works in a browser) | Unknown: terms not readable by a tool (bot check) | API closed to new applications | Wants lists (signed in) |
+| **Card Kingdom** | `https://www.cardkingdom.com/catalog/search?search=header&filter%5Bname%5D=NAME`: opened with "Sol Ring", 141 results. The terms only forbid linking "in a manner that damages or exploits ... our reputation or suggests any form of association, approval, or endorsement" | Terms of Service, [cardkingdom.com/static/tos](https://www.cardkingdom.com/static/tos), "Last Updated" 8/7/2025 on the page, read 2026-10-07: forbidden is "any data mining, robots, or similar data gathering or extraction methods designed to scrape or extract data ... except in accordance with instructions contained in our robot.txt file and only to compile for search results" (public search engines may copy for "publicly available, searchable indices", "but not caches or archives"). [robots.txt](https://www.cardkingdom.com/robots.txt) (read 2026-10-07) disallows `/api/`, `/catalog/item/`, `/catalog/restock_notice`, `/cart/affiliate/`, `/myaccount/` | **No licensed feed.** A public price list answers at `api.cardkingdom.com/api/pricelist` (its header carries only `created_at` and `base_url`, no licence), but it is under `/api/`, which robots.txt disallows and the terms above cover. The site has no affiliate or feed programme page that we could find (footer, 2026-10-07); Card Kingdom has partner arrangements (its blog names content creators; deck sites link with a `partner=` parameter, e.g. `partner=archidekt`). Terms and cost of a feed: none published; ask | **Restock notice** per product: "our site has a restock notification feature which will send you an email notice when your selected item is restocked", sent to everyone on the list at once ([support article](https://cardkingdom.freshdesk.com/support/solutions/articles/3000037518-what-can-i-do-if-you-are-out-of-stock-), updated 2026-09-22, read 2026-10-07). **Wishlist** at `/myaccount/wishlist` (signed in; the page itself was not opened) |
+| **Magic Madhouse** | `https://magicmadhouse.co.uk/search.php?search_query=NAME`: "Sol Ring" lists the printings. **The old format `https://magicmadhouse.co.uk/?q=NAME` does not search: it shows the home page** (found 2026-10-07; the skill link is corrected in the same change) | Terms and Conditions, [magicmadhouse.co.uk/terms-conditions](https://magicmadhouse.co.uk/terms-conditions/) (generated by iubenda; no date on the page except mobile terms of Feb 13, 2024), read 2026-10-07: "Users may not reproduce, duplicate, copy, sell, resell or exploit any portion of this Application and of its Service without the Owner's express prior written permission, granted either directly or through a legitimate reselling programme", and users "may not copy, download, share ... or create derivative works from the content". It does not mention robots or scraping by name; the written-permission rule covers use of the catalogue | **Yes, through the affiliate programme**, [magicmadhouse.co.uk/affiliate-program](https://magicmadhouse.co.uk/affiliate-program/), read 2026-10-07: "full product feed", Google Shopping format (CSV and XML), "updated 4 times per day", 30-day cookie, partners "in any vertical". Terms stated on that page: no paid advertising on their brand name or misspellings of it; nothing is paid on rejected or cancelled sales; apply by contacting the programme manager named on the page (the account is managed by Visualsoft, whose contact is on the page). **Cost: no fee is stated; commission is "a percentage of the product value" with no rate on the page.** Rates of 7% (singles), 7.5% (accessories) and 1% (boxes) appear on third-party affiliate listings (affi.io, FlexOffers): **second-hand, unverified**. No rule for how a feed may be used is on the page, so those terms must be asked for in writing before joining | **Wishlist**: "Add To Wishlist" on each product page and a "My Wishlist" link (a Swym wishlist; whether it needs a login was not tested). A product page with stock showed no restock-alert button; an out-of-stock page was not checked, so **restock alerts are not confirmed either way** |
+| **Cardmarket** | `https://www.cardmarket.com/en/Magic/Products/Search?searchString=NAME` is the format the skills use. **Not re-checked: Cardmarket's pages answer a bot check** ("Just a moment..." in the browser pane; HTTP 403 to fetches on 2026-10-07), which was not bypassed | **Not read.** The General Terms and Conditions ([cardmarket.com/en/Magic/Policies/GeneralTermsAndConditions](https://www.cardmarket.com/en/Magic/Policies/GeneralTermsAndConditions)) are behind that check, so they could not be read by a tool. What could be read on the help centre (read 2026-10-07): [Cardmarket API](https://help.cardmarket.com/en/cardmarket-api): "Currently, we are not accepting applications for access to the Cardmarket API"; credentials may not be shared with third-party software; [Partner Apps and Services](https://help.cardmarket.com/en/api-partnerships) lists TCG PowerTools and **Scryfall** as business partners, which is how Cardmarket prices reach the Vault (shown as Scryfall's). **Owner step:** open the terms in a browser and record the clauses on automated access and price data here | **No.** The API is closed to new applications (above). No affiliate or feed programme page exists on the help centre (the address `help.cardmarket.com/en/AffiliateProgram` returns 404; a search of the help centre finds event sponsorship, coupons and store-partner pages only) | **Wants lists**: [help](https://help.cardmarket.com/en/wants-list), up to 100 lists per game and 150 entries per list; **Email Alarm** per wanted card: "to receive an email when a card matching your wanted card (including condition, language, etc.,) is listed", sent once, the first time ([help](https://help.cardmarket.com/en/add-cards-to-wants)); a Shopping Wizard and "Sellers With the Most Cards" built on a wants list ([help](https://help.cardmarket.com/en/shopping-features-from-wants)) |
 
-Recommendation:
+What this means:
+
 - **Now:** per-card search links only (as the skills do), no fetching of shop pages, prices stay Scryfall's and dated.
-- **For a real "best price"** (#84): ask Card Kingdom for permission to use its price list, and decide whether to join Magic Madhouse's affiliate programme for its feed. Affiliate income would make the Vault earn money from referrals: an owner decision against "the app stays free" (free to users is unaffected) and the Fan Content Policy's terms on monetisation (to read before joining).
-- Owner reads Cardmarket's terms in a browser.
+- **Card Kingdom:** no automated use of its site or price list without written permission; the Vault does not use them.
+  Asking is the owner's decision (draft not written yet: add to `docs/outreach-drafts.md` if wanted).
+- **Magic Madhouse:** the only shop with a documented, legitimate feed. Joining is the owner's decision. Before joining,
+  ask in writing (a) the commission rate, (b) whether a free, non-commercial tool may show feed prices and stock with a
+  link back, (c) how often it may be read. Affiliate income would make the Vault earn money from referrals: an owner
+  decision against "the app stays free" (free to users is unaffected) and against the Fan Content Policy's terms on
+  monetisation, which still have to be read before joining (`docs/compliance.md`).
+- **Cardmarket:** not usable as a source and not read; the owner reads the terms in a browser (step above).
+- **Alerts:** each shop already notifies people about the cards they want (Cardmarket email alarms, Card Kingdom restock
+  notices, Madhouse wishlists). The Vault does not build its own price or stock alerts from shop data; the shopping list
+  it prints is pasted into the shop's own wants or wishlist tool.
 
 ## Metagame and Limited data (issue #105, read 2026-10-05)
 

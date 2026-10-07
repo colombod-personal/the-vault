@@ -1,8 +1,8 @@
 # Threat model: the Vault as an OAuth authorization server for MCP
 
 Issue #41 (part of epic #40). It covers what #42 to #47 build: how ChatGPT, Claude and other MCP
-clients connect to a person's Vault by URL, with no token pasting. It was written before the code
-and updated with it; each mitigation names the test that proves it.
+clients connect to a person's Vault by URL, with no token pasting. Each mitigation names the test that proves it.
+**It was not written before the code**: see "What happened" below, which corrects the claim this paragraph used to make.
 
 Targets: OAuth 2.1 (draft 13), RFC 9728 (protected resource metadata), RFC 8414 (server metadata),
 RFC 7636 (PKCE), RFC 8707 (resource indicators), RFC 9207 (`iss` in the response), RFC 8252
@@ -10,6 +10,28 @@ RFC 7636 (PKCE), RFC 8707 (resource indicators), RFC 9207 (`iss` in the response
 best practice), Client ID Metadata Documents (draft-ietf-oauth-client-id-metadata-document), and
 the MCP authorization specification (2025-11-25). The 2026-07-28 revision was not read for this
 work; re-check it before the real-host run (`docs/mcp-oauth-host-checklist.md`).
+
+## What happened (history, recorded 2026-10-07)
+
+Issue #41 asked for two things that did not happen in that order, and history cannot be changed. Read from `git log`:
+
+| When (2026-10-04, +0100) | Commit | What |
+|---|---|---|
+| 01:11 | `66bb839` | The OAuth 2.1 authorization server (metadata, authorize, consent, tokens, client identification, connected apps) lands on `main` |
+| 01:14 | `fe51c01` | **First commit of this document**, three minutes after the endpoints, together with the host checklist and the connected-apps panel |
+| 01:48 | `f8982d3` | "OAuth review fixes": a security review found a redirect bypass (the "review exploit string", `test_the_review_exploit_string_is_refused`), consent and code-redemption races, and unsafe metadata fetching |
+| 02:18 | `8dc6d5d` | "OAuth second review": fetch budgets that could be used for denial of service, stale rows, generic errors |
+
+So the threat model was **written after the endpoints**, and the review that found real defects happened **after the code was
+on `main`**, not before the merge. The commit messages carry no pull request number, and the repository does not show
+whether a pull request or a review record existed. Nothing here claims otherwise. The two criteria of #41 that ask for the
+order ("required before the endpoints", "a review before merge") cannot be met retroactively; they are reported as such
+and need the owner to waive them.
+
+What changed so it cannot happen silently again: `.github/pull_request_template.md` asks every pull request for a
+`Threat model:` line and a `Security review before merge:` line, `scripts/check_pr_rules.py` (workflow `pr-rules.yml`,
+`tests/test_pr_rules.py`) fails a pull request that changes the OAuth, sign-in, token, privacy or sharing code without both,
+and `AGENTS.md` states the rule. CI cannot prove a review took place; it makes the claim visible to whoever merges.
 
 ## What is protected
 
@@ -280,6 +302,15 @@ grant on the consent screen.
   wants it can use a personal access token.
 - **Refresh tokens last 30 days, sliding, within an absolute 90 days** from first consent.
 - **Consent is asked every time**, even for a client the person already connected.
+- **Pre-registered clients (issue #45, "where needed"): not built, because no client needs it.** The idea is an
+  operator-configured list of clients (fixed `client_id`, redirect URIs, a name, `kind='preregistered'`) for a host that
+  supports neither metadata documents nor dynamic registration. claude.ai and ChatGPT use metadata documents, and every other
+  client we know can register dynamically, so no such host has been shown. `OAuthClient.kind` is `cimd` or `dcr`, and this
+  model analyses neither the configuration channel (settings or environment, who can change it), nor how such a client would
+  be shown on the consent screen ("verified" would be a claim the Vault makes), nor secret handling if one needed a secret.
+  Building a path into an authorization server without a user or an analysis would add risk for nothing, so it is not built.
+  **Owner decision, recommended: accept "not needed today".** If a host needs it, the mechanism, a section in this document
+  and its tests go in one pull request, with the review lines the pull request template asks for.
 - **Public clients and `private_key_jwt` clients are supported; shared-secret (`client_secret_*`) clients are not.** claude.ai uses a metadata document with PKCE only (`none`); ChatGPT's document declares `private_key_jwt` (section 17).
 
 ## Residual risks
