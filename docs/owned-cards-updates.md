@@ -124,7 +124,7 @@ change.
    a name matching a token and a card is never resolved silently. Removing needs the printing when the person owns
    several.
 5. **Undo.** The last assistant change set can be undone until the collection changes again (another edit or an
-   import); the web app shows an Undo on that history entry too. Undo is itself recorded.
+   import); the web app shows an Undo on that history entry too (Account, "Collection history": `Undo` shows what it will put back, and "Undo this change" applies exactly that preview; older entries say they can't be undone any more). The import history marks the one entry that can be undone (`undoable`, and `undone` once it was). Undo is itself recorded.
 6. **Audit and scope.** Each change set records, per changed printing, the folder (the future bucket) of the copies it
    added or removed, from day one (docs/collections.md). Each change set also records the app (OAuth client or token name), the time and the summary; the person sees
    it in their import history and can revoke the app under Connected apps.

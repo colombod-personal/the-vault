@@ -271,6 +271,7 @@ function App() {
       onOpenShared={openShared}
       onOpenDeck={openDeck}
       onMeChanged={() => window.VaultApi.me().then(setMe)}
+      onCollectionChanged={() => { setData(null); loadCollection({ afterImport: true }); }}
     />
   );
 
