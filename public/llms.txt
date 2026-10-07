@@ -183,7 +183,8 @@ be revoked (Account → Connected apps for OAuth).
   - edit the cards owned (bought, sold, traded): `update_owned_cards` (preview; asks which printing),
     `confirm_owned_cards_update` (after the person says yes), `undo_owned_cards_update`; pictures of the
     printings owned: `show_owned_printings`
-  - imports, exports and sharing: `list_imports`, `get_import`, `import_collection_csv` (preview first),
+  - imports, exports and sharing: `list_imports`, `get_import`, `import_collection_csv` (preview first: it
+    keeps edits made here and applies only what changed in the person's app, and lists conflicts),
     big files: `start_collection_upload`, `get_staged_upload`, `confirm_staged_upload`,
     (Dragon Shield, Moxfield or generic CSV), `list_export_formats`, `list_shared_with_me`,
     `get_shared_deck`, `list_my_shares`, `accept_share`, `stop_sharing` (asks first)

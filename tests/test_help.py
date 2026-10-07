@@ -144,7 +144,9 @@ def test_the_sections_no_longer_say_what_the_app_does_not_do():
     for stale in ("press Save deck", "The Value view", "live Scryfall", "is being replaced", "Share your collection creates",
                   "Account, Connected apps", "Account, Your data", "Account, Shared with me"):
         assert stale not in all_text, stale
-    assert "Each import replaces the collection with the new file" in sections()["import"]  # true today (the three-way re-import is #194)
+    text = sections()["import"]  # the three-way re-import (#194) is proved by tests/test_reimport_merge.py
+    assert "applies only what changed in your app" in text and "keeps edits you made through an assistant" in text
+    assert "replaces the collection with the new file" not in text
 
 
 def test_a_help_link_scrolls_its_section_heading_to_the_top_not_just_into_view():
