@@ -75,3 +75,10 @@ def test_a_deck_from_archidekt_says_when_its_list_was_taken_from_the_link(signed
     assert datetime.fromisoformat(changed["credit"]["fetched_at"]) >= first  # a new list for the same link: read again
     pasted = signed_in.post(f"{V1}/decks", json={"name": "Mine", "text": TEXT}).json()
     assert "credit" not in pasted or pasted["credit"] is None  # no source link, nothing to credit
+
+
+def test_the_get_deck_tool_tells_an_assistant_about_the_price_date_and_fetched_at():
+    from vault.api import mcp
+
+    said = mcp.BY_NAME["get_deck"].description
+    assert "`price_date`" in said and "`fetched_at`" in said and "credit" in said
