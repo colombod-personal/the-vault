@@ -28,6 +28,7 @@ list, so production can only enable sources the test has checked.
 | `rulings` | Scryfall bulk `rulings` | read | 2026-10-05 | https://scryfall.com/docs/api | As above; rulings are Wizards' text and are shown as such |
 | `oracle_tags` | Scryfall Tagger tags | read | 2026-10-05 | https://scryfall.com/docs/api/tags | Track by id, be able to hide tags (`HIDDEN_TAGS`), labelled community opinion |
 | `oracle_prices` | Scryfall prices (TCGplayer, Cardmarket via Scryfall) | read | 2026-10-05 | https://scryfall.com/docs/api | Shown as Scryfall's, with date and marketplace |
+| `oracle_printings` | Scryfall bulk `default_cards`: one priced paper printing per row | read | 2026-10-05 | https://scryfall.com/docs/api | Same terms as the prices it carries: shown as Scryfall's with date and marketplace; used to pick the cheapest acceptable printing, never a shop's price; off until `CATALOG_SOURCES` lists it |
 | `rules` | Wizards' Comprehensive Rules | read | 2026-10-04 | https://company.wizards.com/en/legal/fancontentpolicy | Read live, nothing stored (#142); Fan Content notice shown |
 
 Sources the Vault does **not** load, recorded so the next person does not have to find out again:
