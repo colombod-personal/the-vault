@@ -57,6 +57,7 @@ CATALOG_SOURCES = {
     "rulings": dict(name="Scryfall", origin="Wizards of the Coast (rulings)", url="https://scryfall.com/docs/api/rulings", wizards_material=True),
     "oracle_tags": dict(name="Scryfall Tagger", origin="community tags, opinions rather than rules", url="https://tagger.scryfall.com/", wizards_material=False),
     "oracle_prices": dict(name="Scryfall", origin="TCGplayer and Cardmarket (prices)", url="https://scryfall.com/docs/api/cards", wizards_material=False),
+    "oracle_printings": dict(name="Scryfall", origin="TCGplayer and Cardmarket (prices of each printing)", url="https://scryfall.com/docs/api/cards", wizards_material=False),
     "rules": dict(name="Wizards of the Coast", origin="Magic: The Gathering Comprehensive Rules", url="https://magic.wizards.com/en/rules", wizards_material=True),
 }
 

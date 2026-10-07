@@ -485,14 +485,15 @@ function listTexts(r) {
   // The paste-ready text(s) the tool returned: its default list and, when the tool offers several store formats
   // (an array or an object under formats / exports / texts), each of those. Whatever is returned can be shown, copied, saved.
   var out = [];
-  if (typeof r.text === "string") { out.push({ label: lastInput && lastInput.format ? "List (" + lastInput.format + ")" : "Plain list", text: r.text }); }
+  var several = r.texts && typeof r.texts === "object";  // format "all": r.text is only the plain one of r.texts
+  if (typeof r.text === "string" && !several) { out.push({ label: lastInput && lastInput.format ? "List (" + lastInput.format + ")" : "Plain list", key: r.format, text: r.text }); }
   ["formats", "exports", "texts"].forEach(function (k) {
     var v = r[k];
     if (Array.isArray(v)) { v.forEach(function (x) { if (x && typeof x.text === "string") { out.push({ label: String(x.label || x.name || x.format || k), text: x.text }); } }); }
     else if (v && typeof v === "object") {
       Object.keys(v).forEach(function (n) {
         var t = typeof v[n] === "string" ? v[n] : v[n] && typeof v[n].text === "string" ? v[n].text : null;
-        if (t !== null) { out.push({ label: n, text: t }); }
+        if (t !== null) { out.push({ label: (k === "texts" && r.store_format && r.store_format[n] && r.store_format[n].store) || n, key: n, text: t }); }
       });
     }
   });
@@ -522,14 +523,17 @@ function render(root, env) {
     root.appendChild(t);
     if (r.unpriced_lines) { root.appendChild(h("p", { class: "muted", text: r.unpriced_lines + " line(s) have no known price." })); }
     var texts = listTexts(r), current = texts[0] || { label: "Plain list", text: "" };
+    var sf = r.store_format || {}, one = sf.store ? sf : null;  // format "all": sf holds each store's entry, by format
     var ta = h("textarea", { readonly: "readonly", rows: String(Math.min(12, r.lines.length + 1)), style: "width:100%;font-family:monospace" }); ta.value = current.text;
-    root.appendChild(h("h2", { text: "List to paste into a store's own list or deck tool" }));
+    root.appendChild(h("h2", { text: "List to paste into " + (one ? one.store : "a store's own list or deck tool") }));
+    var limits = h("p", { class: "small muted", text: (one || sf[current.key] || {}).limits || "" });
     if (texts.length > 1) {
       var which = h("select", {}, texts.map(function (x, i) { return h("option", { value: String(i), text: x.label }); }));
-      which.addEventListener("change", function () { current = texts[Number(which.value)]; ta.value = current.text; });
+      which.addEventListener("change", function () { current = texts[Number(which.value)]; ta.value = current.text; limits.textContent = (sf[current.key] || {}).limits || ""; });
       root.appendChild(h("div", {}, [document.createTextNode("Format: "), which]));
     }
     root.appendChild(ta);
+    root.appendChild(limits);
     var msg = h("span", { class: "small muted", text: "" });
     root.appendChild(h("button", { text: "Copy list", onclick: function () { ta.select(); try { document.execCommand("copy"); msg.textContent = " Copied."; } catch (e) { msg.textContent = " Select the text and copy it."; } } }));
     root.appendChild(document.createTextNode(" "));

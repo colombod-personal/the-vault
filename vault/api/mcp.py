@@ -279,8 +279,9 @@ TOOLS = [
          path=lambda a: f"{V1}/decks/overlap"),
     Tool("get_deck", "A saved deck: its name, `overview` (format, commander(s), card count, colour identity), a `summary` "
          "of how much of it the person owns (copies needed, owned, missing, cost to finish), the cards not fully owned "
-         "(the dearest 40), and the decklist. all_cards adds every card's ownership with the printings owned (about 80 KB "
-         "for 100 cards).",
+         "(the dearest 40, each with its Scryfall unit price and the `price_date` that price is from), and the decklist. For a "
+         "deck from Archidekt, `credit` gives its link, author and `fetched_at` (when the list was last taken from the link). "
+         "all_cards adds every card's ownership with the printings owned (about 80 KB for 100 cards).",
          {"deck_id": ID, "all_cards": {"type": "boolean", "default": False,
                                        "description": "Every card's ownership and owned printings (large)"}}, ["deck_id"],
          path=lambda a: f"{V1}/decks/{int(a['deck_id'])}?detail={'cards' if a.get('all_cards') else 'summary'}"),

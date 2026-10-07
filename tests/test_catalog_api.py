@@ -266,3 +266,45 @@ def test_a_real_quote_from_the_oldest_ruling_verifies(loaded):
     assert old["verified"] is True and old["detail"]["ruling"]["published_at"] == "2010-01-01"
     bad = loaded.post(f"{V1}/verify-citation", json={"kind": "ruling", "ref": "Lightning Bolt", "quote": "Ruling number 99 about nothing."}).json()
     assert bad["verified"] is False and bad["detail"]["rulings_checked"] == 30
+
+
+def test_the_version_argument_names_the_current_edition_or_is_refused_by_name(loaded):
+    """#25: `version` used to be accepted and ignored. Wizards' rules page links only the current edition and the Vault stores no
+    copy of the rules, so only that edition can be read: any other date is an error that says which one is available."""
+    quote = {"kind": "rule", "ref": "100.1", "quote": "First sample rule."}
+    for fine in (None, "latest", "LATEST", "2027-03-03"):
+        body = {**quote, **({"version": fine} if fine else {})}
+        got = loaded.post(f"{V1}/verify-citation", json=body)
+        assert got.status_code == 200 and got.json()["verified"] is True and got.json()["detail"]["version"] == "2027-03-03", fine
+    for older in ("2026-06-19", "2020-01-01", "2027-03-04"):
+        res = loaded.post(f"{V1}/verify-citation", json={**quote, "version": older})
+        assert res.status_code == 422, older
+        detail = res.json()["detail"]
+        assert older in detail and "2027-03-03" in detail and "only the current edition" in detail, detail
+    # every rules route that takes a version refuses the same way
+    assert loaded.get(f"{V1}/rules/100.1", params={"version": "2026-06-19"}).status_code == 422
+    assert loaded.get(f"{V1}/rules/search", params={"q": "sample rule", "version": "2026-06-19"}).status_code == 422
+    assert loaded.get(f"{V1}/rules/100.1", params={"version": "2027-03-03"}).status_code == 200
+    walk = {"steps": [{"text": "A step", "rules": ["100.1"]}]}
+    assert loaded.post(f"{V1}/walkthrough", json={**walk, "version": "2026-06-19"}).status_code == 422
+    assert loaded.post(f"{V1}/walkthrough", json={**walk, "version": "latest"}).json()["version"] == "2027-03-03"
+
+
+def test_a_version_on_card_text_or_rulings_is_refused_not_ignored(loaded):
+    for kind, ref, quote in (("oracle_text", "Lightning Bolt", "deals 3 damage"), ("ruling", "Lightning Bolt", "bolt’s target")):
+        res = loaded.post(f"{V1}/verify-citation", json={"kind": kind, "ref": ref, "quote": quote, "version": "2026-06-19"})
+        assert res.status_code == 422 and "no editions" in res.json()["detail"], kind
+        assert loaded.post(f"{V1}/verify-citation", json={"kind": kind, "ref": ref, "quote": quote, "version": "latest"}).status_code == 200
+
+
+def test_when_wizards_publishes_a_new_edition_the_old_date_is_no_longer_readable(loaded, app):
+    """The one edition on offer moves with Wizards' page: the previous date is then refused, naming the new one."""
+    from tests.test_rules_parser import SAMPLE as OLD
+
+    newer = OLD.replace("effective as of March 3, 2027", "effective as of April 1, 2027")
+    assert newer != OLD
+    serve_rules(app, newer)
+    ok = loaded.post(f"{V1}/verify-citation", json={"kind": "rule", "ref": "100.1", "quote": "First sample rule.", "version": "2027-04-01"})
+    assert ok.status_code == 200 and ok.json()["detail"]["version"] == "2027-04-01"
+    old = loaded.post(f"{V1}/verify-citation", json={"kind": "rule", "ref": "100.1", "quote": "First sample rule.", "version": "2027-03-03"})
+    assert old.status_code == 422 and "2027-04-01" in old.json()["detail"]

@@ -11,6 +11,9 @@ analyst, attribution), `mcp.json` (the Vault's MCP server), Claude Code extras i
 
 Install and connect: see docs/skills.md in the repository, or https://mtgvault.cards/connect.html.
 
+Check the connection: ask your assistant to call the Vault's `whoami` tool. It names you, your scopes and the data
+versions the Vault holds (the Comprehensive Rules edition, card data and price dates).
+
 ## Who this is built on, and how the Vault uses them
 
 The Vault is a thin layer on other people's work. It never presents their material as its own: every answer carries its source, and the sources below are credited everywhere the material appears. What the Vault sends to each service is stated plainly; it never sends your name, e-mail or collection to any of them.

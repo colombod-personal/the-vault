@@ -13,6 +13,7 @@ import json
 import re
 import shutil
 import subprocess
+import os
 from pathlib import Path
 
 import pytest
@@ -77,10 +78,22 @@ def test_no_secret_outside_its_job_env():
         assert "secrets." not in yaml.safe_dump({k: v for k, v in wf.items() if k != "jobs"}), path.name
 
 
+def _bash() -> str:
+    """The POSIX shell Vercel runs the command in. On Windows `bash` on the PATH can be the WSL launcher, which fails
+    with no distribution installed, so use the bash that ships with Git when it is there."""
+    if os.name == "nt":
+        git = shutil.which("git")
+        for parent in (Path(git).parents if git else []):
+            candidate = parent / "bin" / "bash.exe"
+            if candidate.is_file():
+                return str(candidate)
+    return "bash"
+
+
 @pytest.mark.parametrize("ref,deploys", [("main", True), ("claude/feature", False), ("", False)])
 def test_vercel_deploys_only_main(ref, deploys):
     command = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))["ignoreCommand"]
-    skipped = subprocess.run(["bash", "-c", command], env={"VERCEL_GIT_COMMIT_REF": ref}).returncode == 0
+    skipped = subprocess.run([_bash(), "-c", command], env={"VERCEL_GIT_COMMIT_REF": ref}).returncode == 0
     assert skipped is not deploys
 
 

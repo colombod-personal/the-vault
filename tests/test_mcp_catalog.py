@@ -174,6 +174,20 @@ def test_every_tool_has_a_title_and_a_read_only_or_destructive_annotation_as_the
             assert hints["readOnlyHint"] is True and hints["destructiveHint"] is False, tool.name
 
 
+def test_verify_citation_refuses_an_edition_it_cannot_read_and_says_so_in_its_description(agent, bot):
+    """#25: `version` is used, not ignored: the current edition is checked, any other is an error naming the current one."""
+    read = make_token(agent)
+    tool = {t["name"]: t for t in rpc(bot, "tools/list", token=read).json()["result"]["tools"]}["verify_citation"]
+    said = tool["inputSchema"]["properties"]["version"]["description"]
+    assert "current edition" in said and "no archive" in said
+    ok = call_tool(bot, read, "verify_citation", **SAMPLE_ARGS["verify_citation"], version="2027-03-03")
+    assert ok["isError"] is False and ok["structuredContent"]["verified"] is True
+    refused = call_tool(bot, read, "verify_citation", **SAMPLE_ARGS["verify_citation"], version="2026-06-19")
+    assert refused["isError"] is True
+    text = refused["content"][0]["text"]
+    assert "2026-06-19" in text and "2027-03-03" in text, text
+
+
 def test_the_claude_ai_check_for_the_shop_and_deck_rules_is_prepared_and_not_claimed():
     """#82: the real claude.ai run needs a signed-in person. The doc holds the exact script, the pass rules (tied to the
     claims the 2026-10-04 run got wrong) and an empty record; it must not claim a result nobody recorded."""

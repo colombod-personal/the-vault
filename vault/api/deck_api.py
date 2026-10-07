@@ -12,9 +12,11 @@ from __future__ import annotations
 import hashlib
 from datetime import date
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from mtg_toolkits import delta
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -23,9 +25,10 @@ from .. import combos
 from .. import deck_overview
 from .. import deck_tools as dt
 from .. import provenance as prov
+from .. import shopping as shop
 from .. import simulate
 from ..importer import user_entries
-from ..models import Card, Deck, Entry, User
+from ..models import Card, Deck, Entry, OraclePrinting, User
 from .catalog_api import throttle
 from .hal import link
 
@@ -73,6 +76,30 @@ class SimulateIn(FormatIn):
     seed: int | None = Field(default=None, ge=0, le=2**31 - 1, description="Same seed, same answer (default: from the deck)")
 
 
+class ShoppingIn(DeckIn):
+    format: Literal["plain", "cardkingdom", "tcgplayer", "cardmarket", "csv", "all"] = Field(default="plain", description=(
+        "How `text` is written: plain, cardkingdom (Card Kingdom's Deck Builder), tcgplayer (Mass Entry, with set and collector "
+        "number), cardmarket (want list, with the expansion's name), csv; all fills `texts` with every one. Each was checked "
+        "against the store's own help page, named in `store_format`."))
+    finish: Literal["nonfoil", "foil", "etched"] | None = Field(default=None, description=(
+        "Only printings in this finish (nonfoil, foil, etched); default: whichever is cheapest"))
+    language: str | None = Field(default=None, max_length=30, description=(
+        "Only printings in this language: a Scryfall code (en, ja, de ...) or its name. Scryfall prices few non-English "
+        "printings, so a line may then have no qualifying printing"))
+    sets: list[str] | None = Field(default=None, max_length=30, description=(
+        "Only printings from these sets (Scryfall set codes, e.g. ['2xm', 'mh2'])"))
+    condition: Literal["NM", "LP", "MP", "HP", "DMG"] | None = Field(default=None, description=(
+        "The worst condition accepted (NM, LP, MP, HP, DMG). Scryfall's prices are not per condition, so it does not change "
+        "the printing or price chosen"))
+
+    @field_validator("sets")
+    @classmethod
+    def _sets(cls, value):
+        if value is not None and any(not s.strip() or len(s) > 10 for s in value):
+            raise ValueError("sets are Scryfall set codes of up to 10 characters")
+        return value
+
+
 MULTIPLAYER = {"commander", "oathbreaker", "paupercommander", "predh"}
 
 
@@ -112,7 +139,11 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
         else:
             text, name, stored = body.text, None, None
         known = deck_overview.identities(db, deck_overview.read(text)["commanders"])
-        return {"id": body.deck_id, "name": name, "overview": deck_overview.overview(text, stored, known)}
+        out = {"id": body.deck_id, "name": name, "overview": deck_overview.overview(text, stored, known)}
+        credit = deck_overview.archidekt_credit(deck) if body.deck_id is not None else None
+        if credit:  # the deck is Archidekt's: every answer about it says whose it is and when the list was read (#96)
+            out["credit"] = credit
+        return out
 
     def text_of(db: Session, user: User, body: DeckIn) -> str:
         """The decklist: sent as text, or a saved deck of this person's by id."""
@@ -230,30 +261,75 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
                 "_links": {"self": link(f"{V1}/decks/combos")}}
 
     @router.post("/shopping-list", response_model=Answer, response_model_by_alias=True,
-                 summary="The cards of a decklist you do not own, with cheapest known prices, as a paste-ready list")
-    def deck_shopping(request: Request, body: DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+                 summary="The cards of a decklist you do not own, with dated Scryfall prices, as paste-ready text for a store's list tool")
+    def deck_shopping(request: Request, body: ShoppingIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        try:
+            rules = shop.make_rules(body.finish, body.language, body.sets, body.condition)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
         resolved = prepared(request, db, user, text_of(db, user, body))
+        loaded = q.sources(db)
+        if rules.given and "oracle_printings" not in loaded:
+            raise HTTPException(503, "The price of each printing has not been loaded yet, so a printing cannot be chosen under rules "
+                                     "(finish, language, sets). Leave those out for the cheapest priced printing of each card.")
         deck = dt.parse(text_of(db, user, body))
         owned = [r.to_collection_entry() for r in user_entries(db, user)]
         by_name = {e.line.name.strip().lower(): e.card for e in resolved.entries if e.card}
         prices = dt.prices_of(db, [c.oracle_id for c in by_name.values()])
-        lines, total, unpriced = [], 0.0, 0
-        for c in delta.coverage(deck.to_entries(), owned):
-            if c.missing <= 0:
-                continue
-            card = by_name.get(c.entry.name.strip().lower())
-            price = prices.get(card.oracle_id) if card else None
-            unit = price.usd if price else None
-            if unit is None:
-                unpriced += 1
+        missing = [(c, by_name.get(c.entry.name.strip().lower())) for c in delta.coverage(deck.to_entries(), owned) if c.missing > 0]
+        printings: dict[str, list] = {}
+        as_of = None
+        if rules.given:
+            wanted = [card.oracle_id for _, card in missing if card]
+            for p in db.scalars(select(OraclePrinting).where(OraclePrinting.oracle_id.in_(wanted))):
+                printings.setdefault(p.oracle_id, []).append(p)
+            as_of = loaded["oracle_printings"].version  # the day the printing prices were loaded
+        lines, total, unpriced, excluded = [], 0.0, 0, 0
+        for c, card in missing:
+            line = {"name": card.name if card else c.entry.name, "quantity": c.missing, "unit_price_usd": None, "price_date": None,
+                    "known_card": card is not None}
+            if rules.given:
+                picked = shop.choose(printings.get(card.oracle_id, []), rules) if card else None
+                if picked is None:
+                    line.update(no_qualifying_printing=True,
+                                reason=shop.why_none(rules) if card else "The card was not found in the catalog, so no printing can be chosen.")
+                    excluded += 1
+                else:
+                    printing, finish, unit = picked
+                    line.update(unit_price_usd=unit, price_date=as_of, printing=shop.printing_dict(printing, finish))
+                    total += unit * c.missing
             else:
-                total += unit * c.missing
-            lines.append({"name": card.name if card else c.entry.name, "quantity": c.missing, "unit_price_usd": unit,
-                          "price_date": price.day.isoformat() if price else None, "known_card": card is not None})
-        result = {"lines": lines, "text": "\n".join(f"{l['quantity']} {l['name']}" for l in lines),
-                  "total_usd": round(total, 2), "unpriced_lines": unpriced,
-                  "notes": ["Prices are the cheapest priced paper printing, from Scryfall (sourced from TCGplayer and Cardmarket), not any store's price today.",
-                            "Paste the text into a store's own list or deck tool (for example Card Kingdom's Deck Builder); check how it matches names. The Vault does not contact stores or fill carts."]}
-        return answer(db, "shopping list", result, ("oracle_cards", "oracle_prices"), "shopping-list", identity(db, user, body))
+                price = prices.get(card.oracle_id) if card else None
+                if price is not None and price.usd is not None:
+                    line.update(unit_price_usd=price.usd, price_date=price.day.isoformat())
+                    total += price.usd * c.missing
+            if line["unit_price_usd"] is None and not line.get("no_qualifying_printing"):
+                unpriced += 1
+            lines.append(line)
+        every = body.format == "all"
+        fmt = "plain" if every else body.format
+        info = shop.STORES[fmt]
+        result = {"price_basis": ("the cheapest printing that fits your rules, per line (`printing`)" if rules.given else
+                                  "the cheapest priced paper printing of each card; no rules were given, so no printing is chosen"),
+                  "lines": lines, "format": body.format, "text": shop.render(lines, fmt),
+                  "total_usd": round(total, 2), "unpriced_lines": unpriced, "no_qualifying_printing": excluded,
+                  "rules": rules.describe() if rules.given else None,
+                  "store_format": ({k: {"store": v["store"], "line": v["line"], "checked": v["checked"], "help_page": v["page"],
+                                        "limits": v["limits"]} for k, v in shop.STORES.items()} if every else
+                                   {"format": fmt, "store": info["store"], "line": info["line"], "checked": info["checked"],
+                                    "help_page": info["page"], "limits": info["limits"]}),
+                  "notes": ["Prices are Scryfall's (sourced from TCGplayer and Cardmarket), dated, not any store's price today. "
+                            "The Vault knows no store's price: it never says which store is cheapest.",
+                            "Paste the text into the store's own list tool and check what it matched. The Vault does not contact stores, "
+                            "fill carts or place orders."]}
+        if every:
+            result["texts"] = {f: shop.render(lines, f) for f in shop.FORMATS}
+        else:
+            result["notes"] += shop.store_notes(fmt, lines, rules)
+        if excluded:
+            result["notes"].append(f"{excluded} card(s) have no printing that fits the rules and are left out of the text and the total: "
+                                   "see `reason` on those lines.")
+        used = ("oracle_cards", "oracle_prices", "oracle_printings") if rules.given else ("oracle_cards", "oracle_prices")
+        return answer(db, "shopping list", result, used, "shopping-list", identity(db, user, body))
 
     return router

@@ -429,7 +429,7 @@ function DeckCards({ rows, summary, filter, setFilter, openCard }) {
                     </div>
                   )}
                   {r.scry && !r.ownEntries.length && (
-                    <div className="muted" style={{ fontSize: 10, fontFamily: 'var(--mono)', marginTop: 2, display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <div className="muted" style={{ fontSize: 10, fontFamily: 'var(--mono)', marginTop: 2, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                       <ColorIdentity colors={r.scry.color_identity} /><span>{r.scry.type_line?.split(' — ')[0]}</span>
                     </div>
                   )}
