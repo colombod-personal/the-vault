@@ -60,6 +60,40 @@
     <p class="how">How we use it: indirectly, through Scryfall. The Vault never contacts these marketplaces.</p>
   </div>
 
+  <div class="card" id="scryfall-tagger">
+    <h3><a href="https://scryfall.com/docs/tagger-tags" target="_blank" rel="noopener">Scryfall Tagger</a> contributors</h3>
+    <p>Roles such as ramp, card draw, removal and sweepers come from the functional tags that volunteers attach to
+      cards in Scryfall's Tagger project. Scryfall publishes them in its bulk data; the Vault shows each one as
+      "tagged by Scryfall's community Tagger", with its weight, never as a rule. When a card has no Tagger tag, the Vault
+      may show a role it worked out itself from the card's Oracle text, and says so ("computed by the Vault").</p>
+    <p class="how">How we use it: the server downloads the tag file with Scryfall's other bulk data. Nothing about you is
+      sent.</p>
+    <p class="thanks">Thank you to everyone who tags cards.</p>
+  </div>
+
+  <div class="card" id="wizards-rules">
+    <h3><a href="https://magic.wizards.com/en/rules" target="_blank" rel="noopener">Wizards of the Coast</a>:
+      Comprehensive Rules and Commander Brackets</h3>
+    <p>The rules text the Vault's assistants quote is Wizards' Magic: The Gathering Comprehensive Rules, and the
+      bracket hint for Commander decks follows the
+      <a href="https://magic.wizards.com/en/formats/commander" target="_blank" rel="noopener">Commander Brackets</a> and
+      Game Changers list Wizards publishes. Card rulings are Wizards' too, published through Scryfall.</p>
+    <p class="how">How we use it: the Vault keeps no copy of the rules. The server reads the current edition from
+      Wizards' site when a rules question is asked (the rules page names the file), shows the rule number, the edition date and a link to
+      Wizards' document with each quote, and nothing about you is sent. The Vault is not approved or endorsed by Wizards.</p>
+  </div>
+
+  <div class="card" id="commander-spellbook">
+    <h3><a href="https://commanderspellbook.com" target="_blank" rel="noopener">Commander Spellbook</a></h3>
+    <p>When you ask which combos a Commander deck contains, the Vault asks Commander Spellbook, a community-built
+      database of Magic combos. Each combo, its description and its steps were written by its community and are shown
+      as theirs, with a link to the combo's own page.</p>
+    <p class="how">How we use it: only when you ask, the server sends the deck's card names (no account, name or
+      address) to Commander Spellbook's public service and shortens the answer. The Vault keeps no copy of their data.
+      The Vault isn't affiliated with or endorsed by Commander Spellbook.</p>
+    <p class="thanks">Thank you to the Commander Spellbook maintainers and everyone who adds combos.</p>
+  </div>
+
   <div class="card">
     <h3>Artists</h3>
     <p>Every card image is the work of an illustrator, credited under the image wherever the Vault shows
@@ -145,7 +179,7 @@
       Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast.
       ©Wizards of the Coast LLC. Magic: The Gathering, card names, mana symbols and card images are
       property of Wizards of the Coast LLC.</p>
-    <p>Scryfall, Archidekt, Dragon Shield, Moxfield, TCGplayer, Cardmarket, Cardhoarder and the sign-in providers
+    <p>Scryfall, Commander Spellbook, Archidekt, Dragon Shield, Moxfield, TCGplayer, Cardmarket, Cardhoarder and the sign-in providers
       are trademarks of their respective owners. Naming them here is an acknowledgement, not a claim
       of partnership or endorsement.</p>
     <p><a class="btn sm" href="/">Back to the Vault</a> <a class="btn sm ghost" href="privacy.html">Privacy notice</a></p>
