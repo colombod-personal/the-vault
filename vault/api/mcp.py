@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Callable
@@ -26,7 +28,7 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 
-from .. import experts
+from .. import experts, observability
 from ..deck_tools import FORMATS
 from ..models import User
 from . import mcp_session, mcp_ui
@@ -457,6 +459,30 @@ def _with_cursor(body: Any) -> Any:
     return body
 
 
+def _with_retry_hint(status: int, headers, body: Any, request_id: str) -> Any:
+    """What an agent needs to carry on after a failed tool call: for a 429 or a 503 when to come back
+    (``retry_after_seconds``, from the answer's Retry-After); for any other 5xx that trying again is reasonable, and the
+    request id to quote. Other answers are unchanged."""
+    if status != 429 and status < 500:
+        return body
+    if not isinstance(body, dict):
+        body = {"detail": str(body)[:300]}
+    try:
+        after = math.ceil(float(headers.get("retry-after")))
+    except (TypeError, ValueError):
+        after = body.get("retry_after_seconds") or 5
+    out = {**body, "status": status, "retry_after_seconds": max(1, int(after))}
+    detail = str(out.get("detail") or out.get("title") or "The Vault could not complete this request.")
+    if status >= 500:
+        out["request_id"] = request_id
+        if "Try again" not in detail:
+            detail += f" Try again in {out['retry_after_seconds']} seconds."
+        if request_id and request_id not in detail:
+            detail += f" (request {request_id})"
+    out["detail"] = detail
+    return out
+
+
 def _marked_as_mcp(app):
     """The app, for the in-process calls a tool makes: they are marked, in the request's own scope
     (which no client can write to), as coming from the MCP server. OAuth access tokens are accepted
@@ -485,7 +511,13 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
             kwargs["files"] = {"file": (args.get("filename") or "agent-import.csv", args["csv"].encode(), "text/csv")}
         elif tool.body is not None:
             kwargs["json"] = tool.body(args)
-        transport = httpx.ASGITransport(app=_marked_as_mcp(request.app))
+        rid = request.scope.get("state", {}).get("request_id", "")
+        headers["x-request-id"] = rid  # the in-process call logs under the same id
+        # raise_app_exceptions=False: an exception the app turned into an answer (the 500 with a request id, the 503 for a
+        # database that cannot be reached) is that answer here too, with its hint, instead of a bare exception.
+        transport = httpx.ASGITransport(app=_marked_as_mcp(request.app), raise_app_exceptions=False)
+        started = time.perf_counter()
+        failure = None
         try:
             async with httpx.AsyncClient(transport=transport, base_url=str(request.base_url).rstrip("/")) as client:
                 method = tool.method(args) if callable(tool.method) else tool.method
@@ -494,15 +526,25 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
                     path, fixed = path.split("?", 1)
                     kwargs["params"] = {**dict(parse_qsl(fixed)), **kwargs["params"]}
                 res = await client.request(method, path, **kwargs)
-        except Exception:  # the API failed: this tool call failed, not the whole MCP request (or its batch)
-            log.exception("MCP tool %s failed", tool.name)
-            return 500, {"type": "about:blank", "title": "Internal server error", "status": 500,
-                         "detail": "The Vault could not complete this request. Try again later."}
-        try:
-            body = res.json()
-        except ValueError:
-            body = {"text": res.text}
-        return res.status_code, body
+        except Exception as exc:  # the API failed: this tool call failed, not the whole MCP request (or its batch)
+            failure = exc
+        took = round((time.perf_counter() - started) * 1000)
+        engine = request.app.state.db.engine
+        if failure is not None:
+            observability.event(logging.ERROR, "mcp_tool_failed", request_id=rid, tool=tool.name, duration_ms=took,
+                                pool=observability.pool_state(engine), **observability.describe(failure))
+            status, body = 500, {"type": "about:blank", "title": "Internal server error", "status": 500}
+            headers_back: Any = {}
+        else:
+            status, headers_back = res.status_code, res.headers
+            try:
+                body = res.json()
+            except ValueError:
+                body = {"text": res.text}
+        body = _with_retry_hint(status, headers_back, body, rid)
+        observability.event(logging.WARNING if status >= 500 else logging.INFO, "mcp_tool", request_id=rid, tool=tool.name,
+                            status=status, duration_ms=took, pool=observability.pool_state(engine))
+        return status, body
 
     @router.post("/api/mcp", tags=["agents"], summary="MCP server (Streamable HTTP, JSON-RPC 2.0) for AI agents")
     async def mcp(request: Request, user: User | None = Depends(optional_user)):
@@ -523,10 +565,21 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
             if not message or len(message) > MAX_BATCH:
                 why = "an empty batch" if not message else f"a batch holds at most {MAX_BATCH} calls"
                 return JSONResponse(_rpc_error(None, -32600, f"Invalid request: {why}"), status_code=400)
-            answers = [a for a in [await handle(request, m, i) for i, m in enumerate(message)] if a is not None]
+            answers = [a for a in [await guarded(request, m, i) for i, m in enumerate(message)] if a is not None]
             return JSONResponse(answers, headers=session_headers(request)) if answers else Response(status_code=202)
-        answer = await handle(request, message)
+        answer = await guarded(request, message)
         return JSONResponse(answer, headers=session_headers(request)) if answer is not None else Response(status_code=202)
+
+    async def guarded(request: Request, msg: Any, part: int | None = None) -> dict | None:
+        """``handle``, with an exception it did not expect turned into a JSON-RPC internal error that says when to retry and
+        which request to quote (and is logged under that id), not a bare 500 the client reports as a dead server."""
+        try:
+            return await handle(request, msg, part)
+        except Exception as exc:
+            rid = observability.log_unhandled(request, exc)
+            return {"jsonrpc": "2.0", "id": msg.get("id") if isinstance(msg, dict) else None, "error": {
+                "code": -32603, "message": f"Internal error. Try again in a few seconds; if it keeps happening, quote request {rid}.",
+                "data": {"retryAfterSeconds": 5, "requestId": rid}}}
 
     def session_headers(request: Request) -> dict[str, str]:
         issued = getattr(request.state, "new_session", None)

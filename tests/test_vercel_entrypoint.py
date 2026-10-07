@@ -47,9 +47,11 @@ def test_postgres_engine_suits_neons_pooler(monkeypatch):
 
     seen = {}
     monkeypatch.setattr(db, "create_engine", lambda url, **kw: seen.update(url=url, **kw))
+    monkeypatch.setattr(db, "_retry_connects", lambda engine: None)  # (the fake engine is None)
     db.make_engine("postgres://u:p@ep-x-pooler.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require")
     assert seen["url"].startswith("postgresql+psycopg://") and "channel_binding=require" in seen["url"]
-    assert seen["connect_args"] == {"prepare_threshold": None} and seen["pool_pre_ping"] is True
+    assert seen["connect_args"]["prepare_threshold"] is None and seen["pool_pre_ping"] is True
+    assert 0 < seen["connect_args"]["connect_timeout"] <= 10, "a connection that hangs must give up and be retried (a compute waking up)"
 
 
 def test_entrypoint_is_named_explicitly_for_vercel():
