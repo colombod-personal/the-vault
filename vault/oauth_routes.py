@@ -50,7 +50,7 @@ NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
 
 SCOPE_TEXT = {
     "read": "Read your collection, decks, value history and what others shared with you",
-    "write": "Make changes: import collections, save and edit decks, refresh prices, share",
+    "write": "Make changes: import collections, save and edit decks, change which cards you own, refresh prices, share",
 }
 NEVER = ("Delete your account", "Export all your data", "Create or revoke access tokens",
          "Manage your sign-in methods or other connected apps")

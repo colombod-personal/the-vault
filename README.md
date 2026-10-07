@@ -197,7 +197,8 @@ with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic
   compute hours used (limit 100 CU-hours), network transfer (5 GB) and storage (1 GB); the database
   cannot see the first two. The daily price history grows about
   0.5 GB a year for a ~10k-printing collection, so after that Neon's pay-as-you-go plan costs
-  about $0.35 per GB-month plus compute while in use (a few dollars a month).
+  about $0.35 per GB-month plus compute while in use (a few dollars a month). Price history is capped
+  at a year and thinned (`docs/catalog-design.md`), which keeps 10,000 printings near 290 MB.
 - GitHub Actions: $0.
 - A domain: about $10/year at Cloudflare or Porkbun.
 

@@ -34,14 +34,14 @@ All collection tools also read a collection someone shared with you (`share_id`,
 
 | Action | REST route | MCP tool | Scope | Gap |
 |---|---|---|---|---|
-| List saved decks | `GET /decks` | `list_decks` | read | **partly**: no name search (#96) |
+| List saved decks | `GET /decks` | `list_decks` (a `query` finds a deck by name) | read | no |
 | Open a deck with coverage | `GET /decks/{id}` | `get_deck` | read | no |
 | Save a deck (text and its link) | `POST /decks` | `save_deck` (with `source_url`) | write | no |
 | Edit a deck | `PUT /decks/{id}` | `update_deck` | write | no |
 | Delete a deck | `DELETE /decks/{id}` | `delete_deck` (shows the deck first; deletes only with `confirm`) | write | no |
-| Load a deck from an Archidekt link | `GET /archidekt/decks/{id}` | `get_archidekt_deck` | read | **partly**: saving it needs the model to convert JSON to text (#96 `import_deck_from_link`) |
+| Load a deck from an Archidekt link | `GET /archidekt/decks/{id}` | `get_archidekt_deck`; `import_deck_from_link` saves it | read / write | no |
 | Check a decklist against the collection | `POST /decks/coverage`, `/decks/parse` | `check_decklist`, `parse_decklist` | read | no |
-| Stats, legality, upgrades, validate, combos, shopping list | `POST /decks/stats` ... | `deck_stats`, `deck_legality`, `find_upgrades`, `validate_deck_changes`, `find_combos`, `shopping_list` | read | **partly**: text only, no `deck_id` (#96) |
+| Stats, legality, upgrades, validate, combos, shopping list, draw simulation | `POST /decks/stats` ... | `deck_stats`, `deck_legality`, `find_upgrades`, `validate_deck_changes`, `find_combos`, `shopping_list`, `simulate_draws` (each takes a saved `deck_id` or pasted text) | read | no |
 
 ## Sharing
 
@@ -79,4 +79,4 @@ Shown on the consent screen as "It will never be able to". These stay web-only.
 - ~~G4 Deck overlap~~: `get_deck_overlap` ("which of my decks share cards, and am I short?"); the graph's clusters stay visual.
 - ~~G5 Delete a deck~~: `delete_deck`, preview then `confirm`.
 - ~~G6 Sharing~~: `list_my_shares`, `accept_share`, `stop_sharing` (confirm). Creating a share stays with the person (see the table).
-- Deck items (name search, import from link, `deck_id` analysis) are in #96, owned by the deck work (#88).
+- ~~Deck items (name search, import from link, `deck_id` analysis)~~: done in #96 (`list_decks` with `query`, `import_deck_from_link`, `deck_id` on every deck tool).
