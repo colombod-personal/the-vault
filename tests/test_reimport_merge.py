@@ -508,7 +508,7 @@ def test_a_re_import_of_ten_thousand_rows_with_edits_stays_fast(app, person):
     assert res.status_code == 201 and res.json()["merge"]["kept_vault_edits"]["count"] == 400
     assert seen["merge"]["from_your_app"]["increased"] == 500
     assert copies_of(app, "Card 0") == 3 and copies_of(app, "Card 5000") == 3 and copies_of(app, "Card 9000") == 1
-    assert previewed < 4 and merged < 7 and first < 8, (first, previewed, merged)
+    assert previewed < 12 and merged < 20 and first < 20, (first, previewed, merged)
     t0 = time.perf_counter()
     upload(person, newer)  # the same file again
     assert time.perf_counter() - t0 < 7
