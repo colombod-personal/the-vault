@@ -144,6 +144,12 @@ result with `isError`. Pages include a `next_cursor`, and
 answers come as `structuredContent` plus the same JSON as text. The server's `instructions`
 tell the agent how to start, and remind it to credit artists and Scryfall.
 
+When the Vault cannot answer *right now*, the tool result says when to come back: a `429` (rate limit) or `503` (busy, the database
+or Wizards or Archidekt not reachable) result has `status`, a `detail` with "Try again in N seconds" and `retry_after_seconds`; any
+other server error has `retry_after_seconds` and a `request_id` to quote. A failure of the MCP server itself is a JSON-RPC
+error `-32603` with `data.retryAfterSeconds` and `data.requestId`. Every response carries `X-Request-Id`, the key of the server's log
+line (`docs/ai-integration-testing.md`, "Parallel use"). Agents should retry after that many seconds, not at once.
+
 ## Built for flaky networks and retrying agents
 
 - **Small answers.** Lists are pages of at most 500 items (25 by default for MCP) with cursors,

@@ -162,7 +162,7 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
         return deck.text
 
     def prepared(request: Request, db: Session, user: User, text: str) -> dt.Resolved:
-        throttle(request, settings, "deck analysis", f"user:{user.id}", DECK_LIMIT)
+        throttle(request, settings, "deck analysis", f"user:{user.id}", DECK_LIMIT, db)
         if "oracle_cards" not in q.sources(db):
             raise HTTPException(503, "The card catalog has not been loaded yet, so this cannot be computed.")
         try:

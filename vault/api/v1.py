@@ -919,11 +919,20 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 "vault_cache": raw.get("vault_cache")}
 
     def fetch_archidekt(deck: int) -> dict:
+        """One read of a public deck. Bounded, because the function has a time limit and a thread and a person's request are
+        held while it runs: the shared client would wait 30 s after a 429 and try three more times (more than a minute)."""
         try:
-            with ArchidektClient(client=httpx.Client(transport=transport, timeout=30, follow_redirects=True)) as client:
+            with ArchidektClient(client=httpx.Client(transport=transport, timeout=httpx.Timeout(10, connect=5),
+                                                     follow_redirects=True)) as client:
+                client.max_retries, client.rate_limit_backoff, client.max_retry_wait = 1, 3.0, 5.0
                 return client.get_deck(deck).raw
         except ApiError as exc:
-            raise HTTPException(exc.status_code if exc.status_code == 404 else 502, str(exc)) from exc
+            if exc.status_code == 404:
+                raise HTTPException(404, str(exc)) from exc
+            if exc.status_code == 429:
+                raise HTTPException(503, "Archidekt is limiting requests right now, so the deck cannot be read. Try again in a minute.",
+                                    headers={"Retry-After": "60"}) from exc
+            raise HTTPException(502, "Archidekt could not be reached or did not answer properly. Try again shortly. " + str(exc)[:120]) from exc
 
     @router.post("/decks/import-link", tags=["decks"],
                  summary="Save a public Archidekt deck from its link: the server reads it and keeps its sections; the same link never "
@@ -1064,7 +1073,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                  summary="Preview small edits to the cards owned (add, remove, set): changes nothing; returns a confirmation")
     def preview_owned_changes(request: Request, body: S.OwnedChangesIn, user: User = Depends(current_user),
                               db: Session = Depends(get_db)) -> dict:
-        per_user(request, "owned changes preview", user.id, 30)
+        per_user(request, "owned changes preview", user.id, 30, db)
         try:
             return changes_answer(owned_changes.preview(db, user, [line.model_dump() for line in body.lines],
                                                         settings.session_secret, lambda s, n: lookup_printing(db, s, n)))
@@ -1075,7 +1084,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                  summary="Apply exactly the previewed edits, with the preview's confirmation, after the person said yes")
     def apply_owned_changes(request: Request, body: S.OwnedChangesApplyIn, user: User = Depends(current_user),
                             db: Session = Depends(get_db)):
-        per_user(request, "owned changes", user.id, 10)
+        per_user(request, "owned changes", user.id, 10, db)
         label = tokens.app_label(db, getattr(request.state, "bearer", None))
 
         def run():
@@ -1094,7 +1103,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                  summary="Undo the last assistant change set: without a confirmation, preview; with it, apply")
     def undo_owned_changes(request: Request, body: S.OwnedUndoIn, user: User = Depends(current_user),
                            db: Session = Depends(get_db)) -> dict:
-        per_user(request, "owned changes", user.id, 10)
+        per_user(request, "owned changes", user.id, 10, db)
         imp = owned_changes.last_undoable(db, user)
         if imp is None:
             raise HTTPException(409, "Nothing to undo: only the last change made through an assistant, and only until the "
@@ -1152,7 +1161,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     def refresh_collection(request: Request, body: S.RefreshIn | None = None, user: User = Depends(current_user),
                            db: Session = Depends(get_db)) -> dict:
         body = body or S.RefreshIn()
-        per_user(request, "refresh", user.id, settings.refresh_rate_limit)
+        per_user(request, "refresh", user.id, settings.refresh_rate_limit, db)
         today = date.today()
         state = analytics.refresh_state(db, user.id, today, body.cursor, body.force)
         processed = not_found = 0

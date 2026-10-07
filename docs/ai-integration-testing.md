@@ -36,6 +36,120 @@ DEV_LOGIN=1 DATABASE_URL=... uvicorn --factory vault.app:create_app --port 8010
 Whether the sources may be loaded in production is a separate decision (`docs/compliance.md`); loading them on a local
 machine for testing is what this page describes. The first load takes about 40 seconds, a repeat load 6 seconds.
 
+## Parallel use: the load test (#169)
+
+On 2026-10-05 five agents calling the production MCP server at the same time got 500s and "server isn't responding" (`get_card_oracle`
+several times, `get_deck` twice); retrying worked. Production logs were not available to the work below (the Vercel connector is not
+authorised), so **what the failures were in production is not proven from a log**. What is proven is what the code does under that
+shape of load, on a machine where it can be repeated.
+
+### What was wrong (found by reading the code, then reproduced; each has a test in `tests/test_parallel_load.py` that failed before)
+
+1. **A tool call needed up to three database connections at once.** The MCP request held one for its whole life (its session),
+   the in-process API call opened a second, and the catalog's rate limit counted in a third. With a pool of 2+2 two calls
+   starved each other: each held its connection and waited for another. Measured on the old code with that pool (5 agents, 20
+   calls, one instance): **2 answers, 18 failures, after 30 s waits, 90 s in all.** #176 made the pool 6+14 and the wait 8 s, which
+   hides it until a few more calls are in flight. Now a request holds one connection at a time (the MCP endpoint closes its own
+   session before it runs the tool; the rate limit counts in the request's session), so calls queue for the pool and never wait for
+   themselves: the same 2+2 pool now answers all 100 calls in 2.5 s. Test: a pool of **one** connection serves 30 parallel calls.
+2. **A refused connection was not retried.** A Neon compute waking from suspend, or any database at its connection limit, refuses
+   a connection and accepts the next one a moment later. SQLAlchemy's `pool_pre_ping` does not cover that (it checks connections
+   already in the pool), so the request failed. Connections are now retried (4 attempts, 0.5 s doubling, with jitter, 8 s connect
+   timeout; not for a wrong password or a missing database), and one that still fails is a **503 with `Retry-After`**, never a 500.
+3. **A cold start could crash the instance.** `create_app` migrates at import; a database still waking raised out of the import, so
+   the function instance failed. The instance now comes up and the first request that needs the database finishes the migration.
+4. **A failing or slow Wizards held the whole server.** The rules lock was held during the download (30 s timeout) and a failed read
+   was not remembered, so ten parallel rules calls meant ten timeouts in a row, each holding a thread (the server has 40). A failed
+   read with nothing cached is now remembered for 20 s (calls answer 503 at once, with `Retry-After`), a stale edition is served while
+   one call refreshes it, and a download that is not text or not rules is the same 503, not a 500.
+5. **The Archidekt path held a connection and a thread for minutes.** It held the database session during the call, whose client
+   waits 30 s after a 429 and tries three more times (over the function's 60 s limit). The call is now bounded (about 10 s), holds no
+   connection, is made once per deck per instance however many agents ask at the same moment, and a 429 is a 503 with `Retry-After`.
+6. **Failures were bare.** An exception nobody planned for was a plain "Internal Server Error"; in a tool call a generic message
+   with no hint. Now: problem+json with `request_id` and `retry_after_seconds` (and the `X-Request-Id` header); on the MCP endpoint a
+   JSON-RPC error (`-32603`, `data.retryAfterSeconds`, `data.requestId`); in a tool result `isError` with `status`,
+   `retry_after_seconds` and `request_id`. The per-person limits answer 429 with `Retry-After` **and** "Try again in N seconds." in the
+   text, and over MCP the retry time is in the result (it used to be lost with the header).
+
+### Run it
+
+```bash
+# a running Vault, production included (a read-only personal access token is enough; nothing is written)
+python scripts/load_test.py --url https://mtgvault.cards --token vault_pat_... --deck-id 12 --clients 5 --calls 20 --burst 2
+
+# everything on this machine: Postgres (a disposable database: it is emptied), the twin universe for Wizards and Archidekt,
+# and --workers separate server processes, each with its own connection pool
+python scripts/load_test.py --local --database-url postgresql://small_role:pw@localhost:5432/load_db --workers 2
+```
+
+Five agents make 20 tool calls each, two in flight at once per agent (an assistant running its tool calls in parallel), mixing
+`get_card_oracle` (also with a typo, for the fuzzy path), `search_rules`, `get_rule`, `get_collection_summary`, `list_decks` and,
+with `--deck-id`, `get_deck`, `deck_stats`, `deck_legality` (`--archidekt-id` adds `get_archidekt_deck`). It prints, per tool, how
+many answers were fine, an honest 404, a 429, a 503, another 5xx, no answer at all (timeout, refused connection) or a JSON-RPC error,
+with the p50, p95 and maximum time. **It exits 1 on any 5xx (a 503 too), any call with no answer, any JSON-RPC error, and any 429 or
+503 that came without a retry hint.** A 429 is not a failure, but it is reported: the catalog allows 60 calls a minute per person and
+deck analyses 30, so run production once a minute, not in a loop. `--local` also runs three more cases: Wizards down on cold instances
+(the rules tools answer 503 with a hint and nothing else is affected), the catalog tools only, and Archidekt answering in 2 s.
+
+### Measured on this machine (2026-10-07)
+
+Windows 11, Postgres 16 in Docker on the same machine, a catalog of 5,000 invented cards, a collection of 3,000 rows, a 100-card deck,
+the twin universe standing in for Wizards and Archidekt. The database role had **`CONNECTION LIMIT 12`** (a small compute's order of
+magnitude) and there were two server instances, so the instances' pools together could want more than the database gives.
+
+| Case | Before (main at 784dc45) | After |
+|---|---|---|
+| 5 agents x 20 calls, mixed tools, 2 instances | 32 ok, **68 failed** (60 server errors, 8 refused or dropped); 260 tracebacks in the log | 100 ok, **0 failed** |
+| 5 agents x 20 calls, catalog tools only | 17 ok, **83 failed** | 100 ok, **0 failed** |
+| 5 agents x 20 calls, pool of 2+2 and a 30 s wait (the original #169 settings), 1 instance | 2 ok, **18 failed**, 90 s | 100 ok, **0 failed**, 2.5 s |
+| 12 agents x 20 calls, 3 at once each (36 in flight), mixed tools, default pools | not run | 201 ok, 14 rate limited (429), **25 clean 503 "could not reach its database"** with a retry hint, 0 other failures |
+| the same with `DB_POOL_SIZE=3 DB_MAX_OVERFLOW=2` (2 x 5 stays under the role's 12) | not run | 222 ok, 18 rate limited, **0 failed**, 3.1 s instead of 7.0 s |
+| Wizards down, cold instances | not measured on the old code (the twin answers an outage at once; a hanging Wizards, item 4, is read from the code and covered by a test) | 12 rules calls answered 503 at once with a retry hint, 38 other calls ok |
+| Archidekt answering in 2 s | | the 5 Archidekt calls took 2 s (p50 1965 ms); the other 45 calls were not delayed (p95 under 200 ms) |
+
+A default run of `--local` (all four cases, 2 instances) ends with `FAILURES 0` in each; the p95 of every tool was under 0.5 s (the 2 s Archidekt calls aside).
+On a database with no connection limit the old code also passed 5 x 20 (0 failures): the failures need a pool smaller than the work, a
+connection limit, or the nested connections, which is why the original 2+2 pool failed and the 6+14 pool of #176 held in the
+production check of 2026-10-06 (about 85 calls, no 5xx).
+
+**Tuning for a database with its own connection limit** (a direct Neon URL, a small role): the server keeps `DB_POOL_SIZE` (6) idle
+connections and opens up to `DB_MAX_OVERFLOW` (14) more per instance, and gives up waiting for a free one after `DB_POOL_TIMEOUT` (8 s,
+then 503). Set them so that instances x (size + overflow) stays under the limit; calls beyond that queue instead of failing. Neon's
+pooled URL (host `...-pooler...`, PgBouncer) takes many client connections, so the defaults are fine there. `NullPool` was considered
+and rejected: a new TLS connection per request costs more than it saves, and an instance serves many requests. Also tunable:
+`DB_CONNECT_TIMEOUT` (8 s), `DB_CONNECT_ATTEMPTS` (4), `DB_CONNECT_RETRY_DELAY` (0.5 s).
+
+### What this cannot show
+
+- **Neon.** There is no scale-to-zero here: a compute that is asleep, how long it takes to wake, whether its pooler refuses connections
+  while it does, are not simulated. The retry (item 2) is tested with a connection that is refused twice, not with Neon.
+- **Vercel.** One instance here is one process on a fast machine; Vercel's concurrency per instance, how many instances start at
+  once, cold-start time and the 60 s limit are not reproduced. Latencies are those of localhost.
+- **The real services.** Wizards and Archidekt are the twins (`docs/twins.md`), the catalog is invented, 5,000 names rather than
+  30,000.
+- **uvicorn's own `--workers` on Windows.** With it, in 3 of about 20 runs a few first requests were never read until the client
+  gave up (the log showed them only after the disconnect). It did not happen in any run with separate processes, which is what
+  `--workers` now means and what Vercel does. It was not diagnosed further; it is mentioned so nobody mistakes it for the Vault.
+
+### The production confirmation (a real run, after deploy)
+
+The criterion "a parallel load test on production shows no 5xx" is met on this machine and **not yet on production**. After the deploy:
+
+1. `python scripts/load_test.py --url https://mtgvault.cards --token <a read-only token> --deck-id <a saved deck> --clients 5 --calls 20 --burst 2`
+   once, and post its output in the issue. Pass: exit code 0 and `FAILURES 0`. Run it when the person has not used the catalog in the
+   last minute (60 a minute; the default mix makes about 45 catalog calls and 22 deck analyses).
+2. Look in Vercel's runtime logs for lines with `"event"` (one JSON object per line, logger `vault.access`). Every answer carries
+   `X-Request-Id`, which is Vercel's own request id, so a failed call found in a client is found in the log by it.
+   - `mcp_tool`: `tool`, `status`, `duration_ms`, `pool` (`checked_out` of `size` + `max_overflow`: close to the sum means the pool is the limit).
+   - `slow_request` (3 s or more) and `server_error` (a 5xx that was not an exception, for example a 503 for a busy pool).
+   - `unhandled_exception`: `error_class`, `cause_class`, `sqlstate`, `where` (file:function:line), `route`, `duration_ms`, `pool`.
+   - `db_connect_retry`: `sqlstate` 57P03 or none = the database was waking or unreachable; 53300 = its connection limit. If these appear
+     after quiet periods, that is Neon's cold start, and it is being absorbed; if a call still fails, the `unhandled_exception` says so.
+   - `migration_deferred`, `rules_read_failed` (Wizards could not be read; `cached_edition` says whether an old one was served).
+   No token, name, query, address or exception message is logged.
+3. If a 5xx still shows up, its `request_id` leads to the line, and `error_class` + `sqlstate` + `where` say which of the causes above
+   it is (or a new one).
+
 ## What this does not test
 
 A model. The smoke test checks that the tools give a model what it needs; it does not run one. Running a real assistant

@@ -77,19 +77,29 @@ def limited(bucket: str, *, verify: bool = False, setting: str | None = None) ->
     return [Depends(check)]
 
 
-def per_user(request: Request, bucket: str, user_id: int, allowed: int) -> None:
+def per_user(request: Request, bucket: str, user_id: int, allowed: int, db: Session | None = None) -> None:
     """Limit one signed-in user's calls to an expensive endpoint (e.g. a refresh that calls
     Scryfall) to ``allowed`` a minute, whichever device or token they come from. Counted like the
-    sign-in limits, under a keyed hash of the bucket and user id, so the rows name no one."""
+    sign-in limits, under a keyed hash of the bucket and user id, so the rows name no one.
+    Pass the request's own ``db`` session: counting in a second one would hold two connections at once, and a request that
+    needs two when the pool is busy waits for itself (#169)."""
     settings: Settings = request.app.state.settings
     now = time.time()
     minute = int(now // WINDOW)
     key = hmac.new(settings.session_secret.encode(), f"user:{bucket}:{user_id}".encode(), hashlib.sha256).hexdigest()
-    with request.app.state.db.sessions() as db:
-        count = hit(db, key, minute)
-        if count == 1:
-            db.execute(delete(RateHit).where(RateHit.minute < minute - KEEP))
-        db.commit()
+    if db is None:
+        with request.app.state.db.sessions() as own:
+            count = _count(own, key, minute)
+    else:
+        count = _count(db, key, minute)
     if count > allowed:
-        raise HTTPException(429, "Too many refreshes. Try again in a minute.",
-                            headers={"Retry-After": str(max(1, math.ceil((minute + 1) * WINDOW - now)))})
+        wait = max(1, math.ceil((minute + 1) * WINDOW - now))
+        raise HTTPException(429, f"Too many {bucket} requests. Try again in {wait} seconds.", headers={"Retry-After": str(wait)})
+
+
+def _count(db: Session, key: str, minute: int) -> int:
+    count = hit(db, key, minute)
+    if count == 1:
+        db.execute(delete(RateHit).where(RateHit.minute < minute - KEEP))
+    db.commit()
+    return count

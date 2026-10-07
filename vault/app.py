@@ -17,10 +17,14 @@ from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, Response
+from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.exc import TimeoutError as SATimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.requests import ClientDisconnect
 
 from . import auth as auth_module
+from . import observability
 from . import oauth_clients, oauth_routes, oauth_server, outbound, passkeys, reviewer_routes, rules_live, tokens, uploads
 from .api import catalog_api, deck_api, mcp, meta, v1
 from .api.hal import problem
@@ -58,8 +62,9 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
     settings = settings or Settings()
     settings.check()
     transport = transport or outbound.transport(settings)
+    observability.configure()
     db = Database(settings.database_url)
-    db.migrate()
+    db.start()  # migrates; a database that is still waking is retried by the first request that needs it
     auth = auth_module.Auth(settings, transport=transport)
     verifier = NativeVerifier(settings, transport=transport)
     fetcher = oauth_clients.ClientFetcher(transport, resolver)
@@ -83,11 +88,47 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
             res.headers[k] = v
         return res
 
+    def unavailable(request: Request, detail: str, *, status: int = 503, retry: int = 5) -> JSONResponse:
+        """A failure that is the Vault's and passes: say so, say when to come back, and carry the request id. On the MCP
+        endpoint the body is a JSON-RPC error (an MCP client reads that, not a problem document)."""
+        rid = request.scope.get("state", {}).get("request_id", "")
+        headers = {"X-Request-Id": rid, **({"Retry-After": str(retry)} if status == 503 else {})}
+        if request.url.path == mcp.PATH:
+            return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {
+                "code": -32603, "message": detail, "data": {"retryAfterSeconds": retry, "requestId": rid}}},
+                status_code=status, headers=headers)
+        res = problem(status, detail, request_id=rid, retry_after_seconds=retry)
+        res.headers.update(headers)
+        return res
+
     @app.exception_handler(SATimeoutError)
     async def busy(request: Request, exc: SATimeoutError):
         """Every database connection of this instance was busy for the whole wait: say so (and when to retry)."""
-        res = problem(503, "The Vault is busy right now. Try again in a few seconds.")
-        res.headers["Retry-After"] = "5"
+        observability.log_unhandled(request, exc)
+        return unavailable(request, "The Vault is busy right now. Try again in a few seconds.")
+
+    @app.exception_handler(OperationalError)
+    @app.exception_handler(InterfaceError)
+    async def database_unreachable(request: Request, exc: Exception):
+        """The database refused or dropped the connection even after the retries (Neon waking from suspend, its connection
+        limit, a network blip): a 503 that says to try again, never a 500."""
+        observability.log_unhandled(request, exc)
+        return unavailable(request, "The Vault could not reach its database just now. Try again in a few seconds.")
+
+    @app.exception_handler(Exception)
+    async def unexpected(request: Request, exc: Exception):
+        """Anything nobody planned for: logged under the request id (class, route, duration, pool: no message, no data) and
+        answered with a document that tells the caller to try again and which request to quote."""
+        if isinstance(exc, ClientDisconnect):  # the caller gave up before it was answered: nobody to answer, but worth a line
+            observability.log_client_gone(request)
+            return Response(status_code=499)
+        rid = observability.log_unhandled(request, exc)
+        detail = f"Something went wrong on the Vault's side. Try again in a few seconds; if it keeps happening, quote request {rid}."
+        if request.url.path == mcp.PATH:
+            return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32603, "message": detail, "data": {
+                "retryAfterSeconds": 5, "requestId": rid}}}, status_code=500, headers={"X-Request-Id": rid})
+        res = problem(500, detail, title="Internal server error", request_id=rid, retry_after_seconds=5)
+        res.headers["X-Request-Id"] = rid
         return res
 
     @app.exception_handler(RequestValidationError)
@@ -149,6 +190,7 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
         return await call_next(request)
 
     def get_db():
+        db.ensure_migrated()
         yield from db.session()
 
     def optional_user(request: Request, session: Session = Depends(get_db)) -> User | None:
@@ -174,6 +216,14 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
                 request.state.bearer = bearer
             return user
         return auth_module.session_user(session, request)
+
+    def mcp_user(request: Request) -> User | None:
+        """``optional_user`` for the MCP endpoint, with a session of its own that is closed before the endpoint runs: the
+        request then holds no connection while its tool calls make theirs (a call used to hold one and need two or three
+        more, which starved the pool under parallel use, #169)."""
+        db.ensure_migrated()
+        with db.sessions() as session:
+            return optional_user(request, session)
 
     def current_user(request: Request, user: User | None = Depends(optional_user)) -> User:
         if user is None:
@@ -208,10 +258,12 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
     app.include_router(deck_api.build_router(get_db, current_user, settings, transport))
     app.include_router(passkeys.build_router(settings, get_db, auth_module.sign_in, account_user))
     app.include_router(reviewer_routes.build_router(settings, get_db, auth_module.sign_in))
-    app.include_router(mcp.build_router(optional_user, resource_metadata))
+    app.include_router(mcp.build_router(mcp_user, resource_metadata))
     app.include_router(oauth_routes.build_router(get_db, settings, fetcher, auth))
     app.include_router(uploads.build_router(get_db, current_user, settings))
     app.include_router(meta.build_router(get_db, settings))
+
+    app.add_middleware(observability.Observe)  # added last, so outermost: it sees every answer and gives every request its id
 
     @app.get("/api/health")
     def health() -> dict:
