@@ -367,3 +367,162 @@ def test_archidekt_real_deck_keys_have_not_drifted_from_the_twin(real):
     for part in ("deck", "entry", "card", "edition", "prices"):
         assert set(fx[part]) - {"vault_cache", "provenance"} == set(got[part]), (part, sorted(set(fx[part]) ^ set(got[part])))
     assert set(fx["oracleCard"]) <= set(got["oracleCard"])  # a card may have more (double-faced cards), never fewer
+
+
+# -- Wizards of the Coast: the rules page and the Comprehensive Rules TXT (twins/wizards.py, #21, #143) ------------------------
+
+RULES_HEADERS = {"User-Agent": HEADERS["User-Agent"], "Accept": "*/*"}
+
+
+def _rules_links(client, page_url="https://magic.wizards.com/en/rules"):
+    import re
+
+    html = client.get(page_url, headers=RULES_HEADERS).text
+    anchors = re.findall(r'<a [^>]*href="([^"]*MagicCompRules[^"]*)"', html)
+    return html, anchors
+
+
+def test_wizards_rules_page_names_the_current_edition_in_the_link_the_vault_reads(real, twin):
+    """vault.rules_live finds the edition by reading Wizards' page: the link to the TXT on media.wizards.com, whose file name
+    carries the edition date. If Wizards redesigns the page, this fails the night it happens, not when a person asks a rules
+    question. The twin must have the same links in the same order, with the same shape."""
+    import re
+
+    from vault.rules_live import TXT_LINK
+
+    twin.universe.wizards.publish("Magic: The Gathering Comprehensive Rules\n\nThese rules are effective as of March 3, 2027.\n", "20270303")
+    shape = re.compile(r"^https://media\.wizards\.com/(\d{4})/downloads/MagicCompRules[ %20]+(\d{8})\.(docx|pdf|txt)$")
+    seen = {}
+    for who, client in (("real", real), ("twin", twin)):
+        html, anchors = _rules_links(client)
+        found = TXT_LINK.findall(html)
+        assert found, f"{who}: the Vault's pattern finds no TXT link on the page"
+        matches = [shape.match(a) for a in anchors]
+        assert all(matches), f"{who}: unexpected link shape in {anchors}"
+        assert [m.group(3) for m in matches] == ["docx", "pdf", "txt"], f"{who}: links in another order or set: {anchors}"
+        assert all(m.group(2)[:4] == m.group(1) for m in matches), f"{who}: the year folder is not the edition's year"
+        assert len({m.group(2) for m in matches}) == 1, f"{who}: the three files name different editions"
+        assert 'class="cta"' in html and "Comprehensive Rules" in html
+        seen[who] = matches[-1].group(2)
+    assert re.fullmatch(r"20\d{6}", seen["real"])  # a date: the Vault reads the edition from the file itself, but this is how it is named
+
+
+def test_wizards_rules_text_is_plain_text_the_vault_can_parse_and_the_twin_answers_alike(real, twin):
+    """The TXT the page links: answers HEAD and GET as text/plain with an ETag, parses with the Vault's own parser into thousands
+    of rules, and its 'effective as of' date is the date in its file name or later (a new edition may be published before it
+    takes effect). The twin serves its file with the same headers."""
+    import re
+    from datetime import date
+
+    from vault import rules_parser
+    from vault.rules_live import TXT_LINK
+
+    twin.universe.wizards.publish("Magic: The Gathering Comprehensive Rules\n\nThese rules are effective as of March 3, 2027.\n\n"
+                                  "1. Game Concepts\n\n100. General\n\n100.1. These rules apply to any game.\n\n"
+                                  "100.2. Invented for the conformance run.\n\n100.3. Also invented.\n\nGlossary\n\nCredits\n", "20270303")
+    urls = {}
+    for who, client in (("real", real), ("twin", twin)):
+        html, _ = _rules_links(client)
+        urls[who] = TXT_LINK.findall(html)[0].replace(" ", "%20")
+    heads = {who: client.head(urls[who], headers=RULES_HEADERS) for who, client in (("real", real), ("twin", twin))}
+    for who, head in heads.items():
+        assert head.status_code == 200, who
+        assert head.headers["content-type"].startswith("text/plain"), who
+        assert head.headers.get("etag") and head.headers.get("last-modified"), who
+    text = real.get(urls["real"], headers=RULES_HEADERS).content.decode("utf-8-sig")
+    parsed = rules_parser.parse(text)
+    assert sum(r["kind"] == "rule" for r in parsed.rules) > 3000 and sum(r["kind"] == "glossary" for r in parsed.rules) > 100
+    named = re.search(r"MagicCompRules%20(\d{8})\.txt", urls["real"]).group(1)
+    assert parsed.effective_date >= date(int(named[:4]), int(named[4:6]), int(named[6:])), "effective before the date in its own file name"
+
+
+# -- Wizards of the Coast: the Commander Brackets pages vault.brackets was written from (#171) ---------------------------------
+
+BRACKET_STATEMENTS = {
+    "https://magic.wizards.com/en/formats/commander": [
+        "Bracket 1 and 2 decks exclude Game Changers. Bracket 3 allows for up to three Game Changers. Brackets 4 and 5 allow for unlimited Game Changers.",
+        "two-card infinite combos, extra turns, mass land denial",
+    ],
+    "https://magic.wizards.com/en/news/announcements/introducing-commander-brackets-beta": [
+        "you should not expect to see these cards anywhere in Brackets 1\u20133",
+        "Armageddon, Ruination, Sunder, Winter Orb, and Blood Moon",
+        "No intentional two-card infinite combos or mass land denial. Extra-turn cards should only appear in low quantities",
+    ],
+    "https://magic.wizards.com/en/news/announcements/commander-brackets-beta-update-october-21-2025": [
+        "remove the tutor restrictions from Commander Brackets entirely",
+    ],
+}
+
+
+def test_the_bracket_rules_the_hint_follows_are_still_what_wizards_publishes(real):
+    """vault.brackets holds thresholds read from these pages on 2026-10-07 (Game Changer limits per bracket, mass land denial out of
+    Brackets 1 to 3, extra-turn and two-card combo limits, no tutor limit). If Wizards changes one of these statements, this fails the
+    night it changes: update vault/brackets.py (its constants, RULE texts and RULES_READ) and the briefs that rely on it."""
+    import html
+    import re
+
+    from vault import brackets
+
+    assert {s["url"] for s in brackets.SOURCES} == set(BRACKET_STATEMENTS), "every page the hint cites is checked, and only those"
+    for url, statements in BRACKET_STATEMENTS.items():
+        page = real.get(url, headers=RULES_HEADERS)
+        assert page.status_code == 200, url
+        raw = page.text.replace("\\u003C", "<").replace("\\u003E", ">").replace("\\n", " ")  # the page data carries its text escaped
+        text = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", raw)))
+        text = re.sub(r"\s+([,.;:])", r"\1", text.replace("\u2019", "'").replace("\u2011", "-"))  # a link between words leaves a space before a comma
+        for statement in statements:
+            assert statement.replace("\u2019", "'") in text, f"{url} no longer says: {statement}"
+
+
+# -- GitHub issues and Neon's console (twins/github.py, twins/neon.py: the budget guard, #64) ---------------------------------
+
+GITHUB_HEADERS = {"User-Agent": HEADERS["User-Agent"], "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+GITHUB_REPO = "colombod-personal/the-vault"
+
+
+def test_github_lists_a_public_repositorys_issues_without_a_token_and_refuses_an_unauthenticated_write(real, twin):
+    """What jobs/budget_alert.py relies on: a public repository's open issues are readable without a token (pull requests are in
+    the list, with a pull_request key), and opening one without a token is a 401 with this body. The twin's issue has only fields
+    the real one has."""
+    twin.universe.github.add_issue(GITHUB_REPO, "A twin issue", "body", labels=("neon-budget",))
+    twin.universe.github.add_issue(GITHUB_REPO, "A twin pull request", "", pull_request=True)
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/issues"
+    r = real.get(url, params={"state": "open", "per_page": 5}, headers=GITHUB_HEADERS)
+    t = twin.get(url, params={"state": "open", "per_page": 5}, headers=GITHUB_HEADERS)
+    assert r.status_code == t.status_code == 200 and isinstance(r.json(), list)
+    real_issue = next((i for i in r.json() if "pull_request" not in i), r.json()[0])
+    real_pr = next((i for i in r.json() if "pull_request" in i), None)
+    for key in ("number", "title", "state", "body", "labels", "html_url", "user", "comments", "created_at", "updated_at"):
+        assert key in real_issue, key  # the fields jobs/budget_alert.py reads must exist in the real answer
+    twin_issue = next(i for i in t.json() if "pull_request" not in i)
+    assert invented(twin_issue, real_issue) == []
+    if real_pr is not None:
+        assert invented(next(i for i in t.json() if "pull_request" in i)["pull_request"], real_pr["pull_request"]) == []
+    body = {"title": "conformance: never created"}
+    r401 = real.post(url, json=body, headers=GITHUB_HEADERS)
+    t401 = twin.post(url, json=body, headers=GITHUB_HEADERS)
+    assert r401.status_code == t401.status_code == 401
+    assert r401.json()["message"] == t401.json()["message"] == "Requires authentication" and invented(t401.json(), r401.json()) == []
+    nobody = {**GITHUB_HEADERS, "User-Agent": ""}
+    assert real.get(url, headers=nobody).status_code in (200, 403)  # GitHub documents a 403 here; it has also answered 200
+
+
+def test_neon_refuses_a_missing_or_wrong_key_with_the_body_the_twin_sends(real, twin):
+    """jobs/neon_usage.py reads GET /api/v2/projects/{id}; without a valid key Neon answers 401 with request_id, code and message."""
+    url = "https://console.neon.tech/api/v2/projects/conformance-no-such-project"
+    for headers in ({}, {"Authorization": "Bearer not-a-key"}):
+        r, t = real.get(url, headers=headers), twin.get(url, headers=headers)
+        assert r.status_code == t.status_code == 401
+        assert set(r.json()) == set(t.json()) == {"request_id", "code", "message"}
+        assert r.json()["message"] == t.json()["message"]
+
+
+@pytest.mark.skipif(not (os.environ.get("NEON_CONFORMANCE_TOKEN") and os.environ.get("NEON_CONFORMANCE_PROJECT")),
+                    reason="by hand only: set NEON_CONFORMANCE_TOKEN and NEON_CONFORMANCE_PROJECT (an API key only the owner can create)")
+def test_neon_project_consumption_fields_the_usage_check_reads(real, twin):
+    twin.universe.neon.add_project("twin-project")
+    token = {"Authorization": f"Bearer {os.environ['NEON_CONFORMANCE_TOKEN']}"}
+    r = real.get(f"https://console.neon.tech/api/v2/projects/{os.environ['NEON_CONFORMANCE_PROJECT']}", headers=token).json()["project"]
+    t = twin.get("https://console.neon.tech/api/v2/projects/twin-project", headers={"Authorization": "Bearer twin-neon-key"}).json()["project"]
+    assert missing(r, ["compute_time_seconds", "data_transfer_bytes", "synthetic_storage_size", "consumption_period_start", "consumption_period_end"]) == []
+    assert invented(t, r) == []

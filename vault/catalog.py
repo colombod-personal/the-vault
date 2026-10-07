@@ -25,7 +25,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from .models import Card, PriceSnapshot
-from .prices import plausible_price
+from .prices import plausible_price, valid_ids
 from .sync import card_row, price_row, upsert
 
 MAX_IDENTIFIERS = 75  # Scryfall's own limit per /cards/collection request
@@ -76,7 +76,7 @@ class Catalog:
                     if cards:  # stored before the lock is released, so the next request finds them
                         today = date.today()
                         upsert(db, Card, [card_row(c) for c in cards], ("scryfall_id",))
-                        upsert(db, PriceSnapshot, [price_row(c, today) for c in cards], ("scryfall_id", "day"))
+                        upsert(db, PriceSnapshot, [price_row(c, today) for c in cards if valid_ids([c.id])], ("scryfall_id", "day"))
                         db.commit()
             except (ApiError, httpx.HTTPError):
                 unavailable = True
@@ -165,6 +165,7 @@ def _find(db: Session, ident: dict[str, str]) -> Card | None:
 
 
 def _latest_prices(db: Session, ids: list[str]) -> dict[str, PriceSnapshot]:
+    ids = valid_ids(ids)
     if not ids:
         return {}
     latest = (select(PriceSnapshot.scryfall_id, func.max(PriceSnapshot.day).label("day"))

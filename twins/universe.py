@@ -14,7 +14,9 @@ import httpx
 
 from .archidekt import ArchidektTwin
 from .base import Twin
+from .github import GitHubTwin
 from .mcp_client import ClientHostTwin
+from .neon import NeonTwin
 from .identity import AppleTwin, FacebookTwin, GoogleTwin, IdentityTwin, MicrosoftTwin
 from .scryfall import ScryfallTwin
 from .spellbook import SpellbookTwin
@@ -33,10 +35,12 @@ class Universe:
         self.vercel = VercelTwin()
         self.spellbook = SpellbookTwin(seed)
         self.wizards = WizardsTwin()
+        self.github = GitHubTwin()  # the repository issues the budget guard opens (jobs/budget_alert.py)
+        self.neon = NeonTwin()  # the console API the monthly usage check reads (jobs/neon_usage.py)
         self.client_hosts = ClientHostTwin()  # where MCP clients publish their OAuth metadata documents
         self.twins: dict[str, Twin] = {t.name: t for t in (self.google, self.microsoft, self.apple, self.facebook,
                                                            self.scryfall, self.archidekt, self.vercel, self.spellbook, self.wizards,
-                                                           self.client_hosts)}
+                                                           self.github, self.neon, self.client_hosts)}
         self.by_host: dict[str, Twin] = {h: t for t in self.twins.values() for h in t.hosts}
         self.escapes: list[str] = []
         self.transport = httpx.MockTransport(self.handle)

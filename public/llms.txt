@@ -195,7 +195,8 @@ be revoked (Account → Connected apps for OAuth).
     edition can be read: another `version` is refused with the current one named)
   - the expert council (the same experts the plugin installs): `council_brief` (the panel for a format and
     goal, each member's brief, the chair's procedure), `expert_brief` (one expert)
-  - deck analysis, computed by the Vault: `deck_stats`, `simulate_draws`, `deck_legality`, `find_upgrades`,
+  - deck analysis, computed by the Vault: `deck_stats` (with a Commander Bracket floor from Wizards' published rules;
+    pass `include_combos` to add Commander Spellbook's two-card combos), `simulate_draws`, `deck_legality`, `find_upgrades`,
     `validate_deck_changes`, `find_combos`, `shopping_list`
 - MCP prompts (`prompts/list`): `rules_judge`, `explain_interaction`, `upgrade_deck`, `shopping_help`, `council_review`.
 - A read-only token doesn't list the write tools; all of the above are read-only.

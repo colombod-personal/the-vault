@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from mtg_toolkits.scryfall import Card
 
+from tests.ids import sid
 from twins import Universe
 from vault import analytics
 from vault.app import create_app
@@ -37,7 +38,7 @@ def login(client, email):
 
 def card(id, name, set_code, number, type_line, colors, cmc, rarity, finishes=("nonfoil",), **prices):
     return Card.from_json({
-        "id": id, "name": name, "set": set_code, "collector_number": number, "finishes": list(finishes),
+        "id": sid(id), "name": name, "set": set_code, "collector_number": number, "finishes": list(finishes),
         "prices": {k: str(v) for k, v in prices.items()}, "type_line": type_line, "color_identity": colors,
         "cmc": cmc, "rarity": rarity, "artist": "Artist",
         "image_uris": {"small": f"https://img.test/{id}-s.jpg", "normal": f"https://img.test/{id}.jpg"},

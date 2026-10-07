@@ -1,8 +1,9 @@
 # The digital twin universe
 
-The Vault depends on seven outside services: Google, Microsoft, Apple and Facebook for sign-in,
-Scryfall for card data and prices, Archidekt for decks, and Vercel's API for the setup job
-(`jobs/vercel_setup.py`). `twins/` contains a **behavioural
+The Vault depends on these outside services: Google, Microsoft, Apple and Facebook for sign-in,
+Scryfall for card data and prices, Archidekt for decks, Vercel's API for the setup job
+(`jobs/vercel_setup.py`), Commander Spellbook for combos, Wizards of the Coast's site for the Comprehensive Rules, GitHub's issues API
+for the budget guard's alerts (`jobs/budget_alert.py`) and Neon's console API for compute-hour tracking (`jobs/neon_usage.py`). `twins/` contains a **behavioural
 clone** ("digital twin") of each one. The idea comes from StrongDM's Digital Twin Universe and
 Microsoft's `amplifier-bundle-digital-twin-universe`.
 

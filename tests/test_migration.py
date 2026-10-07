@@ -7,6 +7,7 @@ from datetime import date
 
 from test_api import BULK, CSV, V1, all_cards, upload
 
+from tests.ids import sid
 from vault.sync import sync
 
 MOXFIELD = (
@@ -49,7 +50,7 @@ def test_known_printings_are_priced_at_import_time(app, signed_in):
     cards = {c["name"]: c for c in all_cards(signed_in)}
     assert cards["Sol Ring"]["price"]["source"] == "scryfall" and cards["Sol Ring"]["price"]["market"] == 3.0
     assert {c["name"]: c["scryfall_id"] for c in cards.values()} == {
-        "A Killer Among Us": "kil", "Sol Ring": "sol", "Accursed Marauder": "acc", "Belfry Spirit": "bel"}
+        "A Killer Among Us": sid("kil"), "Sol Ring": sid("sol"), "Accursed Marauder": sid("acc"), "Belfry Spirit": sid("bel")}
 
 
 def test_unknown_files_name_the_supported_formats(signed_in):
@@ -79,9 +80,9 @@ def test_exports_use_scryfall_codes_and_real_finishes(app, signed_in):
     assert by_name["Accursed Marauder"]["Foil"] == "etched"  # blank Printing in Dragon Shield, etched-only card
     assert by_name["Sol Ring"]["Foil"] == "foil" and by_name["Sol Ring"]["Tags"] == "my cards"
     generic = list(csv.DictReader(io.StringIO(download(signed_in, "csv").text)))
-    assert {r["name"]: r["scryfall_id"] for r in generic}["Sol Ring"] == "sol"
+    assert {r["name"]: r["scryfall_id"] for r in generic}["Sol Ring"] == sid("sol")
     archidekt = download(signed_in, "archidekt").text
-    assert "Scryfall ID" in archidekt.splitlines()[0] and ",sol" in archidekt
+    assert "Scryfall ID" in archidekt.splitlines()[0] and "," + sid("sol") in archidekt
     assert download(signed_in, "text").text.splitlines()[0] == "4 A Killer Among Us (MKM) 167"
     assert download(signed_in, "text").headers["content-type"].startswith("text/plain")
 

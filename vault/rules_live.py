@@ -1,7 +1,8 @@
 """The Comprehensive Rules, read live from Wizards of the Coast: nothing of the rules is stored (docs/rules-index.md).
 
 Each instance reads Wizards' rules page (at most every ``PAGE_TTL`` seconds) to find the current edition's TXT, fetches
-and parses it (``vault.rules_parser``) when the edition changes, and keeps in memory: the rules, a search index (BM25),
+and parses it (``vault.rules_parser``) when the edition changes (a new file name) **or when the file under the same name changed** (a silent
+correction: one ``HEAD`` asks for its ``ETag`` or ``Last-Modified``), and keeps in memory: the rules, a search index (BM25),
 and a navigation map (the hierarchy with headings, the cross-references both ways, glossary terms and keyword abilities
 mapped to their rules). If Wizards cannot be reached and nothing is cached, :class:`RulesUnavailable` is raised: the
 tools say so and never answer from memory.
@@ -45,6 +46,10 @@ class RulesUnavailable(Exception):
         self.retry_after = retry_after
 
 
+def _validator(res: httpx.Response) -> str | None:
+    return res.headers.get("etag") or res.headers.get("last-modified")
+
+
 def _words(text: str) -> list[str]:
     return [w for w in WORD.findall(text.lower()) if len(w) > 2 and w not in STOP]
 
@@ -62,6 +67,7 @@ class Edition:
     tf: dict[str, Counter] = field(default_factory=dict)
     df: Counter = field(default_factory=Counter)
     avg_len: float = 1.0
+    validator: str | None = None  # the file's ETag (else Last-Modified) when it was read: how a silent correction is noticed
 
     @classmethod
     def build(cls, text: str, url: str) -> "Edition":
@@ -163,8 +169,13 @@ class Edition:
         matched = "all words" if results and all(w in self.tf[results[0]["number"]] for w in words) else "any word"
         return results, matched
 
+    def in_force(self) -> bool:
+        """False while the edition's own 'effective as of' date is still ahead: Wizards can publish a file weeks before it takes effect."""
+        return date.fromisoformat(self.version) <= date.today()
+
     def provenance(self) -> list:
-        return [prov.source("Wizards of the Coast", origin="Comprehensive Rules (read live; the Vault stores no copy)",
+        later = "" if self.in_force() else f"; this edition takes effect on {self.version}, until then the previous edition is in force"
+        return [prov.source("Wizards of the Coast", origin=f"Comprehensive Rules (read live; the Vault stores no copy{later})",
                             url=self.url, as_of=date.today(), version=self.version, wizards_material=True)]
 
 
@@ -200,6 +211,14 @@ class LiveRules:
         return httpx.Client(transport=self.transport, timeout=TIMEOUT, follow_redirects=True,
                             headers={"User-Agent": USER_AGENT, "Accept": "*/*"})
 
+    @staticmethod
+    def _read(client: httpx.Client, url: str) -> Edition:
+        res = client.get(url)
+        res.raise_for_status()
+        edition = Edition.build(res.content.decode("utf-8-sig"), url)
+        edition.validator = _validator(res)
+        return edition
+
     def edition(self) -> Edition:
         edition = self._edition
         if edition is not None and self.clock() - self._checked < self.page_ttl:
@@ -223,9 +242,13 @@ class LiveRules:
                         raise RulesUnavailable("Wizards' rules page has no link to the rules text")
                     url = links[0].replace(" ", "%20")
                     if self._edition is None or self._edition.url != url:
-                        res = client.get(url)
-                        res.raise_for_status()
-                        self._edition = Edition.build(res.content.decode("utf-8-sig"), url)
+                        self._edition = self._read(client, url)
+                    else:  # the same file name: Wizards can correct a file in place, and only the file itself says so
+                        head = client.head(url)
+                        head.raise_for_status()
+                        validator = _validator(head)
+                        if validator and self._edition.validator and validator != self._edition.validator:
+                            self._edition = self._read(client, url)
                 self._checked = self.clock()
             except Exception as exc:  # whatever went wrong with Wizards' side: a download, an encoding, a format we do not know
                 log.warning(json.dumps({"event": "rules_read_failed", "error_class": type(exc).__name__,

@@ -15,7 +15,7 @@ TOOLS = set(mcp.BY_NAME)
 # Words in backticks that are fields of tool answers or arguments, not tools.
 FIELDS = {"oracle_id", "source_text", "discard_may_be_the_plan", "deck_id", "budget_usd", "added_cost_usd", "known_card", "next_cursor", "share_id", "total_usd",
           "price_date", "store_format", "no_qualifying_printing", "not_checked", "include_sideboard", "choose_printing", "printing_unknown", "did_you_mean", "format_from", "colour_warning", "bracket_floor",
-          "use_app_value", "replace_everything"}
+          "use_app_value", "replace_everything", "include_combos"}
 
 
 def parse(folder: Path):

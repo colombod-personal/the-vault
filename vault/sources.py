@@ -31,8 +31,9 @@ SOURCES: tuple[Source, ...] = (
     Source("Wizards of the Coast", "https://magic.wizards.com", "data",
            "Magic: The Gathering itself: card names, rules text, mana symbols and art, and the Comprehensive Rules.",
            "The Comprehensive Rules are read live from Wizards' own rules page when a rules question is asked (the current edition's "
-           "text file); the Vault keeps no copy of them and always says which edition it quoted. Card text and images reach the Vault "
-           "only through Scryfall.",
+           "text file); the Vault keeps no copy of them and always says which edition it quoted. The Commander Bracket hint for a deck "
+           "follows the Commander Brackets and Game Changers list Wizards publishes (read once, its limits kept in the code and "
+           "re-checked every night). Card text and images reach the Vault only through Scryfall.",
            "Magic: The Gathering and its rules, card names, mana symbols and card images are property of Wizards of the Coast LLC.",
            FAN_CONTENT),
     Source("Scryfall", "https://scryfall.com", "data",
@@ -47,7 +48,8 @@ SOURCES: tuple[Source, ...] = (
     Source("Scryfall Tagger contributors", "https://tagger.scryfall.com", "community",
            "Role tags such as ramp, removal, card draw and sweepers, written by volunteers in Scryfall's Tagger.",
            "Downloaded with the daily Scryfall data and used to count a deck's roles. Always shown as the community's opinion with "
-           "its weight, never as a rule or as the Vault's judgement.",
+           "its weight, never as a rule or as the Vault's judgement. Where a card has no Tagger tag the Vault may add a role from "
+           "its own written rules over the card's Oracle text, always marked as computed by the Vault, never as Scryfall's.",
            "Role tags: Scryfall Tagger, by its community of volunteers."),
     Source("Commander Spellbook", "https://commanderspellbook.com", "community",
            "Known combos for a deck, written and maintained by the Commander Spellbook community.",

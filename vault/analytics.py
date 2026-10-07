@@ -28,7 +28,7 @@ from decimal import Decimal
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .prices import MAX_PRICE
+from .prices import MAX_PRICE, uuid_sql
 
 COLORS = ("W", "U", "B", "R", "G", "M", "C")  # mono colours, multicolour, colourless
 COLOR_NAMES = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green", "M": "Multicolor",
@@ -55,6 +55,10 @@ def color_key(color_identity: list[str] | None) -> str:
 
 
 # -- SQL building blocks ----------------------------------------------------------------------
+
+# The latest snapshot's prices in dollars (the table stores integer cents, #63), under the names the SQL below uses.
+_DOLLARS = ("p.usd_cents / 100.0 AS usd, p.usd_foil_cents / 100.0 AS usd_foil, p.usd_etched_cents / 100.0 AS usd_etched")
+
 
 def _plausible(x: str) -> str:
     return f"(CASE WHEN abs({x}) <= {MAX_PRICE!r} THEN ({x})::float8 END)"
@@ -91,9 +95,9 @@ def _priced(where: str = "") -> str:
     return f"""
 WITH mine AS (SELECT * FROM entries WHERE user_id = :uid {where}),
 latest AS (
-  SELECT DISTINCT ON (p.scryfall_id) p.scryfall_id, p.usd, p.usd_foil, p.usd_etched
+  SELECT DISTINCT ON (p.scryfall_id) p.scryfall_id, {_DOLLARS}
   FROM price_snapshots p
-  WHERE p.scryfall_id IN (SELECT scryfall_id FROM mine WHERE scryfall_id IS NOT NULL)
+  WHERE p.scryfall_id IN (SELECT {uuid_sql('scryfall_id')} FROM mine WHERE scryfall_id IS NOT NULL)
   ORDER BY p.scryfall_id, p.day DESC
 ),
 priced AS (
@@ -104,7 +108,7 @@ priced AS (
          c.scryfall_id IS NOT NULL AS has_card, c.color_identity,
          {COLOR} AS color, {MAIN_TYPE} AS main_type, {MANA_VALUE} AS mana_value, {RARITY} AS rarity
   FROM mine e
-  LEFT JOIN latest l ON l.scryfall_id = e.scryfall_id
+  LEFT JOIN latest l ON l.scryfall_id = {uuid_sql('e.scryfall_id')}
   LEFT JOIN cards c ON c.scryfall_id = e.scryfall_id
 )"""
 
@@ -378,11 +382,11 @@ WITH named AS (
   WHERE lower(split_part(name, ' // ', 1)) = ANY(:fronts)
 ),
 latest AS (
-  SELECT DISTINCT ON (p.scryfall_id) p.scryfall_id, p.day, p.usd, p.usd_foil, p.usd_etched FROM price_snapshots p
-  WHERE p.scryfall_id IN (SELECT scryfall_id FROM named) ORDER BY p.scryfall_id, p.day DESC
+  SELECT DISTINCT ON (p.scryfall_id) p.scryfall_id, p.day, {_DOLLARS} FROM price_snapshots p
+  WHERE p.scryfall_id IN (SELECT {uuid_sql('scryfall_id')} FROM named) ORDER BY p.scryfall_id, p.day DESC
 )
 SELECT n.front, n.set_code, n.collector_number, {cheapest} AS price, l.day
-FROM named n JOIN latest l ON l.scryfall_id = n.scryfall_id"""), {"fronts": fronts}).all()
+FROM named n JOIN latest l ON l.scryfall_id = {uuid_sql('n.scryfall_id')}"""), {"fronts": fronts}).all()
         for front, set_code, number, price, day in priced_cards:
             if price is None:
                 continue
@@ -441,7 +445,7 @@ SELECT count(DISTINCT scryfall_id), count(*) FILTER (WHERE scryfall_id IS NULL) 
     todo = f"""
 SELECT DISTINCT e.scryfall_id FROM entries e
 WHERE e.user_id = :uid AND e.scryfall_id IS NOT NULL AND (CAST(:after AS text) IS NULL OR e.scryfall_id > :after)
-{'' if force else 'AND NOT EXISTS (SELECT 1 FROM price_snapshots p WHERE p.scryfall_id = e.scryfall_id AND p.day = :day)'}"""
+{'' if force else f"AND NOT EXISTS (SELECT 1 FROM price_snapshots p WHERE p.scryfall_id = {uuid_sql('e.scryfall_id')} AND p.day = :day)"}"""
     params = {"uid": user_id, "after": after, "day": day, "lim": REFRESH_CHUNK if limit is None else limit}
     remaining = db.scalar(text(f"SELECT count(*) FROM ({todo}) t"), params)
     ids = db.scalars(text(todo + " ORDER BY e.scryfall_id LIMIT :lim"), params).all()

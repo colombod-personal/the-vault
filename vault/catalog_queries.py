@@ -14,7 +14,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from . import provenance as prov
-from .models import CatalogSource, OracleCard, OraclePrice, OracleTag, OracleTagLink, Ruling
+from .models import CatalogSource, LegalityChange, OracleCard, OraclePrice, OracleTag, OracleTagLink, Ruling
 
 MAX_RULINGS = 25
 MAX_RULE_RESULTS = 10
@@ -82,6 +82,25 @@ def rulings_for(db: Session, oracle_id: str, limit: int = MAX_RULINGS, offset: i
                       .order_by(Ruling.published_at.desc().nulls_last(), Ruling.id).limit(limit).offset(max(0, offset))).all()
     return [{"published_at": r.published_at.isoformat() if r.published_at else None, "source": r.source,
              "comment": r.comment} for r in rows], total
+
+
+MAX_LEGALITY_CHANGES = 25
+LEGALITY_NOTE = ("Changes the Vault noticed when it compared Scryfall's legalities from one daily load to the next, newest first. "
+                 "'observed_on' is the day the Vault saw the change, which can be later than the day Wizards announced it, and "
+                 "nothing before the Vault first loaded the card data is recorded. 'old' null means the format was not listed before.")
+
+
+def legality_changes(db: Session, oracle_ids: list[str], fmt: str | None = None, limit: int = MAX_LEGALITY_CHANGES) -> list[dict]:
+    """Recorded changes of legality (a ban, an unban, a restriction), newest first, for these cards, optionally in one format."""
+    if not oracle_ids:
+        return []
+    query = (select(LegalityChange, OracleCard.name).join(OracleCard, OracleCard.oracle_id == LegalityChange.oracle_id)
+             .where(LegalityChange.oracle_id.in_(oracle_ids)))
+    if fmt:
+        query = query.where(LegalityChange.format == fmt)
+    rows = db.execute(query.order_by(LegalityChange.observed_on.desc(), LegalityChange.id.desc()).limit(max(1, min(limit, 100)))).all()
+    return [{"card": name, "oracle_id": c.oracle_id, "format": c.format, "old": c.old, "new": c.new, "observed_on": c.observed_on.isoformat()}
+            for c, name in rows]
 
 
 def card_tags(db: Session, oracle_id: str) -> list[dict]:

@@ -83,7 +83,8 @@ def council(fmt: str | None, goal: str | None = None, team_format: str | None = 
                        "then Agreed, Disputed and Not checked. In one chat the views are not independent: say so once. Open "
                        "with the deck: its name, format, commander(s), card count and colour identity, from the tools. Report "
                        "every number exactly as a tool returned it, with its name. The Vault has no power score: never call "
-                       "a deck weak or strong from its curve or roles; label any bracket placement as opinion. For a deck of "
+                       "a deck weak or strong from its curve or roles; label any bracket placement above the computed floor "
+                       "as opinion (deck_stats with include_combos returns `bracket`, the floor and its inputs). For a deck of "
                        "three or more colours, say simulate_draws does not check colours (colour_warning). Never quote a "
                        "card's cost, type or text from memory."),
     }
