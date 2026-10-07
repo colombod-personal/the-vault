@@ -17,7 +17,8 @@ CREDITED_AS = {
     "Commander Spellbook": ["Commander Spellbook"],
     "Wizards Commander Brackets and Game Changers list": ["Commander Brackets", "Game Changers"],
     "Archidekt": ["Archidekt"],
-    "Moxfield, EDHREC": ["Moxfield"],  # Moxfield only as a CSV format; EDHREC is not fetched
+    "Moxfield": ["Moxfield"],  # only as a CSV format: the Vault never fetches from it
+    "EDHREC": ["EDHREC"],  # only the popularity rank Scryfall includes: the Vault never fetches from it
 }
 NOT_USED = ("Cardmarket price guide", "Card Kingdom price list", "Magic Madhouse product feed")
 

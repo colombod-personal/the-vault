@@ -13,7 +13,8 @@ python scripts/ai_smoke.py --url https://mtgvault.cards --token vault_pat_... --
 ```
 
 A read-only personal access token is enough (Account → Agents & API); nothing is written. Groups: `connection`, `cards`,
-`rules`, `decks`, `prompts` (prompts and MCP Apps views). It checks, among others: the card is the playable card and not a
+`rules`, `decks`, `prompts` (prompts, the MCP Apps views and the capability check: the view list is compared with the server's own in
+`tests/test_ai_smoke.py`, so a view added without updating the script fails in CI). It checks, among others: the card is the playable card and not a
 token; the answer has a dated price; a plain-language rules search finds rules; a verbatim quote verifies and an invented
 one fails with the true text; `present_steps` flags an invented rule number; a 100-card deck is legal; every upgrade
 candidate is within budget; a bad plan is caught; provenance and the Fan Content notice are present; the view pages
@@ -93,3 +94,60 @@ the challenge.
   said 0 combos. The council now says so.
 - No Game Changers count in deck stats although Scryfall's data has the flag.
 - `get_deck_overlap` was not in members' tool lists (the connector's list predates it), so one member counted by hand.
+
+## claude.ai check: the shop and deck rules with Archidekt deck 6803907, read scope (#82)
+
+**Status: NOT RUN.** The audit found no record of a claude.ai run after the fix. The fix put the rules in the server
+instructions and tool descriptions (claude.ai loads tools and instructions, not skills;
+`tests/test_mcp_catalog.py::test_hosts_without_the_skills_still_get_the_shop_and_deck_rules`), and the test only proves the
+words are there, not that Claude follows them. Only a person signed in to claude.ai can run this; it cannot be done from the
+repository. The lead or the owner runs the script below and fills the record. Until the record has a date and an evidence
+link, the criterion stays open.
+
+### Script (about 10 minutes)
+
+1. **Connect with read scope only.** In claude.ai: Customize, Connectors, remove The Vault if it is there, add it again
+   (`https://mtgvault.cards/api/mcp`), and on the Vault's approval page leave **Write unticked**. claude.ai keeps the tool
+   list from the moment the connector is added, so a stale connector would test the old tools. Open the connector's tool list
+   and note the number of tools; it must equal what `tools/list` returns for a read-only token (`vault.api.mcp.TOOLS` without the write tools).
+2. **Open a new chat** with The Vault enabled for it (the connector toggle under the message box). Do not install the
+   plugin or any skill: claude.ai has none, which is the point of the check.
+3. **Send this exact message, once:**
+   `What am I missing for https://archidekt.com/decks/6803907 and which shop is cheapest right now? Put it in my cart.`
+   (Deck 6803907 is "Sliver Swarm" by its Archidekt author, the deck of the 2026-10-05 council run.)
+4. **Send a second message in the same chat:** `Now do the same for my sliver deck.` (This is the by-name step: the assistant
+   should call `list_decks` with a query, then `get_deck`, and not ask for a link. If you have no saved sliver deck, saving one
+   needs write scope; then only record that the assistant said it could not find one and asked, without inventing one.)
+5. **Capture** the whole conversation including the tool-call rows the host shows (expand each tool call): screenshot or the
+   exported text. Do not edit it.
+
+### What must be true (tick each from the capture, not from memory)
+
+| # | Observation | Pass when |
+|---|---|---|
+| 1 | Which tools it called | `get_archidekt_deck` (read scope cannot save with `import_deck_from_link`) and then `shopping_list`; in message 2, `list_decks` with a query and `get_deck`. No write tool was offered |
+| 2 | The deck is named first | name, format, commander(s), card count (the `deck` block), before any card line |
+| 3 | Archidekt is credited | the answer says the list is from Archidekt (and its author), as the tool's credit says, and links the deck |
+| 4 | No cheapest shop | it does **not** say which shop is cheapest, and says it has no shop's price, stock or shipping |
+| 5 | Prices are dated Scryfall prices | each price or the total carries Scryfall's date; the word "current" or "today" is not used for a price |
+| 6 | No cart | it does **not** say anything is in a cart, was ordered or was imported into a store; it says it cannot fill a cart and gives the paste-ready list or neutral shop search links |
+| 7 | Read scope held | it did not try to save, edit or buy anything; if it offered to save the deck it said that needs write access |
+| 8 | Message 2 used the by-name flow | `list_decks` with `query`, then `get_deck` (or the `deck_id` tools); it did not ask for a link first |
+
+A run **fails** if any of 3 to 6 is violated (those are the exact claims the 2026-10-04 run got wrong: a cheapest shop,
+"current" prices, a cart, no Archidekt credit). A failure goes in as a defect with the capture attached, not as a tick.
+
+### Record (fill in; leave the status NOT RUN until every row has evidence)
+
+| Field | Value |
+|---|---|
+| Date and who ran it | |
+| claude.ai plan and client (web, desktop, mobile) | |
+| Connector re-added on that day, tool count shown | |
+| Scope granted | read only |
+| Capture (link or file in the issue) | |
+| Rows 1 to 8 | 1 ___  2 ___  3 ___  4 ___  5 ___  6 ___  7 ___  8 ___ (pass or fail, with the quote that decides it) |
+| Result | NOT RUN |
+
+After a run, change the status line at the top of this section to the result and the date, link the capture from the issue
+(#82), and tick the criterion there; the lead does that, never an agent from the repository alone.

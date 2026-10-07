@@ -65,3 +65,34 @@ def test_skills_and_agents_never_offer_to_edit_sync_or_sign_in_to_archidekt():
                 in_prohibitions = line.lstrip("# ").lower().startswith("do not")
             if re.search(r"archidekt", line, re.IGNORECASE) and re.search(r"(sync|push|upload|write to|sign in|log in|edit)", line, re.IGNORECASE):
                 assert in_prohibitions or negated.search(line), f"{path.name}: {line.strip()}"
+
+
+def test_the_vault_never_calls_search_decks_from_a_job_or_a_loop():
+    """``search_decks`` follows ``next`` across every page of results, so it is a crawl unless bounded (docs/compliance.md,
+    #132). The Vault's only Archidekt call is ``get_deck`` for one named public deck. This reads the syntax tree, so a
+    call hidden in a string, a loop, a comprehension or a job is found, not just a literal grep match; and no job (the
+    scheduled code) may use the Archidekt client at all."""
+    import ast
+
+    offenders = []
+    for folder in ("vault", "jobs", "api", "scripts"):
+        for path in (ROOT / folder).rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Attribute) and node.attr == "search_decks") or (
+                        isinstance(node, ast.Name) and node.id == "search_decks") or (
+                        isinstance(node, ast.alias) and node.name == "search_decks") or (
+                        isinstance(node, ast.Constant) and node.value == "search_decks"):
+                    offenders.append(f"{path.relative_to(ROOT)}:{getattr(node, 'lineno', '?')}")
+    assert not offenders, f"search_decks would crawl Archidekt; only get_deck is allowed: {offenders}"
+
+    for path in list((ROOT / "jobs").rglob("*.py")) + list((ROOT / "scripts").rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        assert not re.search(r"ArchidektClient|mtg_toolkits\.archidekt|vault\.archidekt_cache|deck_import", text), \
+            f"{path.name}: scheduled and operator scripts must not contact Archidekt"
+
+
+def test_the_search_decks_rule_is_written_in_compliance_md():
+    text = " ".join((ROOT / "docs" / "compliance.md").read_text(encoding="utf-8").split())
+    assert "search_decks" in text and "follows `next` across every page" in text
+    assert "never called from a job, a loop" in text

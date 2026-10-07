@@ -60,18 +60,16 @@
     <p class="how">How we use it: indirectly, through Scryfall. The Vault never contacts these marketplaces.</p>
   </div>
 
-  <div class="card" id="scryfall-tagger">
-    <h3><a href="https://scryfall.com/docs/tagger-tags" target="_blank" rel="noopener">Scryfall Tagger</a> contributors</h3>
-    <p>Roles such as ramp, card draw, removal and sweepers come from the functional tags that volunteers attach to
-      cards in Scryfall's Tagger project. Scryfall publishes them in its bulk data; the Vault shows each one as
-      "tagged by Scryfall's community Tagger", with its weight, never as a rule. When a card has no Tagger tag, the Vault
-      may show a role it worked out itself from the card's Oracle text, and says so ("computed by the Vault").</p>
-    <p class="how">How we use it: the server downloads the tag file with Scryfall's other bulk data. Nothing about you is
-      sent.</p>
-    <p class="thanks">Thank you to everyone who tags cards.</p>
+  <div class="card">
+    <h3>Artists</h3>
+    <p>Every card image is the work of an illustrator, credited under the image wherever the Vault shows
+      one ("Illustrated by …"). Card images are shown whole, without cropping or covering the artist
+      and copyright lines.</p>
   </div>
 
-  <div class="card" id="wizards-rules">
+  <h2>Rules, roles and combos</h2>
+
+  <div class="card">
     <h3><a href="https://magic.wizards.com/en/rules" target="_blank" rel="noopener">Wizards of the Coast</a>:
       Comprehensive Rules and Commander Brackets</h3>
     <p>The rules text the Vault's assistants quote is Wizards' Magic: The Gathering Comprehensive Rules, and the
@@ -83,7 +81,18 @@
       Wizards' document with each quote, and nothing about you is sent. The Vault is not approved or endorsed by Wizards.</p>
   </div>
 
-  <div class="card" id="commander-spellbook">
+  <div class="card">
+    <h3><a href="https://scryfall.com/docs/tagger-tags" target="_blank" rel="noopener">Scryfall Tagger</a> contributors</h3>
+    <p>Roles such as ramp, card draw, removal and sweepers come from the functional tags that volunteers attach to
+      cards in Scryfall's Tagger project. Scryfall publishes them in its bulk data; the Vault shows each one as
+      "tagged by Scryfall's community Tagger", with its weight, never as a rule. When a card has no Tagger tag, the Vault
+      may show a role it worked out itself from the card's Oracle text, and says so ("computed by the Vault").</p>
+    <p class="how">How we use it: the server downloads the tag file with Scryfall's other bulk data. Nothing about you is
+      sent.</p>
+    <p class="thanks">Thank you to everyone who tags cards.</p>
+  </div>
+
+  <div class="card">
     <h3><a href="https://commanderspellbook.com" target="_blank" rel="noopener">Commander Spellbook</a></h3>
     <p>When you ask which combos a Commander deck contains, the Vault asks Commander Spellbook, a community-built
       database of Magic combos. Each combo, its description and its steps were written by its community and are shown
@@ -95,10 +104,10 @@
   </div>
 
   <div class="card">
-    <h3>Artists</h3>
-    <p>Every card image is the work of an illustrator, credited under the image wherever the Vault shows
-      one ("Illustrated by …"). Card images are shown whole, without cropping or covering the artist
-      and copyright lines.</p>
+    <h3><a href="https://edhrec.com" target="_blank" rel="noopener">EDHREC</a></h3>
+    <p>The popularity rank shown for a Commander card is EDHREC's, from the community's deck lists, as
+      Scryfall includes it with each card. Popularity is not power.</p>
+    <p class="how">How we use it: indirectly, through Scryfall. The Vault never contacts EDHREC.</p>
   </div>
 
   <h2>Decks and collections</h2>
@@ -108,8 +117,9 @@
     <p>When you paste an Archidekt deck link on the Decks tab, the Vault reads that public deck from
       Archidekt and links back to it ("View on Archidekt"). Deck lists and their authors belong to the
       Archidekt community. Credit and thanks to every brewer.</p>
-    <p class="how">How we use it: the Vault's server fetches only the public deck you asked for, once,
-      sending the deck id and nothing about you.</p>
+    <p class="how">How we use it: the Vault's server fetches only the public deck you asked for, sending the
+      deck id and nothing about you, and keeps that public deck for ten minutes so repeat reads do not reach
+      Archidekt again (copies are deleted after seven days). It only reads: it never writes, searches or crawls.</p>
     <p class="thanks">Thank you, Archidekt, for keeping public decks open to tools like this one.
       <a href="https://patreon.com/archidekt" target="_blank" rel="noopener">Support Archidekt on Patreon</a>.</p>
   </div>

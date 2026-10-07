@@ -51,7 +51,7 @@ every piece of Archidekt data.
    (encode the card name; spaces become `+`). Offer only the shops they name, or these three:
    - Card Kingdom: `https://www.cardkingdom.com/catalog/search?search=header&filter%5Bname%5D=CARD+NAME`
    - Cardmarket: `https://www.cardmarket.com/en/Magic/Products/Search?searchString=CARD+NAME`
-   - Magic Madhouse: `https://magicmadhouse.co.uk/?q=CARD+NAME`
+   - Magic Madhouse: `https://magicmadhouse.co.uk/search.php?search_query=CARD+NAME`
 
    Say the links only open each shop's own search. You do not know any shop's price, stock or shipping
    today, so you cannot say which shop is cheapest. Tell them to compare totals themselves, and to use the

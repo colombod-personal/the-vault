@@ -36,9 +36,11 @@
   <div class="card" id="claude"><h3>Claude</h3><p>In Claude (web, desktop or mobile): <strong>Settings → Connectors → Add custom connector</strong>, name it The Vault and paste this address:</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>https://mtgvault.cards/api/mcp</code></pre></div><p class="note">Then approve on the Vault's page: tick <strong>Write</strong> if the assistant may edit your collection and decks. A listing in Claude's directory is coming; this page will show the button.</p><p class="note">After a Vault update that adds tools: disconnect and connect The Vault again, so Claude reads the new tools.</p></div>
   <div class="card" id="chatgpt"><h3>ChatGPT</h3><p>In ChatGPT: <strong>Plugins → Add → Add custom MCP server</strong>, name it The Vault, paste this address and keep OAuth:</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>https://mtgvault.cards/api/mcp</code></pre></div><p class="note">Then approve on the Vault's page: tick <strong>Write</strong> if the assistant may edit your collection and decks. A listing in ChatGPT's directory is coming; this page will show the button.</p><p class="note">After a Vault update that adds tools: ChatGPT reads the tools only when the app is added: delete it (not only uninstall) and add it again.</p></div>
 
-  <h2>2. Developers: Claude Code, Codex, Cursor, VS Code</h2>
-  <p>Sign in to the Vault, open <strong>Account → Agents &amp; API</strong>, and create a personal access token.
-    Read-only is enough for rules, cards, deck analysis and your collection. The token is shown once; keep it private.</p>
+  <h2>2. Developers: Claude Code, Codex, Cursor, VS Code, GitHub Copilot CLI</h2>
+  <p>Each tool below has its own format, so each has its own block. Where the tool offers it you sign in with your Vault
+    account in the browser and no token is involved. Otherwise open <strong>Account → Agents &amp; API</strong> and create a
+    personal access token (read-only is enough for rules, cards, deck analysis and your collection; it is shown once).
+    The blocks never put the token in a command: it is read from an environment variable or typed into the tool's own prompt.</p>
 
   <div class="card">
     <h3>Claude Code (plugin: skills and tools together)</h3>
@@ -57,31 +59,85 @@
   <div class="card">
     <h3>Ready-made agents: a rules judge, a budget deck builder, a buyer</h3>
     <p>The Claude Code plugin above includes them (<code>the-vault:vault-judge</code>, <code>vault-deckbuilder</code>,
-      <code>vault-buyer</code>); they can only use the Vault's tools. For Codex, Cursor and GitHub Copilot, copy the
-      matching files from <a href="https://github.com/colombod-personal/the-vault/tree/main/agent-definitions">agent-definitions</a> into the folder named there.</p>
+      <code>vault-buyer</code>); in Claude Code they can only use the Vault's tools. For Codex, Cursor and GitHub Copilot,
+      copy the matching files from <a href="https://github.com/colombod-personal/the-vault/tree/main/agent-definitions">agent-definitions</a> into the folder
+      named there; what each tool actually restricts is in the README next to them (Copilot: only the Vault's tools;
+      Codex: the Vault's read-only tools, read-only sandbox; Cursor: read-only mode and instructions only).</p>
   </div>
 
-  <div class="card">
-    <h3>Claude Code: the tools only</h3>
-    <div class="code"><button class="copy" type="button">Copy</button><pre><code>claude mcp add --transport http vault https://mtgvault.cards/api/mcp --header "Authorization: Bearer vault_pat_..."</code></pre></div>
-  </div>
-
-  <div class="card">
-    <h3>Cursor, VS Code, Codex and other editors: the tools</h3>
-    <p>Add this to the editor's MCP settings (the file is often <code>.cursor/mcp.json</code> or <code>.vscode/mcp.json</code>;
-      some editors call the key <code>servers</code> instead of <code>mcpServers</code>):</p>
-    <div class="code"><button class="copy" type="button">Copy</button><pre><code>{
+  <h3>The tools (MCP server) in each tool</h3>
+  <div class="card" id="claude-code"><h3>Claude Code</h3><p>Add the server for all your projects, then sign in with your Vault account:</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>claude mcp add --transport http vault --scope user https://mtgvault.cards/api/mcp
+claude mcp login vault</code></pre></div><p>Without browser sign-in: create a personal access token (Account → Agents &amp; API; read-only is enough), keep it in an environment variable named VAULT_TOKEN, and put this in the project&#x27;s .mcp.json (Claude Code fills in the variable):</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>{
   "mcpServers": {
     "vault": {
       "type": "http",
       "url": "https://mtgvault.cards/api/mcp",
       "headers": {
-        "Authorization": "Bearer vault_pat_..."
+        "Authorization": "Bearer ${VAULT_TOKEN}"
       }
     }
   }
-}</code></pre></div>
-  </div>
+}</code></pre></div><p class="note">Inside a session, /mcp does the sign-in too. The plugin above asks for the token once and stores it securely. Format from the tool's own documentation (<a href="https://code.claude.com/docs/en/mcp" target="_blank" rel="noopener">Claude Code: MCP</a>), read 2026-10-07.</p></div>
+  <div class="card" id="codex"><h3>Codex (CLI and IDE extension)</h3><p>Add the server, then sign in with your Vault account:</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>codex mcp add vault --url https://mtgvault.cards/api/mcp
+codex mcp login vault</code></pre></div><p>Or by hand in ~/.codex/config.toml (Codex uses TOML here, not JSON):</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>[mcp_servers.vault]
+url = "https://mtgvault.cards/api/mcp"</code></pre></div><p>Without browser sign-in: create a personal access token (Account → Agents &amp; API; read-only is enough), keep it in an environment variable named VAULT_TOKEN, and name it in the same table:</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>[mcp_servers.vault]
+url = "https://mtgvault.cards/api/mcp"
+bearer_token_env_var = "VAULT_TOKEN"</code></pre></div><p class="note">The CLI and the IDE extension share this configuration. Format from the tool's own documentation (<a href="https://learn.chatgpt.com/docs/extend/mcp?surface=cli" target="_blank" rel="noopener">Codex: MCP</a>), read 2026-10-07.</p></div>
+  <div class="card" id="cursor"><h3>Cursor</h3><p>In .cursor/mcp.json (this project) or ~/.cursor/mcp.json (all projects); Cursor documents OAuth for servers that need it; if it shows no sign-in, use the token block below:</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>{
+  "mcpServers": {
+    "vault": {
+      "url": "https://mtgvault.cards/api/mcp"
+    }
+  }
+}</code></pre></div><p>Without browser sign-in: create a personal access token (Account → Agents &amp; API; read-only is enough), keep it in an environment variable named VAULT_TOKEN; Cursor fills in the variable:</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>{
+  "mcpServers": {
+    "vault": {
+      "url": "https://mtgvault.cards/api/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:VAULT_TOKEN}"
+      }
+    }
+  }
+}</code></pre></div><p class="note">The root key is mcpServers. Format from the tool's own documentation (<a href="https://cursor.com/docs/context/mcp" target="_blank" rel="noopener">Cursor: MCP</a>), read 2026-10-07.</p></div>
+  <div class="card" id="vscode"><h3>VS Code (GitHub Copilot)</h3><p>In .vscode/mcp.json (or run “MCP: Open User Configuration” for all workspaces); VS Code documents OAuth for servers that need it; if it shows no sign-in, use the token block below:</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>{
+  "servers": {
+    "vault": {
+      "type": "http",
+      "url": "https://mtgvault.cards/api/mcp"
+    }
+  }
+}</code></pre></div><p>Without browser sign-in: create a personal access token (Account → Agents &amp; API); VS Code asks for it once, hides it and stores it:</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "vault-token",
+      "description": "The Vault personal access token",
+      "password": true
+    }
+  ],
+  "servers": {
+    "vault": {
+      "type": "http",
+      "url": "https://mtgvault.cards/api/mcp",
+      "headers": {
+        "Authorization": "Bearer ${input:vault-token}"
+      }
+    }
+  }
+}</code></pre></div><p class="note">The root key is servers here, not mcpServers. Format from the tool's own documentation (<a href="https://code.visualstudio.com/docs/copilot/customization/mcp-servers" target="_blank" rel="noopener">VS Code: MCP servers</a>, <a href="https://code.visualstudio.com/docs/agents/reference/mcp-configuration" target="_blank" rel="noopener">VS Code: MCP configuration reference</a>), read 2026-10-07.</p></div>
+  <div class="card" id="copilot-cli"><h3>GitHub Copilot CLI</h3><p>Add the server:</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>copilot mcp add --transport http vault https://mtgvault.cards/api/mcp</code></pre></div><p>Or by hand in ~/.copilot/mcp-config.json:</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>{
+  "mcpServers": {
+    "vault": {
+      "type": "http",
+      "url": "https://mtgvault.cards/api/mcp",
+      "tools": [
+        "*"
+      ]
+    }
+  }
+}</code></pre></div><p>Without browser sign-in: create a personal access token (Account → Agents &amp; API). In a Copilot CLI session run /mcp add, choose HTTP, enter the address above and type this into the HTTP Headers prompt (not into a command):</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>{
+  "Authorization": "Bearer vault_pat_..."
+}</code></pre></div><p class="note">The Copilot CLI documentation we read describes headers for remote servers and does not describe a browser sign-in, so this block uses the token. Format from the tool's own documentation (<a href="https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers" target="_blank" rel="noopener">GitHub Docs: add MCP servers to Copilot CLI</a>), read 2026-10-07.</p></div>
 
 
   <h2>3. Check it works</h2>
@@ -103,6 +159,8 @@
   <p>The Vault will not do these, and a good assistant says so: <em>“Which shop is cheapest right now?”</em> (it has no
     shop prices, only dated Scryfall ones), <em>“Buy me this deck”</em> (it never contacts stores), <em>“Delete my
     account”</em> (account actions stay with you in the Vault).</p>
+
+  <h2 id="credits">Who this is built on</h2><p>The Vault reads from these services on your behalf and says what it sends to each one (never your name, e-mail or collection). Every answer carries its source.</p><ul><li><strong>Wizards of the Coast</strong>: Magic: The Gathering and its rules, card names, mana symbols and card images are property of Wizards of the Coast LLC.</li><li><strong>Scryfall</strong>: Card data, rulings, images and prices: Scryfall.</li><li><strong>Scryfall Tagger contributors</strong>: Role tags: Scryfall Tagger, by its community of volunteers.</li><li><strong>Commander Spellbook</strong>: Combos: Commander Spellbook and its community.</li><li><strong>Archidekt</strong>: Deck lists: Archidekt, by their authors.</li><li><strong>Moxfield</strong>: Moxfield file format.</li><li><strong>Dragon Shield (Card Manager)</strong>: Dragon Shield export format.</li><li><strong>TCGplayer, Cardmarket and Cardhoarder</strong>: Prices: TCGplayer, Cardmarket and Cardhoarder via Scryfall, dated.</li><li><strong>EDHREC</strong>: Popularity rank: EDHREC, via Scryfall.</li><li><strong>Card illustrators</strong>: Illustrated by the credited artist.</li><li><strong>Google, Microsoft, Apple and Facebook sign-in, and passkeys</strong>: Sign-in by the account you already have.</li><li><strong>Vercel, Neon and GitHub</strong>: Hosting and code: Vercel, Neon, GitHub.</li><li><strong>Open source software</strong>: Built on open source: see the credits page.</li></ul><p>How each is used, and thanks: <a href="credits.html">the credits page</a>.</p>
 
   <h2>What to expect</h2>
   <ul>

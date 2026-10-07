@@ -40,8 +40,9 @@ into each agent's skills folder.)
 `/connect.html`), or `docs/agents.md`. For editors that read an Agent Plugins folder, use
 `plugins/the-vault/` (it holds `plugin.json`, `skills/` and `mcp.json`).
 
-Sign-in today is a personal access token (Account → Agents & API). Connecting ChatGPT and Claude.ai by
-address needs the OAuth server (milestone M4, `docs/mcp-oauth-host-checklist.md`).
+Sign in with your Vault account where the tool offers it (OAuth: ChatGPT, Claude.ai, and the tools on
+`public/connect.html`), or with a personal access token (Account → Agents & API) kept in an environment variable
+or the tool's own prompt.
 
 ## Where things live (one source of truth)
 
@@ -78,4 +79,8 @@ person should run the first-question check on `connect.html` in each.
 
 ## Agents
 
-Three ready-made agents (`vault-judge`, `vault-deckbuilder`, `vault-buyer`) live in `agents/` as one neutral source. `scripts/build_plugin.py` makes the Claude Code versions (inside the plugin, limited to the Vault's own tools) and Codex, Cursor and GitHub Copilot versions in `agent-definitions/` (copy instructions in its README). Edit `agents/`, never the generated files; `tests/test_agent_definitions.py` checks them against the real tools and skills. Listings and directories: `docs/listings.md`.
+The ready-made agents (the judge, the deckbuilder, the buyer, and the expert council's members) live in `agents/` as one neutral source. `scripts/build_plugin.py` makes the Claude Code versions (inside the plugin, limited to the Vault's own tools by a `tools:` allow list), the GitHub Copilot versions (a `tools:` allow list of `vault/<tool>`), and Codex and Cursor versions, in `agent-definitions/` (copy instructions in its README). Edit `agents/`, never the generated files; `tests/test_agent_definitions.py` checks them against the real tools and skills.
+
+What each assistant enforces differs, and `agent-definitions/README.md` (generated) says exactly that: Claude Code and Copilot have an allow list; Codex limits the Vault server's tools (`enabled_tools`) and runs read-only but cannot take its other tools away; Cursor has only a read-only mode (its subagent format has no tool list). Sources read 2026-10-07: GitHub Docs and VS Code docs (custom agents, `tools` and `<server>/<tool>`), Codex docs (custom agent TOML, `mcp_servers`, `enabled_tools`), Cursor docs (subagents).
+
+**Agent Plugins and agents.** The Agent Plugins 1.0 standard defines only skills and MCP servers; agents are "too client-specific" to be portable (its design notes). Client-specific files go in a top-level directory named for the client's reverse-domain namespace (spec section 8), and a client reads only its own. VS Code documents `com.github.copilot/` for GitHub Copilot's agents, so the portable plugin `plugins/the-vault/` carries the Copilot agents in `com.github.copilot/agents/` and other clients ignore that directory. No documentation was found for a Codex, Cursor or Claude Code namespace, so none is made up: the Claude Code agents stay in the plugin's `agents/` folder, Claude Code's own convention, and Codex and ChatGPT get the experts as skills in `plugins/the-vault-openai/` (a separate package, #225). If a client documents a namespace, add its directory in `scripts/build_plugin.py` (`COPILOT_NAMESPACE` is the pattern) and a case to `tests/test_plugin.py`. Listings and directories: `docs/listings.md`.

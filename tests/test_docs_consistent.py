@@ -30,7 +30,7 @@ def test_the_design_docs_say_the_rules_are_read_live_and_not_stored():
     assert "keep each version (`rules_versions`)" not in catalog
     sources = text(ROOT / "docs" / "data-sources.md")
     row = next(line for line in sources.splitlines() if line.startswith("| Wizards Comprehensive Rules"))
-    assert "Read live, nothing stored" in row and "built, off by default" not in row.lower()
+    assert "read live from Wizards" in row and "off by default" not in row.lower()
     index = text(ROOT / "docs" / "rules-index.md")
     assert "supersedes the first idea of a daily job" in index and "(see \"Design\" below" in index
 

@@ -13,6 +13,7 @@ vault-tools:
   - list_decks
   - get_deck
   - validate_deck_changes
+  - get_archidekt_deck
 skills:
   - shopping-assistant
   - vault-attribution

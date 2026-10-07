@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "the-vault",
   "version": "0.1.0",
-  "description": "Magic: The Gathering rules, cards, decks and collection tools for your AI assistant, grounded in Scryfall and the Comprehensive Rules, with sources shown. Free and unofficial.",
+  "description": "Magic: The Gathering rules, cards, decks and collection tools for your AI assistant, grounded in Scryfall and the Comprehensive Rules, with sources shown. Free and unofficial; credits to Scryfall, Wizards of the Coast, Commander Spellbook, Archidekt and the other sources at https://mtgvault.cards/credits.html.",
   "author": {
     "name": "The Vault",
     "url": "https://github.com/colombod-personal/the-vault"

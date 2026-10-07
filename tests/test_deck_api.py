@@ -311,3 +311,25 @@ def test_a_deck_id_must_be_the_callers_and_exactly_one_of_text_or_id_is_needed(l
     assert loaded.post(f"{V1}/stats", json={"deck_id": 999999}).status_code == 404
     assert loaded.post(f"{V1}/stats", json={}).status_code == 422
     assert loaded.post(f"{V1}/stats", json={"text": "1 Test Rock", "deck_id": mine["id"]}).status_code == 422
+
+
+def test_upgrades_price_the_cut_candidates_and_the_deck_so_a_swap_has_a_delta(loaded):
+    """#53: a view shows what a swap does to the price, so the cut candidates carry their own price and the answer the
+    deck's estimated cost (the same figure deck_stats gives)."""
+    r = computed(post(loaded, "upgrades", text=DECK, format="commander", budget_usd=5, roles=["ramp"]))
+    bear = next(c for c in r["cut_candidates"] if c["name"] == "Dull Bear")
+    assert bear["price_usd"] == 0.1 and bear["price_date"] == "2026-10-04" and bear["price_source"] == "scryfall"
+    assert r["deck_cost_usd"] == computed(post(loaded, "stats", text=DECK))["estimated_cost_usd"]
+
+
+def test_the_validator_reports_what_a_plan_does_to_the_price_of_the_deck(loaded):
+    """#53: adds and cuts each with their price, the net change and the deck's cost before and after. The budget check is
+    unchanged (the adds only); these figures are for comparing."""
+    r = computed(post(loaded, "validate-changes", text=VALID, format="commander", cuts=["Dull Bear"], adds=["Cheap Ramp"], budget_usd=1))
+    assert r["added_cards"] == [{"name": "Cheap Ramp", "price_usd": 0.25}] and r["cut_cards"] == [{"name": "Dull Bear", "price_usd": 0.1}]
+    assert r["cut_value_usd"] == 0.1 and r["net_change_usd"] == 0.15 and r["cut_unpriced"] == [] and r["cuts_not_refunded"] is True
+    assert r["added_cost_usd"] == 0.25  # the budget still counts the adds alone
+    assert round(r["deck_cost_after_usd"] - r["deck_cost_before_usd"], 2) == 0.15
+    assert r["deck_cost_before_usd"] == computed(post(loaded, "stats", text=VALID))["estimated_cost_usd"]
+    free = computed(post(loaded, "validate-changes", text=VALID, format="commander", cuts=["Test Mountain"], adds=[]))
+    assert free["cut_cards"] == [{"name": "Test Mountain", "price_usd": None}] and free["cut_unpriced"] == ["Test Mountain"] and free["net_change_usd"] == 0.0

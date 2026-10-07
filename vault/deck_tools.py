@@ -373,10 +373,13 @@ def find_upgrades(db: Session, resolved: Resolved, fmt: str, budget_usd: float, 
                             for c, p, _ in db.execute(query).all()]
     oids = [e.card.oracle_id for e in played if e.card and not is_land(e.card)]
     roles_map = roles_of(db, oids)
-    cuts = sorted(({"name": e.card.name, "edhrec_rank": e.card.edhrec_rank, "quantity": e.line.quantity}
+    cut_prices = prices_of(db, oids)
+    cuts = sorted(({"name": e.card.name, "edhrec_rank": e.card.edhrec_rank, "quantity": e.line.quantity,
+                    **_price_fields(cut_prices.get(e.card.oracle_id))}  # what the swap saves: the price delta is shown against it
                    for e in played if e.card and not is_land(e.card) and e.line.section == "main" and not roles_map.get(e.card.oracle_id)),
                   key=lambda c: (c["edhrec_rank"] is not None, -(c["edhrec_rank"] or 0)))[:limit]
     return {"format": fmt, "budget_usd": budget_usd, "color_identity": sorted(ident, key=COLORS.index), "gaps": gaps,
+            "deck_cost_usd": st["estimated_cost_usd"],  # the deck's estimated cost now, to compare a plan's change with
             "candidates": candidates, "cut_candidates": cuts,
             "notes": ["Candidates are ordered by popularity (EDHREC rank, lower is more played). Popularity is not power or fit.",
                       "Role guidelines (ramp 10, draw 10, removal 8, sweepers 2 for 100-card decks) are a common community habit, not a rule.",
@@ -442,6 +445,17 @@ def validate_changes(db: Session, text: str, fmt: str, adds: list[str], cuts: li
             total += price.usd
     for name in unpriced:
         issues.append({"kind": "no_price", "card": name, "detail": "no price is known, so the budget cannot be verified"})
+    by_name = {}
+    for e in played:
+        if e.card:
+            by_name[e.name.lower()] = e.card
+    cut_cards = [by_name[n] for n in cut_names if n in by_name]
+    cut_prices = prices_of(db, [c.oracle_id for c in cut_cards])
+    cut_value = round(sum(cut_prices[c.oracle_id].usd for c in cut_cards if c.oracle_id in cut_prices and cut_prices[c.oracle_id].usd is not None), 2)
+    cut_unpriced = [c.name for c in cut_cards if cut_prices.get(c.oracle_id) is None or cut_prices[c.oracle_id].usd is None]
+    deck_oids = list({e.card.oracle_id for e in played if e.card})
+    deck_prices = prices_of(db, deck_oids)
+    cost_before = round(sum((deck_prices[e.card.oracle_id].usd or 0) * e.line.quantity for e in played if e.card and e.card.oracle_id in deck_prices), 2)
     if budget_usd is not None and total > budget_usd + 1e-9:
         issues.append({"kind": "over_budget", "card": None, "detail": f"adds cost ${total:.2f}, budget is ${budget_usd:.2f}"})
     result = Resolved(resolve(db, decklist.Decklist(after_lines)).entries + [Entry(l, e.card) for l, e in zip(add_lines, resolved_adds.entries)])
@@ -456,4 +470,12 @@ def validate_changes(db: Session, text: str, fmt: str, adds: list[str], cuts: li
                if i["kind"] not in ("unknown_card", "not_legal", "color_identity") or i["card"] not in {x.get("card") for x in issues}]
     return {"valid": not issues, "issues": issues, "existing_issues": existing, "format": fmt, "adds": len(adds), "cuts": len(cut_names),
             "cards_after": outcome["cards_checked"], "added_cost_usd": round(total, 2), "budget_usd": budget_usd,
-            "cuts_not_refunded": True, "not_checked": outcome["not_checked"]}
+            "cuts_not_refunded": True,
+            # What the plan does to the deck's price: the adds, the cuts (each with its own price) and the deck as a whole.
+            # The budget above still counts only the adds; these figures are for comparing, not for the budget check.
+            "added_cards": [{"name": e.card.name, "price_usd": plausible_price(prices[e.card.oracle_id].usd) if e.card.oracle_id in prices else None}
+                            for e in resolved_adds.entries if e.card],
+            "cut_cards": [{"name": c.name, "price_usd": plausible_price(cut_prices[c.oracle_id].usd) if c.oracle_id in cut_prices else None} for c in cut_cards],
+            "cut_value_usd": cut_value, "cut_unpriced": cut_unpriced, "net_change_usd": round(total - cut_value, 2),
+            "deck_cost_before_usd": cost_before, "deck_cost_after_usd": round(cost_before - cut_value + total, 2),
+            "not_checked": outcome["not_checked"]}
