@@ -251,6 +251,24 @@ A stranger sets `client_id=https://x/...` and the Vault fetches it. Mitigations 
 All OAuth endpoints are rate limited per IP in the existing database counters (`vault.ratelimit`), with their own, more
 generous limit than sign-in (`OAUTH_RATE_LIMIT`, 120 a minute) because ChatGPT and Claude connect from shared addresses.
 
+### 17. Client assertion abuse (`private_key_jwt`, added with #210 on 2026-10-06)
+
+ChatGPT proves itself at the token endpoint with a signed assertion (RFC 7523) instead of PKCE alone. New paths, and
+what stops each (`vault/client_auth.py`; tests in `tests/test_client_auth.py`, `tests/test_chatgpt_twin.py`):
+
+| Attack | Mitigation |
+|---|---|
+| Replay a captured assertion | `jti` is single use per client (a counter row kept until the assertion expires); `exp` at most 10 minutes away |
+| Forge one by choosing the algorithm (`none`, HS256 with the public key as secret) | Only the algorithm the client's document declared is accepted, and only RS256, PS256 or ES256 |
+| Point `jwks_uri` at an attacker's key set | The `jwks_uri` must be on the same host as the `client_id`; a document served from elsewhere is refused |
+| Make the Vault fetch arbitrary URLs by naming key ids | Keys are cached for an hour; an unknown `kid` refetches at most once a minute per URL, through the SSRF-hardened fetcher |
+| Key rotation locks the client out | A new `kid` triggers one refetch; the last known keys keep working if the client's server is briefly away |
+| Oversized or malformed assertion | 8 KB cap, `iss`/`sub` must equal the `client_id`, `aud` must name this token endpoint |
+| A private key published by mistake | Keys with a private part (`d`) are dropped on load |
+
+Residual: a client that leaks its own signing key can be impersonated until it rotates; the person still approves every
+grant on the consent screen.
+
 ## Decisions to review
 
 - **No custom-scheme redirects.** Some desktop apps (for example Cursor) use their own URL scheme. Allowing them lets any
@@ -262,7 +280,7 @@ generous limit than sign-in (`OAUTH_RATE_LIMIT`, 120 a minute) because ChatGPT a
   wants it can use a personal access token.
 - **Refresh tokens last 30 days, sliding, within an absolute 90 days** from first consent.
 - **Consent is asked every time**, even for a client the person already connected.
-- **Confidential clients are not supported** (`token_endpoint_auth_method: none` only), which is what ChatGPT and Claude use with metadata documents.
+- **Public clients and `private_key_jwt` clients are supported; shared-secret (`client_secret_*`) clients are not.** claude.ai uses a metadata document with PKCE only (`none`); ChatGPT's document declares `private_key_jwt` (section 17).
 
 ## Residual risks
 

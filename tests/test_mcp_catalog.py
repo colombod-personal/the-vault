@@ -149,3 +149,11 @@ def test_hosts_without_the_skills_still_get_the_shop_and_deck_rules():
     assert "find it with list_decks" in GROUNDING and "credit Archidekt" in GROUNDING
     assert "never say which store is cheapest" in mcp.BY_NAME["shopping_list"].description
     assert "credit Archidekt" in mcp.BY_NAME["get_archidekt_deck"].description
+
+
+def test_the_instructions_say_the_vault_is_not_endorsed_and_consent_names_owned_card_edits():
+    """#62 (audit): the instructions had no 'not endorsed' line, and #81: consent never told a person that granting write
+    lets the assistant change which cards they own."""
+    from vault.oauth_routes import SCOPE_TEXT
+    assert "not approved or endorsed by Wizards of the Coast" in GROUNDING and "never speak for any of them" in GROUNDING
+    assert "change which cards you own" in SCOPE_TEXT["write"]

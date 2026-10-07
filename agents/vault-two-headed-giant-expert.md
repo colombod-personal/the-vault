@@ -14,8 +14,8 @@ vault-tools:
   - search_rules
   - get_rule
   - verify_citation
+  - present_steps
 skills:
-  - expert-council
   - interaction-explainer
   - vault-attribution
 ---

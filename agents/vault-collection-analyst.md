@@ -12,8 +12,8 @@ vault-tools:
   - shopping_list
   - list_decks
   - get_deck
+  - validate_deck_changes
 skills:
-  - expert-council
   - shopping-assistant
   - vault-attribution
 ---

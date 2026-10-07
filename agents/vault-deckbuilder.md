@@ -15,6 +15,8 @@ vault-tools:
   - validate_deck_changes
   - find_combos
   - get_card_oracle
+  - get_deck
+  - simulate_draws
 skills:
   - deck-upgrader
   - archidekt-deck-helper

@@ -21,7 +21,6 @@ vault-tools:
 skills:
   - shopping-assistant
   - archidekt-deck-helper
-  - collection-analyst
   - vault-attribution
 ---
 

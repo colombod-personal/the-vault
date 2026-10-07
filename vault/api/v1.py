@@ -874,8 +874,9 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     @router.get("/archidekt/decks/{deck_id}", tags=["decks"],
                 summary="A public Archidekt deck, read for you (fetched server-side; repeat reads within 10 minutes come from a cache)")
-    def archidekt_deck(deck_id: Id, refresh: bool = False, user: User = Depends(current_user),
-                       db: Session = Depends(get_db)) -> dict:
+    def archidekt_deck(deck_id: Id, refresh: bool = False,
+                       detail: Literal["summary", "cards"] = Query(default="summary", description="cards adds every card with its printing (the web app); summary stays small (assistants)"),
+                       user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         """The deck as the Vault saves it: name, author, format, commander(s), counts and the list with its sections, and
         Archidekt's own bracket tag. Archidekt's raw answer is 300 KB for 100 cards, mostly other shops' prices per card
         (Card Kingdom, Cardmarket, ...), which the Vault does not pass on: it quotes only Scryfall's dated prices (#219)."""
@@ -883,7 +884,9 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         parsed = deck_import.to_decklist(raw)
         known = deck_overview.identities(db, deck_overview.read(parsed["text"])["commanders"])
         url = deck_import.canonical_url(deck_id)
-        return {"deck": {"id": deck_id, "name": parsed["name"], "author": parsed["author"], "url": url, "source": "archidekt",
+        extra = {"cards": deck_import.card_lines(raw)} if detail == "cards" else {}
+        return {**extra,
+                "deck": {"id": deck_id, "name": parsed["name"], "author": parsed["author"], "url": url, "source": "archidekt",
                          "overview": deck_overview.overview(parsed["text"], parsed["format"], known)},
                 "archidekt_bracket": raw.get("edhBracket"), "counts": parsed["counts"], "text": parsed["text"],
                 "credit": {"source": "Archidekt", "url": url, "author": parsed["author"],
