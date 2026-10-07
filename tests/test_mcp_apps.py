@@ -13,7 +13,7 @@ from tests.test_catalog_api import BOLT
 from tests.test_mcp_catalog import agent, bot  # noqa: F401  (fixtures)
 from vault.api import mcp, mcp_ui
 
-VIEWS = {"card": ("get_card_oracle",), "deck": ("deck_stats",), "upgrades": ("find_upgrades",), "steps": ("present_steps",),
+VIEWS = {"card": ("get_card_oracle",), "deck": ("deck_stats",), "combos": ("find_combos",), "upgrades": ("find_upgrades",), "steps": ("present_steps",),
          "shopping": ("shopping_list",), "printings": ("update_owned_cards", "show_owned_printings")}
 
 
@@ -119,5 +119,29 @@ def test_deck_panels_lead_with_the_deck_not_with_card_counts(view):
     """#216: the panel opens with the deck's name, format and commander(s) (deckHeader), before its own statistics."""
     page = mcp_ui.html(view)
     assert "deckHeader(" in page and "var head = deckHeader(env.deck)" in page
-    assert page.index("deckHeader(env.deck)") < page.index('h("h2"')  # the deck comes before the panel's own title
+    body = page[page.index("function render("):]  # (helpers defined above it also draw headings; the order that matters is render's own)
+    assert body.index("deckHeader(env.deck)") < body.index('h("h2"')  # the deck comes before the panel's own title
     assert "Commander: " in page and "Format not given" in page and "Format read from the list" in page
+
+
+def test_the_deck_view_offers_every_format_the_server_checks():
+    """#52: it offered 15 of the 20; the list is now the server's own (vault.deck_tools.FORMATS), not a copy that can drift."""
+    from vault.deck_tools import FORMATS
+
+    page = mcp_ui.html("deck")
+    assert "__FORMATS__" not in page and f"var FORMATS = {__import__('json').dumps(list(FORMATS))};" in page and len(FORMATS) == 20
+
+
+def test_the_combos_view_is_for_find_combos_and_allows_no_network_at_all(agent, bot):
+    assert mcp.BY_NAME["find_combos"].ui == "combos"
+    read = make_token(agent)
+    page = rpc(bot, "resources/read", {"uri": "ui://vault/combos"}, read).json()["result"]["contents"][0]
+    assert page["_meta"]["ui"]["csp"] == {} and "Commander Spellbook" in page["text"] and "<img" not in page["text"]
+
+
+def test_the_export_is_a_local_blob_with_a_text_fallback_and_the_csp_is_unchanged(agent, bot):
+    """#55: the shopping view saves the list through a Blob link made in the page; it loads nothing, and the policy stays what it was."""
+    page = mcp_ui.html("shopping")
+    assert "new Blob(" in page and "URL.createObjectURL(" in page and "blocks downloads: use Copy list" in page
+    csp = {v: mcp_ui.resource_meta(v)["ui"]["csp"] for v in mcp_ui.VIEWS}
+    assert csp == {v: ({"resourceDomains": ["https://cards.scryfall.io"]} if v in ("card", "printings") else {}) for v in mcp_ui.VIEWS}

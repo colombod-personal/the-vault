@@ -97,14 +97,20 @@ shopping, collection, Archidekt helper, expert council) and the experts, so they
 ## MCP
 
 Stateless Streamable HTTP. Each JSON-RPC request gets one `application/json` answer, with no
-session id and no SSE, which fits serverless hosting. Protocol versions 2025-06-18, 2025-03-26
+server-side session and no SSE, which fits serverless hosting. `initialize` answers with a signed
+`Mcp-Session-Id` that only records whether the client advertised the MCP Apps extension (`docs/mcp-apps.md`);
+clients that never send it back are served as before. Protocol versions 2025-06-18, 2025-03-26
 and 2024-11-05 are supported. It was tested with the official MCP Python SDK client. A JSON-RPC
 batch (older protocol versions) holds 1 to 20 calls; an empty or larger one is refused (`-32600`).
 
 ```bash
-claude mcp add --transport http vault https://<host>/api/mcp --header "Authorization: Bearer vault_pat_..."
-claude mcp add --transport http vault https://<host>/api/mcp   # OAuth: then /mcp in Claude Code to sign in
+claude mcp add --transport http vault --scope user https://<host>/api/mcp   # OAuth: then /mcp in Claude Code, or `claude mcp login vault`
 ```
+
+Every client has its own format (Codex is TOML, VS Code's root key is `servers`, Cursor and Copilot CLI use `mcpServers`).
+`public/connect.html` and the connection part of `public/llms.txt` are both generated from one list in
+`scripts/build_plugin.py` (`HARNESSES`), so they agree with each other and with the address; the blocks put a token in an
+environment variable or the client's own prompt, never in a command line (shell history, the chat).
 
 Tools (the `share_id` argument reads a collection someone shared with you):
 

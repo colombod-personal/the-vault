@@ -1,0 +1,7 @@
+# Issues come in through the two forms below (both start at status:needs-refinement, docs/triage.md).
+# People who only want to connect their assistant to The Vault are sent to the connect page, not the tracker.
+blank_issues_enabled: false
+contact_links:
+  - name: Connect Claude, ChatGPT or another assistant to The Vault
+    url: https://mtgvault.cards/connect.html
+    about: Step-by-step connection for Claude and ChatGPT (and the plugin). Start here if you want to use The Vault rather than report a problem.

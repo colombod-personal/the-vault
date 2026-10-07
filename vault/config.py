@@ -32,6 +32,10 @@ class Settings:
     # The store reviewers' way in (vault.reviewer): unset, there is none. Set once by the owner, and the same value goes
     # into the directories' private credentials field.
     reviewer_passphrase: str = field(default_factory=lambda: _env("REVIEWER_PASSPHRASE"))
+    # MCP Apps (#50): the server always records whether a client advertised the io.modelcontextprotocol/ui extension (and logs
+    # it). With this on, a client that said it cannot show Apps gets no view links. Off by default until the logs show that
+    # claude.ai and ChatGPT both advertise it, so a host that renders the views without advertising is never cut off.
+    mcp_apps_require_capability: bool = field(default_factory=lambda: _env("MCP_APPS_REQUIRE_CAPABILITY") in ("1", "true", "yes"))
 
     google_client_id: str = field(default_factory=lambda: _env("GOOGLE_CLIENT_ID"))
     google_client_secret: str = field(default_factory=lambda: _env("GOOGLE_CLIENT_SECRET"))

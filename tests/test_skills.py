@@ -73,13 +73,14 @@ def test_no_skill_contains_rules_or_card_text():
 
 
 def test_the_archidekt_helper_reads_one_deck_and_links_shops_without_contacting_them():
-    """The shop links are the formats checked on 2026-10-04 (issue #80); the skill must not claim to edit Archidekt
-    or know a shop's price, since the Vault has neither (docs/compliance.md)."""
+    """The shop links are the formats checked on 2026-10-04 (issue #80). Magic Madhouse's was corrected on 2026-10-07 (the
+    old ?q= format showed the home page, not results) and Cardmarket's could not be re-checked (bot check). The skill must
+    not claim to edit Archidekt or know a shop's price, since the Vault has neither (docs/compliance.md)."""
     meta, body = parse(SKILLS / "archidekt-deck-helper")
     assert "get_archidekt_deck" in meta["metadata"]["vault-tools"]
     for link in ("https://www.cardkingdom.com/catalog/search?search=header&filter%5Bname%5D=CARD+NAME",
                  "https://www.cardmarket.com/en/Magic/Products/Search?searchString=CARD+NAME",
-                 "https://magicmadhouse.co.uk/?q=CARD+NAME"):
+                 "https://magicmadhouse.co.uk/search.php?search_query=CARD+NAME"):
         assert f"`{link}`" in body
     assert "You never edit Archidekt" in body and "One deck per" in body
     assert "cannot say which shop is cheapest" in body
@@ -107,3 +108,50 @@ def test_an_agent_can_call_every_tool_its_skills_tell_it_to_and_only_real_tools(
         assert needed <= allowed, f"{meta['name']} lists the skill {name} but may not call {sorted(needed - allowed)}"
     if "expert council" in meta["description"]:
         assert "expert-council" not in meta.get("skills", []), "a member of the council does not convene it"
+
+
+# #97: every skill that works on one deck carries the whole flow: find it by the person's words (list_decks with query,
+# `closest` when nothing matches), show it (get_deck), and when it is not saved read or save it from its Archidekt link
+# (get_archidekt_deck, import_deck_from_link). The same flow is in the server instructions for hosts without skills
+# (tests/test_mcp_catalog.py::test_hosts_without_the_skills_still_get_the_shop_and_deck_rules).
+DECK_FLOW_TOOLS = ("list_decks", "get_deck", "import_deck_from_link", "get_archidekt_deck")
+DECK_FLOW_SKILLS = ("shopping-assistant", "deck-upgrader", "archidekt-deck-helper")
+
+
+def deck_flow_problems(meta: dict, body: str) -> list[str]:
+    """What is missing from a skill's find-the-deck-by-name flow (empty when it is all there)."""
+    text = " ".join(body.split())
+    declared = set(meta["metadata"]["vault-tools"].split())
+    problems = [f"does not declare {t}" for t in DECK_FLOW_TOOLS if t not in declared]
+    if not re.search(r"`list_decks` with\s+`query`", text):
+        problems.append("no by-name step: list_decks with query")
+    if "`closest`" not in text:
+        problems.append("does not say what to do when no deck matches (closest)")
+    if "`get_deck`" not in text:
+        problems.append("never shows the saved deck (get_deck)")
+    if not re.search(r"`import_deck_from_link`", text) or not re.search(r"`get_archidekt_deck`", text):
+        problems.append("no link step (import_deck_from_link or get_archidekt_deck)")
+    if not re.search(r"not saved", text):
+        problems.append("does not say the link step applies only when the deck is not saved")
+    return problems
+
+
+@pytest.mark.parametrize("name", DECK_FLOW_SKILLS)
+def test_deck_skills_carry_the_whole_find_the_deck_by_name_flow(name):
+    meta, body = parse(SKILLS / name)
+    assert deck_flow_problems(meta, body) == []
+
+
+@pytest.mark.parametrize("name", DECK_FLOW_SKILLS)
+def test_removing_a_step_of_the_flow_fails_the_check(name):
+    """The check must notice each step going missing: this is what the audit found (#97) that no test would."""
+    meta, body = parse(SKILLS / name)
+    flat = " ".join(body.split())
+    without_by_name = re.sub(r"`list_decks` with\s+`query`", "`list_decks`", flat)
+    assert any("by-name" in p for p in deck_flow_problems(meta, without_by_name))
+    without_link = flat.replace("`import_deck_from_link`", "the import").replace("`get_archidekt_deck`", "the reader")
+    assert any("link step" in p for p in deck_flow_problems(meta, without_link))
+    without_show = flat.replace("`get_deck`", "the deck")
+    assert any("get_deck" in p for p in deck_flow_problems(meta, without_show))
+    undeclared = {**meta, "metadata": {**meta["metadata"], "vault-tools": meta["metadata"]["vault-tools"].replace("get_deck", "")}}
+    assert any("does not declare" in p for p in deck_flow_problems(undeclared, body))

@@ -2,6 +2,7 @@
 and GitHub Copilot): tied to real tools and skills, limited to the Vault's tools, faithful to the attribution
 rules, and every generated file parses in its own format."""
 
+import re
 import sys
 import tomllib
 from pathlib import Path
@@ -108,3 +109,61 @@ def test_the_install_instructions_name_each_folder_and_say_what_is_unverified():
     text = (bp.DEFS / "README.md").read_text(encoding="utf-8")
     for needle in (".codex/agents/", ".cursor/agents/", ".github/agents/", "have not been run", "whoami"):
         assert needle in text, needle
+
+
+# ---- #59: each variant restricts the agent to the Vault's tools where its format can, and says only that --------------
+
+
+@pytest.mark.parametrize("agent", AGENTS, ids=lambda a: a["name"])
+def test_the_copilot_agent_has_an_allow_list_of_only_the_vaults_read_only_tools(agent):
+    """GitHub/VS Code custom agents: `tools` lists the tools available to the agent (anything not listed is not);
+    MCP tools are `<server>/<tool>`. Standalone files use the name the connect page gives the server (`vault`), the plugin's
+    com.github.copilot/agents copy the plugin's own server name."""
+    for path, server in ((bp.DEFS / "copilot" / f"{agent['name']}.agent.md", "vault"),
+                         (bp.PLUGIN / "com.github.copilot" / "agents" / f"{agent['name']}.agent.md", "the-vault")):
+        meta, _ = frontmatter(path.read_text(encoding="utf-8"))
+        assert meta["tools"] == [f"{server}/{t}" for t in agent["tools"]]
+        assert all(t.startswith(f"{server}/") and "*" not in t for t in meta["tools"])  # nothing built in, no wildcard
+        assert not [t for t in agent["tools"] if mcp.BY_NAME[t].write]
+
+
+@pytest.mark.parametrize("agent", AGENTS, ids=lambda a: a["name"])
+def test_the_codex_agent_limits_the_vault_server_to_its_tools(agent):
+    """Codex: `enabled_tools` is the allow list of one MCP server; a custom agent file may carry its own mcp_servers."""
+    data = tomllib.loads((bp.DEFS / "codex" / f"{agent['name']}.toml").read_text(encoding="utf-8"))
+    assert data["mcp_servers"]["vault"] == {"url": "https://mtgvault.cards/api/mcp", "enabled_tools": agent["tools"]}
+    assert set(data) == {"name", "description", "sandbox_mode", "developer_instructions", "mcp_servers"}
+
+
+@pytest.mark.parametrize("agent", AGENTS, ids=lambda a: a["name"])
+def test_the_cursor_agent_claims_no_tool_list_because_cursors_format_has_none(agent):
+    """Cursor's subagent frontmatter is name, description, model, readonly, is_background; subagents inherit the parent's tools.
+    If Cursor adds a tool allow list, add it here and in the README table."""
+    meta, _ = frontmatter((bp.DEFS / "cursor" / f"{agent['name']}.md").read_text(encoding="utf-8"))
+    assert set(meta) == {"name", "description", "model", "readonly"} and meta["readonly"] is True
+
+
+def test_the_readme_claims_only_what_each_variant_enforces():
+    """The audit found the README saying every agent 'answers only through the Vault's tools' while only the Claude Code
+    variant enforced it. The table now says, per assistant, what is enforced and what is only asked."""
+    text = (bp.DEFS / "README.md").read_text(encoding="utf-8")
+    assert "answers only through the Vault's tools" not in text
+    rows = {m.group(1): m.group(2) for m in re.finditer(r"^\| ([^|]+?) \| ([^|]+?) \| ([^|]+?) \|$", text, re.M) if "allow list" in m.group(0) or "read-only" in m.group(0)}
+    table = {k.strip(): v for k, v in rows.items()}
+    assert "allow list" in table["Claude Code (the plugin)"] and "allow list" in table["GitHub Copilot and VS Code"]
+    assert "enabled_tools" in table["Codex"] and "sandbox" in table["Codex"]
+    assert "readonly: true" in table["Cursor"]
+    # and the Not-enforced column admits it for the two that cannot
+    assert re.search(r"\| Codex \|[^|]+\| Codex's other tools", text) and re.search(r"\| Cursor \|[^|]+\| Which tools it uses", text)
+    # the copilot claim is conditional on the server name, and the unverified status is stated
+    assert "`vault`" in text and "have not been run" in text and "com.github.copilot" in text
+
+
+def test_the_format_experts_that_do_not_exist_are_recorded_as_an_owner_decision():
+    """#104: Modern, Legacy, cEDH, Brawl and Cube experts are deferred by the owner's own build order (docs/expert-council.md,
+    Decisions item 3), not forgotten: the doc must say which are missing, and that must stay true of the agents."""
+    doc = " ".join((ROOT / "docs" / "expert-council.md").read_text(encoding="utf-8").split())
+    assert "Owner decision needed: the deferred format experts" in doc and "waive the Modern and Legacy part" in doc
+    for fmt in ("modern", "legacy", "cedh", "brawl", "cube", "vintage", "oathbreaker"):
+        assert not [n for n in NAMES if fmt in n], f"an agent for {fmt} exists: update docs/expert-council.md (owner decision)"
+        assert fmt.lower() in doc.lower() or fmt == "cedh" and "cEDH" in doc
