@@ -63,6 +63,36 @@ console.log(JSON.stringify(out));
     assert result["measured"] == [True, True, False, False, True, False]
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node (CI has it)")
+def test_speed_insights_routes_are_view_names_from_a_fixed_list_and_never_an_id_or_a_token():
+    """#285: every event was filed under 'Unknown'. The route is the app's view name only; nothing typed or secret can become one."""
+    script = """
+import { routeOf, VIEWS } from %s;
+const at = (pathname, hash) => routeOf({ pathname, hash });
+console.log(JSON.stringify({
+  views: VIEWS.map((v) => at('/', '#/' + v)),
+  none: [at('/', ''), at('/', '#'), at('/', '#/'), at('/', undefined)],
+  withArg: [at('/', '#/decks/12'), at('/', '#/sets/MKM'), at('/', '#/help/connect'), at('/', '#/browse?q=sol')],
+  hostile: [at('/', '#/invite=SECRET'), at('/', '#/<script>alert(1)</script>'), at('/', '#/share/TOKEN123'), at('/', '#/dashboardX'), at('/', '#/Browse')],
+  pages: [at('/credits.html', '#/decks/1'), at('/privacy.html', ''), routeOf(null)],
+}));
+""" % json.dumps((WEB / "analytics" / "url.mjs").as_uri())
+    done = subprocess.run(["node", "--input-type=module", "-e", script], capture_output=True, text=True, check=True, timeout=30)
+    result = json.loads(done.stdout)
+    assert result["views"] == ["/dashboard", "/browse", "/sets", "/decks", "/lab", "/graph", "/valuation", "/help"]
+    assert result["none"] == ["/", "/", "/", "/"]
+    assert result["withArg"] == ["/decks", "/sets", "/help", "/browse"]  # the argument after the view is dropped
+    assert result["hostile"] == ["/", "/", "/", "/", "/"]  # not on the list: the plain landing route
+    assert result["pages"] == ["/credits.html", "/privacy.html", "/"]
+    for leaked in ("SECRET", "TOKEN", "script", "MKM", "12"):
+        assert leaked not in done.stdout.replace('"/dashboard"', ""), leaked
+
+
+def test_the_entry_point_gives_speed_insights_a_route_and_follows_the_hash():
+    entry = text(WEB / "analytics" / "entry.mjs")
+    assert "route: routeOf(location)" in entry and "hashchange" in entry and "setRoute" in entry
+
+
 def test_the_entry_point_redacts_both_scripts_and_the_privacy_notice_says_what_is_collected():
     entry = text(WEB / "analytics" / "entry.mjs")
     assert entry.count("beforeSend") == 2 and "cleanUrl" in entry and "measured(" in entry
