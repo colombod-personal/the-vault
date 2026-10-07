@@ -113,6 +113,17 @@ def test_archidekt_commander_decks_store_their_format():
     assert deck_import.to_decklist({**raw, "deckFormat": 99})["format"] is None  # unchecked numbers are not guessed
 
 
+def test_archidekt_credit_requires_a_valid_domain_boundary():
+    from types import SimpleNamespace
+
+    assert deck_overview.archidekt_credit(
+        SimpleNamespace(source_url="https://www.archidekt.com/decks/1", source_fetched_at=None, source_author=None)
+    )["source"] == "Archidekt"
+    assert deck_overview.archidekt_credit(
+        SimpleNamespace(source_url="https://notarchidekt.com/decks/1", source_fetched_at=None, source_author=None)
+    ) is None
+
+
 ANALYSIS = {  # tool -> the arguments that make it run on a saved deck
     "deck_stats": {}, "simulate_draws": {"format": "commander", "samples": 1}, "deck_legality": {"format": "commander"},
     "find_upgrades": {"format": "commander", "budget_usd": 50}, "validate_deck_changes": {"format": "commander", "adds": [], "cuts": []},

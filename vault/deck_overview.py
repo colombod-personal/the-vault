@@ -97,7 +97,7 @@ def archidekt_credit(d) -> dict | None:
     from urllib.parse import urlsplit
 
     host = (urlsplit(d.source_url).hostname or "").lower() if d.source_url else ""
-    if not host.endswith("archidekt.com"):
+    if host != "archidekt.com" and not host.endswith(".archidekt.com"):
         return None
     fetched = d.source_fetched_at
     return {"source": "Archidekt", "url": d.source_url, "author": d.source_author,
