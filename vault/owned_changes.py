@@ -210,7 +210,8 @@ def _token(secret: str, user: User, version: int, lines: list[Resolved], expires
     body = json.dumps({"u": user.id, "v": version, "x": expires, "undo": undo, "l": [r.signed() for r in lines]},
                       sort_keys=True, separators=(",", ":"))
     sig = hmac.new(secret.encode(), b"owned-changes:" + body.encode(), hashlib.sha256).hexdigest()
-    return base64.urlsafe_b64encode(f"{expires}.{sig}".encode()).decode()
+    # the ".undo" suffix only lets an error say which tool the confirmation belongs to (#294); the signature covers the real flag
+    return base64.urlsafe_b64encode(f"{expires}.{sig}{'.undo' if undo else ''}".encode()).decode()
 
 
 def preview(db: Session, user: User, lines: list[dict], secret: str, lookup_printing, *, undo: bool = False,
@@ -248,12 +249,19 @@ def preview(db: Session, user: User, lines: list[dict], secret: str, lookup_prin
 def apply(db: Session, user: User, lines: list[dict], confirmation: str, secret: str, lookup_printing, app_label: str,
           *, undo_of: Import | None = None, now: float | None = None) -> Import:
     try:
-        expires_s, sig = base64.urlsafe_b64decode(confirmation.encode()).decode().split(".", 1)
+        expires_s, rest = base64.urlsafe_b64decode(confirmation.encode()).decode().split(".", 1)
         expires = int(expires_s)
     except (ValueError, UnicodeDecodeError) as exc:
         raise ChangeError("That confirmation is not valid: preview again") from exc
     if expires < (now or time.time()):
         raise ChangeError("That confirmation has expired: preview again and ask the person")
+    from_undo = rest.endswith(".undo")
+    if from_undo and undo_of is None:  # in a real Claude run the first undo attempt went here and read a bare "conflict"
+        raise ChangeError("That confirmation came from undo_owned_cards_update: call undo_owned_cards_update again with it "
+                          "(not confirm_owned_cards_update) to apply the undo")
+    if undo_of is not None and not from_undo:
+        raise ChangeError("That confirmation did not come from undo_owned_cards_update: call undo_owned_cards_update without a "
+                          "confirmation first, show the person what it would undo, then call it again with the confirmation it returns")
     seen = preview(db, user, lines, secret, lookup_printing, undo=undo_of is not None, now=now)
     if not seen["ready"]:
         raise ChangeError("These changes are not ready to apply: preview again")

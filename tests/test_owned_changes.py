@@ -188,6 +188,25 @@ def test_undo_previews_then_restores_and_only_the_last_change(app, agent, bot, w
     assert call_tool(bot, write, "undo_owned_cards_update").get("isError")  # nothing left to undo
 
 
+def test_an_undo_confirmation_sent_to_the_ordinary_confirm_tool_is_refused_and_points_to_the_undo_tool(app, agent, bot, write):
+    """#294: in a real Claude run the first undo attempt used confirm_owned_cards_update and read a bare 'conflict'. The error now names
+    the tool to call, the undo preview says how to apply it, and applying through the right tool still works afterwards."""
+    before = total(app)
+    seen = preview(bot, write, ADD_CMR)
+    assert not confirm(bot, write, [ADD_CMR], seen["confirmation"]).get("isError")
+    shown = call_tool(bot, write, "undo_owned_cards_update")["structuredContent"]
+    assert "undo_owned_cards_update again" in shown["to_apply"] and "confirm_owned_cards_update" in shown["to_apply"]
+    inverse = [{"action": "remove", "name": "Sol Ring", "quantity": 2, "set": "CMR", "number": "472"}]
+    wrong = confirm(bot, write, inverse, shown["confirmation"])  # the confirmation belongs to the undo, not to this tool
+    assert wrong["isError"] is True
+    said = " ".join(c["text"] for c in wrong["content"])
+    assert "came from undo_owned_cards_update" in said and "call undo_owned_cards_update again" in said
+    assert total(app) == before + 2  # nothing was applied by the mistake
+    done = call_tool(bot, write, "undo_owned_cards_update", confirmation=shown["confirmation"])  # the right tool works with the same one
+    assert not done.get("isError"), done
+    assert total(app) == before
+
+
 def test_undo_is_refused_after_an_import(app, agent, bot, write):
     from test_agents import CSV
     seen = preview(bot, write, ADD_CMR)
