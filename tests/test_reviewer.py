@@ -12,7 +12,7 @@ from vault import reviewer
 from vault.api import mcp
 from vault.app import create_app
 from vault.config import Settings
-from vault.models import Deck, Entry, User
+from vault.models import Deck, Entry, Import, User
 
 V1 = "/api/v1"
 SECRET = "correct horse battery staple"
@@ -95,6 +95,17 @@ def test_seeding_is_idempotent_and_reset_puts_the_demo_back_as_it_was(app):
         assert count(db, User, email=reviewer.EMAIL) == 1
 
 
+def test_a_private_copy_can_load_its_own_collection_and_sign_in_keeps_it(app):
+    own = ("Folder Name,Quantity,Trade Quantity,Card Name,Set Code,Set Name,Card Number,Condition,Printing,Language,Price Bought,"
+           "Date Bought,LOW,MID,MARKET\nMy binder,3,0,Lightning Bolt,m11,Magic 2011,149,NearMint,Normal,English,1.5,2020-01-01,1,2,2\n")
+    with app.state.db.sessions() as db:
+        user = reviewer.seed(db, reset=True, collection=own.encode("utf-8"))
+        names = {e.name: e.quantity for e in db.scalars(select(Entry).where(Entry.user_id == user.id))}
+        assert names == {"Lightning Bolt": 3}
+        reviewer.seed(db)  # what a reviewer sign-in does: the private data is not put back to the made-up one
+        assert {e.name for e in db.scalars(select(Entry).where(Entry.user_id == user.id))} == {"Lightning Bolt"}
+
+
 def test_the_demo_session_cannot_see_or_touch_anyone_elses_data(app):
     mine = TestClient(app)
     mine.post("/api/auth/dev-login?email=someone@example.com")
@@ -163,3 +174,41 @@ def test_the_guide_states_the_real_number_of_copies_in_the_demo_collection(app):
     """The live page said 'about 150 copies' while the demo holds 110: the number is computed from the data, not typed."""
     guide = TestClient(app).get("/reviewers").text
     assert f"{sum(row[1] for row in reviewer.OWNED)} copies of well-known cards" in guide and "about 150" not in guide
+
+
+def test_every_demo_card_names_a_real_printing_and_old_demo_data_is_replaced(app):
+    """The first real Claude run (2026-10-07) found every demo price at $0: the rows had no set or collector number, so Scryfall
+    could not match them. Now each row carries a printing, and a demo account holding an older version is put back at sign-in."""
+    assert all(row[2] and row[3] and row[4] for row in reviewer.OWNED), "a demo row without a printing cannot be priced"
+    with app.state.db.sessions() as db:
+        user = reviewer.seed(db)
+        db.query(Import).filter_by(user_id=user.id).update({"filename": "demo-collection.csv"})  # the old version's name
+        db.query(Entry).filter_by(user_id=user.id).update({"set_code": None, "collector_number": None})
+        db.commit()
+        assert db.query(Entry).filter_by(user_id=user.id, set_code=None).count() == len(reviewer.OWNED)
+        reviewer.seed(db)  # signing in again
+        assert db.query(Entry).filter_by(user_id=user.id, set_code=None).count() == 0
+        assert db.query(Import).filter_by(user_id=user.id, filename=reviewer.COLLECTION_FILE).count() == 1
+
+
+def test_the_first_reviewer_prompt_gets_five_priced_cards_once_the_demo_is_matched_to_the_catalog(browser, app):
+    """Acceptance for 'What are my five most valuable cards?' on the demo account (#239): the demo rows, matched to a Scryfall-shaped
+    catalog the way the daily sync does it, give five priced cards, not the $0 list the first real Claude run saw."""
+    from datetime import date
+
+    from mtg_toolkits.scryfall import Card as SfCard
+
+    from tests.ids import sid
+    from vault.sync import sync
+
+    assert browser.post("/api/auth/reviewer-login", json={"passphrase": SECRET}).status_code == 200
+    bulk = [SfCard.from_json({"id": sid(f"demo-{i}"), "name": name, "set": code, "collector_number": number, "finishes": ["nonfoil"],
+                              "prices": {"usd": f"{max(paid, 0.1) * 3:.2f}"}, "type_line": "Card", "color_identity": [], "cmc": 1,
+                              "rarity": "rare", "artist": "A", "image_uris": {"small": "https://img.test/s.jpg", "normal": "https://img.test/n.jpg"}})
+            for i, (name, _q, code, _sn, number, _f, paid) in enumerate(reviewer.OWNED)]
+    with app.state.db.sessions() as db:
+        report = sync(db, bulk, day=date(2026, 10, 7))
+        unmatched = db.query(Entry).filter(Entry.scryfall_id.is_(None)).count()
+    assert unmatched == 0, f"{unmatched} demo rows have no matching printing: {report}"
+    top = browser.get(f"{V1}/collection/stats").json()["most_valuable"]
+    assert len(top) >= 5 and all((card.get("market_value") or card.get("value") or 0) > 0 for card in top[:5]) and top[0]["name"] == "Smothering Tithe"
