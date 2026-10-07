@@ -275,7 +275,12 @@ function App() {
   );
 
   const onImported = (res) => {
-    setNotice(`Imported ${res.copies.toLocaleString()} cards: ${window.describeChanges(res.changes)}.`);
+    const merge = res.merge || {};
+    const kept = (merge.kept_vault_edits && merge.kept_vault_edits.count) || 0;
+    const both = (merge.conflicts && merge.conflicts.count) || 0;
+    const edits = kept + both ? ` Kept ${kept + both} card${kept + both === 1 ? '' : 's'} you changed through an assistant`
+      + (both ? ` (${both} also changed in your app: your edit here was kept)` : '') + '.' : '';
+    setNotice(`Imported ${res.copies.toLocaleString()} cards: ${window.describeChanges(res.changes)}.${edits}`);
     setData(null);
     loadCollection({ afterImport: true });
   };

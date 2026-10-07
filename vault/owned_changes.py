@@ -231,9 +231,9 @@ def preview(db: Session, user: User, lines: list[dict], secret: str, lookup_prin
     ready = refusal is None and all(r.status == "ready" for r in resolved)
     out = {"lines": [r.public() for r in resolved], "copies_added": added, "copies_removed": removed,
            "value_change_usd": round(value, 2), "collection_version": version, "ready": ready,
-           "note": "Nothing has changed yet. Show this to the person; apply it only after they say yes. Re-importing a "
-                   "file later replaces the whole collection with that file, so an edit made here is lost unless their app "
-                   "has it too (a re-import that keeps these edits is planned, #194)."}
+           "note": "Nothing has changed yet. Show this to the person; apply it only after they say yes. A later import of "
+                   "their app's file keeps these edits and applies only what changed in their app; a card changed in both "
+                   "places is listed as a conflict in that import's preview."}
     if refusal:
         out["refused"] = refusal
     if ready:

@@ -235,10 +235,14 @@ def test_showing_owned_printings_is_read_only_and_private(agent, cards, bot):
     assert call_tool(bot, bob_read, "show_owned_printings", name="Sol Ring")["structuredContent"]["printings"] == []
 
 
-def test_the_preview_does_not_promise_what_re_import_does_not_do(bot, write):
-    """The audit (#242) found the preview saying 'a later re-import keeps these edits' while _replace wipes the collection:
-    until the three-way re-import (#194) exists, the answer must say the opposite."""
+def test_what_the_preview_and_the_skill_say_about_re_import_is_what_re_import_does(bot, write):
+    """The audit (#242) found the preview promising 'a later re-import keeps these edits' while _replace wiped the
+    collection, and the wording was made honest until the three-way re-import (#194) existed. It exists now, and every
+    sentence below is proved by tests/test_reimport_merge.py (edits kept, only the app's changes applied, conflicts
+    listed, the Vault's edit kept by default) and tests/test_reimport_mcp.py (the same through the MCP tools)."""
     note = preview(bot, write, ADD_CMR)["note"].lower()
-    assert "replaces the whole collection" in note and "keeps these edits and applies" not in note
+    assert "keeps these edits and applies only what changed in their app" in note and "conflict" in note
+    assert "replaces the whole collection" not in note and "is lost" not in note
     skill = (Path(__file__).resolve().parents[1] / "skills" / "collection-analyst" / "SKILL.md").read_text(encoding="utf-8")
-    assert "keeps these edits." not in skill and "replaces the whole collection" in skill
+    assert "keeps this edit and applies only what" in skill and "replaces the whole collection" not in skill
+    assert "is lost unless" not in skill and "is planned" not in skill
