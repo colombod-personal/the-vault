@@ -255,3 +255,24 @@ Proposed, still to confirm:
 ## Measured with the real loaders
 
 On 2026-10-04 the loaders were run on the real bulk files into Postgres 16: first load 39 seconds (36,462 oracle cards, 79,663 rulings, 4,560 tags with 55,557 links, 4,062 Comprehensive Rules rows); a repeat load with no changes 6 seconds and **zero rows written**. Sizes: oracle_cards 55 MB, rulings 34 MB, oracle_tag_links 16 MB, rules 3 MB, oracle_tags 3 MB; about 111 MB of the catalog in a 120 MB database. This matches the estimate above. Real data also caught one mistake in the first draft: glossary terms need a rule-number column of 120 characters, not 20.
+
+## Multi-faced cards: who reads what (audit for #197, 2026-10-07)
+
+Scryfall puts a double-faced card's mana cost, Oracle text and stats on its faces, and (transform and modal cards) its colours
+too. The catalog keeps the top-level values as Scryfall gives them (null for those cards), derives the card's `colors` (front
+face first), and keeps each face's own values in `faces`. Every reader of colours or text was checked; the helpers that read a
+faced card's text are in `vault/card_faces.py`. Evidence: `tests/test_card_faces.py`.
+
+| Reader | What it reads | Verdict |
+|---|---|---|
+| `catalog_queries.card_body` (`get_card_oracle`, `/catalog/cards`) | top-level fields and `faces` | Correct: top-level text is null for faced cards by design and `faces` carries it; the tool description says so. Colours are derived by the loader. `verify_citation` already quotes per face (#249) |
+| `deck_tools.stats`, `legality`, `find_upgrades`, `validate_changes` | `color_identity` (always complete), the type line (complete: `A // B`), `cmc` | Correct. **Fixed:** the "any number of cards named" copy-limit check read the top-level text only (now every face); an upgrade candidate's `mana_cost` was null for a transform or modal card (now the front face's) |
+| `simulate.from_oracle` | Oracle text for "enters tapped", mana rocks and creatures, land ramp, "no maximum hand size" | **Fixed:** it read the top-level text, so a modal land with "enters tapped" on its face was simulated as entering untapped, and a faced card's ramp text was never seen. It now reads the front face's text (what the card does as played) |
+| `deck_overview` | `color_identity` | Correct |
+| `analytics` (colour mix, breakdowns, filters) | `cards.color_identity`, the front type line, `cmc` | Correct: it never reads `colors`; the mix is by colour identity, as its labels say |
+| `collection_view`, `catalog.py` (card lookups for the web app) | the owned-printings table `cards` | **Checked, no gap:** `cards` is filled by `mtg_toolkits.Card.from_json`, which takes `colors` from the top level or, if empty, the union of the faces' colours (sorted alphabetically, not front face first), and joins the faces' mana cost, text, power and toughness with `//`. A real-shaped transform card (Delver of Secrets) looked up through the Vault has colours `["U"]`, the front face's cost and both faces' text. This depends on the pinned `mtg-toolkits` commit: if the library changes `from_json`, the test fails |
+| the new role derivation (below) | the text of every face | Reads `card_faces.all_text`, so a faced card's removal or ramp text is seen |
+
+Left as is, on purpose: the full-text index `ix_oracle_cards_fts` is on the top-level `oracle_text` only. No query uses it today
+(rules text search is the live rules index), so a text search over cards would miss faced cards until the index is rebuilt over the
+faces' text; the index must be changed before any card-text search is added.

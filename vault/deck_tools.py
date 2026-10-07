@@ -18,6 +18,7 @@ from mtg_toolkits import decklist
 from sqlalchemy import and_, false, func, or_, select
 from sqlalchemy.orm import Session
 
+from .card_faces import all_text, front_mana_cost
 from .catalog_queries import card_priority
 from .models import OracleCard, OraclePrice, OracleTag, OracleTagLink
 from .prices import plausible_price
@@ -256,7 +257,7 @@ def legality(resolved: Resolved, fmt: str) -> dict:
             continue
         name, n = e.card.name, counts[e.card.name]
         counts[e.card.name] = 0
-        free = "Basic Land" in (e.card.type_line or "") or "A deck can have any number of cards named" in (e.card.oracle_text or "")
+        free = "Basic Land" in (e.card.type_line or "") or "A deck can have any number of cards named" in all_text(e.card)
         limit = 1 if fmt in SINGLETON or e.card.legalities.get(fmt) == "restricted" else 4
         if n > limit and not free:
             issues.append({"kind": "too_many_copies", "card": name, "detail": f"{n} copies, at most {limit} allowed in {fmt}"})
@@ -333,7 +334,7 @@ def find_upgrades(db: Session, resolved: Resolved, fmt: str, budget_usd: float, 
                  .group_by(OracleCard.oracle_id, OraclePrice.oracle_id)
                  .order_by(*([OracleCard.oracle_id.in_(list(owned)).desc()] if owned else []),
                            OracleCard.edhrec_rank.asc().nulls_last(), OraclePrice.usd, OracleCard.name).limit(limit))
-        candidates[role] = [{"name": c.name, "oracle_id": c.oracle_id, "type_line": c.type_line, "mana_cost": c.mana_cost,
+        candidates[role] = [{"name": c.name, "oracle_id": c.oracle_id, "type_line": c.type_line, "mana_cost": front_mana_cost(c),
                              "edhrec_rank": c.edhrec_rank, **_price_fields(p),
                              **({"owned_copies": owned.get(c.oracle_id, 0)} if owned is not None else {}),
                              "why": f"tagged {role} by Scryfall Tagger; legal in {fmt}; within the deck's colors; "

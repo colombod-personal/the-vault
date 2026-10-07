@@ -15,6 +15,8 @@ import random
 import re
 from dataclasses import dataclass, field
 
+from .card_faces import front_text
+
 HAND_SIZE = 7
 MAX_TURNS, MAX_GAMES, MAX_SAMPLES = 10, 5000, 10
 ASSUMPTIONS = [
@@ -62,7 +64,7 @@ def _mana_added(text: str) -> int:
 def from_oracle(card) -> SimCard:
     """The simulation's view of a catalog card (``vault.models.OracleCard``)."""
     front_type = (card.type_line or "").split("//")[0]
-    text = card.oracle_text or ""
+    text = front_text(card)  # a transform or modal card keeps its text on its faces (vault.card_faces)
     lower = text.lower()
     land = "Land" in front_type
     rock = dork = ramp_lands = 0
