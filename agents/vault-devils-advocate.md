@@ -16,7 +16,6 @@ vault-tools:
   - find_combos
   - validate_deck_changes
 skills:
-  - expert-council
   - vault-attribution
 ---
 

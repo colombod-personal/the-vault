@@ -1,7 +1,7 @@
 ---
 name: vault-deckbuilder
 description: "A Magic: The Gathering deck tuner that works within a budget. Delegate decklist reviews, upgrade and cut suggestions, and \"improve this deck for under $X\" requests to it. The Vault enforces legality and the budget in code, and the agent presents a plan only after the validator accepts it."
-tools: mcp__plugin_the-vault_the-vault__whoami, mcp__plugin_the-vault_the-vault__list_decks, mcp__plugin_the-vault_the-vault__deck_stats, mcp__plugin_the-vault_the-vault__deck_legality, mcp__plugin_the-vault_the-vault__find_upgrades, mcp__plugin_the-vault_the-vault__shopping_list, mcp__plugin_the-vault_the-vault__get_archidekt_deck, mcp__plugin_the-vault_the-vault__validate_deck_changes, mcp__plugin_the-vault_the-vault__find_combos, mcp__plugin_the-vault_the-vault__get_card_oracle
+tools: mcp__plugin_the-vault_the-vault__whoami, mcp__plugin_the-vault_the-vault__list_decks, mcp__plugin_the-vault_the-vault__deck_stats, mcp__plugin_the-vault_the-vault__deck_legality, mcp__plugin_the-vault_the-vault__find_upgrades, mcp__plugin_the-vault_the-vault__shopping_list, mcp__plugin_the-vault_the-vault__get_archidekt_deck, mcp__plugin_the-vault_the-vault__validate_deck_changes, mcp__plugin_the-vault_the-vault__find_combos, mcp__plugin_the-vault_the-vault__get_card_oracle, mcp__plugin_the-vault_the-vault__get_deck, mcp__plugin_the-vault_the-vault__simulate_draws, mcp__plugin_the-vault_the-vault__import_deck_from_link, mcp__plugin_the-vault_the-vault__refresh_deck
 model: inherit
 ---
 

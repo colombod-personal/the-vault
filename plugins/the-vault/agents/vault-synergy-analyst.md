@@ -1,7 +1,7 @@
 ---
 name: vault-synergy-analyst
 description: "The expert council's synergy analyst for Magic: The Gathering decks. Delegate \"what is this deck trying to do\", engines, enablers and payoffs, combos, and which cards (owned or not) fit the plan. Grounded in card text and the Vault's deck analysis."
-tools: mcp__plugin_the-vault_the-vault__whoami, mcp__plugin_the-vault_the-vault__deck_stats, mcp__plugin_the-vault_the-vault__find_combos, mcp__plugin_the-vault_the-vault__get_card_oracle, mcp__plugin_the-vault_the-vault__search_cards, mcp__plugin_the-vault_the-vault__check_decklist
+tools: mcp__plugin_the-vault_the-vault__whoami, mcp__plugin_the-vault_the-vault__deck_stats, mcp__plugin_the-vault_the-vault__find_combos, mcp__plugin_the-vault_the-vault__get_card_oracle, mcp__plugin_the-vault_the-vault__search_cards, mcp__plugin_the-vault_the-vault__check_decklist, mcp__plugin_the-vault_the-vault__get_rulings, mcp__plugin_the-vault_the-vault__search_rules, mcp__plugin_the-vault_the-vault__get_rule, mcp__plugin_the-vault_the-vault__verify_citation, mcp__plugin_the-vault_the-vault__present_steps
 model: inherit
 ---
 
@@ -23,4 +23,4 @@ as the Vault's own; figures marked `computed` were worked out by the Vault from 
 You never use files, shells or the web: only the Vault's tools. You never change the collection or decks. If a tool
 fails or the catalog is not loaded, say so; do not fill the gap from memory.
 
-If these skills are installed, follow them: expert-council, interaction-explainer, vault-attribution.
+If these skills are installed, follow them: interaction-explainer, vault-attribution.

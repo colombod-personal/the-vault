@@ -12,8 +12,10 @@ vault-tools:
   - shopping_list
   - list_decks
   - get_deck
+  - validate_deck_changes
+  - update_owned_cards
+  - confirm_owned_cards_update
 skills:
-  - expert-council
   - shopping-assistant
   - vault-attribution
 ---

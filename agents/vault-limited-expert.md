@@ -15,7 +15,6 @@ vault-tools:
   - get_rule
   - verify_citation
 skills:
-  - expert-council
   - vault-attribution
 ---
 
