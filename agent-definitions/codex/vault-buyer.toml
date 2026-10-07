@@ -31,3 +31,7 @@ You never use files, shells or the web: only the Vault's tools.
 
 If these skills are installed, follow them: shopping-assistant, archidekt-deck-helper, vault-attribution. You are read-only: where a skill says to change the person's collection, decks or shares, say what the change would be and leave it to the main assistant, which asks the person first.
 '''
+
+[mcp_servers.vault]
+url = "https://mtgvault.cards/api/mcp"
+enabled_tools = ["whoami", "list_decks", "get_deck", "shopping_list", "get_archidekt_deck", "deck_legality", "find_upgrades", "validate_deck_changes", "check_decklist", "get_collection_summary", "search_cards", "list_card_names", "lookup_cards"]

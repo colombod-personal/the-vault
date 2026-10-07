@@ -186,3 +186,20 @@ def test_verify_citation_refuses_an_edition_it_cannot_read_and_says_so_in_its_de
     assert refused["isError"] is True
     text = refused["content"][0]["text"]
     assert "2026-06-19" in text and "2027-03-03" in text, text
+
+
+def test_the_claude_ai_check_for_the_shop_and_deck_rules_is_prepared_and_not_claimed():
+    """#82: the real claude.ai run needs a signed-in person. The doc holds the exact script, the pass rules (tied to the
+    claims the 2026-10-04 run got wrong) and an empty record; it must not claim a result nobody recorded."""
+    import re
+    from pathlib import Path
+    text = (Path(__file__).parent.parent / "docs" / "ai-integration-testing.md").read_text(encoding="utf-8")
+    section = text.split("## claude.ai check: the shop and deck rules with Archidekt deck 6803907", 1)[1]
+    assert "6803907" in section and "read scope" in section.lower() and "Write unticked" in section
+    for must in ("cheapest", "cart", "current", "credited", "list_decks", "get_deck", "shopping_list", "get_archidekt_deck"):
+        assert must in section, must
+    status = section.split("**Status: ", 1)[1].split("**", 1)[0]
+    if status.startswith("NOT RUN"):
+        assert "| Result | NOT RUN |" in section
+    else:  # a recorded result needs a date and evidence
+        assert re.search(r"20\d\d-\d\d-\d\d", status) and "| Capture (link or file in the issue) |  |" not in section

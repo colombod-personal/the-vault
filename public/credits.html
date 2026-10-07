@@ -67,6 +67,41 @@
       and copyright lines.</p>
   </div>
 
+  <h2>Rules, roles and combos</h2>
+
+  <div class="card">
+    <h3><a href="https://magic.wizards.com/en/rules" target="_blank" rel="noopener">Wizards of the Coast</a>: the Comprehensive Rules</h3>
+    <p>Magic: The Gathering, its rules, card names and mana symbols belong to Wizards of the Coast. When a
+      rules question is asked (in the app or through an AI assistant), the Vault reads the current
+      Comprehensive Rules from Wizards' own rules page and quotes the part that applies, naming the edition.</p>
+    <p class="how">How we use it: the server reads the rules text live, at most every few hours, and keeps no
+      copy. Nothing about you is sent. The Vault is not produced by or endorsed by Wizards.</p>
+  </div>
+
+  <div class="card">
+    <h3><a href="https://tagger.scryfall.com" target="_blank" rel="noopener">Scryfall Tagger</a> contributors</h3>
+    <p>The role tags (ramp, removal, card draw, sweepers and more) used to describe a deck are written by
+      volunteers in Scryfall's Tagger. They are the community's opinion, shown as such, never as a rule.</p>
+    <p class="how">How we use it: downloaded with Scryfall's daily data. Nothing about you is sent.</p>
+    <p class="thanks">Thank you to every Tagger volunteer.</p>
+  </div>
+
+  <div class="card">
+    <h3><a href="https://commanderspellbook.com" target="_blank" rel="noopener">Commander Spellbook</a></h3>
+    <p>The combos found in a deck come from Commander Spellbook and the community that writes them. Each
+      combo is shown as theirs, with a link to its page. The list only holds combos they know.</p>
+    <p class="how">How we use it: when you ask about a deck's combos, the server sends the deck's card names
+      (nothing about you) to their public API. The Vault stores no copy of their data.</p>
+    <p class="thanks">Thank you, Commander Spellbook.</p>
+  </div>
+
+  <div class="card">
+    <h3><a href="https://edhrec.com" target="_blank" rel="noopener">EDHREC</a></h3>
+    <p>The popularity rank shown for a Commander card is EDHREC's, from the community's deck lists, as
+      Scryfall includes it with each card. Popularity is not power.</p>
+    <p class="how">How we use it: indirectly, through Scryfall. The Vault never contacts EDHREC.</p>
+  </div>
+
   <h2>Decks and collections</h2>
 
   <div class="card">
@@ -74,8 +109,9 @@
     <p>When you paste an Archidekt deck link on the Decks tab, the Vault reads that public deck from
       Archidekt and links back to it ("View on Archidekt"). Deck lists and their authors belong to the
       Archidekt community. Credit and thanks to every brewer.</p>
-    <p class="how">How we use it: the Vault's server fetches only the public deck you asked for, once,
-      sending the deck id and nothing about you.</p>
+    <p class="how">How we use it: the Vault's server fetches only the public deck you asked for, sending the
+      deck id and nothing about you, and keeps that public deck for ten minutes so repeat reads do not reach
+      Archidekt again (copies are deleted after seven days). It only reads: it never writes, searches or crawls.</p>
     <p class="thanks">Thank you, Archidekt, for keeping public decks open to tools like this one.
       <a href="https://patreon.com/archidekt" target="_blank" rel="noopener">Support Archidekt on Patreon</a>.</p>
   </div>

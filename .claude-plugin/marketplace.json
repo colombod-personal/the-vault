@@ -9,7 +9,7 @@
     {
       "name": "the-vault",
       "source": "./plugins/the-vault",
-      "description": "Magic: The Gathering rules, cards, decks and collection tools for your AI assistant, grounded in Scryfall and the Comprehensive Rules, with sources shown. Free and unofficial.",
+      "description": "Magic: The Gathering rules, cards, decks and collection tools for your AI assistant, grounded in Scryfall and the Comprehensive Rules, with sources shown. Free and unofficial; credits to Scryfall, Wizards of the Coast, Commander Spellbook, Archidekt and the other sources at https://mtgvault.cards/credits.html.",
       "version": "0.1.0",
       "keywords": [
         "magic-the-gathering",

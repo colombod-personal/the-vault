@@ -1,11 +1,15 @@
 """The generated plugin, marketplace and connect page (scripts/build_plugin.py): up to date with skills/,
 valid in both layouts, free of secrets, and honest about what works today."""
 
+import html
 import json
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -131,3 +135,130 @@ def test_the_chatgpt_plugin_carries_five_positive_and_three_negative_review_case
         assert case["description"] and case["prompt"] and case["expected_behavior"]
         assert {t.strip() for t in case["tools_triggered"].split(",")} <= set(mcp.BY_NAME)
     assert all(c["description"] and c["prompt"] for c in cases["negative"])
+
+
+# ---- #39: one correct block per harness, and connect.html and llms.txt generated from the same source -------------
+
+
+def _steps(harness_id, kind=None, lang=None):
+    h = next(h for h in bp.HARNESSES if h["id"] == harness_id)
+    return [s for s in bp.harness_steps(h) if (kind is None or s["kind"] == kind) and (lang is None or s["lang"] == lang)]
+
+
+def _parsed(step):
+    return {"json": json.loads, "toml": tomllib.loads}[step["lang"]](step["code"])
+
+
+def test_there_is_a_block_for_each_harness_in_that_harnesss_own_format():
+    assert [h["id"] for h in bp.HARNESSES] == ["claude-code", "codex", "cursor", "vscode", "copilot-cli"]
+    url = f"{bp.HOST}/api/mcp"
+    # Claude Code: `claude mcp add --transport http`, and .mcp.json mcpServers with type http (code.claude.com/docs/en/mcp)
+    cmd = _steps("claude-code", "oauth", "bash")[0]["code"]
+    assert cmd.startswith("claude mcp add --transport http vault ") and cmd.splitlines()[0].endswith(url) and "claude mcp login vault" in cmd
+    server = _parsed(_steps("claude-code", "token")[0])["mcpServers"]["vault"]
+    assert server["type"] == "http" and server["url"] == url and server["headers"]["Authorization"] == "Bearer ${VAULT_TOKEN}"
+    # Codex: codex mcp add --url, and TOML [mcp_servers.<name>] with url and bearer_token_env_var, not JSON
+    assert _steps("codex", "oauth", "bash")[0]["code"].splitlines() == [f"codex mcp add vault --url {url}", "codex mcp login vault"]
+    assert all(s["lang"] in ("bash", "toml") for s in bp.HARNESSES[1]["steps"])
+    toml = [_parsed(s)["mcp_servers"]["vault"] for s in _steps("codex", lang="toml")]
+    assert toml[0] == {"url": url} and toml[1] == {"url": url, "bearer_token_env_var": "VAULT_TOKEN"}
+    # Cursor: mcpServers with url (no type), headers with ${env:VAR}
+    plain, token = (_parsed(s) for s in _steps("cursor"))
+    assert plain == {"mcpServers": {"vault": {"url": url}}}
+    assert token["mcpServers"]["vault"]["headers"]["Authorization"] == "Bearer ${env:VAULT_TOKEN}"
+    # VS Code: root key `servers` (not mcpServers), type http, and a password input for the token
+    plain, token = (_parsed(s) for s in _steps("vscode"))
+    assert plain == {"servers": {"vault": {"type": "http", "url": url}}}
+    assert token["inputs"][0]["password"] is True and token["inputs"][0]["type"] == "promptString"
+    assert token["servers"]["vault"]["headers"]["Authorization"] == "Bearer ${input:%s}" % token["inputs"][0]["id"]
+    # GitHub Copilot CLI: copilot mcp add --transport http, and ~/.copilot/mcp-config.json
+    assert _steps("copilot-cli", lang="bash")[0]["code"] == f"copilot mcp add --transport http vault {url}"
+    assert _parsed(_steps("copilot-cli", lang="json")[0])["mcpServers"]["vault"] == {"type": "http", "url": url, "tools": ["*"]}
+    # not one generic block copied around
+    codes = [s["code"] for h in bp.HARNESSES for s in h["steps"]]
+    assert len(codes) == len(set(codes))
+
+
+def test_no_block_puts_a_token_in_a_command_or_a_file():
+    """docs/onboarding.md: a bearer token in a command argument lands in shell history and the chat. Blocks read it from an
+    environment variable or the tool's own password prompt."""
+    for h in bp.HARNESSES:
+        for s in h["steps"]:
+            if s["lang"] == "bash":
+                assert "Bearer" not in s["code"] and "--header" not in s["code"] and "vault_pat_" not in s["code"], (h["id"], s["code"])
+            else:
+                assert "vault_pat_" not in s["code"] or h["id"] == "copilot-cli"  # Copilot CLI: typed into /mcp add's own prompt
+    page = (ROOT / "public" / "connect.html").read_text(encoding="utf-8")
+    assert "--header" not in page
+
+
+def _page_blocks(page):
+    return [html.unescape(m) for m in re.findall(r"<pre><code>(.*?)</code></pre>", page, re.S)]
+
+
+def _llms_blocks(text):
+    section = text.split(bp.LLMS_BEGIN, 1)[1].split(bp.LLMS_END, 1)[0]
+    blocks = []
+    for m in re.finditer(r"^( *)```\w*\n(.*?)^\1```$", section, re.S | re.M):
+        indent = m.group(1)
+        blocks.append("\n".join(line[len(indent):] for line in m.group(2).rstrip("\n").split("\n")))
+    return blocks
+
+
+def test_connect_page_and_llms_txt_show_the_same_harness_blocks_generated_from_one_list():
+    page = (ROOT / "public" / "connect.html").read_text(encoding="utf-8")
+    llms = (ROOT / "public" / "llms.txt").read_text(encoding="utf-8")
+    want = [s["code"] for h in bp.HARNESSES for s in bp.harness_steps(h)]
+    assert _llms_blocks(llms) == want
+    cards = page.split('id="claude-code"', 1)[1]
+    assert _page_blocks(cards)[:len(want)] == want
+    for h in bp.HARNESSES:
+        assert f'id="{h["id"]}"' in page
+        for _, url in h["docs"]:
+            assert url in page and url in llms  # each block cites the documentation it follows
+
+
+def test_llms_txt_connection_section_follows_host_and_the_oauth_switch(monkeypatch):
+    llms = (ROOT / "public" / "llms.txt").read_text(encoding="utf-8")
+    section = llms.split(bp.LLMS_BEGIN, 1)[1].split(bp.LLMS_END, 1)[0]
+    assert "<host>" not in section and f"`{bp.HOST}/api/mcp`" in section
+    assert ("OAuth (ChatGPT, Claude.ai" in section) == bp.OAUTH_READY
+    monkeypatch.setattr(bp, "OAUTH_READY", False)
+    off = bp.llms_connection()
+    assert "not switched on yet" in off and "OAuth (ChatGPT" not in off and "codex mcp login" not in off
+    assert "codex mcp login" not in bp.connect_page() and "claude mcp login" not in bp.connect_page()
+    assert "VAULT_TOKEN" in off  # the token blocks stay
+
+
+def test_changing_a_harness_block_makes_both_generated_files_stale(monkeypatch):
+    """The drift the audit found: llms.txt's connection text could change without any test noticing."""
+    assert bp.stale() == []
+    monkeypatch.setitem(bp.HARNESSES[1]["steps"][0], "code", "codex mcp add vault --url https://example.invalid/mcp")
+    stale = [s.replace("\\", "/") for s in bp.stale()]
+    assert "out of date: public/llms.txt" in stale and "out of date: public/connect.html" in stale
+
+
+def test_llms_txt_without_its_generated_markers_is_not_accepted(monkeypatch, tmp_path):
+    (tmp_path / "public").mkdir()
+    (tmp_path / "public" / "llms.txt").write_text("# no markers here\n", encoding="utf-8")
+    monkeypatch.setattr(bp, "ROOT", tmp_path)
+    with pytest.raises(ValueError):
+        bp.llms_txt()
+
+
+# ---- #59.3: agents are client extensions, under the client's reverse-domain namespace ------------------------------
+
+
+def test_agents_live_under_the_reverse_domain_namespace_the_standard_prescribes():
+    """Agent Plugins 1.0 s.8: client-specific files go in a top-level directory named for the client's reverse-domain
+    namespace; s.5.2: the manifest is closed except `extensions`. VS Code documents com.github.copilot/agents/."""
+    top = {p.name for p in bp.PLUGIN.iterdir() if p.is_dir()}
+    namespaces = {n for n in top if "." in n and not n.startswith(".")}
+    assert namespaces == {"com.github.copilot"}
+    assert all(re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", n) for n in namespaces)  # reverse-domain
+    files = sorted((bp.PLUGIN / "com.github.copilot" / "agents").glob("*.agent.md"))
+    assert [f.name for f in files] == sorted(f"{a['name']}.agent.md" for a in bp.load_agents())
+    assert top <= {"skills", "agents", ".claude-plugin", "com.github.copilot"}
+    plugin = load(bp.PLUGIN / "plugin.json")
+    assert set(plugin) <= {"$schema", "name", "version", "description", "author", "homepage", "repository", "license", "keywords", "extensions"}
+    assert all(re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", k) for k in plugin.get("extensions", {}))
