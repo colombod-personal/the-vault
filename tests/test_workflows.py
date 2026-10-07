@@ -31,12 +31,20 @@ def load(path):
     return data
 
 
+# The only jobs that may write issues (#64: the budget guard opens or updates a GitHub issue, which needs `issues: write`). Each one
+# holds no secret and no environment (test_the_issue_writers_hold_nothing_else): a read-only token everywhere else.
+ISSUE_WRITERS = {("sync-prices.yml", "alert"), ("sync-catalog.yml", "alert"), ("neon-monthly-check.yml", "remind")}
+
+
 @pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
 def test_least_privilege(path):
     wf = load(path)
     assert wf.get("permissions") == {"contents": "read"}, "declare `permissions: contents: read` at the top"
-    for job in wf["jobs"].values():
-        assert "permissions" not in job or all(v in ("read", "none") for v in job["permissions"].values())
+    for name, job in wf["jobs"].items():
+        if (path.name, name) in ISSUE_WRITERS:
+            assert job["permissions"] == {"contents": "read", "issues": "write"}, f"{name}: contents read and issues write, nothing more"
+        else:
+            assert "permissions" not in job or all(v in ("read", "none") for v in job["permissions"].values())
         for step in job.get("steps", []):
             if str(step.get("uses", "")).startswith("actions/checkout"):
                 assert (step.get("with") or {}).get("persist-credentials") is False, "checkout without persisting the token"
@@ -230,6 +238,50 @@ def test_jobs_run_on_a_pinned_runner_image_not_ubuntu_latest():
     for path in WORKFLOWS:
         for name, job in load(path)["jobs"].items():
             assert job["runs-on"] != "ubuntu-latest", f"{path.name}: {name}"
+
+
+def test_the_issue_writers_hold_nothing_else_and_nothing_else_writes_issues():
+    """The budget guard's alert jobs need `issues: write` to open a GitHub issue, so they get it and nothing else: no environment, no
+    secret (not even a Neon key or the database address), no push or pull-request trigger, the run's own `github.token`, and the one
+    command that talks to GitHub. Every other job stays read-only (test_least_privilege)."""
+    found = set()
+    for path in WORKFLOWS:
+        wf = load(path)
+        triggers = wf["on"] if isinstance(wf["on"], dict) else {t: None for t in ([wf["on"]] if isinstance(wf["on"], str) else wf["on"])}
+        for name, job in wf["jobs"].items():
+            if "issues" not in (job.get("permissions") or {}):
+                continue
+            found.add((path.name, name))
+            assert "secrets." not in yaml.safe_dump(job), f"{path.name}/{name}: an issue writer holds no secret"
+            assert "environment" not in job, f"{path.name}/{name}: and no environment (the vercel-production one carries the secrets)"
+            assert not {"push", "pull_request", "pull_request_target"} & set(triggers), f"{path.name}/{name}: no push or PR trigger"
+            assert "refs/heads/main" in str(job.get("if", "")), f"{path.name}/{name}: only for main"
+            runs = [s["run"] for s in job["steps"] if "run" in s]
+            assert any(r.startswith("python -m jobs.budget_alert") for r in runs)
+            env = next(s["env"] for s in job["steps"] if "run" in s and "jobs.budget_alert" in s["run"])
+            assert env["GITHUB_TOKEN"] == "${{ github.token }}"
+    assert found == ISSUE_WRITERS
+
+
+def test_the_sync_workflows_pass_the_guards_messages_to_an_alert_job_and_check_neon_usage():
+    prices = load(ROOT / ".github" / "workflows" / "sync-prices.yml")
+    catalog = load(ROOT / ".github" / "workflows" / "sync-catalog.yml")
+    for wf, outputs in ((prices, {"storage_alert", "usage_alert"}), (catalog, {"storage_alert"})):
+        assert set(wf["jobs"]["sync"]["outputs"]) == outputs
+        alert = wf["jobs"]["alert"]
+        assert alert["needs"] == "sync" and "always()" in alert["if"]
+    steps = {s.get("id"): s for s in prices["jobs"]["sync"]["steps"]}
+    assert steps["sync"]["run"].startswith("python -m jobs.sync_prices")
+    usage = steps["usage"]
+    assert usage["run"].startswith("python -m jobs.neon_usage") and usage["if"] == "${{ !cancelled() }}"  # reported even if the sync failed
+    assert usage["env"]["NEON_API_KEY"] == "${{ secrets.NEON_API_KEY }}" and "NEON_PROJECT_ID" in usage["env"]
+    assert "python -m jobs.sync_catalog" in {s.get("id"): s for s in catalog["jobs"]["sync"]["steps"]}["load"]["run"]
+
+
+def test_a_monthly_reminder_issue_covers_what_the_guard_cannot_read():
+    wf = load(ROOT / ".github" / "workflows" / "neon-monthly-check.yml")
+    assert wf["on"]["schedule"] == [{"cron": "23 7 1 * *"}]  # the 1st of every month
+    assert "workflow_dispatch" in wf["on"]
 
 
 def test_no_scheduled_job_contacts_archidekt():

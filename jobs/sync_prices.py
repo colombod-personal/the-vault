@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
             report["retention"] = retention.apply(session)  # one year at most, thinned (docs/catalog-design.md)
             print(json.dumps(report, indent=2))
         with db.sessions() as session:
-            db_budget.check(session, stage="after the price sync")
+            db_budget.check(session, stage="after the price sync", fail_at_warn=True)  # fails the job at 70% (after its work)
 
 
 if __name__ == "__main__":

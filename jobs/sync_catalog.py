@@ -96,9 +96,9 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
                         continue
                     path = Path(files[name]) if name in files else sf.download_bulk(name, Path(tmp) / f"{name}.jsonl.gz")
                     report[name] = {"version": version, **load(session, name, path, version, entry)}
+    print(json.dumps(report, indent=2, default=str))  # before the last check, which fails the job at 70% (after its work)
     with db.sessions() as session:
-        db_budget.check(session, stage="after the catalog load")
-    print(json.dumps(report, indent=2, default=str))
+        db_budget.check(session, stage="after the catalog load", fail_at_warn=True)
     return report
 
 

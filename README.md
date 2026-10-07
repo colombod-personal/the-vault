@@ -197,13 +197,15 @@ box that opens one fixed account of made-up data (`vault/reviewer.py`, guide at 
 **Costs:**
 - Vercel Hobby: $0.
 - Neon: free for 1 GB of storage per project and 100 compute-hours a month (checked 2026-10-04;
-  see `docs/catalog-design.md` → Neon budget). Every job logs the database size (`jobs/db_budget.py`),
-  warns at 70% and stops adding catalog data at 85%. **Once a month, check in the Neon console:**
-  compute hours used (limit 100 CU-hours), network transfer (5 GB) and storage (1 GB); the database
-  cannot see the first two. The daily price history grows about
-  0.5 GB a year for a ~10k-printing collection, so after that Neon's pay-as-you-go plan costs
-  about $0.35 per GB-month plus compute while in use (a few dollars a month). Price history is capped
-  at a year and thinned (`docs/catalog-design.md`), which keeps 10,000 printings near 290 MB.
+  see `docs/catalog-design.md` → Neon budget). Every job logs the database size (`jobs/db_budget.py`); at 70% the daily
+  jobs **fail** (after their work) and a GitHub issue is opened or updated; at 85% catalog loading stops.
+  **Compute hours (limit 100 CU-hours) and network transfer (5 GB) are not visible to the database:** if you create a Neon
+  API key and store it as the `NEON_API_KEY` secret (and `NEON_PROJECT_ID` as a variable) in the `vercel-production`
+  environment, the daily job checks them too; without the key, the `neon-monthly-check` workflow opens a reminder issue on the
+  1st of each month and **you read them in the Neon console**. The daily price history grew about
+  0.86 GB a year for a ~10k-printing collection before it was thinned and compacted; now it is capped
+  at a year, thinned and stored in integer cents (`docs/catalog-design.md`), which keeps 10,000 printings near 130 MB. Past the
+  free tier Neon's pay-as-you-go plan costs about $0.35 per GB-month plus compute while in use (a few dollars a month).
 - GitHub Actions: $0.
 - A domain: about $10/year at Cloudflare or Porkbun.
 

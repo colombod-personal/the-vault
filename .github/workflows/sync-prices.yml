@@ -15,6 +15,9 @@ concurrency: vercel-production  # one at a time with the manual deploy
 jobs:
   sync:
     if: github.ref == 'refs/heads/main'
+    outputs:  # the budget guard's messages, for the alert job below (empty when nothing is near a limit)
+      storage_alert: ${{ steps.sync.outputs.storage_alert }}
+      usage_alert: ${{ steps.usage.outputs.usage_alert }}
     runs-on: ubuntu-24.04  # pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19 (#180); move deliberately
     timeout-minutes: 30
     environment: vercel-production
@@ -58,6 +61,40 @@ jobs:
           echo "::add-mask::$DATABASE_URL"
           echo "DATABASE_URL=$DATABASE_URL" >> "$GITHUB_ENV"
       - name: Sync prices
+        id: sync
         env:
           CATALOG_SOURCES: ${{ vars.CATALOG_SOURCES }}  # "oracle_prices" also stores each card's cheapest price
-        run: python -m jobs.sync_prices
+        run: python -m jobs.sync_prices  # fails at the end, after its work, when storage is at 70% (jobs/db_budget.py)
+      - name: Neon compute and network use this month
+        id: usage
+        if: ${{ !cancelled() }}
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}  # optional: without it this step only prints a notice (docs/catalog-design.md)
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+        run: python -m jobs.neon_usage  # fails at 70% of the free plan's compute hours or network transfer
+
+  alert:
+    # Opens or updates a GitHub issue when the budget guard failed the job (jobs/budget_alert.py, docs/catalog-design.md "Neon budget").
+    # It holds only `issues: write` and this run's own token: no database address, no Vercel token, no environment, no secret.
+    if: ${{ always() && github.ref == 'refs/heads/main' && (needs.sync.outputs.storage_alert != '' || needs.sync.outputs.usage_alert != '') }}
+    needs: sync
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19 (#180); move deliberately
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.12"
+      - run: pip install --require-hashes --no-deps -r jobs/requirements-ops.txt  # httpx, hash-checked
+      - name: Open or update the issue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          STORAGE_ALERT: ${{ needs.sync.outputs.storage_alert }}
+          USAGE_ALERT: ${{ needs.sync.outputs.usage_alert }}
+        run: python -m jobs.budget_alert --from-env

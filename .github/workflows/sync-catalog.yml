@@ -14,6 +14,8 @@ concurrency: vercel-production  # one at a time with the manual deploy
 jobs:
   sync:
     if: github.ref == 'refs/heads/main'
+    outputs:  # the budget guard's message, for the alert job below (empty when storage is below 70%)
+      storage_alert: ${{ steps.load.outputs.storage_alert }}
     runs-on: ubuntu-24.04  # pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19 (#180); move deliberately
     timeout-minutes: 20
     environment: vercel-production
@@ -46,7 +48,33 @@ jobs:
           echo "::add-mask::$DATABASE_URL"
           echo "DATABASE_URL=$DATABASE_URL" >> "$GITHUB_ENV"
       - name: Load the catalog
+        id: load
         env:
           CATALOG_SOURCES: ${{ vars.CATALOG_SOURCES }}
-        run: python -m jobs.sync_catalog
+        run: python -m jobs.sync_catalog  # refuses at 85% storage, fails at the end at 70% (jobs/db_budget.py)
+
+  alert:
+    # Opens or updates a GitHub issue when the budget guard failed the job (jobs/budget_alert.py, docs/catalog-design.md "Neon budget").
+    # It holds only `issues: write` and this run's own token: no database address, no Vercel token, no environment, no secret.
+    if: ${{ always() && github.ref == 'refs/heads/main' && (needs.sync.outputs.storage_alert != '') }}
+    needs: sync
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19 (#180); move deliberately
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.12"
+      - run: pip install --require-hashes --no-deps -r jobs/requirements-ops.txt  # httpx, hash-checked
+      - name: Open or update the issue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          STORAGE_ALERT: ${{ needs.sync.outputs.storage_alert }}
+        run: python -m jobs.budget_alert --from-env
 
