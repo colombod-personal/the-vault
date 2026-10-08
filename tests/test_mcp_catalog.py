@@ -203,6 +203,15 @@ def test_get_deck_and_shopping_list_say_which_price_basis_a_card_has():  # #328
     assert "cheapest printing" in by_name["shopping_list"]
 
 
+def test_the_listings_doc_and_the_connect_page_state_that_grounding_needs_the_assistant_to_call_the_vault():  # #319
+    from pathlib import Path
+    root = Path(__file__).parent.parent
+    listings = " ".join((root / "docs" / "listings.md").read_text(encoding="utf-8").split())
+    assert "What a listing cannot promise" in listings and "from the assistant's own memory" in listings and "USE_THE_VAULT" in listings
+    connect = " ".join((root / "public" / "connect.html").read_text(encoding="utf-8").split())
+    assert "Make your assistant use it" in connect and "answered from the assistant's own memory" in connect
+
+
 def test_the_claude_ai_check_for_the_shop_and_deck_rules_is_prepared_and_not_claimed():
     """#82: the real claude.ai run needs a signed-in person. The doc holds the exact script, the pass rules (tied to the
     claims the 2026-10-04 run got wrong) and an empty record; it must not claim a result nobody recorded."""

@@ -34,3 +34,7 @@ already has.
    question decided. A directory listing shows the Vault to many more people than a repository does.
 3. The privacy notice is complete (issue #2).
 4. `docs/mcp-apps.md` has real-host results, so the listing does not promise views that were never seen working.
+
+## What a listing cannot promise (#319)
+
+Grounding happens when the assistant calls the Vault, and the Vault cannot make it call. claude.ai gives the model only the tool names of a connector (measured 2026-10-08: the schemas are not loaded and no server instructions are shown), so a rules question that does not name the Vault, such as "how does trample work against protection?", can be answered from the assistant's own memory (0 of 2 runs called a Vault tool). Once the chat opened with "use The Vault's tools before answering, and never quote a rule from memory", 3 of 3 runs did, and a request that named the expert council got `council_brief` called (1 of 1, #235); ChatGPT has not been measured. So the listing text and the reviewers' test prompts name the Vault, the connect page carries that one line to paste into a Project's instructions or preferences (`USE_THE_VAULT` in `scripts/build_plugin.py`), and the plugin's skills carry the same rule for hosts that load them. A listing must not say the Vault answers every Magic question: it answers the ones the assistant sends to it.
