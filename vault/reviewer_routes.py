@@ -36,6 +36,7 @@ def build_router(settings: Settings, get_db, sign_in) -> APIRouter:
             raise HTTPException(401, "That passphrase is not right")
         user = reviewer.seed(db)  # the demo account and its data, created on first use
         sign_in(db, request, reviewer.profile(), link=False)
+        request.session["rv"] = reviewer.stamp(settings.session_secret, settings.reviewer_passphrase)  # see vault.auth.session_user
         log.info("reviewer sign-in")
         return {"id": user.id, "account": reviewer.EMAIL}
 
@@ -67,7 +68,8 @@ code{{background:#8881;padding:1px 4px;border-radius:3px}}li{{margin-bottom:12px
 <p>The account is <code>{html.escape(reviewer.EMAIL)}</code>. It holds only made-up data: {sum(r[1] for r in reviewer.OWNED)} copies of well-known cards and two decks,
 <em>Sliver Swarm (demo)</em> (a five-colour Commander deck led by Sliver Overlord, partly owned) and <em>Pauper Burn (demo)</em> (fully owned).
 There is no second factor, e-mail or SMS step. Connecting an app opens the Vault's sign-in page, which has a <strong>Reviewer sign-in</strong>
-box: enter the passphrase you were given in the review portal, then choose what the app may do. The account can only see its own data.</p>
+box: enter the passphrase you were given in the review portal, then choose what the app may do. The account can only see its own data,
+and it cannot create access tokens, passkeys or linked sign-ins, export or delete itself.</p>
 <h2>Five requests that should work</h2>
 <p>An assistant answers from the Vault when it calls the Vault. If one of these is answered from the assistant's own knowledge (no
 "Used The Vault" in the answer), start the chat with: <em>{html.escape(reviewer_use_line)}</em> and ask again.</p>

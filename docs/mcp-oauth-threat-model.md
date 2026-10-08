@@ -398,3 +398,15 @@ and clients; the documented lifetimes equal the code's.
   change (a public client after its row expired) needs its own decision.
 - Metadata served stale for up to 7 days when the shared fetch budget is spent: a documented trade-off (a client that removed a
   redirect address stays honoured for that long).
+
+## The reviewer demo account (#239, #345)
+
+The stores' reviewers sign in with a passphrase (`REVIEWER_PASSPHRASE`; `vault/reviewer.py`) to one fixed synthetic account. Since
+2026-10-08 (found by the review of the sign-in code): its session has **no account-level powers**: creating a personal access
+token, adding a passkey, linking a provider, exporting and deleting the account are refused (403), so nothing made through it
+outlives the passphrase and one reviewer cannot wipe the account under another. Its cookie carries a keyed hash of the passphrase
+(`rv`), and the session is refused (401) whenever the passphrase is unset or different, so unsetting or rotating the variable ends
+every reviewer session at once, including the OAuth consent step. A provider sign-in on a reviewer session switches accounts
+instead of linking to the demo account. Tests: `tests/test_reviewer.py` (the 2026-10-08 cases). Residual: a demo session cookie
+made before this change has no `rv` and is not restricted until it expires (30 days at most); the demo account can be reset with
+`jobs/seed_reviewer.py`.
