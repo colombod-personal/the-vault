@@ -231,6 +231,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
   const [format, setFormat] = useStateD(null);
   const [justSaved, setJustSaved] = useStateD(false);
   const [reload, setReload] = useStateD(0);
+  const [since, setSince] = useStateD(null); // what changed since the person last looked at this saved deck (#93)
   const askAgain = useRefD(false); // the Refresh button asks the site again; opening the page may use the Vault's ten-minute copy
 
   async function load() {
@@ -280,6 +281,14 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
 
   const text = useMemoD(() => (deck ? deckListText(deck.cards) : ''), [deck]);
   const saved = source.saved || (deck && deck.url && Array.isArray(myDecks) ? myDecks.find((d) => window.DeckSrc.sourceKey(d.source_url) === window.DeckSrc.sourceKey(deck.url)) : null);
+  // Opening a saved deck: the Vault records the list shown if its cards changed, and says what changed since the last look.
+  const savedId = saved ? saved.id : null;
+  useEffectD(() => {
+    if (!savedId || !text) return;
+    let stop = false;
+    window.VaultApi.deckSeen(savedId, text).then((a) => { if (!stop) setSince(a.since_last_looked || null); }).catch(() => {});
+    return () => { stop = true; };
+  }, [savedId, text]);
   const summary = useMemoD(() => {
     if (!rows || !coverage) return null;
     let total = 0, ownedQty = 0, missingQty = 0, ownedFully = 0, ownedPartial = 0, missingAll = 0;
@@ -306,7 +315,8 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
     catch (e) { setError('Removing failed: ' + e.message); }
   }
 
-  const TABS = [['cards', 'Cards'], ['stats', 'Stats'], ['legality', 'Legality'], ['upgrades', 'Upgrades'], ['combos', 'Combos'], ['buy', 'Buy list']];
+  const TABS = [['cards', 'Cards'], ['stats', 'Stats'], ['legality', 'Legality'], ['upgrades', 'Upgrades'], ['combos', 'Combos'], ['buy', 'Buy list'],
+    ...(savedId ? [['history', 'History']] : [])];
 
   return (
     <div data-screen-label="04 Deck">
@@ -349,6 +359,18 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
         </div>
       )}
 
+      {since && (
+        <div className="panel deck-changed" role="status" style={{ marginBottom: 16 }}>
+          <p className="label-mono">Changed since you last looked</p>
+          <p className="deck-big" style={{ fontSize: 18 }}>
+            <span style={{ color: 'var(--good)' }}>+{since.summary.copies_in}</span> / <span style={{ color: 'var(--danger)' }}>−{since.summary.copies_out}</span>
+            <span className="muted" style={{ fontSize: 12 }}> copies</span>
+          </p>
+          <ChangeList changes={since.changes} />
+          <button className="btn xs" onClick={() => setSince(null)}>Got it</button>
+        </div>
+      )}
+
       {summary && (
         <div className="deck-summary panel" style={{ marginBottom: 16 }}>
           <CoverageDonut summary={summary} size={84} />
@@ -372,8 +394,72 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
           {tab === 'upgrades' && <DeckUpgrades text={text} format={format} setFormat={setFormat} />}
           {tab === 'combos' && <DeckCombos text={text} />}
           {tab === 'buy' && <DeckBuyList text={text} />}
+          {tab === 'history' && savedId && <DeckHistory deckId={savedId} />}
         </>
       )}
+    </div>
+  );
+}
+
+// -- History: the deck's earlier lists (#93) -----------------------------------------------------
+
+const VERSION_SOURCE = { saved: 'Saved', edited: 'Edited', imported: 'Imported from a link', refreshed: 'Refreshed from its link',
+  opened: 'Seen when opened (the list at its source then)' };
+
+// "+1 Mind Stone", "−1 Arcane Signet", "2 → 3 Forest": what changed, one line a card.
+function ChangeList({ changes }) {
+  if (!changes || !changes.length) return <p className="muted" style={{ fontSize: 12 }}>No card changed.</p>;
+  return (
+    <ul className="deck-changes">
+      {changes.map((c, i) => {
+        const gone = c.after === 0, added = c.before === 0;
+        return (
+          <li key={i}>
+            <span style={{ color: added ? 'var(--good)' : gone ? 'var(--danger)' : 'var(--gold)' }}>
+              {added ? '+' + c.after : gone ? '−' + c.before : c.before + ' → ' + c.after}
+            </span> {c.card}{c.section !== 'Deck' && <span className="muted"> ({c.section})</span>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function DeckHistory({ deckId }) {
+  const [state, setState] = useStateD({ loading: true });
+  const [shown, setShown] = useStateD({}); // version id -> its list
+  useEffectD(() => {
+    let stop = false;
+    setState({ loading: true });
+    window.VaultApi.deckVersions(deckId).then((a) => !stop && setState({ data: a })).catch((e) => !stop && setState({ error: e.message }));
+    return () => { stop = true; };
+  }, [deckId]);
+  if (state.loading) return <div className="panel"><span className="spinner"></span> <span className="muted">Reading the deck's history…</span></div>;
+  if (state.error) return <div className="panel"><strong style={{ color: 'var(--danger)' }}>Couldn't read the history:</strong> {state.error}</div>;
+  const { items, keep } = state.data;
+  async function show(v) {
+    if (shown[v.id] !== undefined) { setShown((s) => { const n = { ...s }; delete n[v.id]; return n; }); return; }
+    try { const a = await window.VaultApi.deckVersion(deckId, v.id); setShown((s) => ({ ...s, [v.id]: a.text })); }
+    catch (e) { setShown((s) => ({ ...s, [v.id]: 'Could not read this version: ' + e.message })); }
+  }
+  return (
+    <div className="deck-history">
+      <p className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+        The Vault keeps this deck's list each time its cards change (the last {keep}, oldest dropped first). A new name or a different order is not a change.
+      </p>
+      <ol className="panel">
+        {items.map((v) => (
+          <li key={v.id}>
+            <div className="deck-history-head">
+              <strong>{new Date(v.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</strong>
+              <span className="muted"> · {VERSION_SOURCE[v.source] || v.source} · {v.cards} cards</span>
+            </div>
+            {v.changes ? <ChangeList changes={v.changes} /> : <p className="muted" style={{ fontSize: 12 }}>The oldest list kept.</p>}
+            <button className="btn xs" onClick={() => show(v)} aria-expanded={shown[v.id] !== undefined}>{shown[v.id] !== undefined ? 'Hide this list' : 'Show this list'}</button>
+            {shown[v.id] !== undefined && <pre className="deck-version-text">{shown[v.id]}</pre>}
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

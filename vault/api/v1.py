@@ -863,6 +863,17 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return {"deck_id": deck.id, "keep": deck_versions.KEEP, "total": len(items), "items": items,
                 "_links": {"self": link(f"{V1}/decks/{deck.id}/versions")}}
 
+    @router.post("/decks/{deck_id}/seen", tags=["decks"], response_model=S.DeckSeen,
+                 summary="The person opened the deck page: record the list they saw if its cards changed, say what changed since "
+                         "they last looked, and mark it seen")
+    def deck_seen(deck_id: Id, body: S.DeckSeenIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        deck = owned_deck(db, user, deck_id)
+        if body.text is not None and not _parse(body.text).lines:
+            raise HTTPException(400, "No cards found in the decklist")
+        out = deck_versions.seen(db, deck, body.text)
+        db.commit()
+        return out
+
     @router.get("/decks/{deck_id}/versions/{version_id}", tags=["decks"], response_model=S.DeckVersionText,
                 summary="One older version of a saved deck: its list as it was")
     def get_deck_version(deck_id: Id, version_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:

@@ -171,6 +171,10 @@ class Deck(Base):
     source_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # The deck's format as the person (or their assistant) set it; unset, it is read from the list (vault.deck_overview).
     format: Mapped[str | None] = mapped_column(String(30))
+    # The version the person had last looked at when they last opened the deck page (#93): "changed since you last looked"
+    # is the latest list against this one. Null: they have not opened it since versions exist, or it was dropped (20 kept).
+    viewed_version_id: Mapped[int | None] = mapped_column(ForeignKey("deck_versions.id", ondelete="SET NULL", use_alter=True,
+                                                                     name="fk_decks_viewed_version"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

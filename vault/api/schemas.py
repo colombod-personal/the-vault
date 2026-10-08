@@ -505,6 +505,17 @@ class DeckVersions(Hal):
     items: list[DeckVersionEntry]
 
 
+class DeckSeenIn(BaseModel):
+    text: str | None = Field(None, max_length=50_000, description="The list the page showed (for a deck from a link: the source's "
+                                                                  "current list); recorded as a version when its cards differ from the latest")
+
+
+class DeckSeen(BaseModel):
+    recorded: bool = Field(description="True when the list sent differed from the latest version and was recorded")
+    since_last_looked: dict | None = Field(None, description="What changed since the person last opened the deck (`changes`, "
+                                                              "`summary`, `since`); null the first time or when nothing changed")
+
+
 class DeckVersionText(Hal):
     id: int
     deck_id: int
