@@ -233,7 +233,7 @@ the challenge.
 
 ## claude.ai check: the shop and deck rules with Archidekt deck 6803907, read scope (#82)
 
-**Status: NOT RUN.** The audit found no record of a claude.ai run after the fix. The fix put the rules in the server
+**Status: RUN 2026-10-08, one run, scope differs (see the record at the end of this section).** Before that, the audit found no record of a claude.ai run after the fix. The fix put the rules in the server
 instructions and tool descriptions (claude.ai loads tools and instructions, not skills;
 `tests/test_mcp_catalog.py::test_hosts_without_the_skills_still_get_the_shop_and_deck_rules`), and the test only proves the
 words are there, not that Claude follows them. Only a person signed in to claude.ai can run this; it cannot be done from the
@@ -277,13 +277,13 @@ A run **fails** if any of 3 to 6 is violated (those are the exact claims the 202
 
 | Field | Value |
 |---|---|
-| Date and who ran it | |
-| claude.ai plan and client (web, desktop, mobile) | |
-| Connector re-added on that day, tool count shown | |
-| Scope granted | read only |
-| Capture (link or file in the issue) | |
-| Rows 1 to 8 | 1 ___  2 ___  3 ___  4 ___  5 ___  6 ___  7 ___  8 ___ (pass or fail, with the quote that decides it) |
-| Result | NOT RUN |
+| Date and who ran it | 2026-10-08, an assistant driving the owner's Chrome with Claude in Chrome (the owner's own session), new incognito chat |
+| claude.ai plan and client (web, desktop, mobile) | web, Sonnet 5.5, permission mode Auto, Claude in Chrome on |
+| Connector re-added on that day, tool count shown | re-added by the owner through the reviewer sign-in the same day (whoami: user 5, "Demo reviewer"); the tool count was not read from the connector's list |
+| Scope granted | **read and write** (the demo connector has both), not read only: row 7 cannot be judged; nothing was saved or changed |
+| Capture (link or file in the issue) | incognito chats are not kept, so there is no link; the transcript is quoted in the rows below and in #82 |
+| Rows 1 to 8 | 1 partly: message 1 called `shopping_list` (no `get_archidekt_deck` call is shown; the page lists a generic "used Connectors"), message 2 called `list_decks` then `shopping_list`; 2 pass: "Deck: Sliver Swarm tuned with rage by layer0 on Archidekt. It's a 5-colour Commander deck led by Sliver Overlord", and for message 2 "Sliver Swarm (demo), a Commander deck led by Sliver Overlord"; 3 partly: "by layer0 on Archidekt", no link given; 4 pass: "Cheapest shop: I can't tell you this. My only price source is Scryfall's daily prices"; 5 pass: "By Scryfall's prices dated 7 Oct 2026 ... about $399.76" (and $97.47 for the saved deck); 6 pass: "I have no connection to any shop, so I can't add anything to a cart", the list is formatted for Card Kingdom, TCGplayer and Cardmarket; 7 not judged (write scope); 8 pass: "I used your saved deck ... the only deck of yours with 'sliver' in the name", no link asked for |
+| Result | **No row failed; rows 1, 3 and 7 are not fully shown.** One real defect found in the same run: the missing cost of the Archidekt deck was $456.15 in one answer and $399.76 in another (two price bases, #328) |
 
 After a run, change the status line at the top of this section to the result and the date, link the capture from the issue
 (#82), and tick the criterion there; the lead does that, never an agent from the repository alone.
