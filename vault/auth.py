@@ -305,7 +305,8 @@ def sign_in(db: Session, request: Request, profile: Profile, link: bool = True) 
 
     With ``link`` (provider sign-ins), a new identity joins the account already signed in here.
     Without it (passkey sign-in and sign-up, dev login) the browser simply switches accounts."""
-    current = session_user(db, request) if link else None
+    # A reviewer's demo session never takes a sign-in method of its own (#345): signing in with a provider switches accounts.
+    current = session_user(db, request) if link and "rv" not in request.session else None
     user = find_or_create(db, profile, current)
     if not user.session_key:
         user.session_key = new_session_key()
@@ -325,6 +326,12 @@ def session_user(db: Session, request: Request) -> User | None:
     user = db.get(User, uid) if isinstance(uid, int) and isinstance(key, str) else None
     if user is None or not user.session_key or not hmac.compare_digest(user.session_key, key):
         return None
+    if "rv" in request.session:  # a store reviewer's demo session (vault.reviewer): only while its passphrase is still set
+        from . import reviewer
+
+        settings = request.app.state.settings
+        if not reviewer.stamp_ok(request.session["rv"], settings.session_secret, settings.reviewer_passphrase):
+            return None
     return user
 
 

@@ -40,8 +40,9 @@ ACCOUNT_COOKIE = "vault_account"  # see account_marker
 # Called cross-site by design: OAuth providers (Apple POSTs) and Meta's deletion callback.
 # The OAuth token, registration and revocation endpoints take no cookies (a code or token is the credential),
 # so browser-based MCP clients may call them; the consent form (POST /oauth/authorize) stays same-origin only.
-CROSS_SITE_ALLOWED = ("/api/auth/callback/", "/api/facebook/data-deletion", "/oauth/token", "/oauth/register",
-                      "/oauth/revoke")
+CROSS_SITE_ALLOWED = ("/api/auth/callback/google", "/api/auth/callback/microsoft", "/api/auth/callback/apple",
+                      "/api/auth/callback/facebook", "/api/facebook/data-deletion", "/oauth/token", "/oauth/register",
+                      "/oauth/revoke")  # exact paths (#348): a prefix would also exempt whatever a proxy might decode into it
 # POSTs a read-only token may call: they only compute an answer, or revoke the token itself.
 READ_ONLY_POSTS = {"/api/v1/decks/parse", "/api/v1/imports/preview", "/api/v1/decks/simulate", "/api/v1/decks/coverage", "/api/v1/auth/revoke", "/api/v1/cards/lookup",
                    # computations on a decklist the caller sends: nothing is stored
@@ -183,7 +184,7 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
             request.method in UNSAFE_METHODS
             and origin
             and _origin(origin) != allowed_origin
-            and not request.url.path.startswith(CROSS_SITE_ALLOWED)
+            and request.url.path not in CROSS_SITE_ALLOWED
             and _origin(origin) not in cross_site_origins
         ):
             return problem(403, "Cross-site request refused")
@@ -215,7 +216,10 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
             if user is not None:
                 request.state.bearer = bearer
             return user
-        return auth_module.session_user(session, request)
+        user = auth_module.session_user(session, request)
+        if user is not None and "rv" in request.session:
+            request.state.scopes = {"read", "write"}  # a reviewer's demo account has no account-level powers (#345)
+        return user
 
     def mcp_user(request: Request) -> User | None:
         """``optional_user`` for the MCP endpoint, with a session of its own that is closed before the endpoint runs: the

@@ -80,6 +80,83 @@ def test_the_right_passphrase_signs_in_the_one_demo_account_with_its_synthetic_d
     assert sum(int(m.group(1)) for m in re.finditer(r"^(\d+) ", reviewer.PAUPER_BURN, re.M)) == 60
 
 
+def _reviewer(browser):
+    assert browser.post("/api/auth/reviewer-login", json={"passphrase": SECRET}).status_code == 200
+
+
+def test_a_reviewer_session_can_do_what_the_review_cases_need_but_no_account_level_action(browser):  # #345
+    _reviewer(browser)
+    assert browser.get(f"{V1}/me").status_code == 200 and browser.get(f"{V1}/collection").status_code == 200
+    assert browser.get(f"{V1}/decks").status_code == 200
+    assert browser.post(f"{V1}/decks/parse", json={"text": "1 Sol Ring"}).status_code == 200
+    saved = browser.post(f"{V1}/decks", json={"name": "A reviewer's deck", "text": "1 Sol Ring"})
+    assert saved.status_code == 201  # writes the cases need still work
+    for method, path, body in [("POST", f"{V1}/me/tokens", {"name": "x", "scopes": ["read", "write"], "expires_in_days": 365}),
+                               ("GET", f"{V1}/me/export", None), ("DELETE", f"{V1}/me", {"confirm": "DELETE"}),
+                               ("POST", "/api/auth/passkey/register/options", {})]:
+        res = browser.request(method, path, json=body)
+        assert res.status_code in (403, 404), (path, res.status_code)  # 404: passkeys are off on this http test site
+        assert res.status_code != 200, path
+    assert browser.get(f"{V1}/me").status_code == 200  # nothing above deleted the demo account
+
+
+def test_the_guide_and_the_docs_say_what_the_reviewer_account_cannot_do():  # #345
+    from pathlib import Path
+
+    guide = " ".join(__import__("vault.reviewer_routes", fromlist=["page"]).page("https://x.example").split())
+    assert "cannot create access tokens, passkeys or linked sign-ins, export or delete itself" in guide
+    doc = " ".join((Path(__file__).parent.parent / "docs" / "mcp-oauth-threat-model.md").read_text(encoding="utf-8").split())
+    assert "no account-level powers" in doc and "unsetting or rotating the variable ends every reviewer session at once" in doc
+
+
+def test_a_reviewer_session_never_takes_a_sign_in_method_of_its_own(app, browser):  # #345
+    from types import SimpleNamespace
+
+    from vault import auth as auth_module
+    from vault.models import Identity
+
+    _reviewer(browser)
+    with app.state.db.sessions() as db:
+        demo = db.scalar(select(User).join(Identity, Identity.user_id == User.id).where(Identity.provider == reviewer.PROVIDER))
+        before = count(db, Identity, user_id=demo.id)
+        request = SimpleNamespace(session={"uid": demo.id, "sk": demo.session_key, "rv": "any", "app_flow": None})
+        other = auth_module.sign_in(db, request, auth_module.Profile("google", "someone", "someone@example.com", "Someone"))
+        assert other.id != demo.id  # a provider sign-in on a reviewer session switches accounts, it does not link
+        assert count(db, Identity, user_id=demo.id) == before
+
+
+def test_unsetting_or_changing_the_passphrase_ends_the_reviewer_sessions_at_once(app, browser, settings, universe):  # #345
+    from dataclasses import replace
+
+    _reviewer(browser)
+    assert browser.get(f"{V1}/me").status_code == 200
+    for changed in (replace(settings, reviewer_passphrase=None), replace(settings, reviewer_passphrase="another long passphrase 2")):
+        other = create_app(changed, serve_static=False, transport=universe.transport, resolver=universe.resolve)
+        try:
+            with TestClient(other) as later:
+                later.cookies.update(browser.cookies)  # the same cookie, the app now configured differently
+                assert later.get(f"{V1}/me").status_code == 401, changed.reviewer_passphrase
+        finally:
+            other.state.db.engine.dispose()
+    assert browser.get(f"{V1}/me").status_code == 200  # still valid where the passphrase is unchanged
+
+
+def test_the_cross_site_guard_exempts_the_exact_sign_in_callbacks_and_no_path_below_them():  # #348
+    from vault.app import CROSS_SITE_ALLOWED
+
+    for provider in ("google", "microsoft", "apple", "facebook"):
+        assert f"/api/auth/callback/{provider}" in CROSS_SITE_ALLOWED
+    assert not any(p.endswith("/") for p in CROSS_SITE_ALLOWED)  # no prefix: a path under one is not exempt
+
+
+def test_a_cross_site_post_below_a_callback_is_refused_and_the_callback_itself_is_not(app, browser):  # #348
+    foreign = {"origin": "https://evil.example"}
+    for path in ("/api/auth/callback/google/../me", "/api/auth/callback/%2e%2e/me", "/api/auth/callback/x", "/api/auth/callback/google/x"):
+        res = browser.post(path, headers=foreign)
+        assert res.status_code == 403 and "Cross-site" in res.text, path
+    assert browser.post("/api/auth/callback/google", headers=foreign).status_code != 403  # the real callback may be posted cross-site
+
+
 def test_seeding_is_idempotent_and_reset_puts_the_demo_back_as_it_was(app):
     with app.state.db.sessions() as db:
         user = reviewer.seed(db)
