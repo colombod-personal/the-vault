@@ -223,9 +223,32 @@ TOOLS = [
                    "description": "'-value' = most valuable first, '-acquired' = most recently bought first, "
                                   "'acquired' = first bought first, 'mana_value' = cheapest to cast first "
                                   "('-mana_value' the reverse; cards without data last)"},
+          "bucket": {"type": "integer", "minimum": 1, "maximum": MAX_ID,
+                     "description": "Only the copies in this bucket (a place copies live in, from list_buckets): 'what is in my trade "
+                                    "binder?'. Not on a shared collection"},
           **PAGING, **SHARE},
          path=lambda a: _base(a) + "/cards",
-         query=("q", "set", "name", "finish", "condition", "printing", "type", "mana_value", "sort", "limit", "cursor")),
+         query=("q", "set", "name", "finish", "condition", "printing", "type", "mana_value", "bucket", "sort", "limit", "cursor")),
+    Tool("list_buckets", "The places the person's copies live in: one per folder of their files (a binder, a deck box, a trade "
+         "box) and 'Unsorted', plus any they made. Each has its name, kind (default, folder or made), copies and rows; the "
+         "buckets' copies add up to the whole collection. Use a bucket's id as `bucket` in search_cards to see what is in it.",
+         dict(PAGING), path=lambda a: f"{V1}/collection/buckets", query=("limit", "cursor")),
+    Tool("create_bucket", "Makes an empty bucket (a named place for copies). Names are unique per person, ignoring case; at most "
+         "100 can be made by hand. Moving copies into it is a separate step.",
+         {"name": {"type": "string", "minLength": 1, "maxLength": 200, "description": "The bucket's name"}}, ["name"],
+         method="POST", path=lambda a: f"{V1}/collection/buckets", body=lambda a: {"name": a["name"]}, write=True),
+    Tool("rename_bucket", "Renames a bucket or moves it in the list. The name is the Vault's label only: the folder written in "
+         "the person's files, and so every export, is not changed.",
+         {"bucket_id": ID, "name": {"type": "string", "minLength": 1, "maxLength": 200},
+          "position": {"type": "integer", "minimum": 0, "maximum": 100000, "description": "Where it sits in the list"}}, ["bucket_id"],
+         method="PATCH", path=lambda a: f"{V1}/collection/buckets/{int(a['bucket_id'])}",
+         body=lambda a: {k: a[k] for k in ("name", "position") if a.get(k) is not None}, write=True),
+    Tool("delete_bucket", "Deletes an empty bucket. With confirm false or absent it returns the bucket (how many copies it holds) "
+         "and changes nothing; with confirm true it deletes it. A bucket that still holds copies is refused (409): move the "
+         "copies out first.",
+         {"bucket_id": ID, "confirm": CONFIRM}, ["bucket_id"],
+         method=lambda a: "DELETE" if a.get("confirm") is True else "GET",
+         path=lambda a: f"{V1}/collection/buckets/{int(a['bucket_id'])}", write=True, destructive=True),
     Tool("get_card", "One printing in detail: every copy (condition, language, folder, price paid, date), "
          "Scryfall card data (type, text, image with artist credit) and 90 days of prices.",
          {"card_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$", "description": "The id from search_cards"},
@@ -463,7 +486,8 @@ SCRYFALL_DATA = {"list_decks",  # the commanders' colour identity is Scryfall's 
                  "get_collection_breakdowns", "get_valuation", "get_value_history", "list_card_names", "refresh_prices",
                  "check_decklist", "lookup_cards", "get_deck", "get_shared_deck",
                  "update_owned_cards", "show_owned_printings"}  # these carry Scryfall's card images
-OWN_DATA_ONLY = {"get_acquisition_timeline", "parse_decklist", "save_deck", "update_deck", "list_imports",
+OWN_DATA_ONLY = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucket",
+                 "get_acquisition_timeline", "parse_decklist", "save_deck", "update_deck", "list_imports",
                  "import_collection_csv", "list_export_formats", "list_shared_with_me", "get_import", "delete_deck",
                  "list_my_shares", "accept_share", "stop_sharing", "start_collection_upload",
                  "get_staged_upload", "confirm_staged_upload", "get_deck_overlap", "council_brief", "expert_brief",
