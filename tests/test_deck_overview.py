@@ -53,6 +53,13 @@ def test_other_ways_of_naming_the_commander(text):
     assert deck_overview.overview(text, None)["commanders"] == ["Sliver Overlord"]
 
 
+@pytest.mark.parametrize("line", ["1 Atraxa, Praetors' Voice (CMM) 1068 *CMDR*", "1 Atraxa, Praetors' Voice (CMM) *CMDR*",
+                                  "1 Atraxa, Praetors' Voice (CMM) 1068 *F* *CMDR*", "1 Atraxa, Praetors' Voice *CMDR*"])
+def test_a_moxfield_commander_line_keeps_no_set_code_or_number(line):  # #332
+    seen = deck_overview.overview(line + "\n1 Sol Ring (C21) 263\n1 Island", None)
+    assert seen["commanders"] == ["Atraxa, Praetors' Voice"] and seen["cards"] == 3
+
+
 def test_a_stored_format_wins_and_a_list_without_commander_has_no_guess():
     assert deck_overview.overview(SLIVERS, "oathbreaker")["format"] == "oathbreaker"
     plain = deck_overview.overview("4 Lightning Bolt\n20 Mountain", None)
