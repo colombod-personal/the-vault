@@ -244,3 +244,18 @@ def test_an_edit_that_does_not_send_the_link_keeps_the_time_the_list_was_taken_f
     saved = signed_in.put(f"{V1}/decks/{made['id']}", json={"name": "From a link", "text": BASE, "source_url": link})  # the web app's save
     assert saved.status_code == 200
     assert signed_in.get(f"{V1}/decks/{made['id']}").json()["credit"]["fetched_at"] > first
+
+
+def test_last_change_lists_at_most_forty_changes_and_says_how_many_more_but_the_history_lists_all(signed_in):
+    """#327: a big edit must not make get_deck huge; summary keeps the true totals and the History list is not capped."""
+    old = "".join(f"1 Old Card {n:02d}\n" for n in range(50))
+    new = "".join(f"1 New Card {n:02d}\n" for n in range(50))
+    deck_id = save(signed_in, text="Deck\n" + old)
+    edit(signed_in, deck_id, "Deck\n" + new)
+    last = signed_in.get(f"{V1}/decks/{deck_id}").json()["last_change"]
+    assert len(last["changes"]) == 40 and last["more_changes"] == 60 and "first 40 of 100" in last["note"]
+    assert last["summary"]["added"] == 50 and last["summary"]["removed"] == 50 and last["summary"]["copies_out"] == 50
+    assert len(versions(signed_in, deck_id)["items"][0]["changes"]) == 100  # the History list is complete
+    small = save(signed_in, name="Small", text="Deck\n1 A\n")
+    edit(signed_in, small, "Deck\n1 A\n1 B\n", name="Small")
+    assert "more_changes" not in signed_in.get(f"{V1}/decks/{small}").json()["last_change"]
