@@ -1,7 +1,7 @@
 """Buckets under ``/api/v1/collection/buckets`` (#123, docs/collections.md): the places a person's copies live in.
 
 A bucket per Dragon Shield folder and an "Unsorted" one are made by the importer; a person can also make their own, rename them,
-and delete one that is empty, or whose copies are moved to another bucket first. ``entries.folder`` is never rewritten: it is the
+and delete one that is empty (copies are moved out first, by an explicit move). ``entries.folder`` is never rewritten: it is the
 source file's word for the place, kept so the CSV round-trip stays byte-identical, and the bucket is the Vault's grouping of it.
 """
 
@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -131,23 +131,16 @@ def build_router(get_db, current_user) -> APIRouter:
             raise HTTPException(409, "That name is taken (names ignore case)") from None
         return item(bucket, counts(db, user, [bucket.id]))
 
-    @router.delete("/{bucket_id}", summary="Delete an empty bucket, or move its copies to another one first")
-    def delete_bucket(bucket_id: Id, move_to: Annotated[int | None, Query(ge=1, le=S.MAX_ID,
-                      description="Another of your buckets that takes the copies")] = None,
-                      user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    @router.delete("/{bucket_id}", summary="Delete an empty bucket")
+    def delete_bucket(bucket_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         bucket = owned(db, user, bucket_id)
         held = db.scalar(select(func.count()).select_from(Entry).where(Entry.bucket_id == bucket.id, Entry.user_id == user.id))
-        if held and move_to is None:
-            raise HTTPException(409, f"{bucket.name!r} holds {held} rows of copies: say where they go with move_to, or move them first")
-        moved = 0
-        if move_to is not None:
-            if move_to == bucket.id:
-                raise HTTPException(422, "move_to must be a different bucket")
-            target = owned(db, user, move_to)
-            moved = db.execute(update(Entry).where(Entry.bucket_id == bucket.id, Entry.user_id == user.id)
-                               .values(bucket_id=target.id)).rowcount or 0
+        if held:
+            # Copies leave a bucket by an explicit move, which rewrites their folder and is recorded as a change (docs/collections.md):
+            # deleting does not move them behind anyone's back.
+            raise HTTPException(409, f"{bucket.name!r} still holds {held} rows of copies: move them to another bucket first")
         db.delete(bucket)
         db.commit()
-        return {"deleted": True, "moved_rows": moved, "_links": {"buckets": link(f"{V1}/collection/buckets")}}
+        return {"deleted": True, "_links": {"buckets": link(f"{V1}/collection/buckets")}}
 
     return router

@@ -46,20 +46,14 @@ def test_make_rename_and_delete_an_empty_bucket(signed_in):
     assert signed_in.get(f"{B}/{other['id']}").status_code == 404
 
 
-def test_a_bucket_with_copies_is_only_deleted_when_they_move_and_the_folder_is_not_rewritten(app, signed_in):
+def test_a_bucket_with_copies_cannot_be_deleted_and_nothing_moves_behind_the_back(app, signed_in):
     signed_in.post("/api/v1/imports", files={"file": ("export.csv", CSV, "text/csv")})
     export_before = signed_in.get("/api/v1/collection/export.csv").content
     source = signed_in.get(B).json()["items"][0]
-    target = signed_in.post(B, json={"name": "Elsewhere"}).json()
     held = signed_in.delete(f"{B}/{source['id']}")
-    assert held.status_code == 409 and "move_to" in held.json()["detail"]
-    assert signed_in.delete(f"{B}/{source['id']}", params={"move_to": source["id"]}).status_code == 422
-    assert signed_in.delete(f"{B}/{source['id']}", params={"move_to": 999999}).status_code == 404
-    done = signed_in.delete(f"{B}/{source['id']}", params={"move_to": target["id"]}).json()
-    assert done["deleted"] is True and done["moved_rows"] == source["entries"]
-    moved = signed_in.get(f"{B}/{target['id']}").json()
-    assert moved["copies"] == source["copies"] and moved["entries"] == source["entries"]
-    assert signed_in.get("/api/v1/collection/export.csv").content == export_before  # entries.folder is as imported
+    assert held.status_code == 409 and "move them to another bucket first" in held.json()["detail"]
+    assert signed_in.get(f"{B}/{source['id']}").json()["copies"] == source["copies"]  # still all there
+    assert signed_in.get("/api/v1/collection/export.csv").content == export_before  # and the export is as imported
     with app.state.db.sessions() as db:
         assert db.scalar(select(func.count()).select_from(Entry).where(Entry.bucket_id.is_(None))) == 0
 
@@ -72,8 +66,6 @@ def test_another_persons_buckets_are_404_and_never_listed(client):
     assert client.get(f"{B}/{bob['id']}").status_code == 404
     assert client.patch(f"{B}/{bob['id']}", json={"name": "Mine now"}).status_code == 404
     assert client.delete(f"{B}/{bob['id']}").status_code == 404
-    mine = client.post(B, json={"name": "Alice's box"}).json()
-    assert client.delete(f"{B}/{mine['id']}", params={"move_to": bob["id"]}).status_code == 404  # nor a place to put copies
     sign_in_as(client, "bob@example.com")
     assert client.get(f"{B}/{bob['id']}").json()["name"] == "Bob's box"  # untouched
 
