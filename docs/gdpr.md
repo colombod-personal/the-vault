@@ -26,6 +26,7 @@ This is an engineering document, not legal advice: have the privacy notice
 | `collection_baselines` | yes | the cards (copies, condition, folder, price and date paid) of the last file you imported, so the next import can tell what changed in your app from what was edited here | `last_import_cards.json` | `purge_user` |
 | `entries` | yes | collection rows, incl. purchase price/date and folders | `collection.csv` (Dragon Shield), `collection-moxfield.csv`, `collection-generic.csv`, `collection.json` | `purge_user` |
 | `decks` | yes | saved decklists, with the link and author of the deck they came from | `decks.json`, `decks/*.txt` | `purge_user` |
+| `deck_versions` | via its deck | each saved deck's earlier lists (at most 20 a deck): the decklist text, when and from what | `decks.json` (`versions` of each deck) | deleted with the deck (`ON DELETE CASCADE`), so with the account |
 | `shares` | yes | who shared what with whom | `shares.json` (given and received) | `purge_user` (both directions) |
 | `api_sessions` | yes | signed-in apps: client, device name, dates, token hashes | `app_sessions.json` (no hashes) | `purge_user` |
 | `retired_refresh_tokens` | yes | hashes of already-rotated app refresh tokens, kept until they would expire, to detect a copied token | – (hashes only) | `purge_user`, and with their app session |

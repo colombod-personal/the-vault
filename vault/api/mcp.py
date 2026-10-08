@@ -305,6 +305,8 @@ TOOLS = [
          "of how much of it the person owns (copies needed, owned, missing, cost to finish), the cards not fully owned "
          "(the dearest 40, each with its Scryfall unit price and the `price_date` that price is from), and the decklist. For a "
          "deck from Archidekt, `credit` gives its link, author and `fetched_at` (when the list was last taken from the link). "
+         "`last_change` says what changed between the deck's previous saved version and its current list (cards added, cut or "
+         "changed in count, when, and from what); it is absent while the deck has one version. "
          "all_cards adds every card's ownership with the printings owned (about 80 KB for 100 cards).",
          {"deck_id": ID, "all_cards": {"type": "boolean", "default": False,
                                        "description": "Every card's ownership and owned printings (large)"}}, ["deck_id"],

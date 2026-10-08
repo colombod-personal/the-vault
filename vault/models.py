@@ -175,6 +175,20 @@ class Deck(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class DeckVersion(Base):
+    """A saved deck's list as it was when its cards last changed (vault.deck_versions, #93). At most 20 a deck; they go with
+    the deck (and so with the account)."""
+
+    __tablename__ = "deck_versions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    deck_id: Mapped[int] = mapped_column(ForeignKey("decks.id", ondelete="CASCADE"), index=True)
+    text: Mapped[str] = mapped_column(Text)
+    fingerprint: Mapped[str] = mapped_column(String(20))  # of the cards, whatever their spelling or order
+    source: Mapped[str] = mapped_column(String(12))  # saved, edited, imported or refreshed
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Share(Base):
     """Read access one user grants another, to their collection or to one deck.
 
