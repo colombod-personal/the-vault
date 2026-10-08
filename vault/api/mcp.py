@@ -303,7 +303,8 @@ TOOLS = [
          path=lambda a: f"{V1}/decks/overlap"),
     Tool("get_deck", "A saved deck: its name, `overview` (format, commander(s), card count, colour identity), a `summary` "
          "of how much of it the person owns (copies needed, owned, missing, cost to finish), the cards not fully owned "
-         "(the dearest 40, each with its Scryfall unit price and the `price_date` that price is from), and the decklist. For a "
+         "(the dearest 40, each with its Scryfall unit price and the `price_date` that price is from: the cheapest priced paper printing of the card, or the printing the list names, "
+         "as `shopping_list` gives), and the decklist. For a "
          "deck from Archidekt, `credit` gives its link, author and `fetched_at` (when the list was last taken from the link). "
          "`last_change` says what changed between the deck's previous saved version and its current list (cards added, cut or "
          "changed in count, when, and from what); it is absent while the deck has one version. "
