@@ -161,7 +161,8 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              provenance=("computed",), ui="upgrades"),
         Tool("validate_deck_changes", "Check a proposed list of cuts and adds before presenting it: every card exists and is legal, adds are in "
              "the deck's colors, the resulting deck is still legal, and the adds' total price is within budget_usd. Present the plan only "
-             "if valid is true." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
+             "if valid is true. Each cut or add is a card name; a quantity ('2 Mind Stone', '2x Mind Stone') repeats it and a set and "
+             "number are ignored." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
              {"text": deck, "deck_id": DECK_ID, "format": fmt, "adds": {"type": "array", "maxItems": 60, "items": {"type": "string", "maxLength": 300}},
               "cuts": {"type": "array", "maxItems": 60, "items": {"type": "string", "maxLength": 300}},
               "budget_usd": {"type": "number", "minimum": 0, "maximum": 100000, "description": "The most the adds may cost in total"}},
