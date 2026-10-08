@@ -157,6 +157,21 @@ def test_disconnecting_by_an_older_connections_id_disconnects_the_whole_app(app,
     assert client.browser.delete(f"{V1}/me/apps/{oldest}").status_code == 404
 
 
+def test_only_the_newest_ten_retired_refresh_tokens_are_kept_and_reuse_of_the_latest_still_revokes(app, client):  # #338
+    client.sign_in()
+    client.connect()
+    used = []
+    for _ in range(15):
+        used.append(client.tokens["refresh_token"])
+        res = client.refresh()
+        assert res.status_code == 200
+        client.tokens = res.json()
+    count = lambda db: db.scalar(select(func.count()).select_from(OAuthRetiredRefresh))  # noqa: E731
+    assert db_do(app, count) == 10  # not 15
+    assert client.refresh(used[0]).status_code == 400 and len(oauth_server_ids(app)) == 1  # too old to know: refused, no revoke
+    assert client.refresh(used[-1]).status_code == 400 and oauth_server_ids(app) == []  # a copy of the latest: grant revoked
+
+
 def test_disconnect_removes_the_retired_refresh_tokens_of_every_connection(app, client):
     client.sign_in()
     client.connect()

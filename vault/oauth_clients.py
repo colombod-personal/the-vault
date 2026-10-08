@@ -323,7 +323,7 @@ class ClientFetcher:
             raise _refuse("too slow")
         try:
             return json.loads(body)
-        except ValueError:
+        except (ValueError, RecursionError):  # nested too deeply is "not valid JSON" too
             raise _refuse("not valid JSON") from None
 
 

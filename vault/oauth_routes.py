@@ -406,8 +406,8 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
                 raise server.OAuthError("unsupported_grant_type", "grant_type must be authorization_code or refresh_token")
         except (server.OAuthError, clients.ClientError) as exc:
             if exc.code == "invalid_client":  # why an app could not connect: its public client_id and our reason, never a secret
-                log.warning("token request refused: client=%s grant=%s assertion=%s type=%s reason=%s", (client_id or "")[:200],
-                            grant_type, bool(client_assertion), (client_assertion_type or "")[:80],
+                log.warning("token request refused: client=%r grant=%r assertion=%s type=%r reason=%s", (client_id or "")[:200],
+                            (grant_type or "")[:40], bool(client_assertion), (client_assertion_type or "")[:80],
                             getattr(exc, "description", str(exc)))
             return token_error(exc)
         return JSONResponse(result, headers={**NO_STORE, **CORS})
@@ -433,7 +433,7 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
                 with request.app.state.db.sessions() as db:
                     return JSONResponse(clients.register(db, body, settings.oauth_client_cap), status_code=201,
                                         headers={**NO_STORE, **CORS})
-            except ValueError:
+            except (ValueError, RecursionError):
                 return JSONResponse({"error": "invalid_client_metadata", "error_description": "The body must be JSON"},
                                     status_code=400, headers={**NO_STORE, **CORS})
             except clients.ClientError as exc:
