@@ -197,3 +197,28 @@ def test_a_timeout_counts_as_a_failure(universe, clock):
         with pytest.raises(combos.ComboServiceError):
             combos.ask([("Sol Ring", 1)], [], httpx.MockTransport(hang))
     assert combos.GUARD.state == "open"
+
+
+def _mcp(client, token, tool, **arguments):
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": arguments}}
+    res = client.post("/api/mcp", json=body, headers={"Authorization": "Bearer " + token})
+    assert res.status_code == 200, res.text
+    return res.json()["result"]
+
+
+def test_the_find_combos_tool_answers_for_a_saved_deck_with_its_source_and_links(client, universe):
+    """#28: the AI tool itself (not only the REST route) takes a deck_id, names Commander Spellbook and links each combo."""
+    token = client.post("/api/v1/me/tokens", json={"name": "agent", "scopes": ["read", "write"]}).json()["token"]
+    saved = _mcp(client, token, "save_deck", name="Win line", text="Deck\n1 Thassa's Oracle\n1 Demonic Consultation\n1 Test Rock\n")
+    deck_id = saved["structuredContent"]["id"]
+    out = _mcp(client, token, "find_combos", deck_id=deck_id)
+    assert not out.get("isError"), out
+    body = out["structuredContent"]
+    assert body["deck"]["id"] == deck_id and body["deck"]["name"] == "Win line"
+    combo = body["result"]["included"][0]
+    assert sorted(combo["cards"]) == ["Demonic Consultation", "Thassa's Oracle"]
+    assert combo["url"].startswith("https://commanderspellbook.com/combo/")
+    assert body["provenance"][0]["source"] == "Commander Spellbook" and body["provenance"][0]["notice"]
+    assert any("community" in n for n in body["result"]["notes"])  # it lists only combos Spellbook knows
+    pasted = _mcp(client, token, "find_combos", text="Deck\n1 Thassa's Oracle\n1 Test Rock\n")["structuredContent"]
+    assert pasted["result"]["almost_included"][0]["missing"] == ["Demonic Consultation"]
