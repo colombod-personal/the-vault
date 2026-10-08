@@ -76,6 +76,18 @@ def fresh_upstream_guard():
     combos.GUARD.reset()
 
 
+@pytest.fixture(autouse=True)
+def no_live_scryfall_in_tests(monkeypatch, request):
+    """The printing picker asks Scryfall live (``Catalog.live_printings``, #208). A test whose app has no twin transport must
+    never reach the real Scryfall, so for those the live search answers 'unavailable' (the picker then offers what the Vault
+    holds). A test that wants the live search uses the ``twin_app`` fixture (``tests/test_live_printings.py``)."""
+    if "twin_app" in request.fixturenames:
+        return
+    from vault.catalog import Catalog
+
+    monkeypatch.setattr(Catalog, "live_printings", lambda self, oracle_id: {"printings": [], "unavailable": True, "more": False})
+
+
 @pytest.fixture
 def database_url():
     """An empty Postgres database for this test, migrated to the latest schema."""

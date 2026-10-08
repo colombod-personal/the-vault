@@ -181,7 +181,9 @@ OWNED_LINES = {"type": "array", "minItems": 1, "maxItems": 50, "items": {
         "set": {"type": "string", "maxLength": 20, "description": "The printing's set code (with number)"},
         "number": {"type": "string", "maxLength": 30, "description": "The printing's collector number (with set)"},
         "finish": {"type": "string", "enum": ["nonfoil", "foil", "etched"]},
-        "printing_unknown": {"type": "boolean", "description": "Only when the person says they do not know (adds only)"}}}}
+        "printing_unknown": {"type": "boolean", "description": "Only when the person says they do not know (adds only)"},
+        "printings_page": {"type": "integer", "minimum": 1, "maximum": 20,
+                           "description": "The next page of printings to choose from, when the answer says there are more"}}}}
 # null clears them on update_deck (as on the API), so it is advertised as allowed.
 SOURCE_URL = {"anyOf": [{"type": "string", "maxLength": 500}, {"type": "null"}],
               "description": "Where the deck came from (an http or https link); null clears it"}
@@ -384,7 +386,8 @@ TOOLS = [
          "or remove copies, or set how many are owned. Changes nothing. Returns each card, its printing, copies before "
          "and after, the value change and, when every line is resolved, a confirmation for confirm_owned_cards_update. "
          "A line whose printing is ambiguous returns status choose_printing with the candidate printings (pictures in "
-         "the view); an add may be sent with printing_unknown. Limits: 50 lines, 25 copies removed (or 10% of the "
+         "the view; every printing of the card is offered, found live at Scryfall, 20 a page: send the line again "
+         "with printings_page for the next page); an add may be sent with printing_unknown. Limits: 50 lines, 25 copies removed (or 10% of the "
          "collection) per change; larger changes are imports.",
          {"lines": OWNED_LINES}, ["lines"], method="POST", path=lambda a: f"{V1}/collection/changes/preview",
          body=lambda a: {"lines": a["lines"]}, write=True, ui="printings"),

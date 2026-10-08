@@ -617,6 +617,16 @@ function render(root, r) {
         grid.appendChild(tile);
       });
       box.appendChild(grid);
+      var pg = l.printings;
+      if (pg && pg.page < pg.pages) {
+        box.appendChild(h("button", { text: "More printings (" + pg.page + " of " + pg.pages + ")", onclick: function () {
+          callTool("update_owned_cards", { lines: linesWith(index, { printings_page: pg.page + 1 }) }).then(function (r2) {
+            lastInput = { lines: linesWith(index, { printings_page: pg.page + 1 }) }; show(r2);
+          }).catch(function (e) { status.textContent = e.message; });
+        } }));
+        box.appendChild(document.createTextNode(" "));
+      }
+      if (pg && pg.scryfall_unavailable) { box.appendChild(h("p", { class: "small muted", text: "Scryfall did not answer, so only the printings the Vault already knows are shown." })); }
       if (l.action === "add") {
         box.appendChild(h("button", { text: "I don't know which one", onclick: function () {
           choose(root, index, "For " + (l.card || l.name) + ": I don't know which printing.", { printing_unknown: true }, status);
