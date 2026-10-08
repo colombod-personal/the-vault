@@ -84,3 +84,41 @@ def test_the_get_deck_tool_tells_an_assistant_about_the_price_date_and_fetched_a
 
     said = mcp.BY_NAME["get_deck"].description
     assert "`price_date`" in said and "`fetched_at`" in said and "credit" in said
+
+
+def test_a_card_has_one_price_in_the_deck_answer_and_in_the_shopping_list(signed_in, app):
+    """#328: a line naming no printing is priced from oracle_prices (the cheapest priced paper printing), as shopping_list does,
+    whatever printings the Vault happens to hold: a dearer held printing and a cheaper held foil change nothing."""
+    from datetime import date
+
+    from tests.ids import sid
+    from vault import catalog_sync as cs
+    from vault.models import Card, PriceSnapshot
+
+    oracle = {"Sol Ring": "11111111-1111-1111-1111-111111111111", "Llanowar Elves": "22222222-2222-2222-2222-222222222222"}
+    with app.state.db.sessions() as db:
+        cs.sync_oracle_cards(db, [{"object": "card", "id": "p-" + name[:3], "oracle_id": oid, "name": name, "layout": "normal", "mana_cost": "{1}",
+                                   "cmc": 1.0, "type_line": "Artifact", "oracle_text": "", "colors": [], "color_identity": [], "keywords": [],
+                                   "legalities": {"commander": "legal"}, "digital": False} for name, oid in oracle.items()])
+        cs.sync_oracle_prices(db, [{"oracle_id": oracle["Sol Ring"], "scryfall_id": "o-sol", "usd": 1.0, "usd_foil": None, "eur": None,
+                                    "day": date(2026, 10, 7), "source": "scryfall"},
+                                   {"oracle_id": oracle["Llanowar Elves"], "scryfall_id": "o-elf", "usd": 0.5, "usd_foil": None, "eur": None,
+                                    "day": date(2026, 10, 7), "source": "scryfall"}])
+        for source in ("oracle_cards", "oracle_prices", "oracle_tags"):  # the analysis routes refuse to run on an unloaded catalog
+            cs.record_source(db, source, version=source + "-1", rows=2)
+        db.add_all([Card(scryfall_id=sid("sol-1"), oracle_id=oracle["Sol Ring"], name="Sol Ring", set_code="C21", collector_number="263"),
+                    Card(scryfall_id=sid("elf-1"), oracle_id=oracle["Llanowar Elves"], name="Llanowar Elves", set_code="DOM", collector_number="168")])
+        db.flush()
+        db.add_all([PriceSnapshot(scryfall_id=sid("sol-1"), day=date(2026, 10, 5), usd=1.5),  # a held printing dearer than the cheapest
+                    PriceSnapshot(scryfall_id=sid("elf-1"), day=date(2026, 10, 4), usd=0.9, usd_foil=0.3)])  # and a foil cheaper than every nonfoil
+        db.commit()
+    text = "Deck\n1 Sol Ring\n2 Llanowar Elves"
+    saved = signed_in.post(f"{V1}/decks", json={"name": "Elves", "text": text}).json()
+    deck = signed_in.get(f"{V1}/decks/{saved['id']}").json()["coverage"]
+    lines = {c["name"]: c for c in deck["cards"]}
+    assert (lines["Sol Ring"]["unit_price"], lines["Sol Ring"]["price_date"]) == (1.0, "2026-10-07")
+    assert (lines["Llanowar Elves"]["unit_price"], lines["Llanowar Elves"]["price_date"]) == (0.5, "2026-10-07")
+    answer = signed_in.post(f"{V1}/decks/shopping-list", json={"text": text})
+    assert answer.status_code == 200, answer.text
+    shop = answer.json()["result"]
+    assert deck["missing_cost"] == shop["total_usd"] == 2.0

@@ -28,7 +28,7 @@ from decimal import Decimal
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .prices import MAX_PRICE, uuid_sql
+from .prices import MAX_PRICE, plausible_price, uuid_sql
 
 COLORS = ("W", "U", "B", "R", "G", "M", "C")  # mono colours, multicolour, colourless
 COLOR_NAMES = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green", "M": "Multicolor",
@@ -358,8 +358,9 @@ MAX_OWNED_PRINTINGS = 50  # per deck line
 
 def price_coverage(db: Session, user_id: int, coverage: dict) -> dict:
     """Add prices to a deck's coverage: each line's ``unit_price`` (the cheapest known USD price of
-    the line's printing when it names one the Vault knows, else of any printing of the card, in any
-    finish), ``price_date`` (the day of the snapshot that price came from), ``missing_cost`` (that price times the copies missing; null when no price is known),
+    the line's printing when it names one the Vault knows, else the card's cheapest priced paper printing from
+    ``oracle_prices``: the figure ``shopping_list`` and ``get_card_oracle`` give, so a deck never has two prices for
+    one card; with no such price loaded, the cheapest of the printings the Vault holds, in any finish), ``price_date`` (the day of the snapshot that price came from), ``missing_cost`` (that price times the copies missing; null when no price is known),
     and ``owned_printings`` (the printings of the card in the collection, at today's prices). The
     deck's ``missing_cost`` totals the lines with a price; ``missing_unpriced`` counts the others."""
     return price_coverages(db, user_id, [coverage])[0]
@@ -374,7 +375,14 @@ def price_coverages(db: Session, user_id: int, coverages: list[dict], owned_prin
     name_day: dict[str, date] = {}  # the day of the price snapshot each price above came from (#96: a dated price per card)
     printing_day: dict[tuple, date] = {}
     owned: dict[str, list[dict]] = {}
+    oracle: dict[str, tuple[float, date]] = {}  # the cheapest priced paper printing of each card: the figure shopping_list uses (#328)
     if fronts:
+        for front, usd, day in db.execute(text("""
+SELECT lower(split_part(c.name, ' // ', 1)), p.usd, p.day FROM oracle_cards c JOIN oracle_prices p ON p.oracle_id = c.oracle_id
+WHERE lower(split_part(c.name, ' // ', 1)) = ANY(:fronts) AND p.usd IS NOT NULL"""), {"fronts": fronts}):
+            usd = plausible_price(usd)
+            if usd is not None and (front not in oracle or usd < oracle[front][0]):
+                oracle[front] = (usd, day)
         cheapest = (f"least({_plausible('l.usd')}, {_plausible('l.usd_foil')}, {_plausible('l.usd_etched')})")
         priced_cards = db.execute(text(f"""
 WITH named AS (
@@ -412,6 +420,8 @@ ORDER BY 1, max(price) DESC, 2, 3"""), {"uid": user_id, "fronts": fronts}):
             key = (front, (c.get("set") or "").lower(), (c.get("number") or "").lower())
             unit = by_printing.get(key) if c.get("set") and c.get("number") else None
             day = printing_day.get(key) if unit is not None else None
+            if unit is None and front in oracle:  # no printing named (or none the Vault holds): the same price as shopping_list (#328)
+                unit, day = oracle[front]
             if unit is None:
                 unit, day = by_name.get(front), name_day.get(front)
             cost = round(unit * c["missing"], 2) if unit is not None else None
