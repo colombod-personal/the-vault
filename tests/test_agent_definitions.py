@@ -167,3 +167,25 @@ def test_the_format_experts_that_do_not_exist_are_recorded_as_an_owner_decision(
     for fmt in ("modern", "legacy", "cedh", "brawl", "cube", "vintage", "oathbreaker"):
         assert not [n for n in NAMES if fmt in n], f"an agent for {fmt} exists: update docs/expert-council.md (owner decision)"
         assert fmt.lower() in doc.lower() or fmt == "cedh" and "cEDH" in doc
+
+
+# #172: find_combos lists only the combos Commander Spellbook knows, so no member may say "no infinite combos" because it found none
+NO_INFINITE = [
+    "skills/expert-council/SKILL.md",
+    "plugins/the-vault/skills/expert-council/SKILL.md",
+    "plugins/the-vault-openai/skills/expert-council/SKILL.md",
+    *[f"{base}/vault-{member}{ext}" for member in ("casual-table", "commander-expert") for base, ext in (
+        ("agents", ".md"), ("plugins/the-vault/agents", ".md"), ("agent-definitions/codex", ".toml"),
+        ("agent-definitions/cursor", ".md"), ("agent-definitions/copilot", ".agent.md"),
+        ("plugins/the-vault/com.github.copilot/agents", ".agent.md"))],
+    "plugins/the-vault-openai/skills/vault-casual-table/SKILL.md",
+    "plugins/the-vault-openai/skills/vault-commander-expert/SKILL.md",
+]
+
+
+@pytest.mark.parametrize("path", NO_INFINITE)
+def test_no_one_says_no_infinite_combos_because_find_combos_found_none(path):
+    raw = (Path(__file__).parent.parent / path).read_text(encoding="utf-8")
+    text = " ".join(raw.replace(chr(92) + "n", " ").replace(chr(92), "").split())  # TOML and Python literals escape the quotes and newlines
+    assert re.search(r'never (tell the person a deck has|say (that )?a deck has) "no infinite combos"', text), path
+    assert "find_combos" in text and re.search(r"Commander Spellbook (knows|know)|known to Commander Spellbook", text), path
