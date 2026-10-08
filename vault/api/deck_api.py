@@ -309,7 +309,10 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
         owned = [r.to_collection_entry() for r in user_entries(db, user)]
         by_name = {e.line.name.strip().lower(): e.card for e in resolved.entries if e.card}
         prices = dt.prices_of(db, [c.oracle_id for c in by_name.values()])
-        missing = [(c, by_name.get(c.entry.name.strip().lower())) for c in delta.coverage(deck.to_entries(), owned) if c.missing > 0]
+        covered = list(delta.coverage(deck.to_entries(), owned))
+        missing = [(c, by_name.get(c.entry.name.strip().lower())) for c in covered if c.missing > 0]
+        deck_copies = sum(c.entry.quantity for c in covered)
+        to_buy_copies = sum(c.missing for c in covered)
         printings: dict[str, list] = {}
         as_of = None
         if rules.given:
@@ -342,7 +345,11 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
         every = body.format == "all"
         fmt = "plain" if every else body.format
         info = shop.STORES[fmt]
-        result = {"price_basis": ("the cheapest printing that fits your rules, per line (`printing`)" if rules.given else
+        result = {"covers": {"deck_copies": deck_copies, "already_owned": deck_copies - to_buy_copies, "to_buy": to_buy_copies,
+                             "meaning": f"This list is only the cards the person does not own: they already own {deck_copies - to_buy_copies} of the "
+                                        f"deck's {deck_copies} cards, and the {to_buy_copies} left are listed. It is not the whole deck, and "
+                                        "a card missing from it is one they own."},
+                  "price_basis": ("the cheapest printing that fits your rules, per line (`printing`)" if rules.given else
                                   "the cheapest priced paper printing of each card; no rules were given, so no printing is chosen"),
                   "lines": lines, "format": body.format, "text": shop.render(lines, fmt),
                   "total_usd": round(total, 2), "unpriced_lines": unpriced, "no_qualifying_printing": excluded,
