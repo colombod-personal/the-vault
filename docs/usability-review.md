@@ -57,3 +57,30 @@ horizontal scroll) widened the page, and fixed overlays are placed against the w
 7. No skip-to-content link; no body scroll lock behind the card panel (the page can scroll behind it with the wheel).
 8. Not tested: Safari and Firefox (only Chromium), a screen reader, high-contrast or forced-colours mode, zoom to 200%,
    slow networks, the Decks and Lab views beyond contrast and structure, and the Graph view's interaction.
+
+## Phone-first pass (#95, 2026-10-08)
+
+Measured with `scripts/measure_phone.js` at 390 x 844, signed in, on a local Vault holding the owner's real export (21,950 copies, 10,645 printings, 269 sets). Before: every button, chip and row link was 36 px high (the floor set in #90), body text went down to 11 px, labels to 9.5 px (the bottom tab bar), and the dashboard alone had 118 texts under their floor. After the rules at the end of `public/layout.css` ("Phone-first pass"):
+
+| View | Controls | Under 44 px | Texts | Under 12 px (11 px for labels) | Scrolls sideways |
+|---|---|---|---|---|---|
+| Vault | 42 | 0 | 184 | 0 | no |
+| Browse | 80 | 0 | 583 | 0 | no |
+| Sets | 281 | 0 | 1,371 | 0 | no |
+| Decks (library) | 15 | 0 | 39 | 0 | no |
+| A saved deck, tab Cards | 33 | 0 | 118 | 0 | no |
+| the deck's Stats, Legality, Upgrades, Combos, Buy list, History tabs | 20 to 24 each | 0 | 0 small | 0 | no |
+| Lab | 24 | 0 | 158 | 0 | no |
+| Graph | 37 | 0 | 71 | 0 | no |
+| Value | 18 | 0 | 256 | 0 | no |
+| Help | 9 | 0 | 63 | 0 | no |
+| A card's panel, the Account panel | 82, 103 | 0 | | 0 (after the small colour pip's letter went to 12 px) | no |
+
+Screenshots at 390 px: [Vault](screenshots/phone-dashboard-390.jpg), [Browse](screenshots/phone-browse-390.jpg), [Sets](screenshots/phone-sets-390.jpg), [a deck](screenshots/phone-deck-390.jpg), [Lab](screenshots/phone-lab-390.jpg). Decks (library), Graph, Value and Help were measured but not photographed (the browser pane stopped drawing before they were taken).
+
+What the pass changed: every control a finger taps is 44 px high (the colour filters of the Graph 44 x 44); chips, buttons and the bottom tab labels are 11 px (they were 9 to 10.5 px); text is 12 px or more (it was 10 to 11 px: table notes, quantities, deltas, the footer, card-art placeholders, the freshness line); small texts set in the markup are raised to 12 px; the stat cards let a label and its cue, and the freshness line, wrap as whole words.
+
+**Not done, and not claimed:**
+- The text drawn inside SVG charts (the Value chart's axis, the Graph's node labels) is not counted: it scales with its chart.
+- On Lab and Value, a summary leads, but the tables stay tables (four short columns that fit without scrolling, the card name pinned); they do not become lists.
+- The phone views were not checked on a real iPhone.

@@ -1,4 +1,4 @@
-"""Tap targets of at least 36 px on a phone (#90).
+"""Tap targets of at least 44 px on a phone (#90 measured 36 px; the phone-first pass of #95 raised it to 44).
 
 The audit found the 'From a link' / 'Paste a list' chips, the deck tabs and the xs/sm buttons at 34 px by CSS and
 nothing that measured them. This test reads the style sheets the page loads (styles.css, then layout.css), resolves
@@ -14,7 +14,7 @@ from pathlib import Path
 
 PUBLIC = Path(__file__).parent.parent / "public"
 PHONE_WIDTH = 390
-MIN_PX = 36
+MIN_PX = 44
 
 
 def _strip(css: str) -> str:
@@ -179,8 +179,18 @@ def test_the_checker_catches_a_small_control():
 
 
 def test_the_phone_rules_are_the_ones_that_raise_the_small_controls():
-    """Wider screens keep the design's compact buttons (styles.css is unchanged): the 36 px floor is a phone rule."""
+    """Wider screens keep the design's compact buttons (styles.css is unchanged): the 44 px floor is a phone rule."""
     wide = [d for s, d in ((s, d) for _, s, d in rules(PUBLIC / "styles.css")) if s in (".btn.sm", ".btn.xs", ".chip")]
     assert wide, "styles.css lost its button rules"
     layout = (PUBLIC / "layout.css").read_text(encoding="utf-8")
-    assert "@media (max-width: 760px)" in layout and ".btn.sm, .btn.xs { min-height: 36px" in layout
+    assert "@media (max-width: 760px)" in layout and ".btn.sm, .btn.xs { min-height: 44px" in layout
+
+
+def test_the_phone_pass_keeps_text_at_12_px_and_labels_at_11_px():
+    """#95: scripts/measure_phone.js found no text under 12 px and no label under 11 px on any view at 390 px after the
+    phone-first block at the end of layout.css; that block must not set a smaller size (SVG chart text scales with its chart)."""
+    css = (PUBLIC / "layout.css").read_text(encoding="utf-8")
+    block = _strip(css[css.index("Phone-first pass (#95)"):])
+    sizes = [float(m) for m in re.findall(r"font-size:\s*([\d.]+)px(?:\s*!important)?\s*[;}]", block)]
+    assert sizes and min(sizes) >= 11, sorted(set(sizes))
+    assert "min-height: 44px" in block and "button.pip { min-width: 44px; min-height: 44px; }" in block
