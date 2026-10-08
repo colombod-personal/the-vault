@@ -13,6 +13,8 @@ import hashlib
 
 from mtg_toolkits import decklist
 
+from . import deck_text
+
 SECTION_NAMES = {"commander": "Commander", "main": "Deck", "sideboard": "Sideboard", "maybeboard": "Maybeboard",
                  "companion": "Companion"}
 
@@ -20,7 +22,7 @@ SECTION_NAMES = {"commander": "Commander", "main": "Deck", "sideboard": "Sideboa
 def _cards(text: str) -> dict[tuple[str, str], tuple[str, int]]:
     """``{(section, lower-cased name): (name, quantity)}`` of a list's text."""
     out: dict[tuple[str, str], tuple[str, int]] = {}
-    for line in decklist.parse_text(text).lines:
+    for line in deck_text.parse_text(text).lines:
         key = (line.section or "main", line.name.lower())
         name, qty = out.get(key, (line.name, 0))
         out[key] = (name, qty + line.quantity)

@@ -18,7 +18,7 @@ from mtg_toolkits import decklist
 from sqlalchemy import and_, false, func, or_, select
 from sqlalchemy.orm import Session
 
-from . import brackets, role_rules
+from . import brackets, deck_text, role_rules
 from .card_faces import all_text, front_mana_cost
 from .catalog_queries import card_priority
 from .models import OracleCard, OraclePrice, OracleTag, OracleTagLink
@@ -88,7 +88,7 @@ def loose_name(name: str) -> str:
 
 def parse(text: str) -> decklist.Decklist:
     try:
-        deck = decklist.parse_text(text)
+        deck = deck_text.parse_text(text)
     except (ValueError, OverflowError) as exc:
         raise DeckError(f"The decklist could not be read: {exc}") from exc
     if not deck.lines:

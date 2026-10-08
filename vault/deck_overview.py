@@ -15,16 +15,12 @@ text stays the source of truth; this reads it:
 
 from __future__ import annotations
 
-import re
-
-from mtg_toolkits import decklist
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from . import deck_text
 from .models import OracleCard
 
-CMDR = re.compile(r"\s*\*CMDR\*\s*$", re.IGNORECASE)  # Moxfield's commander marker on an exported line
-PRINTING = re.compile(r"(?:\s+\([A-Za-z0-9]{2,6}\)(?:\s+\S+)?|\s+\*[A-Za-z]\*)+$")  # "(CMM) 1068" and "*F*" the parser left in the name
 WUBRG = "WUBRG"
 SIDE = {"sideboard": "sideboard", "maybeboard": "maybeboard", "companion": "companion"}
 
@@ -32,18 +28,15 @@ SIDE = {"sideboard": "sideboard", "maybeboard": "maybeboard", "companion": "comp
 def read(text: str) -> dict:
     """Commanders and card counts from a decklist's text (no database)."""
     try:
-        deck = decklist.parse_text(text)
+        deck = deck_text.parse_text(text)  # a Moxfield *CMDR* line is a commander (#332)
     except (ValueError, OverflowError):
         return {"commanders": [], "cards": None, "readable": False}
     commanders: list[str] = []
     counts = {"main": 0, "sideboard": 0, "maybeboard": 0, "companion": 0}
     for line in deck.lines:
-        name = CMDR.sub("", line.name).strip()
-        if name != line.name.strip():  # the marker came last, so the parser left the printing in the name
-            name = PRINTING.sub("", name).strip()
-        if line.section == "commander" or CMDR.search(line.name):
-            if name not in commanders:
-                commanders.append(name)
+        if line.section == "commander":
+            if line.name not in commanders:
+                commanders.append(line.name)
             counts["main"] += line.quantity  # the commander is part of the 100
         else:
             counts[SIDE.get(line.section, "main")] += line.quantity

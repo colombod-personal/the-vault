@@ -31,7 +31,7 @@ from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .. import analytics, oauth_server, outbound, tokens
+from .. import analytics, deck_text, oauth_server, outbound, tokens
 from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
 from ..deck_tools import loose_name
@@ -664,7 +664,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     # -- decks ----------------------------------------------------------------------------------
     def _parse(text: str) -> decklist.Decklist:
         try:
-            return decklist.parse_text(text)
+            return deck_text.parse_text(text)
         except (ValueError, OverflowError) as exc:  # e.g. a quantity with thousands of digits
             raise HTTPException(400, f"The decklist could not be read: {exc}") from exc
 
@@ -743,7 +743,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         uses: dict = {}
         for d in decks:
             try:
-                needed = delta.aggregate(decklist.parse_text(d.text).to_entries(), delta.BY_CARD)
+                needed = delta.aggregate(deck_text.parse_text(d.text).to_entries(), delta.BY_CARD)
             except (ValueError, OverflowError):
                 continue  # an unreadable saved deck is skipped, not an error for the others
             for key, entry in needed.items():
