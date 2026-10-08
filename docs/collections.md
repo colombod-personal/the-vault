@@ -86,3 +86,23 @@ Tags versus roles: a tag is the person's own opinion or plan (`trade`, `commande
 2. **Tags on the card (oracle id), kept when the card leaves the inventory?** (Recommended.)
 3. **Deck and bucket related by name only in v1?** (Recommended.)
 4. **Sharing stays whole-inventory in v1?** (Recommended.)
+
+## ER sketch and what is built (#121, 2026-10-08)
+
+```
+users 1 --- * buckets          name (unique per person, ignoring case), kind (default | folder | made), position, vault_metadata
+buckets 1 --- * entries        entries.bucket_id NOT NULL, ON DELETE RESTRICT; entries.folder stays as imported (CSV round-trip)
+users 1 --- * tag_assignments  (user, oracle_id, tag) unique; source person | assistant | system, source_detail, vault_metadata
+users 1 --- * card_annotations (user, oracle_id) unique; source, source_detail, vault_metadata
+```
+
+Built: the three tables and `entries.bucket_id` (migration `0116`); the backfill (an "Unsorted" bucket for every person, one bucket per
+distinct folder, the first spelling kept, nothing merged or dropped); a `before_flush` hook (`vault/models.py`, `vault/buckets.py`) that
+gives every new entry the bucket of its folder, whichever code adds it; the `vault_metadata` check (a JSON object with a positive
+integer `version`, at most 8 KB), the tag check (`^[a-z0-9:-]{1,40}$`) and the `source` check, all in the database; erasure
+(`purge_user`) and export (`buckets.json`, `tags.json`, `card_annotations.json`); `docs/gdpr.md` and `public/privacy.html`. Tests:
+`tests/test_buckets.py`.
+
+Not built yet (they are #123, #124, #127 and the issues after them): the REST routes and MCP tools; the limits of 100 buckets a person
+creates, 50 tags per card and 500 distinct tags (enforced where they are written, not in the schema); the `bucket` filter and field
+in the collection answers; importing into one bucket; the web app.
