@@ -93,5 +93,12 @@ per-user table:
 - [ ] The browser loads card images and set icons from Scryfall's CDN, so Scryfall sees the
       user's IP. This is disclosed in the notice. Card data and prices come from the Vault
       (it calls Scryfall's API itself, without user data).
+- [ ] The recipients of data, read from the code on 2026-10-08 (`grep` for the hosts in `vault/` and `jobs/`), and where the privacy
+      notice names each: Vercel (hosting, request logs, Web Analytics and Speed Insights, which are anonymous and cookieless; the
+      DPA covers them), Neon, GitHub (the price job), the four sign-in providers in `vault/auth.py` (Google, Microsoft, Apple,
+      Facebook) and passkeys (no third party), Scryfall (card images in the browser; identifiers only from the server),
+      Commander Spellbook (`vault/combos.py` sends a deck's card names and nothing that identifies the person), Archidekt
+      (a GET of a public deck by number) and the AI assistant the person connects (their own choice, scoped, revocable).
+      `tests/test_legal_pages.py` fails if the notice stops naming one of them. Add any new outbound host here and in the notice.
 - [ ] Have a breach procedure: the supervisory authority must be notified within 72 hours.
 - [ ] Decide on inactive-account retention (for example, warn after 24 months, then delete).
