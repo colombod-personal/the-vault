@@ -1,6 +1,6 @@
 # One-prompt AI assistant setup (design for #151, epic #150)
 
-Status: design for owner review. Nothing here is built. Per-host tasks #153 (Claude), #154 (ChatGPT), #155 (Codex) and #156 (GitHub Copilot) wait on it.
+Status: agreed by the owner on 2026-10-08 (#287: decisions 20 to 22, all as recommended). Nothing here is built yet. Per-host tasks #153 (Claude), #154 (ChatGPT), #155 (Codex) and #156 (GitHub Copilot) wait on it.
 
 **Where `whoami` is already named (checked by `tests/test_onboarding_whoami.py`):** the Connect page, the README, the plugin README, `docs/mcp-oauth-host-checklist.md`, `docs/skills.md`, `docs/agents.md` and every skill. The `vault_start` prompt below is still only this design and is not in `PROMPTS`.
 
