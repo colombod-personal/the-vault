@@ -1131,7 +1131,9 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         try:
             if not body.confirmation:
                 return {**changes_answer(owned_changes.preview(db, user, lines, settings.session_secret, lookup, undo=True)),
-                        "undoes": imp.id}
+                        "undoes": imp.id,
+                        "to_apply": "After the person says yes, call undo_owned_cards_update again with this confirmation "
+                                    "(not confirm_owned_cards_update)."}
             done = owned_changes.apply(db, user, lines, body.confirmation, settings.session_secret, lookup,
                                        tokens.app_label(db, getattr(request.state, "bearer", None)), undo_of=imp)
         except owned_changes.ChangeError as exc:

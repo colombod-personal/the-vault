@@ -391,7 +391,8 @@ TOOLS = [
     Tool("confirm_owned_cards_update", "Applies the change previewed by update_owned_cards, given the same lines and "
          "that preview's confirmation. Returns an error when the lines differ from the preview, the confirmation is "
          "older than 15 minutes, or the collection changed since. The change is recorded in the import history under "
-         "this app's name; undo_owned_cards_update reverts it.",
+         "this app's name; undo_owned_cards_update reverts it. A confirmation that came from undo_owned_cards_update "
+         "is not applied here: call undo_owned_cards_update again with it.",
          {"lines": OWNED_LINES, "confirmation": {"type": "string", "minLength": 8, "maxLength": 400,
                                                  "description": "From the preview the person agreed to"}},
          ["lines", "confirmation"], method="POST", path=lambda a: f"{V1}/collection/changes/apply",
