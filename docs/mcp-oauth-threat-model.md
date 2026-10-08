@@ -102,9 +102,16 @@ a stolen code in the victim's flow.
   127.0.0.1 while a browser goes to the host before the backslash). Tests: M `test_loopback_redirects_are_checked_strictly_and_never_sent_as_given`,
   `test_other_loopback_spellings_are_refused` (IPv6 forms, uppercase host, trailing dot), `test_a_good_loopback_redirect_is_sent_to_exactly_the_registered_host`,
   `test_the_review_exploit_string_is_refused`, and at the token step `test_the_token_step_refuses_redirect_variants_too`.
-- An unknown client or a redirect URI that does not match produces an error **page**, never a redirect, so the
-  Vault cannot be used as an open redirector. Only after both are validated are other errors redirected, and
-  then only to the validated URI, with `state` encoded (M `test_errors_to_the_redirect_encode_the_state`).
+- An unknown client or a redirect URI that does not match produces an error **page**, never a redirect. Any other
+  request error (a bad `response_type`, challenge, resource or scope) is found after the client and its redirect address
+  are validated, but "validated" only means "equal to what the client declared", and anyone can declare an address
+  (registration, or a hosted metadata document). So since 2026-10-08 (#339) the Vault does not redirect on those
+  either: it shows a page that names the app and the host, says what was wrong, and offers a **Return to <host>** button
+  carrying `error`, `state` and `iss` (M `test_other_request_problems_are_shown_with_a_return_button_not_redirected`,
+  `test_a_request_error_never_redirects_a_stranger_even_when_nobody_is_signed_in`, `test_errors_to_the_redirect_encode_the_state`).
+  Before that change this was an unauthenticated redirector to an app-declared address, which the earlier wording
+  of this section ("cannot be used as an open redirector") overstated. The redirect after the person answers the
+  consent screen is unchanged: they chose it.
 - Duplicate parameters are refused (M `test_a_repeated_parameter_is_refused`).
 - The consent screen shows where the person is sent back to, and warns when it is `localhost` (an app on
   this computer), which a metadata document cannot prove (MCP spec, localhost risks).
@@ -340,3 +347,54 @@ grant on the consent screen.
 - A copied refresh token used before the owner's next refresh gives the thief access until reuse is detected.
 - Registration storage can be filled to its cap by an anonymous attacker for up to a day (the metadata cache is separate and evicts).
 - Real ChatGPT and Claude behaviour is untested here: see `docs/mcp-oauth-host-checklist.md` (issue #48).
+- The metadata fetch has no hard wall-clock limit on the **header phase**: httpx's timeout is per read, so a server that
+  sends response headers a byte at a time (under the timeout apart, up to the HTTP parser's header limit) keeps one of the
+  8 fetch slots of a process busy. It only affects first-time apps (known apps are served from the cache), each caller may
+  start 10 fetches a minute, and a slot is only held for as long as the server keeps dripping. A real limit needs an async
+  fetch under `asyncio.timeout` and an async twin transport; not built (design and cost: issue #337, third row).
+- The per-IP limits trust the first `X-Forwarded-For` entry when `VERCEL` is set. That is right only while Vercel's edge
+  overwrites the header; behind another proxy that appends to it, a caller could choose its own key. Not checked against
+  Vercel's documentation in the review.
+
+## Security review 2026-10-08 (issue #48)
+
+**Method.** A read-only review of the OAuth server as it stands on `main` (a reviewing agent reading `vault/oauth_server.py`,
+`oauth_routes.py`, `oauth_clients.py`, `client_auth.py`, `tokens.py`, the MCP authentication path in `vault/api/mcp.py` and `app.py`,
+the models and the tests, against RFC 6749, 7636, 7591, 8707, 9728, 9700 and the client metadata document draft), then each
+reported finding re-read by the author against the code before it was filed. Nothing was run. It was asked for verified findings
+only, with the exploit path.
+
+**Result.** No path to account takeover, cross-user data, token confusion or code/refresh theft was found. Seven lower findings,
+all fixed or recorded:
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | The "5 seconds in total" fetch limit was not enforced across several addresses or in the header phase | Addresses: capped at 3, the deadline checked before each attempt, each attempt gets the time left (#337). Header phase: residual risk above |
+| 2 | A compressed metadata response was decoded a whole chunk at a time before the size check (a few KB could become tens of MB) | The fetch asks for `identity` and refuses any other `Content-Encoding` (#337) |
+| 3 | A request error was redirected at once to the redirect address the client declared | Page with a "Return to" button instead (#339); section 2 corrected |
+| 4 | Retired refresh hashes grew without a limit per grant | Newest 10 per grant kept (#338) |
+| 5 | Per-IP limits were per IPv6 address, so a /64 could rotate | Limited per /64 (#338) |
+| 6 | Deeply nested JSON raised `RecursionError` (a 500, no leak) | Refused like any bad JSON (#338) |
+| 7 | Caller-chosen `client_id`, `client_assertion_type` and `grant_type` went unescaped into a log line | Written with `%r` and cut short (#338) |
+
+**Checked and fine** (read end to end, with the reviewer's references in the review notes of the pull request): strict redirect
+matching and rebuilt targets; the consent page is validated before it is shown; repeated parameters refused; S256 only and
+mandatory; the code is bound to client, redirect URI, challenge, resource and user, claimed by one conditional update, a replay
+revokes; refresh rotation by compare-and-swap with reuse detection and a 90-day cap; scope can only narrow on refresh; consent
+CSRF (nonce in session and in the database for that user, taken once, no cross-site origin for `/oauth/authorize`); the consent
+cannot be answered for another user; framing, caching and CSP headers on every page; the resource indicator checked at issue and
+at use; an OAuth token accepted only on `/api/mcp` and its in-process calls, never account-level; secrets stored as SHA-256
+hashes; fixed error texts; SSRF (https on 443, no IP literals or credentials, every resolved address public including mapped,
+NAT64, 6to4 and Teredo forms, the connection pinned to the checked address, no redirects, JSON only, 32 KB); client assertions
+(same-host `jwks_uri`, asymmetric algorithms, `iss`, `sub`, `aud`, `exp`, single-use `jti`); bounded growth of consents, grants
+and clients; the documented lifetimes equal the code's.
+
+**Could not verify, left as is.**
+- `X-Forwarded-For` trust (above).
+- Fail-open at the token endpoint: if a client's row is gone (evicted by the cache cap), `authenticate_client` treats the client
+  as public, so a `private_key_jwt` client's code could be redeemed with PKCE alone. It needs the code and the verifier and an
+  attacker who filled about 5,000 cache rows between consent and redemption (a 60-second window), so it was judged not
+  reachable in practice. A safer design would read the client from the code row. Not changed here, because the other half of the
+  change (a public client after its row expired) needs its own decision.
+- Metadata served stale for up to 7 days when the shared fetch budget is spent: a documented trade-off (a client that removed a
+  redirect address stays honoured for that long).
