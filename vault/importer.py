@@ -37,8 +37,12 @@ class ImportConflict(ImportError_):
     """Another import replaced the collection while this one ran."""
 
 
-def user_entries(db: Session, user: User) -> list[Entry]:
-    return list(db.scalars(select(Entry).where(Entry.user_id == user.id).order_by(Entry.position, Entry.id)))
+def user_entries(db: Session, user: User, bucket_id: int | None = None) -> list[Entry]:
+    """A person's entries in file order; with ``bucket_id``, only those in that bucket (#123)."""
+    query = select(Entry).where(Entry.user_id == user.id).order_by(Entry.position, Entry.id)
+    if bucket_id is not None:
+        query = query.where(Entry.bucket_id == bucket_id)
+    return list(db.scalars(query))
 
 
 @dataclass(frozen=True)
@@ -284,7 +288,7 @@ def _clean(e: CollectionEntry, row: int) -> None:
             raise ImportError_(f"Row {row}: {column.replace('_', ' ')} must be text of at most {size} characters.")
 
 
-def export_entries(db: Session, user: User, fmt: str) -> list[CollectionEntry]:
+def export_entries(db: Session, user: User, fmt: str, bucket_id: int | None = None) -> list[CollectionEntry]:
     """The collection as entries for ``fmt``.
 
     Dragon Shield gets the rows exactly as imported, so a Dragon Shield export comes back byte
@@ -294,7 +298,7 @@ def export_entries(db: Session, user: User, fmt: str) -> list[CollectionEntry]:
     - the finish the printing actually exists in
     - Scryfall ids, where the format carries them
     """
-    rows = user_entries(db, user)
+    rows = user_entries(db, user, bucket_id)
     entries = [r.to_collection_entry() for r in rows]
     if fmt == "dragonshield":
         return entries
@@ -315,8 +319,8 @@ def export_entries(db: Session, user: User, fmt: str) -> list[CollectionEntry]:
     return entries
 
 
-def export_collection(db: Session, user: User, fmt: str) -> str:
-    return formats.FORMATS[fmt].dumps(export_entries(db, user, fmt))
+def export_collection(db: Session, user: User, fmt: str, bucket_id: int | None = None) -> str:
+    return formats.FORMATS[fmt].dumps(export_entries(db, user, fmt, bucket_id))
 
 
 def export_dragonshield(db: Session, user: User) -> str:

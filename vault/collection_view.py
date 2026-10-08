@@ -83,15 +83,15 @@ _LOCK = threading.Lock()
 
 
 class CollectionView:
-    def __init__(self, db: Session, user: User, *, hide_costs: bool = False):
-        self.db, self.user, self.hide_costs = db, user, hide_costs
+    def __init__(self, db: Session, user: User, *, hide_costs: bool = False, bucket_id: int | None = None):
+        self.db, self.user, self.hide_costs, self.bucket_id = db, user, hide_costs, bucket_id  # bucket_id: only that bucket's copies (#123)
         last_import = db.execute(select(func.count(Import.id), func.max(Import.id), func.max(Import.created_at))
                                  .where(Import.user_id == user.id)).one()
         self.prices_as_of = db.scalar(select(func.max(PriceSnapshot.day)))
         cards_updated = db.scalar(select(func.max(Card.updated_at)))
         # ids alone can be reused (deleted rows, other databases), so timestamps are in the version and the engine in the key
         self.version = (f"{user.id}.{user.created_at}.{'.'.join(map(str, last_import))}."
-                        f"{self.prices_as_of or '-'}.{cards_updated or '-'}.{int(hide_costs)}")
+                        f"{self.prices_as_of or '-'}.{cards_updated or '-'}.{int(hide_costs)}" + (f".b{bucket_id}" if bucket_id else ""))
         key = (id(db.get_bind()), self.version)
         with _LOCK:
             cached = _CACHE.get(key)
@@ -108,7 +108,7 @@ class CollectionView:
 
     def _build(self) -> tuple:
         db, user = self.db, self.user
-        rows = user_entries(db, user)
+        rows = user_entries(db, user, self.bucket_id)
         ids = {r.scryfall_id for r in rows if r.scryfall_id}
         prices = latest_prices(db, ids)
         # Files without set names (Moxfield) get Scryfall's, once the printing is matched.
