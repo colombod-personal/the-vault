@@ -1,6 +1,6 @@
 # The Lab: decide what to buy, sell, trade or keep (design for #162, epic #158)
 
-Status: design for owner review. Nothing here is built; implementation is #164.
+Status: agreed by the owner on 2026-10-08 (#287: decisions 10 to 16, all as recommended). Nothing here is built yet; implementation is #164.
 
 Owner direction (2026-10-05, `docs/graph-and-lab-review.md`): **the Lab helps with decisions about buying and selling.** Decks are a view; what matters is whether each deck can stand on its own, and whether a card should move or be bought. This page turns that into sections, data, wireframes and tests.
 

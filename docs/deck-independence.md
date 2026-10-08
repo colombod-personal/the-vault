@@ -1,6 +1,6 @@
 # Deck independence: can each deck stand on its own? (design for #165)
 
-Status: design for owner review. Nothing here is built.
+Status: agreed by the owner on 2026-10-08 (#287: decisions 17 to 19, all as recommended). Nothing here is built yet; it goes into the Lab (#164).
 
 ## The question
 
