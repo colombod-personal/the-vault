@@ -142,7 +142,7 @@ What the Vault does:
 - **A cache, and no rate cap yet, by design (#133, 2026-10-06).** A read of a public deck is kept in `archidekt_deck_cache`
   (the deck's public JSON by id, no person's id) and served for 10 minutes; Refresh asks Archidekt again unless the copy
   is under a minute old; entries older than 7 days are deleted. Every answer carries `vault_cache` (from cache or not,
-  fetched_at, age in seconds). Calls to Archidekt and cache hits are logged as counts. A cap is added only if the counts
+  fetched_at, age in seconds). Each read logs `archidekt deck cache=miss|hit calls_last_minute=N hits_last_minute=M hit_rate=R` (this process's last minute; counts only, no deck id or person; each Vercel instance counts its own, so the real rate is read by adding the instances' lines in the logs; `vault/archidekt_cache.py::Rate`, `tests/test_archidekt_rate.py`). A cap is added only if the counts
   show it is needed, and then only behind this cache: an over-limit read gets the cached copy instead of an error.
 - No background jobs, crawling or deck search; nothing is fetched without a person asking. Decks are stored only
   when a person presses Save: their copy of that one deck's list, link and author's public username (for the
