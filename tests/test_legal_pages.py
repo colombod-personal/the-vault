@@ -49,3 +49,17 @@ def test_the_connect_page_documents_five_example_requests_and_what_it_will_not_d
     block = html.split('id="examples"')[1].split("</ol>")[0]
     assert block.count("<li>") == 5
     assert "Which shop is cheapest right now?" in html and "Delete my" in html
+
+
+def test_the_privacy_notice_names_every_recipient_of_data_the_code_sends_to():
+    """#2 / docs/gdpr.md: the notice must name the sign-in providers the code offers and each outside service the server calls."""
+    from vault import auth, combos
+
+    text = " ".join(re.sub(r"<[^>]+>", " ", page("privacy.html")).split()).lower()
+    for provider in auth.PROVIDERS:
+        assert provider in text, provider
+    for recipient in ("vercel", "neon", "github", "scryfall", "commander spellbook", "archidekt", "ai assistant",
+                      "web analytics", "speed insights"):
+        assert recipient in text, recipient
+    assert "commanderspellbook.com" in combos.URL  # the service named above is the one vault/combos.py calls
+    assert "analytics trackers" not in text  # the notice also describes the anonymous visitor statistics
