@@ -410,6 +410,24 @@ def test_a_request_error_never_redirects_a_stranger_even_when_nobody_is_signed_i
     assert res.status_code == 400 and "location" not in res.headers and "Return to app.example" in res.text
 
 
+def test_the_sign_in_page_offers_a_passkey_and_its_script_calls_routes_that_exist():  # #43
+    from types import SimpleNamespace
+
+    from vault import oauth_routes
+
+    req = SimpleNamespace(client=SimpleNamespace(kind="cimd", name="App", client_id="https://app.example/c.json"))
+    on = oauth_routes.sign_in_page(req, [], True, False)
+    text = on.body.decode()
+    assert 'id="passkey"' in text and "Sign in with a passkey" in text and "<script nonce=" in text
+    assert "script-src 'nonce-" in on.headers["content-security-policy"]  # the one inline script is allowed by its nonce only
+    assert 'id="passkey"' not in oauth_routes.sign_in_page(req, [], False, False).body.decode()  # off where WebAuthn can not run
+    called = re.findall(r"post\('(/api/[^']+)'", oauth_routes.PASSKEY_SCRIPT)
+    assert "/api/auth/passkey/login/options" in called and "/api/auth/passkey/login/verify" in called
+    # (the routes answer 404 while WebAuthn is off, as on this http test site, so they are read from their definition)
+    source = (Path(__file__).parent.parent / "vault" / "passkeys.py").read_text(encoding="utf-8")
+    assert 'prefix="/api/auth/passkey"' in source and '"/login/options"' in source and '"/login/verify"' in source
+
+
 def test_a_repeated_parameter_is_refused(client):
     client.sign_in()
     url = "/oauth/authorize?" + urlencode(client.authorize_params()) + "&redirect_uri=https%3A%2F%2Fevil.example%2F"
