@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 from datetime import date
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from mtg_toolkits import delta
@@ -70,8 +70,10 @@ class UpgradesIn(FormatIn):
 
 
 class ChangesIn(FormatIn):
-    adds: list[str] = Field(default_factory=list, max_length=60, description="Card names to add (one copy each)")
-    cuts: list[str] = Field(default_factory=list, max_length=60, description="Card names to cut (one copy each)")
+    adds: list[Annotated[str, Field(max_length=300)]] = Field(default_factory=list, max_length=60,
+                                                              description="Card names to add (a quantity such as 2x repeats one)")
+    cuts: list[Annotated[str, Field(max_length=300)]] = Field(default_factory=list, max_length=60,
+                                                              description="Card names to cut (a quantity such as 2x repeats one)")
     budget_usd: float | None = Field(default=None, ge=0, le=100_000, description="The most the adds may cost in total")
 
 
