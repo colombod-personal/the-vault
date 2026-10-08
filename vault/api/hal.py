@@ -42,7 +42,7 @@ def encode_cursor(key: Sequence[Any]) -> str:
 def decode_cursor(cursor: str) -> list:
     try:
         return json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, RecursionError):  # nested too deeply is invalid too
         raise HTTPException(400, "Invalid cursor") from None
 
 
