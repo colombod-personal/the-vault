@@ -43,7 +43,8 @@ prices. Follow `vault-attribution` (if installed) when you show prices.
    rule changes no price, say so.
 5. **Say how to buy.** Tell the person to paste the `text` into the store's own list tool, check what it matched
    (the tool reports lines it could not match), and compare there. Do not claim the list was imported anywhere, and
-   do not say anything is "in your cart".
+   do not say anything is "in your cart". Never use a browser or any other tool to open a store, fill its cart or
+   paste the list there for them: the list is where your help ends.
 6. **Budget help.** If the person has a budget, use `validate_deck_changes` to check changes against it,
    or suggest cheaper alternatives only from tool results. Do not invent cheaper cards.
 7. **If a card is not found**, the line says `known_card: false`: ask for the correct name rather than guessing.
