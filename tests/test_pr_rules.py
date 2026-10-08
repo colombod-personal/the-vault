@@ -53,7 +53,7 @@ def test_the_templates_placeholder_text_does_not_count_as_an_answer():
 def test_the_template_asks_for_both_lines_and_lists_the_same_paths_as_the_check():
     template = (ROOT / ".github" / "pull_request_template.md").read_text(encoding="utf-8")
     assert "Threat model:" in template and "Security review before merge:" in template
-    assert template.startswith("Refs #") and "never \"Closes\"" in template
+    assert template.startswith("Closes #") and "Refs #" in template and "Left open" in template
     for pattern in rules.AUTH_PATHS:
         assert pattern in template.replace("*", "*"), pattern
 
