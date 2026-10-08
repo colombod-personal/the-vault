@@ -389,12 +389,30 @@ def find_upgrades(db: Session, resolved: Resolved, fmt: str, budget_usd: float, 
 
 # -- validator ----------------------------------------------------------------------------------
 
+def card_names(items: list[str]) -> list[str]:
+    """The cards a list of cuts or adds names, one entry per copy: ``Mind Stone``, ``1 Mind Stone``, ``2x Mind Stone`` and
+    ``Sol Ring (C21) 263`` are all read as a decklist line is (a quantity repeats the card, a set and number are not part of
+    the name). A string that is not one line stays as it was written, so it fails as an unknown card, not silently (#342)."""
+    out: list[str] = []
+    for item in items:
+        try:
+            lines = decklist.parse_text(item if re.match(r"\s*\d+\s*x?\s", item, re.I) else f"1 {item}").lines
+        except (ValueError, OverflowError):
+            lines = []
+        if len(lines) == 1 and 0 < lines[0].quantity <= 100 and lines[0].name.strip():
+            out += [lines[0].name.strip()] * lines[0].quantity
+        else:
+            out.append(item.strip())
+    return out
+
+
 def validate_changes(db: Session, text: str, fmt: str, adds: list[str], cuts: list[str], budget_usd: float | None) -> dict:
     """Apply cuts and adds to a deck and check the result: every named card exists and is in the
     deck (cuts), is legal and in the deck's colors (adds), the resulting deck is still legal, and
     the adds' total price is within budget. A card with no price makes the budget unverifiable, so
     it is reported as an issue rather than assumed free."""
     fmt = check_format(fmt)
+    adds, cuts = card_names(adds), card_names(cuts)
     deck = parse(text)
     before = resolve(db, deck)
     played = before.played()

@@ -191,6 +191,27 @@ def test_nothing_is_computed_before_the_catalog_is_loaded(signed_in):
     assert post(signed_in, "stats", text=DECK).status_code == 503
 
 
+def test_cuts_and_adds_may_carry_a_quantity_or_a_set_and_number(loaded):  # #342
+    plain = computed(post(loaded, "validate-changes", text=VALID, format="commander", cuts=["Dull Bear"], adds=["Cheap Ramp"]))
+    for cut, add in (("1 Dull Bear", "1 Cheap Ramp"), ("1x Dull Bear", "Cheap Ramp (C21) 7"), ("Dull Bear", "1x Cheap Ramp")):
+        got = computed(post(loaded, "validate-changes", text=VALID, format="commander", cuts=[cut], adds=[add]))
+        assert got["issues"] == [] and got["valid"] is True and got["cards_after"] == 100, (cut, add)
+        assert got["added_cost_usd"] == plain["added_cost_usd"] and got["adds"] == 1 and got["cuts"] == 1
+    two = computed(post(loaded, "validate-changes", text=VALID, format="commander", cuts=["1 Dull Bear"], adds=["2x Cheap Ramp"]))
+    assert two["adds"] == 2 and two["cards_after"] == 101 and two["added_cost_usd"] == round(2 * plain["added_cost_usd"], 2)
+    assert [c["name"] for c in two["added_cards"]] == ["Cheap Ramp", "Cheap Ramp"]
+    ghost = computed(post(loaded, "validate-changes", text=VALID, format="commander", cuts=["Dull Bear"], adds=["3 Ghost Card"]))
+    assert {(i["kind"], i["card"]) for i in ghost["issues"]} >= {("unknown_card", "Ghost Card")}  # named without the quantity
+    nope = computed(post(loaded, "validate-changes", text=VALID, format="commander", cuts=["2 Not In Deck"], adds=[]))
+    assert [i["card"] for i in nope["issues"] if i["kind"] == "cut_not_in_deck"] == ["Not In Deck", "Not In Deck"]
+
+
+def test_the_validator_description_says_what_a_cut_or_an_add_may_look_like():  # #342
+    from vault.api import mcp
+    description = {t.name: t.description for t in mcp.TOOLS}["validate_deck_changes"]
+    assert "'2x Mind Stone'" in description and "a set and number are ignored" in description
+
+
 def test_the_validator_enforces_the_budget_legality_and_colours(loaded):
     ok = computed(post(loaded, "validate-changes", text=VALID, format="commander", cuts=["Dull Bear"], adds=["Cheap Ramp"], budget_usd=1))
     assert ok["issues"] == [] and ok["valid"] is True and ok["added_cost_usd"] == 0.25 and ok["cards_after"] == 100
