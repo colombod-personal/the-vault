@@ -105,6 +105,29 @@ def test_one_scryfall_request_per_question_and_asking_again_within_minutes_makes
     assert not [c for c in universe.scryfall.calls if c.host == "cards.scryfall.io"]  # no image was fetched by the Vault
 
 
+def test_no_database_transaction_is_open_while_scryfall_is_asked(twin_app, client, universe, monkeypatch):
+    """#169: a request that waits for an outside service must not hold a connection from the pool while it waits."""
+    from vault import owned_changes
+    from vault.catalog import Catalog
+
+    seed(twin_app, universe)
+    sessions, open_during_call = [], []
+    original, real = owned_changes._other_printings, Catalog.live_printings
+
+    def remember(db, card, seen, live):  # the request's own session, seen from inside the picker
+        sessions.append(db)
+        return original(db, card, seen, live)
+
+    def spy(self, oracle_id):
+        open_during_call.append(sessions[-1].in_transaction())
+        return real(self, oracle_id)
+
+    monkeypatch.setattr(owned_changes, "_other_printings", remember)
+    monkeypatch.setattr(Catalog, "live_printings", spy)
+    ask(client)
+    assert open_during_call == [False]
+
+
 def test_the_printings_are_paged_and_the_next_page_is_asked_for_with_printings_page(client, twin_app, universe):
     seed(twin_app, universe, extra=30)  # 32 printings, 1 owned: 31 to choose from, 20 a page
     first = ask(client)

@@ -148,6 +148,7 @@ def _other_printings(db: Session, card: Card, seen: set, live) -> tuple[list[dic
     others: list[dict] = []
     said = {"source": "the Vault's own cards", "scryfall_unavailable": False, "more_at_scryfall": False}
     if live is not None:
+        db.commit()  # a preview only reads: end its transaction, so no connection is held while Scryfall answers (up to 15 s, #169)
         answer = live(card.oracle_id)
         said.update({"source": "Scryfall (live)", "scryfall_unavailable": answer["unavailable"], "more_at_scryfall": answer["more"]})
         if answer["unavailable"]:
