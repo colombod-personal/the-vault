@@ -217,6 +217,16 @@ def near_qty(client, name):
     return sum(c["quantity"] for c in all_cards(client) if c["name"] == name)
 
 
+def test_a_moxfield_commander_line_is_covered_as_the_card_not_as_a_name_with_a_marker(signed_in):  # #332
+    upload(signed_in)
+    cards = signed_in.post(f"{V1}/decks/coverage", json={"text": "1 Sol Ring *CMDR*\n1 Rhystic Study"}).json()["cards"]
+    by_name = {c["name"]: c for c in cards}
+    assert set(by_name) == {"Sol Ring", "Rhystic Study"}
+    assert by_name["Sol Ring"]["status"] == "owned" and by_name["Sol Ring"]["section"] == "commander"
+    parsed = signed_in.post(f"{V1}/decks/parse", json={"text": "1 Sol Ring (c21) 263 *CMDR*"}).json()["cards"]
+    assert [(c["name"], c["set"], c["collector_number"], c["section"]) for c in parsed] == [("Sol Ring", "c21", "263", "commander")]
+
+
 def test_deck_coverage_and_parsing(signed_in):
     upload(signed_in)
     res = signed_in.post(f"{V1}/decks/coverage", json={"text": "1 Sol Ring\n4 A Killer Among Us\n1 Rhystic Study"})
