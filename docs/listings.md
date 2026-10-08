@@ -22,7 +22,7 @@ already has.
 | Claude connector directory | A remote MCP server with tool annotations, OAuth sign-in, documentation and a test account; submission through Anthropic's form | Ready: tool annotations on every tool, the OAuth server (checked on Claude.ai on 2026-10-08), the reviewer account and eight test cases (five positive, three negative; run on the demo account, see #239). Left, and only the owner can do them: the submission under the owner's Anthropic account and the directory terms (#241) |
 | Claude Code marketplace | `.claude-plugin/marketplace.json` in the repository (`/plugin marketplace add colombod-personal/the-vault`) | Done; validates with `claude plugin validate` |
 | Skills (`npx skills add colombod-personal/the-vault`) | `SKILL.md` files in `skills/` | Done; works once these files are on `main` |
-| Official MCP Registry | A `server.json` describing the remote server and a verified namespace (a domain or GitHub identity) | Not prepared: needs the production address decided and the owner's namespace verification |
+| Official MCP Registry | A `server.json` describing the remote server and a verified namespace (a domain or GitHub identity) | `server.json` at the repository root is ready (`tests/test_server_json.py` checks its shape, the address and the version). Left, and only the owner can do it: sign in to the registry as the GitHub account `colombod-personal` (`mcp-publisher login github`, which is what verifies the `io.github.colombod-personal` namespace) and run `mcp-publisher publish` (#60) |
 | MCP Server Card (`/.well-known/mcp/server-card.json`) | A proposal (SEP-2127) whose location and format had not settled in September 2026 | Deliberately not published, to avoid a format that may change |
 
 ## Before submitting anything

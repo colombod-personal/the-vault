@@ -1,0 +1,17 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.colombod-personal/the-vault",
+  "description": "Magic: The Gathering collection, decks and rules for AI assistants, with cited, dated sources.",
+  "version": "0.1.0",
+  "websiteUrl": "https://mtgvault.cards",
+  "repository": {
+    "url": "https://github.com/colombod-personal/the-vault",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mtgvault.cards/api/mcp"
+    }
+  ]
+}
