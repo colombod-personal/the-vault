@@ -24,7 +24,10 @@ This is an engineering document, not legal advice: have the privacy notice
 | `identities` | yes | provider, provider user id, e-mail | `account.json` | `purge_user` |
 | `imports` | yes | file name, date, change summary | `imports.json` | `purge_user` |
 | `collection_baselines` | yes | the cards (copies, condition, folder, price and date paid) of the last file you imported, so the next import can tell what changed in your app from what was edited here | `last_import_cards.json` | `purge_user` |
-| `entries` | yes | collection rows, incl. purchase price/date and folders | `collection.csv` (Dragon Shield), `collection-moxfield.csv`, `collection-generic.csv`, `collection.json` | `purge_user` |
+| `entries` | yes | collection rows, incl. purchase price/date and folders, and the bucket each copy is in | `collection.csv` (Dragon Shield), `collection-moxfield.csv`, `collection-generic.csv`, `collection.json` | `purge_user` |
+| `buckets` | yes | the places your copies are grouped in (#121): one per folder of your files, and "Unsorted"; the name, its kind and position, and notes (`vault_metadata`) written by you or an assistant | `buckets.json` (with how many copies each holds) | `purge_user` (after the entries) |
+| `tag_assignments` | yes | tags you, or an assistant you allowed, put on cards (keyed by the card, not a printing): the card's id, the tag, who wrote it (person, assistant or system, and which app) and notes (`vault_metadata`) | `tags.json` | `purge_user` |
+| `card_annotations` | yes | notes about a card written by you or an assistant (`vault_metadata`, at most 8 KB), keyed by the card | `card_annotations.json` | `purge_user` |
 | `decks` | yes | saved decklists, with the link and author of the deck they came from | `decks.json`, `decks/*.txt` | `purge_user` |
 | `deck_versions` | via its deck | each saved deck's earlier lists (at most 20 a deck): the decklist text, when and from what | `decks.json` (`versions` of each deck) | deleted with the deck (`ON DELETE CASCADE`), so with the account |
 | `shares` | yes | who shared what with whom | `shares.json` (given and received) | `purge_user` (both directions) |

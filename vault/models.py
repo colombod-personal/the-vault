@@ -17,10 +17,10 @@ import secrets
 from datetime import date, datetime, timezone
 
 from mtg_toolkits.models import CollectionEntry, Condition, Finish
-from sqlalchemy import JSON, Boolean, Index, LargeBinary, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, Uuid, text
+from sqlalchemy import JSON, Boolean, CheckConstraint, Index, LargeBinary, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, Uuid, text
 from sqlalchemy import DDL, event
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
 from .db import Base
 
@@ -88,6 +88,71 @@ class Import(Base):
     changes: Mapped[dict | None] = mapped_column(JSON)
 
 
+# What every ``vault_metadata`` column must hold (docs/collections.md, section 7): a JSON object with a positive integer
+# ``version`` (the shape its readers upgrade from), at most 8 KB. Free-form otherwise, never read by the Vault's own logic.
+METADATA_OK = ("coalesce(jsonb_typeof(vault_metadata) = 'object' AND jsonb_typeof(vault_metadata->'version') = 'number' "
+               "AND (vault_metadata->>'version') ~ '^[1-9][0-9]{0,8}$' AND octet_length(vault_metadata::text) <= 8192, false)")
+METADATA_DEFAULT = text("""'{"version": 1}'::jsonb""")
+
+
+class Bucket(Base):
+    """A named place copies live in: a binder, a deck box, a trade box (docs/collections.md, #118/#121). Every entry is in
+    exactly one bucket and the inventory is the sum of them. A bucket per distinct Dragon Shield folder (names compare
+    case-insensitively), and "Unsorted" for copies with no folder. ``entries.folder`` stays as imported, for the CSV round-trip."""
+
+    __tablename__ = "buckets"
+    __table_args__ = (Index("uq_buckets_user_name", "user_id", text("lower(name)"), unique=True),
+                      CheckConstraint(METADATA_OK, name="ck_buckets_vault_metadata"))
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(12), default="folder")  # default (Unsorted), folder (from a file) or made (by the person)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    vault_metadata: Mapped[dict] = mapped_column(JSONB, default=lambda: {"version": 1}, server_default=METADATA_DEFAULT)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class TagAssignment(Base):
+    """A person's tag on a card (the oracle id, not a printing and not an entry: entries are replaced on every import, so a
+    tag survives them and stays, shown as "not owned", when the card leaves the inventory). ``source`` says who wrote it."""
+
+    __tablename__ = "tag_assignments"
+    __table_args__ = (UniqueConstraint("user_id", "oracle_id", "tag", name="uq_tag_assignments_card_tag"),
+                      Index("ix_tag_assignments_user_tag", "user_id", "tag"),
+                      CheckConstraint("tag ~ '^[a-z0-9:-]{1,40}$'", name="ck_tag_assignments_tag"),
+                      CheckConstraint("source IN ('person', 'assistant', 'system')", name="ck_tag_assignments_source"),
+                      CheckConstraint(METADATA_OK, name="ck_tag_assignments_vault_metadata"))
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    oracle_id: Mapped[str] = mapped_column(String(36))
+    tag: Mapped[str] = mapped_column(String(40))  # lower case letters, digits, "-" and ":" (deck:sliver, trade:sell)
+    source: Mapped[str] = mapped_column(String(12), default="person")  # person, assistant or system
+    source_detail: Mapped[str | None] = mapped_column(String(200))  # which app wrote it, or imported:<file>
+    vault_metadata: Mapped[dict] = mapped_column(JSONB, default=lambda: {"version": 1}, server_default=METADATA_DEFAULT)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CardAnnotation(Base):
+    """Free-form notes about a card for one person (``vault_metadata``), keyed like the tags: the oracle id. Written by the
+    person or by an assistant (``source``), never read by the Vault's own logic."""
+
+    __tablename__ = "card_annotations"
+    __table_args__ = (UniqueConstraint("user_id", "oracle_id", name="uq_card_annotations_card"),
+                      CheckConstraint("source IN ('person', 'assistant', 'system')", name="ck_card_annotations_source"),
+                      CheckConstraint(METADATA_OK, name="ck_card_annotations_vault_metadata"))
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    oracle_id: Mapped[str] = mapped_column(String(36))
+    source: Mapped[str] = mapped_column(String(12), default="person")
+    source_detail: Mapped[str | None] = mapped_column(String(200))
+    vault_metadata: Mapped[dict] = mapped_column(JSONB, default=lambda: {"version": 1}, server_default=METADATA_DEFAULT)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class Entry(Base):
     """One collection row, as imported."""
 
@@ -106,6 +171,9 @@ class Entry(Base):
     condition: Mapped[str] = mapped_column(String(20), default=Condition.NEAR_MINT.value)
     language: Mapped[str] = mapped_column(String(5), default="en")
     folder: Mapped[str | None] = mapped_column(String(200))
+    # The Vault's grouping of ``folder`` (see Bucket). Filled in by the before_flush hook below for every new entry, so no
+    # code path that adds a row can leave a copy outside a bucket. RESTRICT: a bucket with copies in it can't be deleted.
+    bucket_id: Mapped[int] = mapped_column(ForeignKey("buckets.id", ondelete="RESTRICT"), index=True)
     quantity: Mapped[int] = mapped_column(Integer, default=1)
     trade_quantity: Mapped[int] = mapped_column(Integer, default=0)
     purchase_price: Mapped[float | None] = mapped_column(Float)  # per copy
@@ -709,3 +777,14 @@ class ArchidektDeckCache(Base):
     deck_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     data: Mapped[dict] = mapped_column(JSONB)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+@event.listens_for(Session, "before_flush")
+def _entries_get_their_bucket(session, flush_context, instances):
+    """Every new entry lands in the bucket of its folder, whichever code adds it (an import, an assistant's edit, a merge):
+    the inventory is the sum of the buckets only if no copy is outside one (docs/collections.md, #121)."""
+    fresh = [o for o in session.new if isinstance(o, Entry) and o.bucket_id is None]
+    if fresh:
+        from . import buckets
+
+        buckets.assign(session, fresh)

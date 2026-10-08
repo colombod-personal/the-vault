@@ -16,12 +16,12 @@ import json
 import zipfile
 from datetime import date, datetime, timezone
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from .importer import export_collection
 from .sharing import display_name
-from .models import AccessToken, ApiSession, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionBaseline, CollectionValue, Deck, DeckVersion, Entry, Identity, Import, Share, StagedUpload, User
+from .models import AccessToken, ApiSession, Bucket, CardAnnotation, TagAssignment, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionBaseline, CollectionValue, Deck, DeckVersion, Entry, Identity, Import, Share, StagedUpload, User
 from .prices import history
 from .collection_view import CollectionView
 
@@ -45,6 +45,9 @@ app_sessions.json    apps signed in to your account (tokens are never exported)
 passkeys.json        passkeys that can sign in to your account (names and dates; keys stay on your devices)
 access_tokens.json   personal access tokens you created for agents and scripts (names and dates only)
 connected_apps.json  apps you connected with OAuth, such as ChatGPT or Claude (name, what you allowed, dates; never tokens)
+buckets.json         the places your copies are grouped in (one per folder of your file, and Unsorted), with how many copies each holds
+tags.json            the tags you (or an assistant you allowed) put on cards, and who wrote each
+card_annotations.json   notes about cards written by you or an assistant
 
 Card data, images and prices come from Scryfall (https://scryfall.com), which sources prices
 from TCGplayer and Cardmarket. They are not personal data. Thank you, Scryfall.
@@ -67,6 +70,14 @@ def _json(data) -> bytes:
 def _display(user: User | None) -> str | None:
     """Other people in your export are named as sharing names them: never by e-mail address."""
     return display_name(user) if user else None
+
+
+def _buckets(db: Session, user: User) -> list[dict]:
+    copies = dict(db.execute(select(Entry.bucket_id, func.coalesce(func.sum(Entry.quantity), 0))
+                             .where(Entry.user_id == user.id).group_by(Entry.bucket_id)).all())
+    return [{"name": b.name, "kind": b.kind, "position": b.position, "copies": int(copies.get(b.id, 0)),
+             "metadata": b.vault_metadata, "created_at": b.created_at}
+            for b in db.scalars(select(Bucket).where(Bucket.user_id == user.id).order_by(Bucket.position, Bucket.id))]
 
 
 def export_archive(db: Session, user: User) -> bytes:
@@ -120,6 +131,16 @@ def export_archive(db: Session, user: User) -> bytes:
                       for c in (baseline.cards if baseline else [])],
             "columns_of_rows": ["condition", "language", "folder", "price_paid", "date_paid", "quantity", "trade_quantity"]}))
         z.writestr("value_history.json", _json(history(db, user)))
+        z.writestr("buckets.json", _json(_buckets(db, user)))
+        z.writestr("tags.json", _json([{"card": t.oracle_id, "tag": t.tag, "source": t.source, "source_detail": t.source_detail,
+                                        "metadata": t.vault_metadata, "created_at": t.created_at}
+                                       for t in db.scalars(select(TagAssignment).where(TagAssignment.user_id == user.id)
+                                                           .order_by(TagAssignment.id))]))
+        z.writestr("card_annotations.json", _json([{"card": a.oracle_id, "source": a.source, "source_detail": a.source_detail,
+                                                    "metadata": a.vault_metadata, "created_at": a.created_at,
+                                                    "updated_at": a.updated_at}
+                                                   for a in db.scalars(select(CardAnnotation).where(CardAnnotation.user_id == user.id)
+                                                                       .order_by(CardAnnotation.id))]))
         z.writestr("decks.json", _json([
             {"id": d.id, "name": d.name, "source_url": d.source_url, "source_author": d.source_author,
              "source_fetched_at": d.source_fetched_at, "created_at": d.created_at,
@@ -181,7 +202,10 @@ def personal_data(user_id: int) -> dict:
         "auth_codes": delete(AuthCode).where(AuthCode.user_id == user_id),
         "shares": delete(Share).where(or_(Share.owner_id == user_id, Share.grantee_id == user_id)),
         "decks": delete(Deck).where(Deck.user_id == user_id),
+        "tag_assignments": delete(TagAssignment).where(TagAssignment.user_id == user_id),
+        "card_annotations": delete(CardAnnotation).where(CardAnnotation.user_id == user_id),
         "entries": delete(Entry).where(Entry.user_id == user_id),
+        "buckets": delete(Bucket).where(Bucket.user_id == user_id),  # after the entries: a bucket with copies can't be deleted
         "collection_baselines": delete(CollectionBaseline).where(CollectionBaseline.user_id == user_id),
         "imports": delete(Import).where(Import.user_id == user_id),
         "collection_values": delete(CollectionValue).where(CollectionValue.user_id == user_id),
