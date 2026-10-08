@@ -53,6 +53,8 @@ def _case(i: int, c: dict) -> str:
 
 
 def page(base_url: str) -> str:
+    reviewer_use_line = ("For Magic rules, card text, rulings, decks, prices and my collection, use The Vault's tools before answering, "
+                         "and never quote a rule from memory.")
     positive = "".join(_case(i, c) for i, c in enumerate(reviewer.POSITIVE))
     negative = "".join(_case(i, c) for i, c in enumerate(reviewer.NEGATIVE))
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -66,7 +68,10 @@ code{{background:#8881;padding:1px 4px;border-radius:3px}}li{{margin-bottom:12px
 <em>Sliver Swarm (demo)</em> (a five-colour Commander deck led by Sliver Overlord, partly owned) and <em>Pauper Burn (demo)</em> (fully owned).
 There is no second factor, e-mail or SMS step. Connecting an app opens the Vault's sign-in page, which has a <strong>Reviewer sign-in</strong>
 box: enter the passphrase you were given in the review portal, then choose what the app may do. The account can only see its own data.</p>
-<h2>Five requests that should work</h2><ol>{positive}</ol>
+<h2>Five requests that should work</h2>
+<p>An assistant answers from the Vault when it calls the Vault. If one of these is answered from the assistant's own knowledge (no
+"Used The Vault" in the answer), start the chat with: <em>{html.escape(reviewer_use_line)}</em> and ask again.</p>
+<ol>{positive}</ol>
 <h2>Three requests that must be refused or answered honestly</h2><ol>{negative}</ol>
 <p>Prices are Scryfall's, dated, and never a store's price today. The Vault never contacts stores or fills carts.</p>
 <p>The Vault is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC.</p>
