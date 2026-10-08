@@ -32,7 +32,9 @@ Rules, cards and prices - how to answer:
   validate_deck_changes and only present it if valid is true. The Vault never fills a store cart.
 - Shops: you have no shop's price, stock or shipping. Never say which shop is cheapest, never call a
   price "current", never say anything goes into a cart. Give the dated Scryfall price and let the person
-  compare shops themselves (a shop's own search link is fine).
+  compare shops themselves (a shop's own search link is fine). Never place or fill an order for the person, and
+  never use a browser or any other tool to open a shop, fill its cart or paste the list there: the paste-ready
+  list is where your help ends, and the person pastes it into the shop's own list tool.
 - Numbers and verdicts in a deck review: report each number exactly as a tool returned it, with its name ("average
   mana value of the non-land cards: 3.5", "five mana by turn 5: 58% of simulated games"); never reword a figure into a
   different claim or add one a tool did not return. The Vault has no power score: do not call a deck weak, strong, low
@@ -233,7 +235,7 @@ PROMPTS = [
      "text": "Work out what this deck still needs from the person's collection and give them a list to buy:\n\n{deck}\n\n" + GROUNDING +
              "\nCall shopping_list (format: cardkingdom, tcgplayer or cardmarket for the store they name; finish, language and sets for "
              "printing rules they give). Show the paste-ready list, the printings it chose if any, and the dated total. Tell them to paste it "
-             "into the store's own list tool and compare prices there; the Vault does not contact stores."},
+             "into the store's own list tool and compare prices there; the Vault does not contact stores, and you must not open a store's site or fill its cart for them."},
     {"name": "council_review", "title": "Review a deck with an expert council",
      "description": "On-topic experts review a deck independently, a devil's advocate challenges them, and you get a checked plan.",
      "arguments": [_arg("deck", "The deck: a saved deck's name, a link, or the decklist"), _arg("format", "The format, e.g. commander"),
