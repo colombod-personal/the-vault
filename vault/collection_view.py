@@ -44,6 +44,13 @@ def group_id(name: str, set_code: str, number: str, printing: str, condition: st
     return hashlib.sha1(raw.encode()).hexdigest()[:16]
 
 
+def entry_group_id(r: Entry) -> str:
+    """The id of the printing group a row belongs to in the view (``search_cards`` items): the same computation as ``_build``'s.
+    tests/test_buckets_api.py compares the two so they cannot drift."""
+    set_code = (r.extra or {}).get("Set Code") or (r.set_code or "").upper()
+    return group_id(r.name, set_code, r.collector_number or "", _printing(r), r.condition, r.language)
+
+
 @dataclass
 class Group:
     id: str

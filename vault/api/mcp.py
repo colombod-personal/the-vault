@@ -243,6 +243,20 @@ TOOLS = [
           "position": {"type": "integer", "minimum": 0, "maximum": 100000, "description": "Where it sits in the list"}}, ["bucket_id"],
          method="PATCH", path=lambda a: f"{V1}/collection/buckets/{int(a['bucket_id'])}",
          body=lambda a: {k: a[k] for k in ("name", "position") if a.get(k) is not None}, write=True),
+    Tool("move_cards", "Moves copies from one bucket to another: a stack is split when only part of it moves, the moved rows take "
+         "the target bucket's name as their folder (so the person's next export shows it) and it is recorded as a change in "
+         "the history (a move is not undone: move the copies back). Give card ids from search_cards with `bucket`. More than 10 "
+         "copies is shown first (applied false) and applied only when sent again with confirm true after the person agreed.",
+         {"bucket_id": ID, "to_bucket_id": ID,
+          "lines": {"type": "array", "minItems": 1, "maxItems": 50,
+                    "items": {"type": "object", "additionalProperties": False, "required": ["card_id", "quantity"],
+                              "properties": {"card_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$",
+                                                         "description": "The id from search_cards"},
+                                             "quantity": {"type": "integer", "minimum": 1, "maximum": 100000}}}},
+          "confirm": CONFIRM}, ["bucket_id", "to_bucket_id", "lines"],
+         method="POST", path=lambda a: f"{V1}/collection/buckets/{int(a['bucket_id'])}/move",
+         body=lambda a: {"to": a["to_bucket_id"], "lines": a["lines"], **({"confirm": True} if a.get("confirm") is True else {})},
+         write=True),
     Tool("delete_bucket", "Deletes an empty bucket. With confirm false or absent it returns the bucket (how many copies it holds) "
          "and changes nothing; with confirm true it deletes it. A bucket that still holds copies is refused (409): move the "
          "copies out first.",
@@ -486,7 +500,7 @@ SCRYFALL_DATA = {"list_decks",  # the commanders' colour identity is Scryfall's 
                  "get_collection_breakdowns", "get_valuation", "get_value_history", "list_card_names", "refresh_prices",
                  "check_decklist", "lookup_cards", "get_deck", "get_shared_deck",
                  "update_owned_cards", "show_owned_printings"}  # these carry Scryfall's card images
-OWN_DATA_ONLY = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucket",
+OWN_DATA_ONLY = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucket", "move_cards",
                  "get_acquisition_timeline", "parse_decklist", "save_deck", "update_deck", "list_imports",
                  "import_collection_csv", "list_export_formats", "list_shared_with_me", "get_import", "delete_deck",
                  "list_my_shares", "accept_share", "stop_sharing", "start_collection_upload",

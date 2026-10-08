@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from .. import bucket_moves
 from ..models import Bucket, Entry, User
 from . import schemas as S
 from .hal import link, page_body, paginate
@@ -47,6 +48,18 @@ class BucketItem(S.Hal):
 
 class BucketPage(S.Page):
     items: list[BucketItem]
+
+
+class MoveLine(BaseModel):
+    card_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$", description="The id of a printing, from /collection/cards?bucket=")
+    quantity: int = Field(ge=1, le=100_000, description="How many copies to move")
+
+
+class MoveIn(BaseModel):
+    to: int = Field(ge=1, le=S.MAX_ID, description="The bucket that takes the copies")
+    lines: list[MoveLine] = Field(min_length=1, max_length=50)
+    confirm: bool | None = Field(None, description=f"A move of more than {bucket_moves.CONFIRM_ABOVE} copies is only shown "
+                                 "(applied: false) until it is sent again with confirm true")
 
 
 def build_router(get_db, current_user) -> APIRouter:
@@ -142,5 +155,33 @@ def build_router(get_db, current_user) -> APIRouter:
         db.delete(bucket)
         db.commit()
         return {"deleted": True, "_links": {"buckets": link(f"{V1}/collection/buckets")}}
+
+    @router.post("/{bucket_id}/move", summary="Move copies from this bucket to another (rewrites their folder; recorded as a change)")
+    def move(request: Request, bucket_id: Id, body: MoveIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+        source = owned(db, user, bucket_id)
+        target = owned(db, user, body.to)
+        if target.id == source.id:
+            raise HTTPException(422, "to must be a different bucket")
+
+        def run():
+            try:
+                pieces, asked = bucket_moves.plan(db, user, source, [(l.card_id, l.quantity) for l in body.lines])
+            except bucket_moves.MoveError as exc:
+                raise HTTPException(exc.status, str(exc)) from None
+            copies = sum(p.take for p in pieces)
+            names = {}
+            for p in pieces:
+                names[p.entry.name] = names.get(p.entry.name, 0) + p.take
+            shown = {"from": {"id": source.id, "name": source.name}, "to": {"id": target.id, "name": target.name},
+                     "copies": copies, "cards": [{"name": n, "copies": c} for n, c in sorted(names.items())]}
+            if copies > bucket_moves.CONFIRM_ABOVE and body.confirm is not True:
+                return {**shown, "applied": False, "note": f"This moves {copies} copies, so it is shown first: send it again with "
+                        "confirm true to apply it. It rewrites their folder to the target's name and is recorded as a change."}
+            imp = bucket_moves.apply(db, user, source, target, pieces, None)
+            return {**shown, "applied": True, "change_set": imp.id,
+                    "_links": {"source": link(f"{V1}/collection/buckets/{source.id}"), "target": link(f"{V1}/collection/buckets/{target.id}"),
+                               "import": link(f"{V1}/imports/{imp.id}")}}
+
+        return idempotent(request, db, user, 200, run)
 
     return router

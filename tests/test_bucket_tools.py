@@ -12,7 +12,7 @@ TWO = (
 
 
 def test_the_tools_are_listed_classified_and_the_write_ones_are_marked(agent, bot):
-    names = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucket"}
+    names = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucket", "move_cards"}
     assert names <= set(mcp.BY_NAME) and names <= mcp.OWN_DATA_ONLY
     tools = {t["name"]: t for t in rpc(bot, "tools/list", token=make_token(agent, scopes=["read", "write"])).json()["result"]["tools"]}
     assert names <= set(tools)
@@ -20,6 +20,7 @@ def test_the_tools_are_listed_classified_and_the_write_ones_are_marked(agent, bo
     for name in ("create_bucket", "rename_bucket"):
         assert tools[name]["annotations"]["readOnlyHint"] is False and tools[name]["annotations"]["destructiveHint"] is False
     assert tools["delete_bucket"]["annotations"]["destructiveHint"] is True
+    assert tools["move_cards"]["annotations"]["readOnlyHint"] is False
     assert "bucket" in tools["search_cards"]["inputSchema"]["properties"]
     assert "list_buckets" in " ".join(tools["search_cards"]["inputSchema"]["properties"]["bucket"]["description"].split())
 
@@ -45,6 +46,24 @@ def test_an_assistant_lists_makes_renames_and_deletes_buckets_and_searches_one(a
     assert done["deleted"] is True and agent.get(f"{V1}/collection/buckets/{made['id']}").status_code == 404
 
 
+def test_an_assistant_moves_copies_between_buckets_and_a_big_move_waits_for_confirm(agent, bot):
+    agent.post(f"{V1}/imports", files={"file": ("two.csv", TWO, "text/csv")})
+    write = make_token(agent, scopes=["read", "write"])
+    by_name = {b["name"]: b for b in call_tool(bot, write, "list_buckets")["structuredContent"]["items"]}
+    sol = call_tool(bot, write, "search_cards", bucket=by_name["Binder"]["id"])["structuredContent"]["items"][0]["id"]
+    done = call_tool(bot, write, "move_cards", bucket_id=by_name["Binder"]["id"], to_bucket_id=by_name["Trade box"]["id"],
+                     lines=[{"card_id": sol, "quantity": 2}])["structuredContent"]
+    assert done["applied"] is True and done["copies"] == 2
+    left = call_tool(bot, write, "search_cards", bucket=by_name["Binder"]["id"])["structuredContent"]["items"]
+    assert [(c["name"], c["quantity"]) for c in left] == [("Sol Ring", 1)]
+    mountain = call_tool(bot, write, "search_cards", bucket=by_name["Trade box"]["id"], name="Mountain")["structuredContent"]["items"][0]["id"]
+    big = call_tool(bot, write, "move_cards", bucket_id=by_name["Trade box"]["id"], to_bucket_id=by_name["Binder"]["id"],
+                    lines=[{"card_id": mountain, "quantity": 4}])["structuredContent"]
+    assert big["applied"] is True  # 4 copies: under the threshold, applied at once
+    assert call_tool(bot, write, "move_cards", bucket_id=by_name["Binder"]["id"], to_bucket_id=by_name["Binder"]["id"],
+                     lines=[{"card_id": sol, "quantity": 1}]).get("isError")
+
+
 def test_a_read_only_connection_can_list_but_not_change_buckets(agent, bot):
     made = agent.post(f"{V1}/collection/buckets", json={"name": "Mine"}).json()
     read = make_token(agent)
@@ -52,6 +71,8 @@ def test_a_read_only_connection_can_list_but_not_change_buckets(agent, bot):
     assert call_tool(bot, read, "create_bucket", name="No").get("isError")
     assert call_tool(bot, read, "rename_bucket", bucket_id=made["id"], name="No").get("isError")
     assert call_tool(bot, read, "delete_bucket", bucket_id=made["id"], confirm=True).get("isError")
+    assert call_tool(bot, read, "move_cards", bucket_id=made["id"], to_bucket_id=made["id"],
+                     lines=[{"card_id": "x", "quantity": 1}]).get("isError")
     assert agent.get(f"{V1}/collection/buckets/{made['id']}").json()["name"] == "Mine"
 
 
