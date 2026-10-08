@@ -16,8 +16,10 @@ agent and every session (Claude, Codex, Copilot, Cursor). `CLAUDE.md` has the co
 - A criterion is ticked only with **evidence posted in the issue**: the CI run for a test, the production response for an
   API, and for anything a person uses through Claude or ChatGPT **a real run in that app after deploy** (screenshot or
   the captured answer). Merged is not done. Deployed is not done. Tests green is not done.
-- PRs say `Refs #n`, **never `Closes #n`**: GitHub closes on merge, before anything was checked. The issue is closed by
-  hand, after the last criterion has its evidence.
+- A PR is **linked** to its issue with a keyword GitHub understands (a plain mention of `#n` links nothing): `Closes #n` when the
+  PR completes the issue, so GitHub shows it in the issue and closes the issue on merge, with the evidence in the PR's
+  description; `Refs #n` plus a `Left open: ...` line when part of the issue is left. Checks that can only be run after deploy
+  are run right after deploy, and the issue is reopened if one fails.
 - Report status in three separate words, never "done": **merged**, **deployed**, **verified** (verified = the evidence
   is in the issue). If something is partial, say so first.
 - Before saying a feature works, run it the way the owner would: the real app, their data, their words.
@@ -96,10 +98,12 @@ What happens, and who does it:
 
 1. **Before work:** the issue has criteria in the owner's words (section 1). Claim it: `in-progress`, assignee, comment,
    and give it a **milestone** (an issue without a milestone is not planned work).
-2. **Opening a PR:** the description starts with `Refs #n` (or `No issue: <why>`), never `Closes`/`Fixes`/`Resolves`:
-   `scripts/check_pr_rules.py` fails the pull request otherwise. The `issue progress` workflow then updates the Progress block
-   (`in review`) and comments on the issue by itself.
-3. **Merging:** the same workflow marks it `merged` and comments. Merged is not verified: the rows stay open.
+2. **Opening a PR:** the description starts with `Closes #n` (the PR completes the issue; it needs an evidence section) or
+   `Refs #n` with a `Left open: ...` line (or `No issue: <why>`): `scripts/check_pr_rules.py` fails the pull request otherwise.
+   The `issue progress` workflow then updates the Progress block (`in review`) and comments on the issue by itself.
+3. **Merging:** the same workflow marks it `merged` and comments. With `Closes`, GitHub closes the issue on merge; the rows
+   still open are post-deploy checks, run right after deploy, and a failed check reopens the issue. With `Refs`, the issue stays
+   open and its rows say what is left.
 4. **Verifying:** after deploy, run the criterion the way the owner would (section 2), post the evidence in the issue, then
    `python scripts/issue_progress.py tick <issue> "<words of the criterion>" --evidence "<link or the captured answer>"`.
 5. **Closing:** `python scripts/issue_progress.py close <issue>`: it refuses while any row is not verified or waived.

@@ -48,16 +48,20 @@ def test_the_block_replaces_itself_and_keeps_the_rest_of_the_issue():
 def test_issues_are_found_from_refs_lines_only():
     assert ip.refs_in("Refs #246\n\ntext #99") == [246]
     assert ip.refs_in("Refs #23 #25, #137 and #9") == [9, 23, 25, 137]
-    assert ip.refs_in("see #5 and Closes #6") == []
+    assert ip.refs_in("see #5 and Closes #6") == []  # a mention inside a sentence is not a link
+    assert ip.refs_in("Closes #7\n\ntext #99") == [7]  # a closing line is followed by the progress workflow too
 
 
-def test_every_pull_request_names_its_issue_and_never_uses_a_closing_keyword():
-    assert rules.issue_link_problems("Refs #246\n\nbody") == []
-    assert rules.issue_link_problems("No issue: repairs a broken main after two PRs merged")  == []
+def test_every_pull_request_links_its_issue_with_a_keyword_github_understands():
+    """A plain mention links nothing (the owner, 2026-10-08): Closes links the PR and closes the issue on merge, Refs says what is left."""
+    assert rules.issue_link_problems("Closes #246\n\n## Evidence\n| a | b |") == []
+    assert rules.issue_link_problems("Refs #246\n\nLeft open: the real run after deploy") == []
+    assert rules.issue_link_problems("No issue: repairs a broken main after two PRs merged") == []
     assert any("names no issue" in p for p in rules.issue_link_problems("just a description"))
-    closing = rules.issue_link_problems("Refs #1\nFixes #2")
-    assert closing and "closing keyword" in closing[0]
-    assert rules.issue_link_problems("Refs #1\n\nThis fixes the parity test in #274")[0:0] == []  # prose without 'fixes #n' is fine
+    assert any("names no issue" in p for p in rules.issue_link_problems("This is about #246 somehow"))  # a mention is not a link
+    assert any("no evidence section" in p for p in rules.issue_link_problems("Closes #1\n\nit works"))
+    assert any("Left open" in p for p in rules.issue_link_problems("Refs #1\n\nit helps"))
+    assert rules.issue_link_problems("Closes #1\nRefs #2\n\nEvidence: tests/test_x.py") == []  # one closes, one only mentions
 
 
 def test_the_workflow_updates_issues_from_the_default_branch_with_only_issue_write():
