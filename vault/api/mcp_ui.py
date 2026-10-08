@@ -542,7 +542,10 @@ function render(root, env) {
     } }));
     root.appendChild(msg);
   }
-  (r.notes || []).forEach(function (n) { root.appendChild(h("p", { class: "small muted", text: n })); });
+  // The store's own note is already printed under its list: the answer's notes repeat it, so it is not printed twice (#317).
+  var storeLimits = [];
+  if (typeof sf === "object" && sf) { storeLimits.push(sf.limits); Object.keys(sf).forEach(function (k) { if (sf[k] && sf[k].limits) { storeLimits.push(sf[k].limits); } }); }
+  (r.notes || []).filter(function (n) { return storeLimits.indexOf(n) < 0; }).forEach(function (n) { root.appendChild(h("p", { class: "small muted", text: n })); });
   root.appendChild(provenanceFooter(env.provenance));
 }
 """

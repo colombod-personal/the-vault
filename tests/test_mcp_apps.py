@@ -124,6 +124,14 @@ def test_deck_panels_lead_with_the_deck_not_with_card_counts(view):
     assert "Commander: " in page and "Format not given" in page and "Format read from the list" in page
 
 
+def test_the_shopping_view_prints_the_stores_note_once_not_again_among_the_notes():
+    """#317: the answer's notes repeat the store's own note, which the view already prints under the list to paste."""
+    page = mcp_ui.html("shopping")
+    assert "storeLimits.indexOf(n) < 0" in page
+    # the notes that are not the store's note are still printed
+    assert page.count('(r.notes || []).filter(function (n) { return storeLimits.indexOf(n) < 0; })') == 1
+
+
 def test_the_shopping_view_names_the_store_and_what_its_paste_cannot_carry_and_switches_between_formats():
     """#55: store formats in the view - the heading names the store, its limits are shown, and `format: all` offers each text."""
     page = mcp_ui.html("shopping")
