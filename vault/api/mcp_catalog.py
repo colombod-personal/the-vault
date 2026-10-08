@@ -75,7 +75,8 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              "stats are under `faces`; the top-level fields can be empty. Also lists the recorded changes of its legality "
              "(`legality_changes`: a ban, an unban or a restriction, with the day the Vault saw it), and `computed_roles`: roles the Vault "
              "worked out from the Oracle text where Scryfall's tags have none (computed, with the rule used). A misspelled name returns "
-             "suggestions, never a guess. Works for any card, owned or not.",
+             "suggestions, never a guess. Works for any card, owned or not. A question about how a card works under the rules also needs "
+             "the rules themselves: call find_rules_term or get_rule too, and never answer it from memory.",
              {"name": {"type": "string", "minLength": 1, "maxLength": 300, "description": "Exact card name"},
               "oracle_id": {"type": "string", "minLength": 36, "maxLength": 36}},
              path=lambda a: f"{V1}/catalog/cards", query=("name", "oracle_id"), provenance=("catalog",), ui="card"),
@@ -86,7 +87,8 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
               "offset": {"type": "integer", "minimum": 0, "maximum": 10000, "default": 0, "description": "Skip this many of the newest rulings"}}, ["oracle_id"],
              path=lambda a: f"{V1}/catalog/cards/{quote(a['oracle_id'], safe='')}/rulings", query=("limit", "offset"), provenance=("catalog",)),
         Tool("search_rules", "Search the Comprehensive Rules for a topic (e.g. 'replacement effect damage'); best matches "
-             "first, at most 10, each with its number and the edition. A keyword ability or glossary term in the query puts "
+             "first, at most 10, each with its number and the edition. Use it for any question about how the rules work: never answer "
+             "one from memory, because the rules change between editions. A keyword ability or glossary term in the query puts "
              "its defining rules first. The rules are read live from Wizards of the Coast's current edition.",
              {"query": {"type": "string", "minLength": 2, "maxLength": 200},
               "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5}}, ["query"],
@@ -97,11 +99,14 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              {"under": {"type": "string", "maxLength": 20, "description": "A section, subsection or rule number"}},
              path=lambda a: f"{V1}/catalog/rules", query=("under",), provenance=("catalog",)),
         Tool("find_rules_term", "A glossary term or keyword ability ('trample', 'state-based actions', 'commander') and the rules "
-             "that define it, with the glossary definition. Start here when a question names a game term.",
+             "that define it, with the glossary definition. Start here when a question names a game term, and never quote a rule "
+             "from memory: only text returned by the rules tools is the current edition's.",
              {"name": {"type": "string", "minLength": 2, "maxLength": 120}}, ["name"],
              path=lambda a: f"{V1}/catalog/rules/term/{quote(a['name'], safe='')}", provenance=("catalog",)),
         Tool("get_rule", "One rule by number (e.g. '613.1a') or a glossary term ('glossary:Trample'), with where it sits: its "
-             "parent, children, previous and next rule, the rules it cites and the rules that cite it. Follow those to read "
+             "parent, children, previous and next rule, the rules it cites and the rules that cite it. This is the only source for "
+             "a rule's wording: when a rule is asked for or quoted, call it, and never quote a rule from memory (the rules change "
+             "between editions; a quote not returned here must not be called the current edition's). Follow the links to read "
              "around a rule (exceptions often sit in a sibling or a later subrule).",
              {"number": {"type": "string", "minLength": 1, "maxLength": 120}}, ["number"],
              path=lambda a: f"{V1}/catalog/rules/{quote(a['number'], safe='')}", provenance=("catalog",)),
