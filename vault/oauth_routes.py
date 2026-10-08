@@ -65,11 +65,12 @@ class PageError(Exception):
 
 
 class RedirectError(Exception):
-    """A problem the app should hear about, at its own (validated) redirect URI."""
+    """A problem the app should hear about, at the redirect URI it declared (so a person is asked to go there, not sent)."""
 
-    def __init__(self, redirect_uri: str, state: str | None, code: str, description: str):
+    def __init__(self, redirect_uri: str, state: str | None, code: str, description: str, client: OAuthClient | None = None):
         super().__init__(description)
         self.redirect_uri, self.state, self.code, self.description = redirect_uri, state, code, description
+        self.client = client
 
 
 @dataclass
@@ -106,9 +107,9 @@ def parse_authorize(query: QueryParams, db: Session, fetcher: clients.ClientFetc
         raise PageError("The app's redirect address is not one it registered, so the Vault won't send you there.")
     redirect_uri = target  # what the browser is sent to is rebuilt from what was registered, never the raw input
     state = get("state")
-    fail = lambda code, text: RedirectError(redirect_uri, state, code, text)  # noqa: E731
+    fail = lambda code, text: RedirectError(redirect_uri, state, code, text, client)  # noqa: E731
     if state is not None and len(state) > MAX_STATE:
-        raise fail("invalid_request", "state is too long")
+        raise RedirectError(redirect_uri, None, "invalid_request", "state is too long", client)  # not echoed back: it is too long
     if get("response_type") != "code":
         raise fail("unsupported_response_type", "response_type must be code")
     challenge = get("code_challenge")
@@ -174,6 +175,22 @@ def page(title: str, body: str, *, status: int = 200, script_nonce: str | None =
 def error_page(text: str, status: int = 400) -> HTMLResponse:
     return page("Can't connect this app", f"<h1>This app can't be connected</h1><p>{esc(text)}</p>"
                 "<p class=small>Nothing was shared. Go back to the app and try again.</p>", status=status)
+
+
+def return_page(exc: RedirectError, settings: Settings) -> HTMLResponse:
+    """A request error found before anyone has agreed to anything. The redirect address is only what the app declared
+    (anyone can declare one), so the Vault does not send a person there by itself: it says what was wrong and who the
+    address belongs to, and the person chooses to go back (#339)."""
+    target = with_query(exc.redirect_uri, {"error": exc.code, "error_description": exc.description, "state": exc.state,
+                                           "iss": settings.base_url})
+    host, ascii_form = clients.display_host(urlsplit(exc.redirect_uri).hostname or "")
+    who = client_label(exc.client) if exc.client is not None else "An app"
+    look_alike = (f' <span class="warn">This address uses non-English letters; its technical form is '
+                  f"<code>{esc(ascii_form)}</code>. Check it carefully.</span>") if host != ascii_form else ""
+    return page("Can't connect this app", f"<h1>This app can't be connected</h1><p><b>{esc(who)}</b> sent a request the Vault "
+                f"can't use: {esc(exc.description)}.</p><p class=small>Nothing was shared. The app gave "
+                f"<code>{esc(host)}</code> as the address to return to; go there only if you started this from that app.{look_alike}</p>"
+                f'<p><a class="button" href="{esc(target)}">Return to {esc(host)}</a></p>', status=400)
 
 
 def client_label(client: OAuthClient) -> str:
@@ -315,8 +332,7 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
         except PageError as exc:
             return error_page(exc.text, exc.status)
         except RedirectError as exc:
-            return redirect(exc.redirect_uri, {"error": exc.code, "error_description": exc.description,
-                                               "state": exc.state}, settings)
+            return return_page(exc, settings)
         user = session_user(db, request)
         if user is None:
             request.session["oauth_pending"] = {"q": raw, "t": int(time.time())}
@@ -406,8 +422,8 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
                 raise server.OAuthError("unsupported_grant_type", "grant_type must be authorization_code or refresh_token")
         except (server.OAuthError, clients.ClientError) as exc:
             if exc.code == "invalid_client":  # why an app could not connect: its public client_id and our reason, never a secret
-                log.warning("token request refused: client=%s grant=%s assertion=%s type=%s reason=%s", (client_id or "")[:200],
-                            grant_type, bool(client_assertion), (client_assertion_type or "")[:80],
+                log.warning("token request refused: client=%r grant=%r assertion=%s type=%r reason=%s", (client_id or "")[:200],
+                            (grant_type or "")[:40], bool(client_assertion), (client_assertion_type or "")[:80],
                             getattr(exc, "description", str(exc)))
             return token_error(exc)
         return JSONResponse(result, headers={**NO_STORE, **CORS})
@@ -433,7 +449,7 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
                 with request.app.state.db.sessions() as db:
                     return JSONResponse(clients.register(db, body, settings.oauth_client_cap), status_code=201,
                                         headers={**NO_STORE, **CORS})
-            except ValueError:
+            except (ValueError, RecursionError):
                 return JSONResponse({"error": "invalid_client_metadata", "error_description": "The body must be JSON"},
                                     status_code=400, headers={**NO_STORE, **CORS})
             except clients.ClientError as exc:

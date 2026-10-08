@@ -82,7 +82,9 @@ def test_at_70_percent_the_last_check_fails_the_job_with_a_clear_message_and_han
 
 def test_below_70_percent_the_last_check_passes_even_when_asked_to_fail(db, monkeypatch, tmp_path):
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out"))
-    monkeypatch.setenv("NEON_STORAGE_LIMIT_MB", str(used_mb(db) * 2))
+    # the size of a real database moves by a page between two reads (#307: the same flake, seen again in a full run), so it is fixed
+    monkeypatch.setattr(db_budget, "usage", lambda _db: {"database_mb": 10.0, "tables_mb": {}})
+    monkeypatch.setenv("NEON_STORAGE_LIMIT_MB", "20")
     assert db_budget.check(db, fail_at_warn=True)["used"] == "50%"
     assert not (tmp_path / "out").exists()
 

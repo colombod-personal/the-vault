@@ -49,7 +49,7 @@ def unverified_issuer(assertion: str) -> str | None:
     try:
         part = assertion.split(".")[1]
         claims = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
-    except (IndexError, ValueError, UnicodeDecodeError):
+    except (IndexError, ValueError, UnicodeDecodeError, RecursionError):
         return None
     issuer = claims.get("iss") if isinstance(claims, dict) else None
     return issuer if isinstance(issuer, str) else None
@@ -99,7 +99,7 @@ def verify(db: Session, fetcher: ClientFetcher, cache: KeyCache, *, client_id: s
         raise _refuse("the client declared an algorithm the Vault does not accept")
     try:
         header = json.loads(base64.urlsafe_b64decode(assertion.split(".")[0] + "=" * (-len(assertion.split(".")[0]) % 4)))
-    except (ValueError, UnicodeDecodeError, IndexError):
+    except (ValueError, UnicodeDecodeError, IndexError, RecursionError):
         raise _refuse("the assertion is not a JWT") from None
     if not isinstance(header, dict) or header.get("alg") != algorithm:
         raise _refuse(f"the assertion must be signed with {algorithm}")

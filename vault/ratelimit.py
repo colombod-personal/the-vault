@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import math
 import time
 
@@ -28,12 +29,28 @@ WINDOW = 60
 KEEP = 5  # windows kept before they are deleted
 
 
+def limit_key(address: str) -> str:
+    """What a caller is limited as: its address, or for IPv6 its /64 (one subscriber has a whole /64, so per-address
+    keys would let it rotate through addresses). An IPv4-mapped IPv6 address is the IPv4 address."""
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return address
+    if ip.version == 6:
+        if ip.ipv4_mapped:
+            return str(ip.ipv4_mapped)
+        top = ipaddress.IPv6Address(int(ip) >> 64 << 64)  # the first 64 bits, whatever zone id the address carries
+        return f"{top}/64"
+    return address
+
+
 def client_ip(request: Request, settings: Settings) -> str:
+    """The caller's address as a limit key (see ``limit_key``): only used to count requests, never shown or kept."""
     if settings.on_vercel:
         forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
         if forwarded or request.headers.get("x-real-ip"):
-            return forwarded or request.headers["x-real-ip"].strip()
-    return request.client.host if request.client else ""
+            return limit_key(forwarded or request.headers["x-real-ip"].strip())
+    return limit_key(request.client.host if request.client else "")
 
 
 def hit(db: Session, key: str, minute: int) -> int:

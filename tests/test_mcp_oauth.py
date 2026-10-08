@@ -5,6 +5,7 @@ Every test drives the Vault the way ChatGPT or Claude would, with the twin MCP c
 """
 
 import hashlib
+import html
 import logging
 import re
 import secrets
@@ -83,6 +84,17 @@ def location(res):
 
 def query(res):
     return {k: v[-1] for k, v in parse_qs(location(res).query).items()}
+
+
+def query_of(url):
+    return {k: v[-1] for k, v in parse_qs(urlsplit(url).query).items()}
+
+
+def returned(res):
+    """What a request error sends back to the app, now as the link behind the page's "Return to ..." button (#339): the page is
+    an error page without a redirect, and its link carries the same ``error`` and ``state``."""
+    assert res.status_code == 400 and "location" not in res.headers
+    return query_of(html.unescape(re.search(r'<a class="button" href="([^"]+)"', res.text).group(1)))
 
 
 def import_csv(client):
@@ -334,9 +346,8 @@ def test_the_consent_belongs_to_the_account_that_saw_it(client):
 ])
 def test_pkce_s256_is_required(client, override):
     client.sign_in()
-    res = client.authorize(**override)
-    assert res.status_code == 303
-    assert query(res)["error"] == "invalid_request" and query(res)["state"] == client.state
+    sent = returned(client.authorize(**override))
+    assert sent["error"] == "invalid_request" and sent["state"] == client.state
 
 
 @pytest.mark.parametrize("redirect", [
@@ -385,10 +396,18 @@ def test_a_non_loopback_port_difference_is_not_tolerated(make_client):
     ({"response_type": "token"}, "unsupported_response_type"), ({"response_type": None}, "unsupported_response_type"),
     ({"state": "x" * 600}, "invalid_request"),
 ])
-def test_other_request_problems_go_back_to_the_app(client, override, error):
+def test_other_request_problems_are_shown_with_a_return_button_not_redirected(client, override, error):  # #339
     client.sign_in()
     res = client.authorize(**override)
-    assert res.status_code == 303 and query(res)["error"] == error
+    assert res.status_code == 400 and "location" not in res.headers
+    assert "app.example" in res.text and "Return to app.example" in res.text and "Nothing was shared" in res.text
+    sent = returned(res)
+    assert sent["error"] == error and sent["iss"] == "http://testserver"
+
+
+def test_a_request_error_never_redirects_a_stranger_even_when_nobody_is_signed_in(client):  # #339
+    res = client.authorize(response_type="token")  # not signed in
+    assert res.status_code == 400 and "location" not in res.headers and "Return to app.example" in res.text
 
 
 def test_a_repeated_parameter_is_refused(client):
@@ -416,8 +435,8 @@ def test_hostile_text_in_names_cannot_inject_html(make_client):
 
 def test_errors_to_the_redirect_encode_the_state(client):
     client.sign_in()
-    res = client.authorize(state="a b&error=evil#x", code_challenge_method="plain")
-    assert query(res)["state"] == "a b&error=evil#x" and query(res)["error"] == "invalid_request"
+    sent = returned(client.authorize(state="a b&error=evil#x", code_challenge_method="plain"))
+    assert sent["state"] == "a b&error=evil#x" and sent["error"] == "invalid_request"
 
 
 # -- the token endpoint ------------------------------------------------------------------------

@@ -270,6 +270,93 @@ def test_the_connection_goes_to_the_address_that_was_checked():
     assert request.extensions["sni_hostname"] == "app.example"  # TLS is still checked against the name
 
 
+def test_a_compressed_answer_is_refused_unread_and_plain_bytes_are_asked_for(caplog):  # #337
+    import gzip
+    caplog.set_level(logging.WARNING)
+    seen = []
+    bomb = gzip.compress(b"a" * 20_000_000)  # a few KB that would inflate to 20 MB in one chunk
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("accept-encoding"))
+        return httpx.Response(200, content=bomb, headers={"content-type": "application/json", "content-encoding": "gzip"})
+
+    fetcher = oc.ClientFetcher(httpx.MockTransport(handler), lambda host: [PUBLIC])
+    with pytest.raises(oc.ClientError):
+        fetcher.fetch("https://app.example/c.json")
+    assert seen == ["identity"] and "Content-Encoding is not identity" in caplog.text
+    plain = oc.ClientFetcher(httpx.MockTransport(lambda r: json_response(200, {"client_id": "x", "client_name": "X"})),
+                             lambda host: [PUBLIC])
+    assert plain.fetch("https://app.example/c.json")["client_name"] == "X"  # plain answers still work
+
+
+def test_at_most_three_addresses_are_tried_and_none_after_the_deadline():  # #337
+    import time
+    tried = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        tried.append(request.url.host)
+        time.sleep(0.12)
+        raise httpx.ConnectTimeout("blackholed", request=request)
+
+    addresses = [f"93.184.216.{n}" for n in range(30, 36)]
+    fetcher = oc.ClientFetcher(httpx.MockTransport(handler), lambda host: addresses, pin=True, seconds=5.0)
+    started = time.monotonic()
+    with pytest.raises(oc.ClientError):
+        fetcher.fetch("https://app.example/c.json")
+    assert tried == addresses[:3] and time.monotonic() - started < 2  # the fourth to sixth are never tried
+    tried.clear()
+    slow = oc.ClientFetcher(httpx.MockTransport(handler), lambda host: addresses[:3], pin=True, seconds=0.15)
+    with pytest.raises(oc.ClientError):
+        slow.fetch("https://app.example/c.json")
+    assert len(tried) == 2  # 0.15 s of budget: the third attempt is not started
+
+
+def test_deeply_nested_json_is_refused_like_any_bad_json_and_not_a_server_error(app, universe, browser):  # #338
+    res = browser.post("/oauth/register", content=b"[" * 5000, headers={"content-type": "application/json"})
+    assert res.status_code == 400
+    url = universe.client_hosts.serve("big.example", "/c.json", lambda r: httpx.Response(
+        200, content=b"[" * 30_000, headers={"content-type": "application/json"}))
+    _, res = start(browser, url)
+    assert res.status_code == 400 and GENERIC in res.text
+    res = browser.post("/oauth/token", data={"grant_type": "authorization_code", "client_assertion": "x." + "W10=" * 3 + ".y"})
+    assert res.status_code in (400, 401)  # refused, not a 500
+
+
+def test_values_the_caller_chose_are_escaped_in_the_token_refusal_log(app, browser, caplog):  # #338
+    caplog.set_level(logging.WARNING)
+    res = browser.post("/oauth/token", data={"grant_type": "refresh_token\nFORGED-GRANT", "client_id": "app\nFORGED-CLIENT",
+                                             "client_assertion_type": "type\nFORGED-TYPE", "refresh_token": "r"})
+    assert res.status_code == 401 or res.status_code == 400
+    assert "token request refused" in caplog.text
+    for forged in ("\nFORGED-GRANT", "\nFORGED-CLIENT", "\nFORGED-TYPE"):
+        assert forged not in caplog.text
+    assert "FORGED-CLIENT" in caplog.text  # still logged, escaped
+
+
+def test_ipv6_callers_are_limited_per_64_and_ipv4_is_unchanged():  # #338
+    from vault.ratelimit import limit_key
+    assert limit_key("2001:db8:1:2:aaaa::1") == limit_key("2001:db8:1:2:bbbb:cccc::9") == "2001:db8:1:2::/64"
+    assert limit_key("2001:db8:1:3::1") != limit_key("2001:db8:1:2::1")
+    assert limit_key("203.0.113.9") == "203.0.113.9" and limit_key("::ffff:203.0.113.9") == "203.0.113.9"
+    assert limit_key("") == "" and limit_key("not-an-address") == "not-an-address"
+    assert limit_key("fe80::1%eth0") == "fe80::/64"  # a link-local peer with a zone id does not break the limiter
+
+
+def test_both_address_families_are_tried_before_the_cap_when_a_host_has_many_of_one():  # #337
+    assert oc.interleaved(["2606::1", "2606::2", "2606::3", "3.4.5.6", "34.1.1.1"]) == \
+        ["3.4.5.6", "2606::1", "34.1.1.1", "2606::2", "2606::3"]
+    tried = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        tried.append(request.url.host)
+        raise httpx.ConnectError("no route", request=request)
+
+    fetcher = oc.ClientFetcher(httpx.MockTransport(handler), lambda host: ["2606::1", "2606::2", "2606::3", "93.184.216.34"], pin=True)
+    with pytest.raises(oc.ClientError):
+        fetcher.fetch("https://app.example/c.json")
+    assert "93.184.216.34" in tried and len(tried) == 3  # the A record is among the three, not the fourth
+
+
 def test_a_name_that_resolves_differently_is_judged_on_every_address():
     fetcher = oc.ClientFetcher(httpx.MockTransport(lambda r: pytest.fail("fetched")), lambda host: [PUBLIC, "10.0.0.1"])
     with pytest.raises(oc.ClientError):

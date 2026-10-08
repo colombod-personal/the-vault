@@ -26,6 +26,7 @@ from .tokens import PKCE_VERIFIER, _touch, s256
 
 ACCESS_TTL = timedelta(hours=1)
 REFRESH_TTL = timedelta(days=30)
+MAX_RETIRED_PER_GRANT = 10  # rotated refresh hashes kept per grant to catch a copied token; older ones are dropped
 GRANT_MAX_AGE = timedelta(days=90)  # from first consent: refreshing never extends a grant past this
 CONSENT_TTL = timedelta(minutes=10)
 MAX_PENDING_CONSENTS = 5  # unanswered consent screens per person
@@ -211,6 +212,11 @@ def refresh(db: Session, client_id: str, refresh_token: str, scope: str | None, 
     db.execute(delete(OAuthRetiredRefresh).where(OAuthRetiredRefresh.grant_id == grant.id,
                                                  OAuthRetiredRefresh.expires_at < _now()))
     db.add(OAuthRetiredRefresh(user_id=grant.user_id, grant_id=grant.id, token_hash=h, expires_at=grant.refresh_expires))
+    db.flush()
+    newest = select(OAuthRetiredRefresh.id).where(OAuthRetiredRefresh.grant_id == grant.id) \
+        .order_by(OAuthRetiredRefresh.id.desc()).limit(MAX_RETIRED_PER_GRANT)  # a loop of refreshes can not grow the table
+    db.execute(delete(OAuthRetiredRefresh).where(OAuthRetiredRefresh.grant_id == grant.id,
+                                                 OAuthRetiredRefresh.id.not_in(newest)))
     db.commit()
     return _response(access, refresh_new, scopes)
 
