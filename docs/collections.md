@@ -1,6 +1,6 @@
 # Collections: inventory, buckets, tags and metadata (decision doc for #118)
 
-Status: draft for owner decisions. Nothing here is built. It is the root of the Collections epic (#117): #119 (metadata), #120 (tags), #121 (schema), #122 to #130 wait on it.
+Status: agreed by the owner on 2026-10-08 (#287: decisions 1 to 4, all as recommended). Not built yet: building starts with #121. It is the root of the Collections epic (#117): #119 (metadata), #120 (tags), #121 (schema), #122 to #130 wait on it.
 
 ## What exists today (checked in the code, 2026-10-06)
 

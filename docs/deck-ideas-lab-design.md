@@ -1,6 +1,6 @@
 # The deck ideas lab: what can I build, what is missing, what can stand in (design for #161, epic #158)
 
-Status: design for owner review. Nothing here is built; implementation is #163.
+Status: agreed by the owner on 2026-10-08 (#287: decisions 5 to 9, all as recommended). Nothing here is built yet; implementation is #163.
 
 Owner direction (2026-10-05, `docs/graph-and-lab-review.md`): the Graph's seven modes are cut. The Graph becomes a **deck ideas lab**: how a deck could be built from the collection, what is missing, and for each missing card which owned card could stand in or deliver the same dynamic.
 
