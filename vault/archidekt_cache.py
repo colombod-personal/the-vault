@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
@@ -24,6 +26,33 @@ MIN_REFRESH = timedelta(seconds=60)
 RETENTION = timedelta(days=7)
 
 
+class Rate:
+    """Counts, per process, the calls to Archidekt (cache misses) and the cache hits of the last minute, so the log shows how
+    often Archidekt is really asked and how much the cache saves (#133). Only counts: no deck id, no person. Each Vercel
+    instance counts its own, so a sum over instances is read from the log lines, not from here."""
+
+    WINDOW = 60.0
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic):
+        self._clock = clock
+        self._calls: deque[float] = deque()
+        self._hits: deque[float] = deque()
+        self._guard = threading.Lock()
+
+    def note(self, kind: str) -> dict:
+        """Record a ``miss`` (a call to Archidekt) or a ``hit``; returns the last minute's counts and the hit rate."""
+        now = self._clock()
+        with self._guard:
+            (self._calls if kind == "miss" else self._hits).append(now)
+            for q in (self._calls, self._hits):
+                while q and now - q[0] > self.WINDOW:
+                    q.popleft()
+            calls, hits = len(self._calls), len(self._hits)
+        return {"calls_last_minute": calls, "hits_last_minute": hits,
+                "hit_rate": round(hits / (calls + hits), 2) if calls + hits else None}
+
+
+RATE = Rate()
 _locks: dict[int, threading.Lock] = {}
 _locks_guard = threading.Lock()
 
@@ -59,7 +88,7 @@ def read(db: Session, deck_id: int, fetch: Callable[[int], dict], *, refresh: bo
             row = _fresh(db, deck_id, refresh, now)
             if row is None:
                 db.commit()
-                log.info("archidekt deck cache=miss")  # one request to archidekt.com
+                log.info("archidekt deck cache=miss %s", _counts(RATE.note("miss")))  # one request to archidekt.com
                 data = fetch(deck_id)
                 stamp = now
                 stmt = postgresql.insert(ArchidektDeckCache).values(deck_id=deck_id, data=data, fetched_at=stamp)
@@ -67,8 +96,12 @@ def read(db: Session, deck_id: int, fetch: Callable[[int], dict], *, refresh: bo
                 db.execute(delete(ArchidektDeckCache).where(ArchidektDeckCache.fetched_at < stamp - RETENTION))
                 db.commit()
                 return _answer(data, stamp, stamp, from_cache=False)
-    log.info("archidekt deck cache=hit")
+    log.info("archidekt deck cache=hit %s", _counts(RATE.note("hit")))
     return _answer(row.data, row.fetched_at, now, from_cache=True)
+
+
+def _counts(c: dict) -> str:
+    return f"calls_last_minute={c['calls_last_minute']} hits_last_minute={c['hits_last_minute']} hit_rate={c['hit_rate']}"
 
 
 def _answer(data: dict, fetched_at: datetime, now: datetime, *, from_cache: bool) -> dict:
