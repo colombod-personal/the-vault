@@ -233,6 +233,17 @@ def public_address(value: str) -> bool:
     return ip.is_global and not ip.is_multicast
 
 
+def interleaved(addresses: list[str]) -> list[str]:
+    """IPv4 and IPv6 addresses taking turns, IPv4 first: of the first few, one of each family is tried, so a host with
+    several AAAA records does not hide its A records from a runtime that has no IPv6 route."""
+    v4 = [a for a in addresses if ":" not in a]
+    v6 = [a for a in addresses if ":" in a]
+    out: list[str] = []
+    for i in range(max(len(v4), len(v6))):
+        out += v4[i:i + 1] + v6[i:i + 1]
+    return out
+
+
 def system_resolver(host: str) -> list[str]:
     return sorted({info[4][0] for info in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)})
 
@@ -281,7 +292,7 @@ class ClientFetcher:
 
     def _fetch_pinned(self, url: str, host: str, found: list[str]) -> dict:
         deadline = time.monotonic() + self.seconds
-        for address in (found[:MAX_ADDRESSES] if self.pin else [None]):
+        for address in (interleaved(found)[:MAX_ADDRESSES] if self.pin else [None]):
             if time.monotonic() >= deadline:
                 break
             try:
@@ -299,7 +310,9 @@ class ClientFetcher:
             target = str(httpx.URL(url).copy_with(host=address))
             extensions["sni_hostname"] = host
             headers["Host"] = host
-        left = max(deadline - time.monotonic(), 0.05)  # each attempt gets what is left of the whole fetch
+        # Connect and read time out at what is left of the whole fetch (each, not together: an attempt can still run to about
+        # twice that, and a server dripping its headers a byte at a time is not cut off: see the threat model, residual risks).
+        left = max(deadline - time.monotonic(), 0.05)
         with httpx.Client(transport=self.transport, timeout=httpx.Timeout(left), follow_redirects=False,
                           trust_env=False) as client:
             with client.stream("GET", target, headers=headers, extensions=extensions) as res:

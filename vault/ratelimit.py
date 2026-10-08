@@ -37,7 +37,10 @@ def limit_key(address: str) -> str:
     except ValueError:
         return address
     if ip.version == 6:
-        return str(ip.ipv4_mapped) if ip.ipv4_mapped else str(ipaddress.ip_network((ip, 64), strict=False))
+        if ip.ipv4_mapped:
+            return str(ip.ipv4_mapped)
+        top = ipaddress.IPv6Address(int(ip) >> 64 << 64)  # the first 64 bits, whatever zone id the address carries
+        return f"{top}/64"
     return address
 
 

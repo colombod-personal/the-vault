@@ -109,7 +109,7 @@ def parse_authorize(query: QueryParams, db: Session, fetcher: clients.ClientFetc
     state = get("state")
     fail = lambda code, text: RedirectError(redirect_uri, state, code, text, client)  # noqa: E731
     if state is not None and len(state) > MAX_STATE:
-        raise fail("invalid_request", "state is too long")
+        raise RedirectError(redirect_uri, None, "invalid_request", "state is too long", client)  # not echoed back: it is too long
     if get("response_type") != "code":
         raise fail("unsupported_response_type", "response_type must be code")
     challenge = get("code_challenge")
@@ -183,11 +183,13 @@ def return_page(exc: RedirectError, settings: Settings) -> HTMLResponse:
     address belongs to, and the person chooses to go back (#339)."""
     target = with_query(exc.redirect_uri, {"error": exc.code, "error_description": exc.description, "state": exc.state,
                                            "iss": settings.base_url})
-    host = clients.display_host(urlsplit(exc.redirect_uri).hostname or "")[0]
+    host, ascii_form = clients.display_host(urlsplit(exc.redirect_uri).hostname or "")
     who = client_label(exc.client) if exc.client is not None else "An app"
+    look_alike = (f' <span class="warn">This address uses non-English letters; its technical form is '
+                  f"<code>{esc(ascii_form)}</code>. Check it carefully.</span>") if host != ascii_form else ""
     return page("Can't connect this app", f"<h1>This app can't be connected</h1><p><b>{esc(who)}</b> sent a request the Vault "
                 f"can't use: {esc(exc.description)}.</p><p class=small>Nothing was shared. The app gave "
-                f"<code>{esc(host)}</code> as the address to return to; go there only if you started this from that app.</p>"
+                f"<code>{esc(host)}</code> as the address to return to; go there only if you started this from that app.{look_alike}</p>"
                 f'<p><a class="button" href="{esc(target)}">Return to {esc(host)}</a></p>', status=400)
 
 

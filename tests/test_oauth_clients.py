@@ -339,6 +339,22 @@ def test_ipv6_callers_are_limited_per_64_and_ipv4_is_unchanged():  # #338
     assert limit_key("2001:db8:1:3::1") != limit_key("2001:db8:1:2::1")
     assert limit_key("203.0.113.9") == "203.0.113.9" and limit_key("::ffff:203.0.113.9") == "203.0.113.9"
     assert limit_key("") == "" and limit_key("not-an-address") == "not-an-address"
+    assert limit_key("fe80::1%eth0") == "fe80::/64"  # a link-local peer with a zone id does not break the limiter
+
+
+def test_both_address_families_are_tried_before_the_cap_when_a_host_has_many_of_one():  # #337
+    assert oc.interleaved(["2606::1", "2606::2", "2606::3", "3.4.5.6", "34.1.1.1"]) == \
+        ["3.4.5.6", "2606::1", "34.1.1.1", "2606::2", "2606::3"]
+    tried = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        tried.append(request.url.host)
+        raise httpx.ConnectError("no route", request=request)
+
+    fetcher = oc.ClientFetcher(httpx.MockTransport(handler), lambda host: ["2606::1", "2606::2", "2606::3", "93.184.216.34"], pin=True)
+    with pytest.raises(oc.ClientError):
+        fetcher.fetch("https://app.example/c.json")
+    assert "93.184.216.34" in tried and len(tried) == 3  # the A record is among the three, not the fourth
 
 
 def test_a_name_that_resolves_differently_is_judged_on_every_address():
