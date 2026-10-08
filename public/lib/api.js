@@ -466,6 +466,11 @@ window.VaultApi = (() => {
       : Promise.resolve(null)),
     updateDeck: (id, name, text, source_url, source_author) => call(V1 + '/decks/' + id, { method: 'PUT', json: { name, text, source_url, source_author } }),
     deleteDeck: (id) => call(V1 + '/decks/' + id, { method: 'DELETE' }),
+    // a saved deck's versions (at most 20), and the open: records the list the page showed if its cards changed and says what
+    // changed since the person last looked
+    deckVersions: (id) => call(V1 + '/decks/' + id + '/versions'),
+    deckVersion: (id, versionId) => call(V1 + '/decks/' + id + '/versions/' + versionId),
+    deckSeen: (id, text) => call(V1 + '/decks/' + id + '/seen', { method: 'POST', json: text ? { text } : {} }),
     // deck analysis, computed by the server from the card catalog (each answer is { result, provenance })
     deckStats: (text) => call(V1 + '/decks/stats', { method: 'POST', json: { text } }),
     deckLegality: (text, format) => call(V1 + '/decks/legality', { method: 'POST', json: { text, format } }),

@@ -169,3 +169,61 @@ def test_the_database_budget_check_counts_the_versions_table(signed_in, app, mon
     with app.state.db.sessions() as db:
         report = db_budget.usage(db)
     assert "deck_versions" in report["tables_mb"] and report["database_mb"] > 0
+
+
+# -- "changed since you last looked" (#93) -------------------------------------------------------
+
+def seen(client, deck_id, text=None):
+    res = client.post(f"{V1}/decks/{deck_id}/seen", json={} if text is None else {"text": text})
+    assert res.status_code == 200, res.text
+    return res.json()
+
+
+def test_opening_a_deck_reports_what_changed_since_the_last_time_and_then_only_what_is_new(signed_in):
+    deck_id = save(signed_in)
+    assert seen(signed_in, deck_id) == {"recorded": False, "since_last_looked": None}  # saved and never seen: nothing to compare
+    edit(signed_in, deck_id, BASE.replace("1 Arcane Signet", "1 Mind Stone"))
+    out = seen(signed_in, deck_id)["since_last_looked"]
+    assert {c["card"]: (c["before"], c["after"]) for c in out["changes"]} == {"Arcane Signet": (1, 0), "Mind Stone": (0, 1)}
+    assert out["summary"]["added"] == 1 and out["summary"]["removed"] == 1
+    assert seen(signed_in, deck_id)["since_last_looked"] is None  # looked: the next open reports only what is new
+    edit(signed_in, deck_id, BASE.replace("1 Arcane Signet", "1 Mind Stone") + "1 Forest\n")
+    again = seen(signed_in, deck_id)["since_last_looked"]
+    assert [(c["card"], c["after"]) for c in again["changes"]] == [("Forest", 1)]
+
+
+def test_a_list_the_page_saw_that_differs_from_the_latest_version_is_recorded_as_opened(signed_in):
+    deck_id = save(signed_in)
+    seen(signed_in, deck_id)
+    live = BASE + "1 Mind Stone\n"  # e.g. the deck's list at its source today, not yet saved
+    assert seen(signed_in, deck_id, live)["recorded"] is True
+    assert versions(signed_in, deck_id)["items"][0]["source"] == "opened"
+    assert seen(signed_in, deck_id, live)["recorded"] is False  # the same cards again: nothing new
+    assert signed_in.get(f"{V1}/decks/{deck_id}").json()["text"] == BASE  # the saved copy is not replaced by looking
+
+
+def test_opening_a_deck_that_is_not_yours_or_with_an_empty_list_is_refused(signed_in, client):
+    deck_id = save(signed_in)
+    assert signed_in.post(f"{V1}/decks/{deck_id}/seen", json={"text": "nothing here"}).status_code == 400
+    client.cookies.clear()
+    assert client.post("/api/auth/dev-login", params={"email": "other@example.com"}).status_code == 200
+    assert client.post(f"{V1}/decks/{deck_id}/seen", json={}).status_code == 404
+
+
+def test_migration_0115_marks_each_existing_decks_latest_version_as_seen(blank_database_url):
+    database = Database(blank_database_url)
+    try:
+        alembic(database, "0113")
+        with database.engine.begin() as conn:
+            conn.execute(text("INSERT INTO users (id, email, created_at, collection_version) VALUES (1, 'a@example.com', now(), 0)"))
+            conn.execute(text("INSERT INTO decks (id, user_id, name, text, created_at, updated_at) VALUES (1, 1, 'd', :t, now(), now())"), {"t": BASE})
+        alembic(database, "0115")  # 0114 gives the deck its first version, 0115 marks it seen
+        with database.engine.connect() as conn:
+            viewed, latest = conn.execute(text("SELECT d.viewed_version_id, (SELECT max(id) FROM deck_versions WHERE deck_id = 1) FROM decks d")).one()
+        assert viewed is not None and viewed == latest
+        alembic(database, "0114", "downgrade")
+        with database.engine.connect() as conn:
+            assert "viewed_version_id" not in {r[0] for r in conn.execute(text(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'decks'"))}
+    finally:
+        database.engine.dispose()
