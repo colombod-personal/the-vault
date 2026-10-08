@@ -197,6 +197,12 @@ def test_verify_citation_refuses_an_edition_it_cannot_read_and_says_so_in_its_de
     assert "2026-06-19" in text and "2027-03-03" in text, text
 
 
+def test_get_deck_and_shopping_list_say_which_price_basis_a_card_has():  # #328
+    by_name = {t.name: t.description for t in mcp.TOOLS}
+    assert "cheapest priced paper printing" in by_name["get_deck"] and "`shopping_list`" in by_name["get_deck"]
+    assert "cheapest printing" in by_name["shopping_list"]
+
+
 def test_the_claude_ai_check_for_the_shop_and_deck_rules_is_prepared_and_not_claimed():
     """#82: the real claude.ai run needs a signed-in person. The doc holds the exact script, the pass rules (tied to the
     claims the 2026-10-04 run got wrong) and an empty record; it must not claim a result nobody recorded."""
