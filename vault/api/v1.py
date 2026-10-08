@@ -39,7 +39,7 @@ from ..collection_view import SORTS, CollectionView, filtered, filtered_printing
 from .. import archidekt_cache, deck_import, deck_match, deck_overview, deck_refresh, deck_versions, experts, owned_changes
 from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, ImportOptions, export_collection, import_collection,
                         preview_import as preview_collection_import, user_entries)
-from ..models import AccessToken, ApiSession, Card, Deck, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
+from ..models import AccessToken, ApiSession, Bucket, Card, Deck, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
 from ..native import LEEWAY as NATIVE_LEEWAY, NativeTokenError, NativeVerifier, ProviderUnavailable
 from ..passkeys import remove_passkey
 from ..prices import compute_values
@@ -347,8 +347,18 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         own: bool
         owner_name: str | None = None
 
-        def view(self) -> CollectionView:
-            return CollectionView(self.db, self.owner, hide_costs=self.hide_costs)
+        def view(self, bucket_id: int | None = None) -> CollectionView:
+            return CollectionView(self.db, self.owner, hide_costs=self.hide_costs, bucket_id=bucket_id)
+
+        def bucket(self, bucket_id: int | None) -> int | None:
+            """The bucket a request names, if it is the caller's own: buckets are the person's own grouping, not part of
+            what a share shows (docs/collections.md), and another person's id is the same 404 as one that does not exist."""
+            if bucket_id is None:
+                return None
+            found = self.own and self.db.scalar(select(Bucket.id).where(Bucket.id == bucket_id, Bucket.user_id == self.owner.id))
+            if not found:
+                raise HTTPException(404, "Bucket not found")
+            return bucket_id
 
     def own_ctx(db: Session = Depends(get_db), user: User = Depends(current_user)) -> Ctx:
         return Ctx(db, user, False, f"{V1}/collection", True)
@@ -406,7 +416,9 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                                                             "Printings whose card data is not stored yet are left out"),
                   mana_value: str | None = Query(None,
                                                  description=f"Mana value bucket, as in the breakdowns: {', '.join(analytics.MANA_VALUES)}. "
-                                                             "Printings whose card data is not stored yet are left out")):
+                                                             "Printings whose card data is not stored yet are left out"),
+                  bucket: int | None = Query(None, ge=1, le=S.MAX_ID, description="Only the copies in this bucket "
+                                             "(GET /collection/buckets); not on a shared collection")):
             if sort not in SORTS:
                 raise HTTPException(400, f"sort must be one of {sorted(SORTS)}")
             if card_type is not None:
@@ -415,7 +427,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                     raise HTTPException(400, f"type must be one of {', '.join(analytics.TYPES)}")
             if mana_value is not None and mana_value not in analytics.MANA_VALUES:
                 raise HTTPException(400, f"mana_value must be one of {', '.join(analytics.MANA_VALUES)}")
-            view = ctx.view()
+            view = ctx.view(ctx.bucket(bucket))
 
             def body():
                 items = filtered(view, q=q, set_code=set, finish=finish, condition=condition, name=name,
@@ -427,7 +439,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                        for g in page]
                 return {**page_body(request, out, nxt, len(items), q=q, set=set, name=name, finish=finish,
                                     condition=condition, printing=printing, type=card_type, mana_value=mana_value,
-                                    sort=None if sort == "name" else sort, limit=limit),
+                                    bucket=bucket, sort=None if sort == "name" else sort, limit=limit),
                         "value_total": round(sum(g.value for g in items), 2)}
 
             return etag_response(request, view.version, body)
@@ -577,10 +589,11 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     own = collection_routes(own_ctx)
 
-    def _download(ctx: Ctx, fmt: str) -> Response:
+    def _download(ctx: Ctx, fmt: str, bucket: int | None = None) -> Response:
         f = FORMATS[fmt]
-        name = f"vault-collection-{fmt}-{date.today().isoformat()}.{f.extension}"
-        return Response(export_collection(ctx.db, ctx.owner, fmt), media_type=f"{f.media_type}; charset=utf-8",
+        bucket = ctx.bucket(bucket)
+        name = f"vault-collection-{fmt}{'-bucket-' + str(bucket) if bucket else ''}-{date.today().isoformat()}.{f.extension}"
+        return Response(export_collection(ctx.db, ctx.owner, fmt, bucket), media_type=f"{f.media_type}; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
     @own.get("/exports", response_model=S.ExportFormats,
@@ -592,14 +605,16 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return {"items": items, "_links": {"self": link(f"{V1}/collection/exports")}}
 
     @own.get("/export/{fmt}", summary="Download your collection in one format (see /collection/exports)")
-    def export_as(fmt: str, ctx: Ctx = Depends(own_ctx)) -> Response:
+    def export_as(fmt: str, ctx: Ctx = Depends(own_ctx), bucket: int | None = Query(None, ge=1, le=S.MAX_ID,
+                  description="Only the copies in this bucket")) -> Response:
         if fmt not in FORMATS:
             raise HTTPException(404, f"Unknown format. Available: {', '.join(FORMATS)}")
-        return _download(ctx, fmt)
+        return _download(ctx, fmt, bucket)
 
     @own.get("/export.csv", summary="Your collection as a Dragon Shield CSV (same as /collection/export/dragonshield)")
-    def export_csv(ctx: Ctx = Depends(own_ctx)) -> Response:
-        return _download(ctx, "dragonshield")
+    def export_csv(ctx: Ctx = Depends(own_ctx), bucket: int | None = Query(None, ge=1, le=S.MAX_ID,
+                   description="Only the copies in this bucket")) -> Response:
+        return _download(ctx, "dragonshield", bucket)
 
     router.include_router(own, prefix="/collection")
     router.include_router(collection_routes(shared_ctx), prefix="/shared/{share_id}/collection")

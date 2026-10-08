@@ -107,3 +107,46 @@ def test_a_person_makes_at_most_100_buckets_by_hand_and_pages_follow_the_cursor(
     assert len(seen) == len(set(seen)) == 100
     assert signed_in.delete(f"{B}/{first['items'][0]['id']}").status_code == 200
     assert signed_in.post(B, json={"name": "Room again"}).status_code == 201  # deleting one makes room
+
+
+# -- the bucket filter on search and export (#123) ----------------------------------------------------------------------
+
+TWO_FOLDERS = (
+    "Folder Name,Quantity,Trade Quantity,Card Name,Set Code,Set Name,Card Number,Condition,Printing,Language,Price Bought,Date Bought,LOW,MID,MARKET\n"
+    "Binder,3,0,Sol Ring,C21,Commander 2021,263,Mint,Normal,English,1.00,2024-02-17,1.00,2.00,2.30\n"
+    "Trade box,2,0,Sol Ring,CMM,Commander Masters,400,Mint,Normal,English,1.00,2024-02-17,1.00,2.00,2.30\n"
+    "Trade box,4,0,Mountain,C17,Commander 2017,304,Mint,Normal,English,0.05,2024-02-17,0.05,0.05,0.05\n"
+).encode()
+
+
+def by_name(client):
+    return {b["name"]: b for b in client.get(B).json()["items"]}
+
+
+def test_the_collection_search_and_the_exports_can_be_limited_to_one_bucket(signed_in):
+    assert signed_in.post("/api/v1/imports", files={"file": ("two.csv", TWO_FOLDERS, "text/csv")}).status_code in (200, 201)
+    buckets = by_name(signed_in)
+    assert {n: b["copies"] for n, b in buckets.items() if b["kind"] == "folder"} == {"Binder": 3, "Trade box": 6}
+    everything = signed_in.get("/api/v1/collection/cards").json()
+    trade = signed_in.get("/api/v1/collection/cards", params={"bucket": buckets["Trade box"]["id"]}).json()
+    assert sum(c["quantity"] for c in everything["items"]) == 9
+    assert sorted((c["name"], c["quantity"]) for c in trade["items"]) == [("Mountain", 4), ("Sol Ring", 2)]  # only that bucket's copies
+    assert trade["_links"]["self"]["href"].endswith(f"bucket={buckets['Trade box']['id']}")
+    binder = signed_in.get("/api/v1/collection/cards", params={"bucket": buckets["Binder"]["id"]}).json()
+    assert [(c["name"], c["quantity"]) for c in binder["items"]] == [("Sol Ring", 3)]
+    csv = signed_in.get("/api/v1/collection/export.csv", params={"bucket": buckets["Trade box"]["id"]}).text
+    assert "Mountain" in csv and "Trade box" in csv and "Binder" not in csv  # the Dragon Shield rows of that bucket
+    assert signed_in.get("/api/v1/collection/export/moxfield", params={"bucket": buckets["Binder"]["id"]}).text.count("Sol Ring") == 1
+    whole = signed_in.get("/api/v1/collection/export.csv").text
+    assert "Binder" in whole and "Trade box" in whole  # no bucket: everything, as before
+
+
+def test_a_bucket_filter_for_someone_elses_bucket_or_on_a_shared_collection_is_404(client):
+    sign_in_as(client, "bob@example.com")
+    bob = client.post(B, json={"name": "Bob's box"}).json()
+    sign_in_as(client, "alice@example.com")
+    assert client.get("/api/v1/collection/cards", params={"bucket": bob["id"]}).status_code == 404
+    assert client.get("/api/v1/collection/export.csv", params={"bucket": bob["id"]}).status_code == 404
+    assert client.get("/api/v1/collection/cards", params={"bucket": 0}).status_code == 422
+    mine = client.post(B, json={"name": "Mine"}).json()
+    assert client.get("/api/v1/collection/cards", params={"bucket": mine["id"]}).json()["total"] == 0  # an empty bucket is empty, not 404
