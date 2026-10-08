@@ -146,6 +146,12 @@ def test_hosts_without_the_skills_still_get_the_shop_and_deck_rules():
     'current' prices and a cart, and did not credit Archidekt. The rules must be in what every host reads."""
     from vault.api import mcp
     assert "Never say which shop is cheapest" in GROUNDING and "never say anything goes into a cart" in GROUNDING
+    # #304: a real run quoted rule 702.19 "word for word" with no get_rule call: the tools say they are the only source for a rule's wording
+    from vault.api import mcp
+    for name in ("get_rule", "find_rules_term", "search_rules"):
+        assert "from memory" in " ".join(mcp.BY_NAME[name].description.split()), name
+    assert "the only source for a rule's wording" in " ".join(mcp.BY_NAME["get_rule"].description.split())
+    assert "never answer it from memory" in " ".join(mcp.BY_NAME["get_card_oracle"].description.split())
     # #295: an assistant with browser tools opened a shop's Mass Entry to fill a cart after "buy my missing cards"
     flat = " ".join(GROUNDING.split())
     assert "Never place or fill an order for the person" in flat and "never use a browser or any other tool to open a shop, fill its cart" in flat
