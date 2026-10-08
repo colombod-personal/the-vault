@@ -212,3 +212,20 @@ def test_the_claude_ai_check_for_the_shop_and_deck_rules_is_prepared_and_not_cla
         assert "| Result | NOT RUN |" in section
     else:  # a recorded result needs a date and evidence
         assert re.search(r"20\d\d-\d\d-\d\d", status) and "| Capture (link or file in the issue) |  |" not in section
+
+
+def test_the_archidekt_provenance_links_the_real_deck_not_the_vaults_id_for_it():
+    """#321: refresh_deck and import_deck_from_link carry the Vault's saved deck as `deck`; its id is not Archidekt's."""
+    from vault.api import mcp_catalog
+
+    refresh = {"deck": {"id": 9, "source_url": "https://archidekt.com/decks/6803907", "source_author": "layer0"},
+               "source": {"url": "https://archidekt.com/decks/6803907", "author": "layer0"}}
+    (block,) = mcp_catalog.provenance_blocks(("archidekt",), refresh)
+    assert block["url"] == "https://archidekt.com/decks/6803907" and block["origin"] == "deck by layer0"
+    imported = {"deck": {"id": 9, "credit": {"url": "https://archidekt.com/decks/6803907", "author": "layer0"}}}
+    assert mcp_catalog.provenance_blocks(("archidekt",), imported)[0]["url"] == "https://archidekt.com/decks/6803907"
+    read = {"id": 6803907, "owner": {"username": "layer0"}}  # get_archidekt_deck: the id is Archidekt's own
+    block = mcp_catalog.provenance_blocks(("archidekt",), read)[0]
+    assert block["url"] == "https://archidekt.com/decks/6803907" and block["origin"] == "deck by layer0"
+    none = mcp_catalog.provenance_blocks(("archidekt",), {"deck": {"id": 9}})[0]  # nothing says where: the site, never a made-up deck
+    assert none["url"] == "https://archidekt.com"
