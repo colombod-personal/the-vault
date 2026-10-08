@@ -9,8 +9,8 @@ The Vault depends on other people's data and says so, always. Two rules sit abov
    which inputs. The Vault is not produced or endorsed by Scryfall, Wizards, Moxfield or Archidekt.
 
 Status of this document: written 2026-10-04 from public pages that were reachable then; Scryfall's terms read first-hand on 2026-10-05;
-Moxfield's terms, Card Kingdom's, Magic Madhouse's and Archidekt's read first-hand on 2026-10-07 (Cardmarket's General Terms
-are behind a bot check and are **not read**, see `docs/data-sources.md`). Anything marked unverified may not be relied on
+Moxfield's terms, Card Kingdom's, Magic Madhouse's and Archidekt's read first-hand on 2026-10-07 and Cardmarket's General
+Terms (version of 20/02/2026) read in a browser on 2026-10-07, see `docs/data-sources.md`. Anything marked unverified may not be relied on
 until someone has read the primary text. This is engineering diligence, not legal advice.
 
 ## Source gate (enforced)
@@ -39,7 +39,7 @@ Sources the Vault does **not** load, recorded so the next person does not have t
 | `archidekt` | Archidekt public decks | read: not clear, owner position recorded | 2026-10-07 | https://archidekt.com/terms | One public deck per person's request only; see "Archidekt" below |
 | `cardkingdom` | Card Kingdom site and price list | read: automation forbidden | 2026-10-07 | https://www.cardkingdom.com/static/tos | Not used; ask first (`docs/data-sources.md`) |
 | `magicmadhouse` | Magic Madhouse site and affiliate feed | read: written permission needed | 2026-10-07 | https://magicmadhouse.co.uk/terms-conditions/ | Not used; the affiliate feed is the legitimate route (`docs/data-sources.md`) |
-| `cardmarket` | Cardmarket site | not read | n/a | https://www.cardmarket.com/en/Magic/Policies/GeneralTermsAndConditions | Not used; behind a bot check, owner reads it in a browser |
+| `cardmarket` | Cardmarket site | read | 2026-10-07 | https://www.cardmarket.com/en/Magic/Policies/GeneralTermsAndConditions | Not used: showing its cards and prices needs its prior written agreement (clause 9); its prices reach the Vault only as Scryfall's |
 | `commander_spellbook` | Commander Spellbook API | not read: no data licence found | n/a | https://commanderspellbook.com | On demand per request, nothing stored |
 
 The questions we planned to put to the sources' owners are **not part of this test** and are still open owner actions:
@@ -170,7 +170,7 @@ updating together with #94.
 Shops are in `docs/data-sources.md` with the source URL and date per row: Card Kingdom (terms forbid robots and data
 extraction; robots.txt disallows `/api/`), Magic Madhouse (copying or exploiting needs written permission "granted either
 directly or through a legitimate reselling programme"; the affiliate programme offers a full product feed, no rate
-published), Cardmarket (**General Terms not read**: bot check; API closed to new applications).
+published), Cardmarket (General Terms read 2026-10-07: showing its cards and prices needs its prior written agreement, clause 9; API closed to new applications).
 
 Still unread: Commander Spellbook's data licence (none found; on demand only, nothing stored) and the **Fan Content Policy's
 rules on monetisation**, which must be read before the owner joins any affiliate programme. Neon and Vercel limits are in
@@ -260,7 +260,7 @@ sends them.
 | Moxfield: legitimate access before any automated deck fetching (#62) | Their terms forbid robots without written approval (read 2026-10-07) | **Not sent** | Send the Moxfield draft to support@moxfield.com or their Discord; until an answer, nothing is fetched |
 | Archidekt: is one public deck per person's request acceptable? (#79) | Their terms exclude "automated searches, requests, or queries"; the owner's position is that one request on a person's action is within them, but Archidekt has never been asked | **Not sent** | Send the Archidekt draft via https://archidekt.com/contact or their Discord (link on the terms page) |
 | Wizards: Fan Content Policy (optional since #142) | The rules are read live and nothing is stored, so nothing needs their permission today | Not sent, optional | Only if the owner wants it in writing |
-| Cardmarket's terms | Could not be read by a tool | **Not read** | Open the General Terms in a browser and record the clauses on automated access and price data in `docs/data-sources.md` |
+| Cardmarket's terms | Read in a browser on 2026-10-07 (the earlier "bot check" was a wrong address) | **Read** | Recorded in `docs/data-sources.md`: showing Cardmarket's own prices needs its prior written agreement (clause 9); nothing from Cardmarket is stored or shown today |
 | Fan Content monetisation terms | Needed before joining an affiliate programme | Not read | Read https://company.wizards.com/en/legal/fancontentpolicy before joining |
 
 The gate (the table at the top) is met for what the Vault loads today, because the terms of those sources have been read.
