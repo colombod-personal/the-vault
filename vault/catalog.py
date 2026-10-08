@@ -30,6 +30,9 @@ from .sync import card_row, price_row, upsert
 
 MAX_IDENTIFIERS = 75  # Scryfall's own limit per /cards/collection request
 SETS_TTL = 24 * 3600
+LIVE_PRINTINGS_TTL = 300  # a few minutes in memory, enough for a picker; never written to the database
+LIVE_PRINTINGS_KEPT = 200  # cards kept at once, oldest dropped first
+LIVE_PRINTINGS_MAX = 175  # one page of Scryfall's search: one request per question
 
 
 class Catalog:
@@ -38,6 +41,7 @@ class Catalog:
         self._client: ScryfallClient | None = None
         self._lock = threading.Lock()  # one Scryfall call at a time per process: keeps the rate limit
         self._sets: tuple[float, list[dict]] | None = None
+        self._printings: dict[str, tuple[float, dict]] = {}
         self._rewrite = rewrite_image or (lambda url: url)
 
     def _scryfall(self) -> ScryfallClient:
@@ -107,6 +111,45 @@ class Catalog:
             "prices": {k: money(getattr(p, k, None)) for k in ("usd", "usd_foil", "usd_etched", "eur", "eur_foil", "eur_etched")},
             "prices_as_of": p.day.isoformat() if p else None,
         }
+
+    # -- live printings -----------------------------------------------------------------------
+    def live_printings(self, oracle_id: str) -> dict[str, Any]:
+        """Every printing of one card, asked of Scryfall live (one search, ``unique=prints``, newest first) for a picker.
+        Nothing is stored: the list lives in this process's memory for LIVE_PRINTINGS_TTL seconds, and a printing becomes a
+        stored card only when the person picks it and it is applied (``lookup``). Images are Scryfall's own URLs, never
+        fetched or served here. ``{"printings": [...], "unavailable": bool, "more": bool}``; ``unavailable`` is true when
+        Scryfall did not answer (the caller still offers what the Vault holds)."""
+        if (hit := self._printings.get(oracle_id)) and time.monotonic() - hit[0] < LIVE_PRINTINGS_TTL:
+            return hit[1]
+        with self._lock:  # one Scryfall call at a time, as every other call
+            if (hit := self._printings.get(oracle_id)) and time.monotonic() - hit[0] < LIVE_PRINTINGS_TTL:
+                return hit[1]
+            try:
+                cards = list(self._scryfall().search(f"oracleid:{oracle_id}", unique="prints", order="released",
+                                                     limit=LIVE_PRINTINGS_MAX))
+            except (ApiError, httpx.HTTPError):
+                return {"printings": [], "unavailable": True, "more": False}
+            answer = {"printings": [self._live_label(c) for c in cards], "unavailable": False,
+                      "more": len(cards) >= LIVE_PRINTINGS_MAX}
+            if len(self._printings) >= LIVE_PRINTINGS_KEPT:
+                self._printings.pop(min(self._printings, key=lambda k: self._printings[k][0]))
+            self._printings[oracle_id] = (time.monotonic(), answer)
+            return answer
+
+    def _live_label(self, c) -> dict[str, Any]:
+        raw = c.raw or {}
+        faces = raw.get("card_faces") or []
+        uris = c.image_uris or (faces[0].get("image_uris") if faces else None) or {}
+        normal = uris.get("normal") or ""
+        small = uris.get("small") or ""
+        image = None
+        if normal.startswith("https://cards.scryfall.io/"):  # only Scryfall's image server, as for stored cards
+            image = {"url": self._rewrite(normal),
+                     "small": self._rewrite(small) if small.startswith("https://cards.scryfall.io/") else None,
+                     "artist": raw.get("artist") or (faces[0].get("artist") if faces else None),
+                     "scryfall_uri": c.scryfall_uri, "source": "Scryfall"}
+        return {"set": c.set_code, "set_name": c.set_name, "number": c.collector_number,
+                "finishes": [f for f in (c.finishes or []) if f in ("nonfoil", "foil", "etched")] or None, "image": image}
 
     # -- sets -------------------------------------------------------------------------------
     def sets(self) -> list[dict[str, Any]]:

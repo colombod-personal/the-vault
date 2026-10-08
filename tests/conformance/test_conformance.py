@@ -142,6 +142,23 @@ def test_scryfall_double_faced_card(real, twin):
     assert invented(t, r) == []
 
 
+def test_scryfall_every_printing_of_a_card_by_oracle_id(real, twin):
+    """The live printing picker (#208) asks for ``oracleid:<id>`` with ``unique=prints`` and ``order=released``."""
+    oracle = real.get("https://api.scryfall.com/cards/c21/263").json()["oracle_id"]
+    r = real.get("https://api.scryfall.com/cards/search", params={"q": f"oracleid:{oracle}", "unique": "prints", "order": "released"}).json()
+    twin_oracle = twin.get("https://api.scryfall.com/cards/c21/263").json()["oracle_id"]
+    t = twin.get("https://api.scryfall.com/cards/search", params={"q": f"oracleid:{twin_oracle}", "unique": "prints", "order": "released"}).json()
+    assert r["object"] == t["object"] == "list" and len(r["data"]) >= 2 and len(t["data"]) >= 1
+    # a reversible card carries its oracle id on its faces, not on the card
+    oid = lambda c: c.get("oracle_id") or c["card_faces"][0]["oracle_id"]  # noqa: E731
+    assert {oid(c) for c in r["data"]} == {oracle} and {oid(c) for c in t["data"]} == {twin_oracle}
+    assert [c["released_at"] for c in r["data"]] == sorted((c["released_at"] for c in r["data"]), reverse=True)  # newest first
+    assert [c["released_at"] for c in t["data"]] == sorted((c["released_at"] for c in t["data"]), reverse=True)
+    for field in ("set", "set_name", "collector_number", "finishes", "scryfall_uri", "released_at"):
+        assert field in r["data"][0], field
+    assert missing(r["data"][0], ["image_uris", "artist"]) == [] and invented(t["data"][0], r["data"][0]) == []
+
+
 def test_scryfall_collection_and_errors(real, twin):
     body = {"identifiers": [{"name": "Sol Ring"}, {"name": "Not A Real Card Name"}]}
     r = real.post("https://api.scryfall.com/cards/collection", json=body).json()

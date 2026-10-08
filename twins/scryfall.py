@@ -211,7 +211,10 @@ class ScryfallTwin(Twin):
                     seen.add(c["oracle_id"])
                     unique.append(c)
             cards = unique
-        cards.sort(key=lambda c: c["name"])
+        if req.query.get("order") == "released":
+            cards.sort(key=lambda c: (c.get("released_at", ""), c["collector_number"]), reverse=True)
+        else:
+            cards.sort(key=lambda c: c["name"])
         if not cards:
             return self.error(404, "not_found", "Your query didn’t match any cards. Adjust your search terms or refer to the syntax guide at https://scryfall.com/docs/reference")
         return self._ok(self._list(cards, req, int(req.query.get("page", "1"))))
@@ -230,6 +233,8 @@ class ScryfallTwin(Twin):
                 if key in ("t", "type") and value not in (card.get("type_line") or "").lower():
                     return False
                 if key in ("a", "artist") and value not in (card.get("artist") or "").lower():
+                    return False
+                if key in ("oracleid", "oid") and card["oracle_id"] != value:
                     return False
             elif _norm(term) not in _norm(card["name"]):
                 return False

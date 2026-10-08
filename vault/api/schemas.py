@@ -317,6 +317,7 @@ class OwnedChangeLine(BaseModel):
     number: str | None = Field(None, max_length=30, description="The printing's collector number, with set")
     finish: Literal["nonfoil", "foil", "etched"] | None = None
     printing_unknown: bool = Field(False, description="Only when the person does not know the printing (adds only)")
+    printings_page: int = Field(1, ge=1, le=20, description="The next page of printings to choose from, when the answer says there are more")
 
 
 class OwnedChangesIn(BaseModel):

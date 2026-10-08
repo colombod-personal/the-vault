@@ -1094,7 +1094,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         per_user(request, "owned changes preview", user.id, 30, db)
         try:
             return changes_answer(owned_changes.preview(db, user, [line.model_dump() for line in body.lines],
-                                                        settings.session_secret, lambda s, n: lookup_printing(db, s, n)))
+                                                        settings.session_secret, lambda s, n: lookup_printing(db, s, n),
+                                                        live=catalog.live_printings))
         except owned_changes.ChangeError as exc:
             raise HTTPException(400, str(exc)) from exc
 

@@ -32,7 +32,7 @@ MAX_REMOVED_COPIES = 25
 MAX_REMOVED_SHARE = 0.10
 REMOVAL_FLOOR = 5  # removing this many copies is never refused by the share cap (a small collection can still sell one)
 TOKEN_SECONDS = 15 * 60
-MAX_CANDIDATES = 20
+MAX_CANDIDATES = 20  # printings offered per page
 
 
 class ChangeError(ValueError):
@@ -58,6 +58,7 @@ class Resolved:
     unit_price: float | None = None
     image: dict | None = None  # the chosen printing's Scryfall image, for the preview view
     candidates: list[dict] = field(default_factory=list)
+    paging: dict | None = None  # for a picker: page, pages, how many printings are not owned, and what Scryfall said
     suggestions: list[str] = field(default_factory=list)
 
     def key(self) -> tuple:
@@ -80,6 +81,8 @@ class Resolved:
                 out["image"] = self.image
         if self.candidates:
             out["choose_from"] = self.candidates
+        if self.paging:
+            out["printings"] = self.paging
         if self.suggestions:
             out["did_you_mean"] = self.suggestions
         return out
@@ -139,7 +142,32 @@ def _price(db: Session, scryfall_id: str | None, oracle_id: str | None) -> float
     return None
 
 
-def _resolve(db: Session, user: User, line: dict, lookup_printing) -> Resolved:
+def _other_printings(db: Session, card: Card, seen: set, live) -> tuple[list[dict], dict]:
+    """The printings of a card the person does not own: every one Scryfall has when ``live`` can ask (newest first), else
+    what the Vault already holds. Nothing here is stored. Returns the labels and what Scryfall answered."""
+    others: list[dict] = []
+    said = {"source": "the Vault's own cards", "scryfall_unavailable": False, "more_at_scryfall": False}
+    if live is not None:
+        answer = live(card.oracle_id)
+        said.update({"source": "Scryfall (live)", "scryfall_unavailable": answer["unavailable"], "more_at_scryfall": answer["more"]})
+        if answer["unavailable"]:
+            said["source"] = "the Vault's own cards (Scryfall did not answer)"
+        for p in answer["printings"]:
+            key = (str(p["set"]).lower(), str(p["number"]).lower())
+            if key not in seen:
+                seen.add(key)
+                others.append(p)
+    # what the Vault already holds is always offered too (after Scryfall's newest-first list): it is all there is when
+    # Scryfall is down, and a printing the person once looked up is never lost from the picker
+    for c in db.scalars(select(Card).where(Card.oracle_id == card.oracle_id).order_by(Card.set_code).limit(MAX_CANDIDATES * 5)):
+        key = (c.set_code.lower(), c.collector_number.lower())
+        if key not in seen:
+            seen.add(key)
+            others.append(_printing_label(db, c))
+    return others, said
+
+
+def _resolve(db: Session, user: User, line: dict, lookup_printing, live=None) -> Resolved:
     action, qty = line["action"], int(line["quantity"])
     r = Resolved(action=action, quantity=qty, name=line["name"].strip(), status="ready", finish=line.get("finish") or "nonfoil")
     if action in ("add", "remove") and qty < 1:
@@ -181,9 +209,13 @@ def _resolve(db: Session, user: User, line: dict, lookup_printing) -> Resolved:
                 r.candidates.append(label)
                 seen.add((str(label["set"]).lower(), str(label["number"]).lower()))  # Scryfall's codes when known
             if action == "add":
-                for c in db.scalars(select(Card).where(Card.oracle_id == card.oracle_id).order_by(Card.set_code).limit(MAX_CANDIDATES)):
-                    if (c.set_code.lower(), c.collector_number.lower()) not in seen:
-                        r.candidates.append(_printing_label(db, c))
+                others, said = _other_printings(db, card, seen, live)
+                pages = max(1, -(-len(others) // MAX_CANDIDATES))
+                page = min(max(1, int(line.get("printings_page") or 1)), pages)
+                r.candidates.extend(others[(page - 1) * MAX_CANDIDATES: page * MAX_CANDIDATES])
+                r.paging = {"page": page, "pages": pages, "not_owned": len(others), **said,
+                            "next": ("call update_owned_cards again with this line and printings_page " + str(page + 1))
+                            if page < pages else None}
             return r
     current = owned.get(r.key(), [])
     r.before = sum(e.quantity for e in current)
@@ -215,11 +247,11 @@ def _token(secret: str, user: User, version: int, lines: list[Resolved], expires
 
 
 def preview(db: Session, user: User, lines: list[dict], secret: str, lookup_printing, *, undo: bool = False,
-            now: float | None = None) -> dict:
+            now: float | None = None, live=None) -> dict:
     if not lines or len(lines) > MAX_LINES:
         raise ChangeError(f"Send 1 to {MAX_LINES} lines; larger changes go through an import")
     version = db.scalar(select(User.collection_version).where(User.id == user.id)) or 0
-    resolved = [_resolve(db, user, line, lookup_printing) for line in lines]
+    resolved = [_resolve(db, user, line, lookup_printing, live) for line in lines]
     removed = sum(max(0, r.before - r.after) for r in resolved if r.status == "ready")
     added = sum(max(0, r.after - r.before) for r in resolved if r.status == "ready")
     total = db.scalar(select(func.coalesce(func.sum(Entry.quantity), 0)).where(Entry.user_id == user.id)) or 0

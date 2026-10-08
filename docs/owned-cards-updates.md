@@ -97,7 +97,7 @@ Other kinds of conflict: `removed_in_vault` (the assistant removed every copy, t
 
 | Tool | Scope | What it does |
 |---|---|---|
-| `update_owned_cards` | write | Propose changes: lines of `add`, `remove` or `set` with a card name, a quantity, and optionally the printing (set and collector number) and finish. **Changes nothing.** Returns the preview and a `confirmation` token |
+| `update_owned_cards` | write | Propose changes: lines of `add`, `remove` or `set` with a card name, a quantity, and optionally the printing (set and collector number) and finish. **Changes nothing.** Returns the preview and a `confirmation` token. For an add with no printing it returns `choose_printing` with the printings owned first, then every printing Scryfall has (asked live, once, kept in memory for five minutes, never stored), 20 a page: `printings` says the page, the pages and whether Scryfall answered, and `printings_page` on the line asks for the next page (#208) |
 | `confirm_owned_cards_update` | write, destructive | Applies exactly the previewed change set, given its `confirmation` token, after the person said yes |
 | `undo_owned_cards_update` | write, destructive | Reverts the last assistant change set (preview first, then confirm, like the others) |
 
