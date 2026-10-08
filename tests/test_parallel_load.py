@@ -336,7 +336,9 @@ def test_a_stale_edition_is_served_while_one_call_refreshes_it():
     assert entered.wait(5)
     started = time.monotonic()
     assert live.edition().version == version  # the stale edition, at once
-    assert time.monotonic() - started < 1
+    # The refresher is held for up to 5 s (release.wait(5) above), so "not blocked" means well under 5 s; 3 s keeps the margin on a slow
+    # runner without being able to pass if the call waited for the refresh (#288: an unexplained 1 s bound is a coin toss on CI).
+    assert time.monotonic() - started < 3
     release.set()
     refresher.join(5)
 
