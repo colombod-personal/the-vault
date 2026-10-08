@@ -396,7 +396,7 @@ def card_names(items: list[str]) -> list[str]:
     out: list[str] = []
     for item in items:
         try:
-            lines = decklist.parse_text(item if re.match(r"\s*\d+\s*x?\s", item, re.I) else f"1 {item}").lines
+            lines = deck_text.parse_text(item if re.match(r"\s*\d+\s*x?\s", item, re.I) else f"1 {item}").lines
         except (ValueError, OverflowError):
             lines = []
         if len(lines) == 1 and 0 < lines[0].quantity <= 100 and lines[0].name.strip():
