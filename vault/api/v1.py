@@ -896,8 +896,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         if "source_url" in body.model_fields_set:  # omitted: keep it (null clears it)
             values["source_url"] = body.source_url
             values["source_fetched_at"] = values["updated_at"] if body.source_url else None
-        else:  # a new list for the link the deck has: taken from it now
-            values["source_fetched_at"] = case((Deck.source_url.is_not(None), values["updated_at"]), else_=None)
+        # No `source_url`: the caller (an assistant's update_deck) changed the list without reading the link, so the time the list was
+        # last taken from it stays as it was (#322). The web app always sends the link with its save; refresh_deck stamps its own.
         if "format" in body.model_fields_set:  # likewise
             values["format"] = body.format
         if "source_author" in body.model_fields_set:
