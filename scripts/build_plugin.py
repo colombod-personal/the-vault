@@ -46,6 +46,10 @@ NAME = "the-vault"
 COPILOT_NAMESPACE = "com.github.copilot"
 VERSION = "0.1.0"
 HOST = "https://mtgvault.cards"
+# One line a person puts in a Claude Project's instructions (or their preferences), or opens a chat with. Measured in claude.ai on
+# 2026-10-08 (issue #319): without it a rules question that does not name the Vault was answered from memory in 2 of 2 runs; with
+# it the assistant called the Vault in 3 of 3. claude.ai gives the model only the tool names, never the server's instructions.
+USE_THE_VAULT = "For Magic rules, card text, rulings, decks, prices and my collection, use The Vault's tools before answering, and never quote a rule from memory."
 REPO = "https://github.com/colombod-personal/the-vault"
 DESCRIPTION = ("Magic: The Gathering rules, cards, decks and collection tools for your AI assistant, grounded in "
                "Scryfall and the Comprehensive Rules, with sources shown. Free and unofficial; credits to Scryfall, Wizards of "
@@ -331,6 +335,17 @@ def connect_page() -> str:
     any time under <strong>Account → Connected apps</strong>.</p>
   {claude_card}
   {chatgpt_card}
+
+  <div class="card" id="use-it">
+    <h3>Make your assistant use it</h3>
+    <p>An assistant only gives answers from The Vault when it calls The Vault. Claude and ChatGPT show the assistant the
+      names of the Vault's tools, not the instructions that come with them, so a question that does not mention the Vault
+      (“how does trample work against protection?”) can be answered from the assistant's own memory, which can be out of
+      date. Paste this once into a Claude Project's instructions or your preferences, or start a chat with it:</p>
+    {_block(USE_THE_VAULT)}
+    <p class="note">When you see “Used The Vault” in the answer, it came from the tools. If it does not appear, ask again
+      and name the Vault.</p>
+  </div>
 
   <h2>2. Developers: Claude Code, Codex, Cursor, VS Code, GitHub Copilot CLI</h2>
   <p>Each tool below has its own format, so each has its own block. Where the tool offers it you sign in with your Vault

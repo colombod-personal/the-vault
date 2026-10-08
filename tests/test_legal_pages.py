@@ -63,3 +63,21 @@ def test_the_privacy_notice_names_every_recipient_of_data_the_code_sends_to():
         assert recipient in text, recipient
     assert "commanderspellbook.com" in combos.URL  # the service named above is the one vault/combos.py calls
     assert "analytics trackers" not in text  # the notice also describes the anonymous visitor statistics
+
+
+def test_the_connect_page_and_the_reviewers_guide_give_the_one_line_that_makes_an_assistant_use_the_vault():
+    """#319: claude.ai gives the model only the tool names, so a rules question that does not name the Vault is answered from memory;
+    one line in a Project or at the start of a chat made 3 of 3 runs call the Vault (docs/ai-integration-testing.md)."""
+    import sys
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import build_plugin as bp
+
+    line = bp.USE_THE_VAULT
+    assert "never quote a rule from memory" in line and "The Vault's tools" in line
+    connect = page("connect.html").replace("&#x27;", "'").replace("&#39;", "'")
+    assert 'id="use-it"' in connect and line in connect
+    from vault import reviewer_routes as rr
+
+    guide = rr.page("https://example.test").replace("&#x27;", "'").replace("&#39;", "'")
+    assert line in guide and "Used The Vault" in guide
