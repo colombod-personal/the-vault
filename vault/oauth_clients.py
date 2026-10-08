@@ -53,6 +53,7 @@ MAX_NAME = 80
 STALE_MAX = timedelta(days=7)  # a cached document older than the cache TTL is still served when fetching is not possible
 FETCH_FAILED = "The app's metadata document could not be fetched"  # the one message for every fetch-stage failure
 BLANKS = "\u2800\u3164\u115f\u1160\uffa0\u180e"  # letters and symbols that draw nothing
+MAX_ADDRESSES = 3  # of a host's addresses, so many unreachable records can not hold a fetch slot for minutes
 MAX_CONCURRENT_FETCHES = 8  # per process: a flood of metadata URLs can not tie up every worker
 LOOPBACK_HOSTS = ("127.0.0.1", "[::1]", "localhost")
 LOOPBACK_NAMES = ("127.0.0.1", "::1", "localhost")
@@ -280,31 +281,39 @@ class ClientFetcher:
 
     def _fetch_pinned(self, url: str, host: str, found: list[str]) -> dict:
         deadline = time.monotonic() + self.seconds
-        for address in (found if self.pin else [None]):
+        for address in (found[:MAX_ADDRESSES] if self.pin else [None]):
+            if time.monotonic() >= deadline:
+                break
             try:
                 return self._get(url, host, address, deadline)
             except httpx.TransportError as exc:
                 log.warning("client metadata fetch failed: %s", type(exc).__name__)
-        raise _refuse("no address answered")
+        raise _refuse("no address answered in time")
 
     def _get(self, url: str, host: str, address: str | None, deadline: float) -> dict:
-        target, extensions, headers = url, {}, {"Accept": "application/json", "User-Agent": "TheVault-client-metadata/1"}
+        # Plain bytes only: a compressed answer is decoded a whole chunk at a time, so a few KB could become tens of MB
+        # before the size limit looks at it.
+        target, extensions, headers = url, {}, {"Accept": "application/json", "User-Agent": "TheVault-client-metadata/1",
+                                                "Accept-Encoding": "identity"}
         if address is not None:
             target = str(httpx.URL(url).copy_with(host=address))
             extensions["sni_hostname"] = host
             headers["Host"] = host
-        with httpx.Client(transport=self.transport, timeout=httpx.Timeout(self.seconds), follow_redirects=False,
+        left = max(deadline - time.monotonic(), 0.05)  # each attempt gets what is left of the whole fetch
+        with httpx.Client(transport=self.transport, timeout=httpx.Timeout(left), follow_redirects=False,
                           trust_env=False) as client:
             with client.stream("GET", target, headers=headers, extensions=extensions) as res:
                 if res.status_code != 200:  # redirects included: a redirect could lead anywhere
                     raise _refuse(f"status {res.status_code} (redirects are not followed)")
                 if not res.headers.get("content-type", "").lower().startswith("application/json"):
                     raise _refuse("not application/json")
+                if res.headers.get("content-encoding", "identity").strip().lower() not in ("", "identity"):
+                    raise _refuse("Content-Encoding is not identity (a compressed answer is not read)")
                 declared = res.headers.get("content-length", "0")
                 if declared.isdigit() and int(declared) > self.max_bytes:
                     raise _refuse("too large")
                 body = b""
-                for chunk in res.iter_bytes():
+                for chunk in res.iter_bytes():  # no decoder: a Content-Encoding other than identity was refused above
                     body += chunk
                     if len(body) > self.max_bytes:
                         raise _refuse("too large")

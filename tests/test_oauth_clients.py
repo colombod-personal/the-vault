@@ -270,6 +270,47 @@ def test_the_connection_goes_to_the_address_that_was_checked():
     assert request.extensions["sni_hostname"] == "app.example"  # TLS is still checked against the name
 
 
+def test_a_compressed_answer_is_refused_unread_and_plain_bytes_are_asked_for(caplog):  # #337
+    import gzip
+    caplog.set_level(logging.WARNING)
+    seen = []
+    bomb = gzip.compress(b"a" * 20_000_000)  # a few KB that would inflate to 20 MB in one chunk
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("accept-encoding"))
+        return httpx.Response(200, content=bomb, headers={"content-type": "application/json", "content-encoding": "gzip"})
+
+    fetcher = oc.ClientFetcher(httpx.MockTransport(handler), lambda host: [PUBLIC])
+    with pytest.raises(oc.ClientError):
+        fetcher.fetch("https://app.example/c.json")
+    assert seen == ["identity"] and "Content-Encoding is not identity" in caplog.text
+    plain = oc.ClientFetcher(httpx.MockTransport(lambda r: json_response(200, {"client_id": "x", "client_name": "X"})),
+                             lambda host: [PUBLIC])
+    assert plain.fetch("https://app.example/c.json")["client_name"] == "X"  # plain answers still work
+
+
+def test_at_most_three_addresses_are_tried_and_none_after_the_deadline():  # #337
+    import time
+    tried = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        tried.append(request.url.host)
+        time.sleep(0.12)
+        raise httpx.ConnectTimeout("blackholed", request=request)
+
+    addresses = [f"93.184.216.{n}" for n in range(30, 36)]
+    fetcher = oc.ClientFetcher(httpx.MockTransport(handler), lambda host: addresses, pin=True, seconds=5.0)
+    started = time.monotonic()
+    with pytest.raises(oc.ClientError):
+        fetcher.fetch("https://app.example/c.json")
+    assert tried == addresses[:3] and time.monotonic() - started < 2  # the fourth to sixth are never tried
+    tried.clear()
+    slow = oc.ClientFetcher(httpx.MockTransport(handler), lambda host: addresses[:3], pin=True, seconds=0.15)
+    with pytest.raises(oc.ClientError):
+        slow.fetch("https://app.example/c.json")
+    assert len(tried) == 2  # 0.15 s of budget: the third attempt is not started
+
+
 def test_a_name_that_resolves_differently_is_judged_on_every_address():
     fetcher = oc.ClientFetcher(httpx.MockTransport(lambda r: pytest.fail("fetched")), lambda host: [PUBLIC, "10.0.0.1"])
     with pytest.raises(oc.ClientError):
