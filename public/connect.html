@@ -36,6 +36,17 @@
   <div class="card" id="claude"><h3>Claude</h3><p>In Claude (web, desktop or mobile): <strong>Settings → Connectors → Add custom connector</strong>, name it The Vault and paste this address:</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>https://mtgvault.cards/api/mcp</code></pre></div><p class="note">Then approve on the Vault's page: tick <strong>Write</strong> if the assistant may edit your collection and decks. A listing in Claude's directory is coming; this page will show the button.</p><p class="note">After a Vault update that adds tools: disconnect and connect The Vault again, so Claude reads the new tools.</p></div>
   <div class="card" id="chatgpt"><h3>ChatGPT</h3><p>In ChatGPT: <strong>Plugins → Add → Add custom MCP server</strong>, name it The Vault, paste this address and keep OAuth:</p><div class="code"><button class="copy" type="button">Copy</button><pre><code>https://mtgvault.cards/api/mcp</code></pre></div><p class="note">Then approve on the Vault's page: tick <strong>Write</strong> if the assistant may edit your collection and decks. A listing in ChatGPT's directory is coming; this page will show the button.</p><p class="note">After a Vault update that adds tools: ChatGPT reads the tools only when the app is added: delete it (not only uninstall) and add it again.</p></div>
 
+  <div class="card" id="use-it">
+    <h3>Make your assistant use it</h3>
+    <p>An assistant only gives answers from The Vault when it calls The Vault. Claude and ChatGPT show the assistant the
+      names of the Vault's tools, not the instructions that come with them, so a question that does not mention the Vault
+      (“how does trample work against protection?”) can be answered from the assistant's own memory, which can be out of
+      date. Paste this once into a Claude Project's instructions or your preferences, or start a chat with it:</p>
+    <div class="code"><button class="copy" type="button">Copy</button><pre><code>For Magic rules, card text, rulings, decks, prices and my collection, use The Vault's tools before answering, and never quote a rule from memory.</code></pre></div>
+    <p class="note">When you see “Used The Vault” in the answer, it came from the tools. If it does not appear, ask again
+      and name the Vault.</p>
+  </div>
+
   <h2>2. Developers: Claude Code, Codex, Cursor, VS Code, GitHub Copilot CLI</h2>
   <p>Each tool below has its own format, so each has its own block. Where the tool offers it you sign in with your Vault
     account in the browser and no token is involved. Otherwise open <strong>Account → Agents &amp; API</strong> and create a

@@ -161,6 +161,28 @@ skills, but its own sign-in had expired, so no model call could be made.
 Also not covered: the OAuth connect flow with a real host (`docs/mcp-oauth-host-checklist.md`), and the MCP Apps views in
 real hosts (`docs/mcp-apps.md`).
 
+## What claude.ai gives the model (#319, measured 2026-10-08)
+
+New incognito chats (no memory), owner's Chrome, connector The Vault (demo account), Sonnet 5.5, permission mode Auto:
+
+- Asked what the connector told it, the model said its tools were "registered in this conversation, but their schemas aren't loaded
+  yet", that it "wasn't given any instruction text from this connector", and listed only tool names (`search_rules`, `get_rule`,
+  `rules_outline`, `find_rules_term`, `get_rulings`, `verify_citation`, and by name `get_card_oracle`, `council_brief`, ...). So the
+  server instructions (GROUNDING in `vault/api/mcp_catalog.py`) and the tool descriptions reach the model only after it decides to load a
+  tool, and it decides on the question.
+- "Walk me through combat damage step by step when my 5/5 creature with trample is blocked by a 2/2 creature with protection from
+  green, and show the rules behind each step": **0 of 2** runs called a Vault tool; both wrote rule numbers from memory and hedged.
+- The same question after one line, "Instruction for this chat: for Magic rules, card text, rulings, decks, prices and my collection, use
+  The Vault's tools before answering, and never quote a rule from memory.": **3 of 3** runs called `present_steps` and the walkthrough view
+  rendered with each rule expandable to Wizards' text (edition 2026-09-25).
+- Questions that name the thing the tools are for did call them: a rule "word for word" (`get_rule`, #304), buying missing cards
+  (`list_decks`, `shopping_list`, #295), the collection's worth (`get_collection_summary`, #36).
+
+The Vault cannot force a call. What it does: the connect page has a "Make your assistant use it" block with that line
+(`USE_THE_VAULT` in `scripts/build_plugin.py`), `/reviewers` tells reviewers to start with it when an answer shows no "Used The Vault",
+and the skills and agents of the plugin carry the same rule for hosts that load them (#225). Not yet measured: the line as a Claude
+Project's instructions, and the plugin's skills in claude.ai (#319).
+
 ## Gotchas found while setting it up
 
 - The embedded Postgres in the Python package `pgserver` has no `pg_trgm`, so the catalog migration fails and a
