@@ -241,6 +241,12 @@ def test_the_shopping_list_is_what_you_do_not_own_with_dated_prices(loaded):
         sorted((l["name"], l["quantity"]) for l in r["lines"]) == [("Cheap Ramp", 2), ("Test Burn", 1)]
     assert r["total_usd"] == 1.0 and "Scryfall" in r["notes"][0] and "does not contact stores" in r["notes"][1]
     assert set(r["text"].splitlines()) == {"1 Test Burn", "2 Cheap Ramp"}
+    # #323: the answer says what the list is a part of, so an assistant cannot mistake it for the whole deck
+    assert list(r)[0] == "covers" and r["covers"]["deck_copies"] == 4 and r["covers"]["already_owned"] == 1 and r["covers"]["to_buy"] == 3
+    assert "only the cards the person does not own" in r["covers"]["meaning"] and "own 1 of the deck's 4" in r["covers"]["meaning"]
+    nothing = computed(post(loaded, "shopping-list", text="1 Test Burn\n2 Cheap Ramp"))["covers"]  # a deck of which nothing is owned
+    everything = computed(post(loaded, "shopping-list", text="1 Test Rock"))["covers"]  # and one of which everything is
+    assert (nothing["already_owned"], nothing["to_buy"]) == (0, 3) and (everything["already_owned"], everything["to_buy"]) == (1, 0)
 
 
 def test_analyses_are_rate_limited_per_person(loaded, app):

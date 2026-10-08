@@ -515,6 +515,7 @@ function render(root, env) {
   var r = env.result || env;
   var head = deckHeader(env.deck); if (head) { root.appendChild(head); }
   root.appendChild(h("h2", { text: r.lines.length ? "To buy: " + r.lines.length + " card(s), about " + usd(r.total_usd) : "You own everything in this list" }));
+  if (r.covers) { root.appendChild(h("p", { class: "small muted", text: "You already own " + r.covers.already_owned + " of this deck's " + r.covers.deck_copies + " cards; this list is the " + r.covers.to_buy + " you do not." })); }
   if (r.lines.length) {
     var t = h("table", {}, [h("tr", {}, [h("th", { class: "num", text: "Qty" }), h("th", { text: "Card" }), h("th", { class: "num", text: "Each" }), h("th", { text: "Price date" })])]);
     r.lines.forEach(function (l) {
