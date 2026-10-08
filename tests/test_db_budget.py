@@ -26,11 +26,23 @@ def test_usage_names_the_database_size_and_the_largest_tables(db):
 
 
 def test_below_70_percent_it_only_logs(db, monkeypatch, capsys):
-    monkeypatch.setenv("NEON_STORAGE_LIMIT_MB", str(used_mb(db) * 3))
+    # #307: the size of a real database moves by a page between two reads, so the size is fixed here and the percentage is exact
+    monkeypatch.setattr(db_budget, "usage", lambda _db: {"database_mb": 10.0, "tables_mb": {}})
+    monkeypatch.setenv("NEON_STORAGE_LIMIT_MB", "30")
     report = db_budget.check(db, refuse=True, stage="test")
     out = capsys.readouterr().out
     assert report["used"] == "33%" and "::warning::" not in out
     assert json.loads(out.splitlines()[0])["db_budget"]["stage"] == "test"
+
+
+def test_a_database_size_that_moves_between_reads_does_not_change_the_band(db, monkeypatch, capsys):
+    """#307: the same real database measured twice may differ by 0.1 MB; one third of the limit stays well under 70%."""
+    real = db_budget.usage(db)["database_mb"]
+    for size in (real, real + 0.1, real - 0.1):
+        monkeypatch.setattr(db_budget, "usage", lambda _db, size=size: {"database_mb": size, "tables_mb": {}})
+        monkeypatch.setenv("NEON_STORAGE_LIMIT_MB", str(real * 3))
+        db_budget.check(db, refuse=True)
+    assert "::warning::" not in capsys.readouterr().out
 
 
 def test_at_70_percent_it_warns_but_does_not_stop(db, monkeypatch, capsys):
