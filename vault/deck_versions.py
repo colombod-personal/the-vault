@@ -19,6 +19,7 @@ from . import deck_refresh
 from .models import Deck, DeckVersion
 
 KEEP = 20
+LAST_CHANGE_LISTED = 40  # changes listed in get_deck's last_change; the summary keeps the true totals (#327)
 SOURCES = ("saved", "edited", "imported", "refreshed", "opened")
 
 
@@ -73,9 +74,13 @@ def last_change(db: Session, deck: Deck) -> dict | None:
     if len(rows) < 2:
         return None
     changes = deck_refresh.diff(rows[1].text, rows[0].text)
-    return {"at": _iso(rows[0].created_at), "version": rows[0].id, "source": rows[0].source, "changes": changes,
-            "summary": deck_refresh.summary(changes),
-            "note": "Between the previous saved version of this deck and the current list."}
+    out = {"at": _iso(rows[0].created_at), "version": rows[0].id, "source": rows[0].source,
+           "changes": changes[:LAST_CHANGE_LISTED], "summary": deck_refresh.summary(changes),
+           "note": "Between the previous saved version of this deck and the current list."}
+    if len(changes) > LAST_CHANGE_LISTED:  # a big edit must not make the deck answer huge: the web app's History lists them all
+        out["more_changes"] = len(changes) - LAST_CHANGE_LISTED
+        out["note"] += f" The first {LAST_CHANGE_LISTED} of {len(changes)} changes are listed; summary has the totals."
+    return out
 
 
 def seen(db: Session, deck: Deck, text: str | None = None, now: datetime | None = None) -> dict:
