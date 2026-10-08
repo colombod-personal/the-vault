@@ -66,18 +66,29 @@ def check(changed: list[str], body: str) -> list[str]:
     return problems
 
 
-ISSUE_LINE = re.compile(r"(?im)^\s*(?:Refs\s+#\d+|No issue:\s*\S.{8,})")
-CLOSING = re.compile(r"(?i)\b(?:closes|closed|close|fixes|fixed|fix|resolves|resolved|resolve)\s+#\d+")
+ISSUE_LINE = re.compile(r"(?im)^\s*(?:(?:Refs|Closes|Fixes|Resolves)\s+#\d+|No issue:\s*\S.{8,})")
+CLOSING_LINE = re.compile(r"(?im)^\s*(?:Closes|Fixes|Resolves)\s+#\d+")
+REFS_LINE = re.compile(r"(?im)^\s*Refs\s+#\d+")
+LEFT_OPEN = re.compile(r"(?im)^\s*Left open:\s*\S.{3,}")
+EVIDENCE = re.compile(r"(?i)\bevidence\b")
 
 
 def issue_link_problems(body: str) -> list[str]:
-    """Every pull request is tied to its issue so the issue's Progress block can follow it (AGENTS.md section 8), and never closes one."""
+    """Every pull request is linked to its issue with a keyword GitHub understands (a plain mention links nothing): `Closes #n` when
+    the pull request completes the issue (GitHub shows it in the issue's Development panel and closes the issue on merge, so the
+    description must carry the evidence), `Refs #n` when part of the issue is left (then it says what: `Left open: ...`)."""
     problems = []
-    if CLOSING.search(body or ""):
-        problems.append("the description uses a closing keyword (Closes/Fixes/Resolves #n): GitHub would close the issue on merge, before "
-                        "anything was verified. Write `Refs #n`; the issue is closed by hand once every criterion has its evidence")
-    if not ISSUE_LINE.search(body or ""):
-        problems.append("the description names no issue: start it with `Refs #n` (or `No issue: <why this needs none>`)")
+    body = body or ""
+    closing, refs = CLOSING_LINE.search(body), REFS_LINE.search(body)
+    if not ISSUE_LINE.search(body):
+        problems.append("the description names no issue: start it with `Closes #n` (this pull request completes the issue: GitHub links it "
+                        "and closes the issue on merge), `Refs #n` (part of it is left) or `No issue: <why this needs none>`")
+    if closing and not EVIDENCE.search(body):
+        problems.append("the description uses `Closes #n` but has no evidence section: a pull request that closes an issue shows, per "
+                        "criterion, the test or run that proves it")
+    if refs and not closing and not LEFT_OPEN.search(body):
+        problems.append("the description uses `Refs #n` (part of the issue is left): add a line `Left open: <what is not done>`, or use "
+                        "`Closes #n` if this completes it")
     return problems
 
 

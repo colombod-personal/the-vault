@@ -30,7 +30,8 @@ START = "<!-- progress:start (kept by scripts/issue_progress.py: do not edit by 
 END = "<!-- progress:end -->"
 STATES = ("open", "in review", "merged", "verified", "owner", "waived")
 DONE = {"verified", "waived"}
-REFS = re.compile(r"(?im)^\s*Refs\s+((?:#\d+[\s,]*(?:and\s+)?)+)")
+REFS = re.compile(r"(?im)^\s*(?:Refs|Closes|Fixes|Resolves)\s+((?:#\d+[\s,]*(?:and\s+)?)+)")
+CLOSES = re.compile(r"(?im)^\s*(?:Closes|Fixes|Resolves)\s+((?:#\d+[\s,]*(?:and\s+)?)+)")
 
 
 def clean(text: str) -> str:
@@ -177,8 +178,13 @@ def main(argv: list[str] | None = None) -> int:
                 return rows, prs
             line = update(n, mutate)
             sha = (pr.get("mergeCommit") or {}).get("oid", "")[:7]
-            note = (f"PR #{args.pr} merged ({sha}). Merged is not verified: the Progress block above says what is left."
-                    if target == "merged" else f"PR #{args.pr} opened for this issue. Progress: {line}")
+            closes = n in {int(x) for m in CLOSES.finditer(pr.get("body") or "") for x in re.findall(r"#(\d+)", m.group(1))}
+            if target == "merged" and closes:
+                note = (f"PR #{args.pr} merged ({sha}) and, because it said Closes, GitHub closes this issue. Rows still marked open or merged "
+                        "in the Progress block above are checks to run after deploy; if one fails, this issue is reopened.")
+            else:
+                note = (f"PR #{args.pr} merged ({sha}). Merged is not verified: the Progress block above says what is left."
+                        if target == "merged" else f"PR #{args.pr} opened for this issue. Progress: {line}")
             gh("issue", "comment", str(n), "--body", f"{note}\n\n**{line}**")
         return 0
     if args.cmd == "tick":

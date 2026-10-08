@@ -1,4 +1,4 @@
-Refs #<issue>   <!-- never "Closes": the issue is closed by hand once every criterion has evidence (AGENTS.md) -->
+Closes #<issue>   <!-- a real link: GitHub shows this PR in the issue and closes it on merge. Use it when this PR completes the issue and the evidence table below shows it. If part is left, write `Refs #<issue>` and a line `Left open: <what>` instead (AGENTS.md section 8) -->
 
 | Criterion | What now makes it true | Evidence (test name, command output, file) |
 |---|---|---|
