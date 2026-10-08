@@ -273,8 +273,14 @@ def provenance_blocks(kinds: tuple[str, ...], body: dict) -> list[dict]:
                                url="https://scryfall.com", as_of=as_of, wizards_material=True).model_dump(exclude_none=True))
     if "archidekt" in kinds:
         deck = body.get("deck") if isinstance(body.get("deck"), dict) else {}
-        owner = (body.get("owner") or {}).get("username") if isinstance(body.get("owner"), dict) else deck.get("author")
-        deck_id = body.get("id") or deck.get("id")
+        source = body.get("source") if isinstance(body.get("source"), dict) else {}  # refresh_deck: the link it read
+        credit = deck.get("credit") if isinstance(deck.get("credit"), dict) else {}
+        owner = ((body.get("owner") or {}).get("username") if isinstance(body.get("owner"), dict) else None)             or deck.get("author") or source.get("author") or deck.get("source_author") or credit.get("author")
+        # A saved deck's own `id` is the Vault's, not Archidekt's (#321): its stored link says where the list really is.
+        link = next((u for u in (source.get("url"), deck.get("source_url"), credit.get("url"))
+                     if isinstance(u, str) and u.startswith("https://") and "archidekt.com/" in u), None)
+        deck_id = None if link else (body.get("id") if not deck else None)
+        url = link or (f"https://archidekt.com/decks/{deck_id}" if deck_id else "https://archidekt.com")
         out.append(prov.source("Archidekt", origin=f"deck by {owner}" if owner else "a deck by its Archidekt author",
-                               url=f"https://archidekt.com/decks/{deck_id}" if deck_id else "https://archidekt.com").model_dump(exclude_none=True))
+                               url=url).model_dump(exclude_none=True))
     return out

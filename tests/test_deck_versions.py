@@ -227,3 +227,20 @@ def test_migration_0115_marks_each_existing_decks_latest_version_as_seen(blank_d
                 "SELECT column_name FROM information_schema.columns WHERE table_name = 'decks'"))}
     finally:
         database.engine.dispose()
+
+
+def test_an_edit_that_does_not_send_the_link_keeps_the_time_the_list_was_taken_from_it(signed_in):
+    """#322: fetched_at says when the list was last read from its link; an assistant's update_deck did not read it."""
+    import time
+
+    link = "https://archidekt.com/decks/6803907"
+    made = signed_in.post(f"{V1}/decks", json={"name": "From a link", "text": BASE, "source_url": link, "source_author": "layer0"}).json()
+    first = signed_in.get(f"{V1}/decks/{made['id']}").json()["credit"]["fetched_at"]
+    time.sleep(0.05)
+    edited = signed_in.put(f"{V1}/decks/{made['id']}", json={"name": "From a link", "text": BASE + "1 Mind Stone\n"})  # no source_url
+    assert edited.status_code == 200
+    assert signed_in.get(f"{V1}/decks/{made['id']}").json()["credit"]["fetched_at"] == first
+    time.sleep(0.05)
+    saved = signed_in.put(f"{V1}/decks/{made['id']}", json={"name": "From a link", "text": BASE, "source_url": link})  # the web app's save
+    assert saved.status_code == 200
+    assert signed_in.get(f"{V1}/decks/{made['id']}").json()["credit"]["fetched_at"] > first
