@@ -26,9 +26,8 @@ def test_there_is_one_head_and_every_revision_has_its_parent():
     assert len(numbered) == len(set(numbered))
 
 
-def test_the_price_compaction_follows_the_latest_other_migration():
+def test_the_price_compaction_follows_the_migration_before_it_and_there_is_one_head():
     s = script()
     compaction = s.get_revision("0113")
-    assert s.get_heads() == ["0113"], "the compaction is the head; its parent is the previous head (0112 once the re-import migration is in)"
-    assert compaction.down_revision == max(r.revision for r in s.walk_revisions() if r.revision != "0113"), \
-        "set down_revision in vault/migrations/versions/0113_compact_price_snapshots.py to the newest other migration"
+    assert len(s.get_heads()) == 1
+    assert compaction.down_revision == max(r.revision for r in s.walk_revisions() if r.revision < "0113"),         "set down_revision in vault/migrations/versions/0113_compact_price_snapshots.py to the migration numbered just before it"

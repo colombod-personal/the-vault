@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from .importer import export_collection
 from .sharing import display_name
-from .models import AccessToken, ApiSession, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionBaseline, CollectionValue, Deck, Entry, Identity, Import, Share, StagedUpload, User
+from .models import AccessToken, ApiSession, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionBaseline, CollectionValue, Deck, DeckVersion, Entry, Identity, Import, Share, StagedUpload, User
 from .prices import history
 from .collection_view import CollectionView
 
@@ -39,7 +39,7 @@ collection.json      your collection as the app shows it, with current prices
 imports.json         every CSV you imported, with what changed each time (and which edits made in the Vault were kept)
 last_import_cards.json  the cards of the last file you imported, as they were: what the next import is compared with
 value_history.json   your collection's daily market value and cost
-decks.json           your saved decks (each also as a .txt file in decks/)
+decks.json           your saved decks with their earlier versions (each deck also as a .txt file in decks/)
 shares.json          who you have given access to, and what others have shared with you
 app_sessions.json    apps signed in to your account (tokens are never exported)
 passkeys.json        passkeys that can sign in to your account (names and dates; keys stay on your devices)
@@ -123,7 +123,9 @@ def export_archive(db: Session, user: User) -> bytes:
         z.writestr("decks.json", _json([
             {"id": d.id, "name": d.name, "source_url": d.source_url, "source_author": d.source_author,
              "source_fetched_at": d.source_fetched_at, "created_at": d.created_at,
-             "updated_at": d.updated_at, "text": d.text}
+             "updated_at": d.updated_at, "text": d.text,
+             "versions": [{"id": v.id, "created_at": v.created_at, "source": v.source, "text": v.text}
+                          for v in db.scalars(select(DeckVersion).where(DeckVersion.deck_id == d.id).order_by(DeckVersion.id))]}
             for d in decks
         ]))
         for d in decks:

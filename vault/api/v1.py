@@ -36,7 +36,7 @@ from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
 from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, import_days, view_version
-from .. import archidekt_cache, deck_import, deck_match, deck_overview, deck_refresh, experts, owned_changes
+from .. import archidekt_cache, deck_import, deck_match, deck_overview, deck_refresh, deck_versions, experts, owned_changes
 from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, ImportOptions, export_collection, import_collection,
                         preview_import as preview_collection_import, user_entries)
 from ..models import AccessToken, ApiSession, Card, Deck, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
@@ -813,6 +813,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                         source_fetched_at=datetime.now(timezone.utc) if body.source_url else None)
             db.add(deck)
             db.flush()
+            deck_versions.record(db, deck, "saved")
             return _deck(deck)
 
         return idempotent(request, db, user, 201, run)
@@ -851,7 +852,26 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         out = _deck(deck, covered, deck_overview.identities(db, deck_overview.read(deck.text)["commanders"]))
         if detail == "summary":
             out["coverage"], out["summary"] = _lean_coverage(covered)
+        out["last_change"] = deck_versions.last_change(db, deck)
         return out
+
+    @router.get("/decks/{deck_id}/versions", tags=["decks"], response_model=S.DeckVersions,
+                summary="A saved deck's versions, newest first, each with what changed from the one before (at most 20 are kept)")
+    def list_deck_versions(deck_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        deck = owned_deck(db, user, deck_id)
+        items = deck_versions.versions(db, deck)
+        return {"deck_id": deck.id, "keep": deck_versions.KEEP, "total": len(items), "items": items,
+                "_links": {"self": link(f"{V1}/decks/{deck.id}/versions")}}
+
+    @router.get("/decks/{deck_id}/versions/{version_id}", tags=["decks"], response_model=S.DeckVersionText,
+                summary="One older version of a saved deck: its list as it was")
+    def get_deck_version(deck_id: Id, version_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        deck = owned_deck(db, user, deck_id)
+        version = deck_versions.get(db, deck, version_id)
+        if version is None:
+            raise HTTPException(404, "No such version of this deck")
+        return {"id": version.id, "deck_id": deck.id, "created_at": _iso(version.created_at), "source": version.source,
+                "text": version.text, "_links": {"self": link(f"{V1}/decks/{deck.id}/versions/{version.id}")}}
 
     @router.put("/decks/{deck_id}", tags=["decks"], response_model=S.Deck)
     def update_deck(deck_id: Id, body: S.DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -884,6 +904,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             raise HTTPException(404, "Deck not found")
         db.commit()
         db.refresh(deck)
+        deck_versions.record(db, deck, "edited")
+        db.commit()
         return _deck(deck)
 
     @router.post("/decks/{deck_id}/source-author", tags=["decks"], response_model=S.AuthorRecorded,
@@ -986,12 +1008,14 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 if body.name:
                     same.name = body.name.strip()[:200] or same.name
                 db.flush()
+                deck_versions.record(db, same, "refreshed")
                 return {"created": False, "updated": True, "deck": _deck(same), "counts": parsed["counts"]}
             deck = Deck(user_id=user.id, name=(body.name or parsed["name"] or "Archidekt deck").strip()[:200], text=parsed["text"],
                         source_url=url, source_author=parsed["author"], format=parsed["format"],
                         source_fetched_at=datetime.now(timezone.utc))
             db.add(deck)
             db.flush()
+            deck_versions.record(db, deck, "imported")
             return {"created": True, "updated": False, "deck": _deck(deck), "counts": parsed["counts"]}
 
         return idempotent(request, db, user, 201, run)
@@ -1031,6 +1055,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             deck.format = parsed["format"] or deck.format
             deck.source_author = parsed["author"] or deck.source_author
             db.flush()
+            deck_versions.record(db, deck, "refreshed")
             return {"refreshed": True, "deck": _deck(deck, brief=True), "changes": changes,
                     "summary": deck_refresh.summary(changes)}
 

@@ -481,9 +481,35 @@ class Deck(Hal):
                                 "Vault last took the list from that link) and the notice to repeat")
     coverage: Coverage | None = None
     text: str | None = Field(None, description="The decklist (left out of the AI tools' brief deck list)")
+    last_change: dict | None = Field(None, description="What changed between the deck's previous saved version and its current list "
+                                     "(`changes`, `summary`, when, from what); absent until the deck has two versions (#93)")
     created_at: str
     updated_at: str
     from_: str | None = Field(None, alias="from", description="Who shared it (shared decks only)")
+
+
+class DeckVersionEntry(BaseModel):
+    id: int
+    created_at: str
+    source: str = Field(description="saved, edited, imported or refreshed")
+    cards: int
+    changes: list[dict] | None = Field(None, description="Cards whose count changed from the version before; null for the oldest kept")
+    summary: dict | None = None
+
+
+class DeckVersions(Hal):
+    deck_id: int
+    keep: int = Field(description="Versions kept per deck; the oldest are dropped first")
+    total: int
+    items: list[DeckVersionEntry]
+
+
+class DeckVersionText(Hal):
+    id: int
+    deck_id: int
+    created_at: str
+    source: str
+    text: str
 
 
 class DeckPage(Page):
