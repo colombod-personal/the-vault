@@ -321,7 +321,8 @@ class ImportItem(Hal):
     copies: int
     changes: dict[str, int]
     created_at: str
-    kind: str = Field("import", description="import (a file), assistant (edits made through an assistant) or undo")
+    kind: str = Field("import", description="import (a file), assistant (edits made through an assistant), undo, move (copies moved "
+                                            "between buckets), reset (the collection or one bucket emptied) or reset_undo")
     app: str | None = Field(None, description="For assistant edits: the app that made them")
     lines: list[dict] | None = Field(None, description="For assistant edits: each printing, copies before and after")
     merge: dict | None = Field(None, description="For imports: how the file was applied (mode, what came from the person's app, "
@@ -329,7 +330,9 @@ class ImportItem(Hal):
     bucket: dict | None = Field(None, description="For an import into one bucket: its id and name; every other bucket was left alone")
     undoable: bool | None = Field(None, description="For assistant edits: true on the one change set that can be undone now "
                                   "(the latest, until the collection changes again); POST /collection/changes/undo")
-    undone: bool | None = Field(None, description="For assistant edits: true once it was undone")
+    undone: bool | None = Field(None, description="For assistant edits and resets: true once it was undone")
+    reset: dict | None = Field(None, description="For a reset or its undo: the scope, what was removed (rows, copies, market value, "
+                               "tags, notes, history entries) and whether it can be undone")
 
 
 class ImportPage(Page):

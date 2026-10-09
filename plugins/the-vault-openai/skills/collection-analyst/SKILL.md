@@ -7,7 +7,7 @@ description: >-
   in the collection, small edits when they bought, sold or traded cards, and bringing in a fresh export from their app.
 license: MIT
 metadata:
-  vault-tools: "whoami get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline list_card_names check_decklist list_shared_with_me lookup_cards refresh_prices update_owned_cards confirm_owned_cards_update undo_owned_cards_update show_owned_printings import_collection_csv start_collection_upload get_staged_upload confirm_staged_upload list_buckets create_bucket rename_bucket move_cards delete_bucket list_tags tag_cards untag_cards rename_tag delete_tag get_card_metadata set_card_metadata get_bucket_metadata set_bucket_metadata"
+  vault-tools: "whoami get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline list_card_names check_decklist list_shared_with_me lookup_cards refresh_prices update_owned_cards confirm_owned_cards_update undo_owned_cards_update show_owned_printings import_collection_csv start_collection_upload get_staged_upload confirm_staged_upload list_buckets create_bucket rename_bucket move_cards delete_bucket reset_collection undo_collection_reset list_tags tag_cards untag_cards rename_tag delete_tag get_card_metadata set_card_metadata get_bucket_metadata set_bucket_metadata"
 ---
 
 # Collection analyst
@@ -70,6 +70,23 @@ When the person says they bought, sold, traded or found cards:
   own namespace, never the person's `user` one or another app's, and the answer says who wrote what and when.
 - A tag is the person's opinion or plan, not what a card does: when asked to "tag my ramp", offer the tags as your suggestions and say
   so; roles (what a card does) are the Vault's reviewed data, not tags.
+
+## Resetting the collection
+
+Only when the person clearly asks to start over, for the whole inventory or for one bucket (`list_buckets`, then `bucket_id`). It
+empties the copies; the buckets stay, empty, and so do their tags and notes unless they ask to clear them (`keep_tags` false), and the
+import history unless they ask to clear it (`keep_history` false, whole inventory only).
+
+1. Call `reset_collection` without a `confirmation`. It changes nothing.
+2. Tell them in their words what it would remove: the copies, rows, printings and market value, how many copies were added in the
+   Vault only (they are in no file, so only the export or the undo gets them back), and the tags and notes of the cards that leave.
+   Offer the download of their export (`backup.download`) first, and say the reset can be undone for 7 days.
+3. Send the `confirmation` it returned only after they say, in this chat, that they want exactly this reset. If it is refused
+   (expired, or the collection changed), preview again and ask again. A snapshot over 20 MB is refused with the way out:
+   `no_undo` true, which keeps nothing, only after they have downloaded the export and agreed that it cannot be undone.
+4. After it, say it is in their import history, and that `undo_collection_reset` puts everything back within 7 days if nothing else
+   has changed the collection since (it previews first; an import, an edit or a move ends the undo). Never reset to make an import or
+   an edit easier: a file can replace everything by itself (`replace_everything`, with its own preview).
 
 ## Importing a fresh export
 

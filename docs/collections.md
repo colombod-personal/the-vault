@@ -218,3 +218,55 @@ with a fresh `Idempotency-Key`, then reloads the collection and the bucket list 
 unreadable file (400), a missing bucket (404), a changed collection (409) and the limit (429) show in the dialog as the server words them. The
 top bar's "Import CSV" is unchanged (the whole collection, no preview). Tests: `tests/js/api_client.test.mjs` (`importPreview`, `importInto`),
 phone measure and screenshots in the pull request.
+
+Built since (#129, reset: server, MCP and the account panel). Reset is the same operation as an import with an empty target in **replace**
+mode for the selected scope (decision 6), through the importer's own `_replace` (`vault/collection_reset.py`), so a card added only in the
+Vault (in neither the baseline nor the empty file) is removed too, which a merge would have kept (`tests/test_collection_reset.py`). REST
+`POST /collection/reset` (preview without `confirmation`), `GET /collection/reset`, `POST /collection/reset/undo`; MCP `reset_collection`
+and `undo_collection_reset`; web: Account → "Reset collection". What the design left open, and how it was decided (without a question to the
+owner: each is reversible by a later change and changes nothing agreed; say so on #129 to change one):
+
+- **Scope and what stays.** The whole inventory or one bucket (`bucket_id`; another person's is a 404). **Buckets stay, empty** (the open
+  question of the issue): they are the person's structure, and the app's names for where copies live. **Tags and notes stay by default**,
+  shown as "not owned" (decision 2); `keep_tags: false` clears them (for a bucket: only those of cards that no longer exist anywhere in the
+  inventory, so a card still owned in another bucket keeps its tags). **The import history stays by default**; `keep_history: false` clears
+  it for the whole inventory (a bucket has no history of its own: 422). The reset is an import-history entry of its own kind (`reset`, the
+  undo is `reset_undo`) and the baseline of the scope becomes the empty file (so importing the person's file again brings everything back as
+  "what changed in the app"). The collection summary's `source` and `imported_at` follow the latest entry of the history, as they do for an
+  assistant's edit.
+- **Preview, then confirm.** The preview says what goes: rows, copies, printings, cards, market value, unmatched rows, how many cards and
+  copies were **added in the Vault only** (cards in no file the person imported: this is the number a reset surprises people with; unknown
+  when the Vault holds no record of the last file), how many were edited here, what the tags, notes and history do, what other buckets keep,
+  and the download of the export of that scope (`/collection/export.csv[?bucket=]`, the existing format: no new archive). It returns a
+  `confirmation` (HMAC over the person, scope, options, collection version and a digest of the rows and tags it would touch; 15 minutes);
+  apply recomputes the preview and refuses a different one (409). On the web the person also types `RESET`.
+- **Automatic backup = the snapshot plus the download.** The reset keeps the removed rows for the undo, and the preview links the export
+  (the file that can be imported again); no new archive format.
+- **Undo window: 7 days, one snapshot per person (the latest reset only).** Compact JSON (the removed rows as column lists, the baselines
+  of the scope, the tags, notes and history when they were cleared) compressed with zlib in `reset_snapshots.payload`; deleted by the daily
+  retention job when `expires_at` has passed, when the next reset replaces it, when the undo is used, and with the account. **Cap: 20 MB of
+  JSON** (before compression, about 84,000 copies): over it the preview refuses with the way out (download the export, then reset with
+  `no_undo: true`, which keeps nothing).
+- **Storage cost (the Neon budget, `docs/catalog-design.md`: 1 GB on the free plan), measured with `ResetSnapshot`:** the demo collection
+  (`demo125.csv`, 93 copies in 11 rows) is 4,094 bytes of JSON and 1,261 bytes stored; the test fixture (7 copies) 2,032 and 784 bytes; a
+  **synthetic 22,000-copy collection** (11,063 rows, 12 folders, matched printings, prices and dates paid) is 5,237,054 bytes of JSON and
+  **858,003 bytes stored (0.82 MB)**, about 2.5 s to preview and reset on a laptop. The worst case is every person holding one such
+  snapshot for 7 days: 1,000 people with a 22,000-copy collection would be 0.8 GB, which is why it is one per person, 7 days and compressed;
+  a small collection like the demo is about 1 KB, and the daily job removes what expired. Nothing else grows: no row of the
+  inventory is copied while a collection exists.
+- **Undo restores exactly**: the same rows with the same ids, positions, buckets, folder strings, prices, dates and baselines (whole
+  inventory: the whole base and each bucket's own base; one bucket: that bucket's base), the tags, notes and history the reset cleared (a tag
+  or note the person made again since is kept, theirs wins), and it is recorded as `reset_undo`. **The rule for when it is refused is the
+  simplest correct one:** the collection must be exactly as the reset left it (`users.collection_version` is the reset's: any import,
+  assistant edit or move since ends the undo), the scope must still be empty, and every bucket the copies lived in must still exist
+  (deleting an emptied bucket ends the undo). Anything else would mean guessing where copies go, so it is refused (409) with the reason
+  (`GET /collection/reset` says `can_undo` and `why_not`). The snapshot is used up by the undo.
+- **Scopes and limits.** Write scope for the preview too (the preview is step one of a destructive action; it is not in `READ_ONLY_POSTS`),
+  10 a minute per person (429), `Idempotency-Key` honoured, no account power: a connected app with write scope can reset after a confirm,
+  as it can already import with `replace_everything` (`docs/mcp-oauth-threat-model.md`, "Resetting the collection").
+- **GDPR** (`docs/gdpr.md`): a reset is not erasure; the snapshot is a table in the data map, in the export (`last_reset.json`), erased with
+  the account and deleted after 7 days; the privacy notice says so.
+
+Evidence of the web part: `docs/screenshots/reset-{section,preview,typed,undo,undone}-{1400,390}.jpg` (the demo collection with a card added
+only in the Vault, tags and a note; at 390 px no horizontal overflow, 0 targets under 44 px and no text under the minimum, measured with
+`scripts/measure_phone.js`).

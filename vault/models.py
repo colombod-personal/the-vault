@@ -237,6 +237,26 @@ class BucketBaseline(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class ResetSnapshot(Base):
+    """What the person's last reset (#129) removed, kept for a limited time so it can be undone: one per person (the latest reset
+    only; the next reset replaces it), compact JSON compressed with zlib in ``payload`` (the removed rows with their bucket and
+    folder, the baselines of the scope, and the tags, notes and import history when the reset cleared them). ``version_after`` is
+    the collection version the reset left: the undo is allowed only while the collection is still at it. Deleted by the daily
+    retention job once ``expires_at`` has passed, with the account, and when the undo is used."""
+
+    __tablename__ = "reset_snapshots"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    import_id: Mapped[int | None] = mapped_column(ForeignKey("imports.id", ondelete="SET NULL"))  # the reset's entry in the history
+    bucket_id: Mapped[int | None] = mapped_column(Integer)  # the bucket that was reset; none: the whole inventory
+    version_after: Mapped[int] = mapped_column(Integer)
+    summary: Mapped[dict] = mapped_column(JSON, default=dict)  # what the snapshot holds, in words and numbers
+    payload: Mapped[bytes] = mapped_column(LargeBinary)
+    raw_bytes: Mapped[int] = mapped_column(Integer)  # the JSON before compression (the cap applies to it)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class Deck(Base):
     """A saved decklist (plain text, any common format)."""
 

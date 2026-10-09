@@ -428,3 +428,33 @@ would also lump in neighbours on the same ISP delegation (a whole site's users s
 /48 can already rotate through 65,536 /64s. The /64 is kept: it stops the cheap case, and a determined attacker with a /48 is the
 same problem as one with many IPv4 addresses, which the per-IP limit never claimed to stop. With the challenge stateless, the limit
 no longer protects other people's sign-in, only the server's work.
+
+## Resetting the collection (#129, 2026-10-09)
+
+A reset (`POST /collection/reset`, the MCP tool `reset_collection`) empties the whole inventory or one bucket: an account-level
+destructive action that is reachable by an OAuth app or a personal token **with the write scope**, because it is a collection
+operation like an import with `replace_everything` (which such a caller can already do), not an account power (`account_user`, section 5:
+creating tokens, deleting the account). It touches `vault/privacy.py` only to add the snapshot table to erasure and export.
+
+What stops an assistant resetting without the person:
+
+- **Scope.** A read-only token and a read-only grant are refused (403), the preview included: the preview is step one of a destructive
+  action, so `POST /collection/reset` is not in `READ_ONLY_POSTS` (`tests/test_collection_reset.py`). The MCP tools are not listed
+  without the write scope, and are marked destructive so a host asks first.
+- **Two steps, bound to the preview.** Without a `confirmation` the call only previews. The confirmation is an HMAC over the person, the
+  scope, the options (keep tags, keep history, no undo), the collection version, a digest of the rows (and tags) it would remove and its
+  expiry (15 minutes); apply recomputes the preview and refuses (409) anything that differs, so a changed collection, other options or
+  another scope are stale. An assistant that previews and confirms in one go is still a write-scope app doing what it was allowed: the
+  protection against that is the one every write tool has (the host's approval of a destructive tool, the server instructions and the
+  skill that say to show the numbers and the export link and to wait for the person's exact yes). **On the web** the person must also
+  type `RESET`, as account deletion asks for `DELETE`.
+- **It is not final.** For 7 days the latest reset keeps a snapshot (`reset_snapshots`) and `undo_collection_reset` restores the same
+  rows, buckets, folders and baselines, as long as nothing else changed the collection (an import, an edit or a move ends the undo:
+  it is refused rather than guessed). `no_undo` keeps none; the preview offers the export of the scope as a download first. The reset
+  is recorded in the import history under the app's name (`imports.kind = reset`).
+- **Tenancy.** The scope is the caller's: another person's `bucket_id` is a 404, as is another person's snapshot (the snapshot is
+  keyed by the caller's id, there is no id to guess). Rate limit 10 a minute per person; `Idempotency-Key` honoured.
+
+Residual: a connected app with write scope can reset after a confirm, as it can already import a file with `replace_everything`; what the
+person can still do is undo it for 7 days, or import the export. The snapshot holds the same personal data as the copies it removed, so
+it is in the data map, the export (`last_reset.json`), erasure and the daily retention job (`docs/gdpr.md`).

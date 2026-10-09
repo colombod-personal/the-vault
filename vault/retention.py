@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import delete, text
 from sqlalchemy.orm import Session
 
-from .models import CollectionValue, StagedUpload
+from .models import CollectionValue, ResetSnapshot, StagedUpload
 
 DAILY_DAYS = 90
 WEEKLY_UNTIL = DAILY_DAYS + 182  # six months of weekly points
@@ -66,8 +66,14 @@ def prune_staged_uploads(db: Session) -> int:
     return db.execute(delete(StagedUpload).where(StagedUpload.expires_at <= datetime.now(timezone.utc))).rowcount or 0
 
 
+def prune_reset_snapshots(db: Session) -> int:
+    """The undo of a collection reset (#129) lasts 7 days: the snapshot holds the copies the person removed, so it is deleted when
+    its time is up, whether or not anyone asked. (It is also replaced by the next reset, and deleted when the undo is used.)"""
+    return db.execute(delete(ResetSnapshot).where(ResetSnapshot.expires_at <= datetime.now(timezone.utc))).rowcount or 0
+
+
 def apply(db: Session, today: date | None = None) -> dict:
     report = {"prices_deleted": prune_price_snapshots(db, today), "values_deleted": prune_collection_values(db, today),
-              "uploads_deleted": prune_staged_uploads(db)}
+              "uploads_deleted": prune_staged_uploads(db), "reset_snapshots_deleted": prune_reset_snapshots(db)}
     db.commit()
     return report
