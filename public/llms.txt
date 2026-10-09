@@ -20,6 +20,13 @@ be revoked (Account → Connected apps for OAuth).
   `client_id`, scopes `read` (default) and `write` (the person must tick it). Access tokens last
   an hour; refresh tokens rotate, and a reused one revokes the connection. OAuth tokens work on
   `/api/mcp` only, and can never manage the account.
+- One-prompt setup: paste `Set up The Vault for me. Follow only this page: <the page below>` into your assistant. Each page says which
+  steps the assistant does (ASSISTANT) and which only the person can (PERSON), checks the connection with `whoami`, and is read-only:
+  - Claude (Claude Code, claude.ai or Claude Desktop): https://mtgvault.cards/setup/claude.md
+  - ChatGPT (ChatGPT on the web or the desktop app): https://mtgvault.cards/setup/chatgpt.md
+  - Codex (the Codex CLI, the Codex IDE extension or Codex cloud): https://mtgvault.cards/setup/codex.md
+  - GitHub Copilot (GitHub Copilot CLI, VS Code or the GitHub Copilot desktop app): https://mtgvault.cards/setup/copilot.md
+- First tour after connecting: the MCP prompt `vault_start` (`prompts/get`); it is read-only and uses the person's own collection and decks.
 - Token: header `Authorization: Bearer vault_pat_...` (a personal access token from Account → Agents & API). Keep it in an
   environment variable or the client's own secret prompt, never in a command line (shell history, the chat).
 - Each client has its own format, taken from its documentation (read 2026-10-07); the host is https://mtgvault.cards:
@@ -222,7 +229,7 @@ be revoked (Account → Connected apps for OAuth).
   - deck analysis, computed by the Vault: `deck_stats` (with a Commander Bracket floor from Wizards' published rules;
     pass `include_combos` to add Commander Spellbook's two-card combos), `simulate_draws`, `deck_legality`, `find_upgrades`,
     `validate_deck_changes`, `find_combos`, `shopping_list`
-- MCP prompts (`prompts/list`): `rules_judge`, `explain_interaction`, `upgrade_deck`, `shopping_help`, `council_review`.
+- MCP prompts (`prompts/list`): `vault_start` (the read-only first tour), `rules_judge`, `explain_interaction`, `upgrade_deck`, `shopping_help`, `council_review`.
 - A read-only token doesn't list the write tools; all of the above are read-only.
 
 ## How to answer (rules, cards, decks)
