@@ -1,6 +1,6 @@
 # Collections: inventory, buckets, tags and metadata (decision doc for #118)
 
-Status: agreed by the owner on 2026-10-08 (#287: decisions 1 to 4, all as recommended). Not built yet: building starts with #121. It is the root of the Collections epic (#117): #119 (metadata), #120 (tags), #121 (schema), #122 to #130 wait on it.
+Status: agreed by the owner on 2026-10-08 (#287: decisions 1 to 4, all as recommended; the owner's "all as recommended" on 2026-10-09 covers the sub-designs below). It is the root of the Collections epic (#117): the schema (#121), buckets (#123) and tags (#127) are built (see "What is built" at the end); #122, #124, #125, #128, #129 and #130 follow.
 
 ## What exists today (checked in the code, 2026-10-06)
 
@@ -41,6 +41,8 @@ Tags versus roles: a tag is the person's own opinion or plan (`trade`, `commande
 - **Unmatched copies are not tags.** An entry the importer could not match has neither a Scryfall id nor an oracle id (`vault/importer.py`), so it cannot take an `(person, oracle_id, tag)` key. "Unmatched" stays derived per entry from the missing printing, as today, and is shown as a status, never stored as a tag. If the card is matched later, the person's tags can be added then.
 - Namespaces are plain text with a colon (`deck:sliver`, `trade:sell`); no curated list in v1. Slug rules: lower case, letters, digits, `-`, `:`; at most 40 characters.
 - Limits: at most 50 tags per card and 500 distinct tags per person, so no response grows with the collection (cursor paging everywhere).
+- **Tags an assistant wrote (#120).** An assistant's tag is an assignment with `source = assistant` and the app's name in `source_detail`; it is listed and shown as the assistant's, never as the person's own. The person **accepts** it by tagging the same card with the same tag themselves (the assignment is then the person's: `source` becomes `person`) and **rejects** it by removing the tag (a removal is explicit and deliberate; the assistant is not told to re-add it, and the skills say so). Pinning an assistant's tag, and a confidence or reason per tag, are not in v1: the reason an assistant gives for a suggestion belongs in its own namespace of the card's notes (section 7), not in the tag. This was decided without a question to the owner because it changes nothing already agreed and is reversible by a later column; say so on #120 to change it.
+- **Namespaces and the roles that already exist (#120).** `deck:`, `trade:` and similar prefixes are only a convention in the name (a colon), with no hierarchy and no curated list in v1. A Scryfall Tagger role is shown by its own tools and fields (`role` data with its provenance) and is never a tag: a person may tag a card `ramp`, which says nothing about the card's role.
 
 ### 3. Decks and buckets: related by name, not linked, in v1
 
