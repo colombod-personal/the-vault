@@ -73,7 +73,12 @@ const VAULT_START_NOTICE = (() => {
 // entry too, so Back closes it before leaving the view.
 const VAULT_VIEWS = ['dashboard', 'browse', 'sets', 'decks', 'lab', 'graph', 'valuation', 'help'];
 function vaultRouteFromHash(fallback) {
-  const [view, arg] = location.hash.replace(/^#\/?/, '').split('/').map((p) => decodeURIComponent(p || ''));
+  const [path, search] = location.hash.replace(/^#\/?/, '').split('?');
+  const [view, arg] = path.split('/').map((p) => decodeURIComponent(p || ''));
+  if (view === 'browse') {  // #/browse?bucket=3: one bucket's copies
+    const bucket = Number(new URLSearchParams(search || '').get('bucket'));
+    return Number.isInteger(bucket) && bucket > 0 ? { view, bucket } : { view };
+  }
   if (view === 'sets' && arg) return { view: 'setdetail', code: arg };
   if (view === 'decks' && arg) return { view: 'decks', deckId: arg };
   if (view === 'help') return { view: 'help', section: arg || '' };
@@ -83,6 +88,7 @@ function vaultHashFor(route) {
   if (route.view === 'setdetail') return `#/sets/${encodeURIComponent(route.code)}`;
   if (route.view === 'decks' && route.deckId) return `#/decks/${encodeURIComponent(route.deckId)}`;
   if (route.view === 'help') return helpHashFor(route.section);
+  if (route.view === 'browse' && route.bucket) return `#/browse?bucket=${encodeURIComponent(route.bucket)}`;
   return `#/${route.view}`;
 }
 const vaultUrlFor = (route) => location.pathname + location.search + vaultHashFor(route);
@@ -140,6 +146,17 @@ function App() {
   const closeOverlay = (close) => {
     if (history.state && history.state.overlay) history.back(); // popstate closes it
     else close();
+  };
+  // The bucket Browse shows lives in the address (#/browse?bucket=3) without a history entry of its own, like its other filters.
+  const setBucket = (bucket) => {
+    const next = { view: 'browse', ...(bucket ? { bucket } : {}) };
+    setRouteState(next);
+    history.replaceState({ route: next }, '', vaultUrlFor(next));
+  };
+  // After copies moved between buckets: the collection's version changed, so ask again (without blanking the page).
+  const reloadCollection = async () => {
+    const j = await window.VaultApi.collection();
+    setData(j);
   };
   const openCard = (c) => { setDrawerCard(c); openOverlay(); };
   const openAccount = () => { setAccountOpen(true); openOverlay(); };
@@ -464,7 +481,8 @@ function App() {
             />
           )}
           {route.view === 'browse' && (
-            <Browse data={data} openCard={openCard} initialQuery={route.initialQuery} />
+            <Browse data={data} openCard={openCard} initialQuery={route.initialQuery} bucket={route.bucket} onBucket={setBucket}
+                    onChanged={reloadCollection} readOnly={!!viewing} />
           )}
           {route.view === 'sets' && (
             <Sets data={data} onSetClick={code => nav('setdetail', { code })} />
@@ -497,7 +515,8 @@ function App() {
         </main>
 
         <VaultFooter />
-        {drawerCard && <CardDrawer card={drawerCard} costsHidden={!!data?.meta?.costsHidden}
+        {drawerCard && <CardDrawer card={drawerCard} costsHidden={!!data?.meta?.costsHidden} canMove={!viewing && !!data}
+                                   version={data?.meta?.version} onMoved={reloadCollection}
                                    onClose={() => closeOverlay(() => setDrawerCard(null))} />}
 
         <TweaksPanel title="Tweaks">
@@ -562,7 +581,8 @@ function App() {
   return <>{body}{accountPanel}</>;
 }
 
-function CardDrawer({ card, onClose, costsHidden }) {
+function CardDrawer({ card, onClose, costsHidden, canMove, version, onMoved }) {
+  const { buckets } = window.useBuckets(version, !!canMove);
   const [scry, setScry] = useStateApp(() => card._scry || card.scry || window.Scryfall.cached(card.n, card.s, card.cn));
   useEffectApp(() => {
     if (scry) return;
@@ -670,6 +690,8 @@ function CardDrawer({ card, onClose, costsHidden }) {
             )}
           </div>
         )}
+
+        {canMove && card.q > 0 && <window.BucketMover card={card} buckets={buckets} onMoved={onMoved} />}
 
         {card._ownEntries && card._ownEntries.length > 0 && (
           <div className="panel" style={{ marginBottom: 20 }}>
