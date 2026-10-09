@@ -155,6 +155,40 @@ bucket and, for a tag, the person's tags stamp, so a tag change never serves a s
 distinct counts do not (the section 5 rule; `tests/test_analytics_filters.py`). The daily value history is recorded for the whole
 inventory only, so a filtered `/history` prices the copies held now in the selection at each recorded day's prices.
 
+Built since (#124, import into one bucket; server, MCP and the assistant's upload page): `bucket_id` on `POST /imports`, `POST /imports/preview`,
+`POST /uploads` (and the MCP tools `import_collection_csv`, `start_collection_upload`, `confirm_staged_upload`). One code path (section 6): a file
+maps to one bucket, only that bucket's rows are compared, merged and replaced (`vault/importer.py`), every other bucket's copies, tags and notes
+are untouched, and a preview names the bucket and totals what it leaves alone (`bucket`, `untouched`). Without `bucket_id` nothing changed.
+What the design left open, and how it was decided:
+
+- **`entries.folder` keeps the file's own value**, as everywhere (decision 1). The bucket is the target: new entries get `bucket_id` of the
+  target whatever `Folder Name` the file carries, and no bucket is made from the file's folders. So an export of that bucket writes the file's
+  folders, and importing a whole-collection export again regroups by folder name (decision 1's round trip); a person who wants the folder to
+  say the bucket moves the copies (`move_cards`), which writes the bucket's name.
+- **The base is stored per scope.** A whole-collection import keeps `collection_baselines` as before. An import into a bucket keeps its own base
+  in `bucket_baselines` (one per bucket, the file as imported, deleted with the bucket). Before a bucket has a file of its own, the base is
+  derived from the last whole-collection file: its rows whose folder names the bucket (`merge.restricted`), so the first import into a bucket
+  that came from a whole import still keeps the Vault's edits instead of replacing it; the preview says the base was derived. Only when the
+  bucket holds copies and nothing says what the app last said about it (no whole base, or one rebuilt by migration `0110`) is the mode
+  `no_baseline`, the file replacing the bucket, as for the whole collection.
+- **How the scopes meet.** A whole-collection import forgets every bucket's own base (the whole file is the latest word on all of them; each is
+  derived from it again when needed). An import into a bucket leaves the whole base as it was, so a later whole-collection import sees that
+  bucket's changes as edits made in the Vault: it keeps them and asks about conflicts, never loses them. A renamed bucket has no folder of its
+  file's to derive from, so its first import treats its cards as edits made in the Vault (kept, conflicts asked).
+- **A stack in two buckets** is two entries, so a card in two buckets is compared in each bucket separately; moving copies between buckets is an
+  edit made in the Vault, as before.
+- **Import history.** An import into a bucket is an `imports` entry with `bucket` (id, name); its `rows` and `copies` are those of the bucket
+  after the import; its `merge` is about the bucket. Its position order puts the bucket's rows after the other buckets'.
+- **Several folders of one file into matching buckets is not a separate option.** A whole-collection import already does it (each folder goes
+  into the bucket of that name, made when absent), and the design (section 6) says a file maps to one bucket for an import into a bucket. What
+  the design does not say is a scoped version: replace only the buckets named by the file's folders, with a base per set of folders, and what a
+  folder missing from the file then means (the bucket is emptied or left). That is left open rather than invented (no `by_folder`).
+- **The upload link.** `POST /uploads?bucket_id=` binds the upload to the bucket (404 for another person's); the page shows it and cannot change
+  it. An unbound link shows a picker (only when the person has more than one bucket, and listing only that person's own buckets), and the choice
+  is stored with the upload. The preview's `content_hash` covers the file and the bucket (the plain file hash when there is no bucket, as before),
+  so a changed file or bucket after the preview is refused (409). A link whose bucket is deleted is deleted with it, never turned into a
+  whole-collection import. `bucket_id` on the preview and apply of an upload is only a check that it is the bound bucket.
+
 Built since (#128, the app): tags in Browse and the card drawer (`public/views/tags.jsx`): chips under each card's name, the tag filter
 (`#/browse?tag=`, combinable with `bucket=`), tick boxes on every list (the bucket move bar stays bucket-only) with a bulk bar to tag or
 untag the ticked cards (more than 25 waits for a button that says the count), "Manage tags" (rename, remove from every card), the
@@ -174,4 +208,4 @@ value", from the summary), says once that distinct counts do not add up across b
 cards in this selection" with a way back, not a page of zeros. The daily value history of a selection prices the copies held now
 (decision 5's note on `/history`), and the page says so and drops the import markers. Evidence: `docs/screenshots/scope-*`.
 
-Not built yet: importing into one bucket (#124).
+Not built yet: the web app's import with a bucket picker (#124).
