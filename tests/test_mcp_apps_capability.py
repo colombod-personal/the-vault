@@ -20,7 +20,7 @@ SECRET = "a-test-secret"
 
 @pytest.fixture
 def settings(database_url):
-    """The enforcing configuration (MCP_APPS_REQUIRE_CAPABILITY=1); the default, off, is tested at the end of this file."""
+    """The enforcing configuration, which is also the default (#50); turning it off is tested at the end of this file."""
     return Settings(database_url=database_url, session_secret="test", dev_login=True, base_url="http://testserver",
                     google_client_id="google-web", google_client_secret="x", oauth_rate_limit=1000, oauth_register_rate_limit=1000,
                     oauth_fetch_limit=100_000, oauth_fetch_ip_limit=100_000, mcp_apps_require_capability=True)
@@ -137,16 +137,24 @@ def test_a_page_the_host_cannot_show_is_never_the_only_way_to_the_information(ho
     assert res["result"]["isError"] is False and res["result"]["content"][0]["type"] == "text"
 
 
-def test_by_default_the_views_are_never_withheld_but_the_capability_is_still_recorded(database_url, universe, caplog):
-    """Enforcement is off until the logs show both claude.ai and ChatGPT advertising the extension: the safe default."""
+def test_by_default_a_host_that_said_it_cannot_show_apps_gets_no_view_links(database_url, universe, caplog):
+    """Enforcement is on by default (#50): the logs show both claude.ai (25 initialize lines) and ChatGPT (openai-mcp/1.0.0,
+    2026-10-08) advertising the extension. MCP_APPS_REQUIRE_CAPABILITY=0 turns it off."""
     settings = Settings(database_url=database_url, session_secret="test", dev_login=True, base_url="http://testserver",
                         google_client_id="google-web", google_client_secret="x", oauth_rate_limit=1000, oauth_register_rate_limit=1000,
                         oauth_fetch_limit=100_000, oauth_fetch_ip_limit=100_000)
-    assert settings.mcp_apps_require_capability is False
+    assert settings.mcp_apps_require_capability is True
     from vault.app import create_app
     app = create_app(settings, serve_static=False, transport=universe.transport, resolver=universe.resolve)
     client = McpClient(lambda: TestClient(app), universe.client_hosts.publish())
     client.connect(write=True)
     client.initialize({}, name="plain-host")
     assert client.session_id.startswith("v1.0.")  # recorded: it said it cannot
-    assert {n for n, t in listed(client).items() if "_meta" in t} == VIEW_TOOLS  # but not acted on
+    assert {n for n, t in listed(client).items() if "_meta" in t} == set()  # enforced: a host that cannot show them is not offered them
+
+
+def test_the_enforcement_can_be_turned_off_with_the_environment(monkeypatch):
+    monkeypatch.setenv("MCP_APPS_REQUIRE_CAPABILITY", "0")
+    assert Settings(database_url="postgresql://x/y", session_secret="test").mcp_apps_require_capability is False
+    monkeypatch.delenv("MCP_APPS_REQUIRE_CAPABILITY")
+    assert Settings(database_url="postgresql://x/y", session_secret="test").mcp_apps_require_capability is True
