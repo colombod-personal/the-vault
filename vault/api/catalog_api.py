@@ -15,7 +15,7 @@ import hashlib
 import hmac
 import math
 import time
-from datetime import date
+from datetime import date, timedelta
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from .. import catalog_queries as q
-from .. import deck_tools, limited_data, role_rules
+from .. import deck_tools, limited_data, role_rules, rules_changes
 from .. import provenance as prov
 from ..models import User
 from ..ratelimit import WINDOW, hit
@@ -91,6 +91,20 @@ class RuleSearchOut(BaseModel):
     query: str
     matched: str = Field(default="all words", description="'all words' (every word is in each rule) or 'any word' (nothing had all of them, so rules with some of them are listed best first)")
     results: list[dict]
+    provenance: list[prov.Provenance]
+    links: dict = Field(default_factory=dict, alias="_links")
+
+
+class RulesChangesOut(BaseModel):
+    current: dict = Field(description="The current edition: version (its 'effective as of' date), file_date (the date in its file name), url, in_force")
+    previous: dict | None = Field(description="The edition before it, in the same shape; null when none was found (see `note`)")
+    rules: dict | None = Field(description="The change brief: counts, then added, removed, renumbered, shifted and changed rules in rule "
+                                           "order, capped at `limit`, with the first changed sentence of each changed rule and a tally by "
+                                           "subsection. Null when no previous edition was found")
+    rulings: dict = Field(description="Rulings published since `since`: total, how many each source wrote, and the newest `limit`")
+    legality: dict = Field(description="Legality changes the Vault recorded since `since`: total and the newest `limit`, with what they are not")
+    since: str = Field(description="The first day of the rulings and legality window (YYYY-MM-DD)")
+    note: str | None = None
     provenance: list[prov.Provenance]
     links: dict = Field(default_factory=dict, alias="_links")
 
@@ -374,6 +388,63 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
             raise HTTPException(404, "No glossary term or keyword ability by that name; try search_rules")
         return {"version": edition.version, **found, "provenance": edition.provenance(),
                 "_links": {"self": link(f"{V1}/catalog/rules/term/{name}")}}
+
+    @router.get("/rules/changes", response_model=RulesChangesOut, response_model_by_alias=True,
+                summary="What changed between the previous and the current Comprehensive Rules, and the rulings and legality changes since")
+    def rules_changes_brief(previous: str | None = Query(default=None, max_length=10, description="The date in the previous edition's file name "
+                                                         "(YYYY-MM-DD); by default it is found on Wizards' CDN"),
+                            since: str | None = Query(default=None, max_length=10, description="First day of the rulings and legality window "
+                                                      "(YYYY-MM-DD); by default the day the previous edition took effect"),
+                            limit: int = Query(default=rules_changes.DEFAULT_LIMIT, ge=1, le=rules_changes.MAX_LIMIT),
+                            user=Depends(access), db: Session = Depends(get_db)) -> dict:
+        try:
+            since_day, prev_day = rules_changes.parse_date(since), rules_changes.parse_date(previous)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        try:
+            comparison = live_rules.compare(previous)
+        except RulesUnavailable as exc:
+            raise HTTPException(503, str(exc), headers={"Retry-After": str(exc.retry_after)}) from exc
+        if prev_day and comparison.previous is None:
+            raise HTTPException(404, comparison.note or "No such edition")
+        edition = rules_edition()
+        side = lambda s: {"version": s.version, "file_date": s.file_date, "url": s.url, "in_force": s.in_force}  # noqa: E731
+        window = since_day or (date.fromisoformat(comparison.previous.version) if comparison.previous else date.today() - timedelta(days=30))
+        rulings, rulings_total, by_source = q.rulings_since(db, window, limit)
+        legality, legality_total = q.legality_changes_since(db, window, limit)
+        notes = []
+        if comparison.previous is None:
+            notes.append(comparison.note or "No previous edition was found.")
+            if not since_day:
+                notes.append("With no previous edition to date the window from, rulings and legality changes cover the last 30 days.")
+        if comparison.same_effective_date:
+            notes.append("Earlier files with the same effective date as the current edition were skipped as its corrections: "
+                         + ", ".join(s.file_date for s in comparison.same_effective_date) + ".")
+        if not edition.in_force():
+            notes.append(f"The current edition takes effect on {edition.version}; until then the previous edition is in force.")
+        sources = [prov.source("Wizards of the Coast", origin="Comprehensive Rules, current edition (read live; the Vault stores no copy)",
+                               url=comparison.current.url, as_of=date.today(), version=comparison.current.version, wizards_material=True)]
+        if comparison.previous:
+            sources.append(prov.source("Wizards of the Coast", origin="Comprehensive Rules, previous edition (read live; the Vault stores no copy)",
+                                       url=comparison.previous.url, as_of=date.today(), version=comparison.previous.version,
+                                       wizards_material=True))
+        body = {
+            "current": side(comparison.current), "previous": side(comparison.previous) if comparison.previous else None,
+            "rules": comparison.changes.brief(limit) if comparison.changes else None,
+            "rulings": {"total": rulings_total, "by_source": by_source, "items": rulings, "capped": rulings_total > len(rulings),
+                        "note": "Rulings as published (Wizards' text via Scryfall), each cut to a pointer; read one in full with get_rulings."},
+            "legality": {"total": legality_total, "items": legality, "capped": legality_total > len(legality), "note": q.LEGALITY_NOTE},
+            "since": window.isoformat(), "note": " ".join(notes) or None,
+            "provenance": [*sources, *q.provenance_for(db, "rulings")],
+            "_links": {"self": link(f"{V1}/catalog/rules/changes")},
+        }
+        if comparison.changes:
+            body["provenance"].insert(0, prov.computed("change brief: the Vault compared the two editions' rule numbers and words when asked, "
+                                                       "and kept neither edition", list(sources), as_of=date.today()))
+        if legality:
+            body["provenance"].append(prov.computed("legality change log: the Vault compared Scryfall's legalities between daily loads",
+                                                    q.provenance_for(db, "oracle_cards"), as_of=legality[0]["observed_on"]))
+        return body
 
     @router.get("/rules/{number}", response_model=RuleOut, response_model_by_alias=True,
                 summary="One rule by number (e.g. 613.1a) or glossary term (glossary:Trample), with its subrules")

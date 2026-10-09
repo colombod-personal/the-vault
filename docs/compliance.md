@@ -309,3 +309,7 @@ are cited live from Wizards with no copy kept (see Decisions).
   account, that is a product decision about a page that adds value, not a switch on a raw API.
 - **Comprehensive Rules (owner, 2026-10-05, #142):** cited live from Wizards' current edition; the Vault stores no copy
   (docs/rules-index.md).
+- **Rules change brief (#107, recommended defaults approved 2026-10-09):** `rules_changes` reads the previous edition from Wizards'
+  CDN as well, only to compare the two when asked; neither is stored, and the answer is a capped list of rule numbers with the first
+  changed sentence of each (at most 50 a list, one sentence cut to 240 characters), with both editions in `provenance` and the Fan
+  Content notice (`docs/reconciler-design.md`).

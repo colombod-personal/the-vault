@@ -477,6 +477,31 @@ def test_17lands_files_answer_head_with_a_version_and_a_missing_file_with_403_an
         assert head.headers["content-type"].startswith("text/csv"), who  # the body is gzip: S3 is not told otherwise
         missing = client.head(LANDS_HOST + absent, headers={"User-Agent": HEADERS["User-Agent"], "Accept": "*/*"})
         assert missing.status_code == 403, f"{who}: a file that is not there answers {missing.status_code}, not 403"
+def test_wizards_cdn_keeps_earlier_editions_under_their_dated_names_and_answers_404_for_any_other(real, twin):
+    """vault.rules_live.LiveRules.compare (#107) finds the previous edition by asking HEAD for the file dated each day before the
+    current file's date: 200 for an edition that was published, 404 for a name that never was. The page links only the current
+    edition. Checked against the real CDN with the Vault's own comparison; the twin keeps earlier files the same way."""
+    from datetime import date
+
+    from vault import rules_changes
+    from vault.rules_live import LiveRules, dated_url
+
+    wizards = twin.universe.wizards
+    wizards.publish("Magic: The Gathering Comprehensive Rules\n\nThese rules are effective as of January 5, 2027.\n", "20270105", listed=False)
+    wizards.publish("Magic: The Gathering Comprehensive Rules\n\nThese rules are effective as of March 3, 2027.\n", "20270303")
+    comparison = LiveRules().compare()  # the real page and the real CDN
+    assert comparison.previous is not None, f"no earlier edition found on the CDN: {comparison.note}"
+    assert comparison.previous.version <= comparison.current.version
+    assert 0 < comparison.looked_back_days <= 150 and rules_changes.DATED_NAME.match(comparison.previous.url)
+    assert comparison.changes.counts() != {"added": 0, "removed": 0, "renumbered": 0, "shifted": 0, "changed": 0}
+    html, _ = _rules_links(real)
+    assert comparison.previous.url.replace("%20", " ") not in html, "the page links an earlier edition now: the dated-name search may be unneeded"
+    cases = {"real": (comparison.previous.url, dated_url(comparison.current.url, date(1999, 1, 1)), real),
+             "twin": (dated_url(wizards.url, date(2027, 1, 5)), dated_url(wizards.url, date(1999, 1, 1)), twin)}
+    for who, (earlier, never, client) in cases.items():
+        head = client.head(earlier, headers=RULES_HEADERS)
+        assert head.status_code == 200 and head.headers["content-type"].startswith("text/plain") and head.headers.get("etag"), who
+        assert client.head(never, headers=RULES_HEADERS).status_code == 404, who
 
 
 # -- Wizards of the Coast: the Commander Brackets pages vault.brackets was written from (#171) ---------------------------------
