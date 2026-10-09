@@ -16,7 +16,7 @@ window.VaultDeckChange = (() => {
     if (raw == null || raw === '') return null;
     const bad = { error: 'The swap in the address could not be read, so nothing was filled in. Choose the cards below.' };
     let o;
-    try { o = JSON.parse(raw); } catch { return bad; }
+    try { o = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return bad; }  // the route carries it already read (lib/ideas.js parseSwap) or as written
     if (!o || typeof o !== 'object' || Array.isArray(o)) return bad;
     const names = (v) => {
       if (v == null) return [];

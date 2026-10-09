@@ -71,11 +71,11 @@ const VAULT_START_NOTICE = (() => {
 // Navigation lives in the URL hash (#/browse, #/sets/MKM, …), so the browser's Back and Forward
 // buttons, refresh and bookmarks work. Opening a card or the account panel adds a history
 // entry too, so Back closes it before leaving the view.
-const VAULT_VIEWS = ['dashboard', 'browse', 'sets', 'decks', 'lab', 'graph', 'valuation', 'help'];
+const VAULT_VIEWS = ['dashboard', 'browse', 'sets', 'decks', 'lab', 'ideas', 'valuation', 'help'];
 const VAULT_TAG = /^[a-z0-9:-]{1,40}$/;  // a tag's shape (the server's rule): anything else in the address is ignored
 // The views that follow the scope (#130): one bucket, one tag or both, kept in the address (#/dashboard?bucket=3&tag=trade). It is global
-// to the app until cleared: choosing it in Browse, the Vault, Sets or Value keeps it in the other three. Lab, Graph and Decks read the
-// whole inventory and keep the choice for when the person comes back. VAULT_ANALYTICS are the views whose figures come from the
+// to the app until cleared: choosing it in Browse, the Vault, Sets or Value keeps it in the other three. Lab, Ideas and Decks read the
+// whole inventory (Ideas: the saved decks against it) and keep the choice for when the person comes back. VAULT_ANALYTICS are the views whose figures come from the
 // selection's own summary (Browse lists the selection's cards itself).
 const VAULT_SCOPED = new Set(['browse', 'dashboard', 'sets', 'setdetail', 'valuation']);
 const VAULT_ANALYTICS = new Set(['dashboard', 'sets', 'setdetail', 'valuation']);
@@ -85,17 +85,17 @@ function vaultScopeFromSearch(search) {
   const bucket = Number(q.get('bucket')), tag = q.get('tag') || '';
   return { ...(Number.isInteger(bucket) && bucket > 0 ? { bucket } : {}), ...(VAULT_TAG.test(tag) ? { tag } : {}) };
 }
-// #/decks/7?swap=<url-encoded JSON {"cut":[...],"add":[...]}> opens the deck's change flow with those cards (a "Swap into the
-// deck" link): the route carries the JSON as written; the deck page reads it, and drops it from the address once the flow is done.
-function vaultSwapFromSearch(search) {
-  const swap = new URLSearchParams(search || '').get('swap');
-  return swap ? { swap } : {};
-}
 function vaultRouteFromHash(fallback) {
   const [path, search] = location.hash.replace(/^#\/?/, '').split('?');
-  const [view, arg] = path.split('/').map((p) => decodeURIComponent(p || ''));
+  const [view, arg, arg2] = path.split('/').map((p) => { try { return decodeURIComponent(p || ''); } catch { return ''; } });
   if (view === 'sets' && arg) return { view: 'setdetail', code: arg, ...vaultScopeFromSearch(search) };
-  if (view === 'decks' && arg) return { view: 'decks', deckId: arg, ...vaultSwapFromSearch(search) };
+  // The deck page's change flow is opened by Ideas with a proposal in the address: #/decks/12?swap={"cut":["A"],"add":["B"]} (lib/ideas.js)
+  if (view === 'decks' && arg) {
+    const swap = window.VaultIdeas.parseSwap(new URLSearchParams(search || '').get('swap'));
+    return { view: 'decks', deckId: arg, ...(swap ? { swap } : {}) };
+  }
+  // The old map view is gone: a bookmark of it goes to Ideas. #/ideas, #/ideas/{deck} and #/ideas/{deck}/{card}.
+  if (view === 'graph' || view === 'ideas') return window.VaultIdeas.ideasRoute(arg, arg2);
   if (view === 'help') return { view: 'help', section: arg || '' };
   const known = VAULT_VIEWS.includes(view) ? view : fallback;
   return { view: known, ...(VAULT_SCOPED.has(known) ? vaultScopeFromSearch(search) : {}) };
@@ -103,7 +103,8 @@ function vaultRouteFromHash(fallback) {
 function vaultHashFor(route) {
   let hash;
   if (route.view === 'setdetail') hash = `#/sets/${encodeURIComponent(route.code)}`;
-  else if (route.view === 'decks' && route.deckId) return `#/decks/${encodeURIComponent(route.deckId)}` + (route.swap ? `?swap=${encodeURIComponent(route.swap)}` : '');
+  else if (route.view === 'decks' && route.deckId) return `#/decks/${encodeURIComponent(route.deckId)}` + (route.swap ? '?' + window.VaultIdeas.swapQuery(route.swap) : '');
+  else if (route.view === 'ideas') return window.VaultIdeas.ideasHash(route);
   else if (route.view === 'help') return helpHashFor(route.section);
   else hash = `#/${route.view}`;
   if (!VAULT_SCOPED.has(route.view)) return hash;
@@ -121,7 +122,6 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "compactNumbers": false,
   "density": "regular",
   "landing": "dashboard",
-  "graphTopN": 200,
   "imageQuality": "normal",
   "showPnL": true
 }/*EDITMODE-END*/;
@@ -169,10 +169,16 @@ function App() {
     setRouteState(next);
     setDrawerCard(null);
     setAccountOpen(false);
-    const entry = { route: next };
+    const entry = { route: next, from: vaultHashFor(route) };  // `from`: where the person came from, so a page's "Back" can be the browser's
     if (history.state && history.state.overlay) history.replaceState(entry, '', vaultUrlFor(next));
     else if (location.hash !== vaultHashFor(next) || next.initialQuery) history.pushState(entry, '', vaultUrlFor(next));
     window.scrollTo(0, 0);
+  };
+  // One step up: the browser's Back when that is where the person came from (so the page's Back button and the browser's agree and
+  // leave no stale entry behind), else a normal step to the route.
+  const stepTo = (raw) => {
+    if (history.state && !history.state.overlay && history.state.from === vaultHashFor(raw)) history.back();
+    else setRoute(raw);
   };
   // A card or the account panel: its own history entry, so Back closes it.
   const openOverlay = () => {
@@ -443,6 +449,8 @@ function App() {
           {route.view === 'help' ? <Help section={route.section} /> : route.view === 'lab' ? (
             // nothing imported: the Lab is one panel that asks for the import (a shared collection says it has no Lab)
             <Lab data={data} openCard={openCard} readOnly={!!viewing} onImported={onImported} />
+          ) : route.view === 'ideas' ? (
+            <Ideas data={data} route={route} openCard={openCard} readOnly={!!viewing} onImported={onImported} onGo={setRoute} onUp={stepTo} />
           ) : viewing ? (
             // Someone else's collection, shared but empty: nothing to import here.
             <><div className="help-row"><HelpHint view="dashboard" shared /></div><div style={{ display: 'grid', placeItems: 'center', minHeight: '60vh' }}>
@@ -495,7 +503,8 @@ function App() {
             <button data-nav="decks" aria-current={route.view === 'decks' ? 'page' : undefined} className={route.view === 'decks' ? 'active' : ''} onClick={() => { setDeckText(null); nav('decks'); }}>Decks</button>
             {/* the Lab is built from your own decks and what you paid: a shared collection has none (docs/lab-design.md) */}
             {!viewing && <button data-nav="lab" aria-current={route.view === 'lab' ? 'page' : undefined} className={route.view === 'lab' ? 'active' : ''} onClick={() => nav('lab')}>Lab</button>}
-            <button data-nav="graph" aria-current={route.view === 'graph' ? 'page' : undefined} className={route.view === 'graph' ? 'active' : ''} onClick={() => nav('graph')}>Graph</button>
+            {/* Ideas reads your own saved decks: a shared collection has none (docs/deck-ideas-lab-design.md) */}
+            {!viewing && <button data-nav="ideas" aria-current={route.view === 'ideas' ? 'page' : undefined} className={route.view === 'ideas' ? 'active' : ''} onClick={() => nav('ideas')}>Ideas</button>}
           </nav>
           {refreshing && refreshProgress && refreshProgress.auto && (
             // the automatic refresh after an import or on a new day: a quiet note, no prompt
@@ -512,8 +521,11 @@ function App() {
         <main>
           {route.view !== 'help' && <div className="help-row"><HelpHint view={route.view} shared={!!viewing} /></div>}
           {route.view === 'help' && <Help section={route.section} />}
-          {(route.view === 'lab' || route.view === 'graph') && window.scopeActive(scope) && (
+          {route.view === 'lab' && window.scopeActive(scope) && (
             <p className="muted scope-aside" role="status">This page reads your whole inventory. Your bucket or tag choice is kept for the Vault, Browse, Sets and Value pages.</p>
+          )}
+          {route.view === 'ideas' && window.scopeActive(scope) && (
+            <p className="muted scope-aside" role="status">This page reads your saved decks against your whole inventory, not the bucket or tag you chose. That choice is kept for the Vault, Browse, Sets and Value pages.</p>
           )}
           {route.view === 'dashboard' && (
             <ScopeFrame inventory={data} scoped={scoped} scope={scope} onScope={setScope} viewing={!!viewing}>
@@ -557,8 +569,8 @@ function App() {
             <Lab data={data} openCard={openCard} readOnly={!!viewing} onImported={onImported} onOpenDeck={openDeck}
                  onAddDeck={() => { setDeckText(null); nav('decks'); }} onRefresh={() => runRefresh(false)} refreshing={refreshing} />
           )}
-          {route.view === 'graph' && (
-            <GraphView data={data} openCard={openCard} />
+          {route.view === 'ideas' && (
+            <Ideas data={data} route={route} openCard={openCard} readOnly={!!viewing} onImported={onImported} onGo={setRoute} onUp={stepTo} />
           )}
           {route.view === 'valuation' && (
             <ScopeFrame inventory={data} scoped={scoped} scope={scope} onScope={setScope} viewing={!!viewing}>
@@ -621,16 +633,8 @@ function App() {
           <TweakSelect
             label="Landing tab"
             value={t.landing}
-            options={['dashboard', 'browse', 'sets', 'decks', 'lab', 'graph']}
+            options={['dashboard', 'browse', 'sets', 'decks', 'lab', 'ideas']}
             onChange={(v) => setTweak('landing', v)}
-          />
-          <TweakSlider
-            label="Graph default top-N"
-            value={t.graphTopN}
-            min={50}
-            max={800}
-            step={10}
-            onChange={(v) => setTweak('graphTopN', v)}
           />
           <TweakRadio
             label="Image quality"

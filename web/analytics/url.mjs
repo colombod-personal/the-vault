@@ -16,7 +16,7 @@ export function measured(nav) {
 
 // The route Speed Insights files a page under. The app keeps its views in the hash (#/browse), which is never sent; this sends only
 // the NAME of the view, and only when it is one of the app's own views: never a set code, deck id, token or anything typed.
-export const VIEWS = ['dashboard', 'browse', 'sets', 'decks', 'lab', 'graph', 'valuation', 'help'];
+export const VIEWS = ['dashboard', 'browse', 'sets', 'decks', 'lab', 'ideas', 'valuation', 'help'];
 export function routeOf(loc) {
   const path = (loc && loc.pathname) || '/';
   if (path !== '/') return path;

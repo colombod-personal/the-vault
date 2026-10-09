@@ -14,6 +14,8 @@ const J = (o) => JSON.parse(JSON.stringify(o));  // objects made in the sandbox 
 test('a swap in the address fills the flow in; anything that is not a list of card names is refused and nothing is filled in', () => {
   assert.equal(V.parseSwap(null), null);
   assert.equal(V.parseSwap(''), null);
+  // the route carries the swap already read when it came from the Ideas view: an object is read like the JSON text
+  assert.deepEqual(J(V.parseSwap({ cut: ['Cloudstone Curio'], add: [' Anointed Procession '] })), { cut: ['Cloudstone Curio'], add: ['Anointed Procession'] });
   assert.deepEqual(J(V.parseSwap('{"cut":["Cloudstone Curio"],"add":[" Anointed Procession "]}')), { cut: ['Cloudstone Curio'], add: ['Anointed Procession'] });
   assert.deepEqual(J(V.parseSwap('{"add":["Sol Ring"]}')), { cut: [], add: ['Sol Ring'] });
   for (const raw of ['not json', '[]', '"x"', '{}', '{"cut":[],"add":[]}', '{"cut":"Sol Ring"}', '{"cut":[1]}', '{"cut":[""]}', '{"add":["' + 'x'.repeat(301) + '"]}',
