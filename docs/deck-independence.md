@@ -1,6 +1,6 @@
 # Deck independence: can each deck stand on its own? (design for #165)
 
-Status: agreed by the owner on 2026-10-08 (#287: decisions 17 to 19, all as recommended). Nothing here is built yet; it goes into the Lab (#164).
+Status: agreed by the owner on 2026-10-08 (#287: decisions 17 to 19, all as recommended). The server side is built (#165: `vault/deck_independence.py`, `vault/api/independence_api.py`, the `get_deck_overlap` tool; "As built" below); the web view goes into the Lab (#164), and the check on the owner's four real decks is still to do.
 
 ## The question
 
@@ -103,6 +103,20 @@ A section of the Lab (#162), phone-first, "Do your decks stand on their own?":
 - Existing `get_deck_overlap` fields unchanged.
 - Real data: the owner's four decks give 27 not contested and 1 contested (The World Tree), checked against the collection.
 
+## As built (server, #165)
+
+Where the code settles a point the design left open (tests: `tests/test_deck_independence.py`):
+
+- **Contested needs two decks.** `0 < have < need_for_all` is read with "two or more saved decks use the card": a card only one deck uses and the person owns too few of is that deck's plain shortage (`lacking`, `not_owned`, in `purchases`), not a borrowing question, and it offers no `move`.
+- **Counts are copies.** `need` and `free` count copies (a 4-of is 4); `independence` is `free / need`. `free` means "not contested": it does not say the copies are owned (`lacking` does).
+- **The order.** "Cards still missing" is, per deck, the copies short against the whole collection on its own, basics left out. `priority` names decks first, in the given order (repeats dropped); the others follow in the default order. Skipped decks (unreadable) come last and take no copies.
+- **Field names.** A `lacking` line has `card`, `quantity`, `not_owned`, `held_by_other_deck`, `unit_price`, `price_date`, `cost`. A deck has `cost_to_complete` (priced lines) and `cost_unpriced` (lines with no price). `holds` lines carry `also_wanted_by` (at most 10 names) and `also_wanted_by_total`. `holds` and `lacking` list at most 100 cards each, with `holds_total` and `lacking_total`. A contested card lists at most 25 decks, with `decks_total`.
+- **The move option.** One `move` per contested card: from the last deck in the order that holds a copy, to the first deck that lacks a copy held by another deck. `buy` carries `quantity` (the global deficit), `unit_price`, `cost`, `price_status` and `price_date`.
+- **The root.** `_links.decks` is the first page of the `decks` subresource, `_links.next` (only when there is one) the next page of decks; `contested` and `purchases` are linked. `limit` on the root is the size of its first page of decks (default 25). Every page of a subresource also carries `allocation` and `prices_date` (the newest price day used; Scryfall provenance as_of).
+- **Purchases text.** `GET /decks/overlap/purchases?format=text` answers `{ format: "text", text, count, total, _links }` with one `<copies> <card>` line per purchase in the page's order.
+- **The tool.** `get_deck_overlap` takes `priority` (an array of deck ids), `list` (`decks`, `contested`, `purchases`), `cursor`, `limit` and `format` (`text` alone routes to the purchases list). It is classified `SCRYFALL_DATA`.
+- **Rate limit.** 60 calls a minute per person across the four routes.
+
 ## Decisions for the owner
 
 1. **The default order.** Recommendation: closest to complete first. Alternatives: most recently edited first, or a priority the person sets once and the Vault remembers (needs storing, so a later step).
@@ -111,6 +125,6 @@ A section of the Lab (#162), phone-first, "Do your decks stand on their own?":
 
 ## Tasks that follow
 
-1. Implement: extend `/decks/overlap` and `get_deck_overlap` (allocation, per-deck and contested answers, tests above).
+1. ~~Implement: extend `/decks/overlap` and `get_deck_overlap` (allocation, per-deck and contested answers, tests above).~~ Done on the server (#165, "As built"); the real-data check on the owner's four decks is the owner's.
 2. Web: the Lab section (with #162).
 3. Docs: `docs/api.md`, `docs/ai-parity.md`, `public/llms.txt`, and the skills that explain decks (they should say what contested means).

@@ -186,6 +186,11 @@ be revoked (Account → Connected apps for OAuth).
   - decks: `check_decklist`, `parse_decklist`, `list_decks`, `get_deck`, `get_deck_overlap`, `save_deck`,
     `update_deck`, `delete_deck` (asks first), `get_archidekt_deck`, `import_deck_from_link`,
     `refresh_deck` (shows what changed on Archidekt, replaces only with the preview's fingerprint)
+  - can the saved decks all be built at the same time? `get_deck_overlap`: per deck what it holds and what it lacks
+    (a lacking copy is `not_owned`, so buy it, or `held_by_other_deck`, so it can be moved), the contested cards (some copies
+    owned, fewer than the decks need together) with their `move` and `buy` options, and what finishing every deck costs, each
+    card counted once; `priority` (deck ids) says which deck takes contested copies first, `list` pages `decks`, `contested` or
+    `purchases` (cheapest first; `format` text is a paste-ready list); prices are Scryfall's, dated
   - any card, owned or not: `lookup_cards`
   - edit the cards owned (bought, sold, traded): `update_owned_cards` (preview; asks which printing),
     `confirm_owned_cards_update` (after the person says yes), `undo_owned_cards_update`; pictures of the

@@ -328,3 +328,20 @@ def test_disconnecting_an_app_never_touches_another_persons_connections_of_the_s
     login(client, "alice@example.com")
     [row] = client.get("/api/v1/me/apps").json()["items"]
     assert row["connections"] == 2  # Alice still has both
+
+
+def test_deck_overlap_priority_answers_404_for_another_persons_deck(client):
+    """#165: `priority` takes deck ids; another person's deck and a missing one are the same 404, on every overlap route."""
+    login(client, "alice@example.com")
+    deck_id = client.post("/api/v1/decks", json={"name": "A's deck", "text": "1 Sol Ring"}).json()["id"]
+    login(client, "bob@example.com")
+    client.post("/api/v1/decks", json={"name": "B's deck", "text": "1 Sol Ring"})
+    seen = set()
+    for path in ("", "/decks", "/contested", "/purchases"):
+        res = client.get(f"/api/v1/decks/overlap{path}", params={"priority": str(deck_id)})
+        assert res.status_code == 404, path
+        seen.add(res.text)
+        missing = client.get(f"/api/v1/decks/overlap{path}", params={"priority": "999999"})
+        assert missing.status_code == 404 and missing.text == res.text
+    body = client.get("/api/v1/decks/overlap").json()
+    assert body["decks_checked"] == 1 and [d["name"] for d in body["decks"]] == ["B's deck"]  # nothing of Alice's
