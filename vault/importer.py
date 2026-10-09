@@ -16,7 +16,7 @@ from sqlalchemy import delete, select, tuple_, update
 from sqlalchemy.orm import Session
 
 from . import merge
-from .models import Card, CollectionBaseline, Entry, Import, User, utcnow
+from .models import Card, CollectionBaseline, Entry, Import, TagAssignment, User, utcnow
 from .prices import MAX_PRICE, compute_values
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -37,11 +37,16 @@ class ImportConflict(ImportError_):
     """Another import replaced the collection while this one ran."""
 
 
-def user_entries(db: Session, user: User, bucket_id: int | None = None) -> list[Entry]:
-    """A person's entries in file order; with ``bucket_id``, only those in that bucket (#123)."""
+def user_entries(db: Session, user: User, bucket_id: int | None = None, tag: str | None = None) -> list[Entry]:
+    """A person's entries in file order; with ``bucket_id``, only those in that bucket (#123); with ``tag``, only the copies of
+    cards the person tagged so (the tag is on the card: every printing of it counts, #130)."""
     query = select(Entry).where(Entry.user_id == user.id).order_by(Entry.position, Entry.id)
     if bucket_id is not None:
         query = query.where(Entry.bucket_id == bucket_id)
+    if tag is not None:
+        query = query.where(Entry.scryfall_id.in_(
+            select(Card.scryfall_id).join(TagAssignment, TagAssignment.oracle_id == Card.oracle_id)
+            .where(TagAssignment.user_id == user.id, TagAssignment.tag == tag)))
     return list(db.scalars(query))
 
 
