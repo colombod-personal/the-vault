@@ -161,7 +161,20 @@ def plan(client: httpx.Client, db, sets: list[str], formats: list[str]) -> list[
 
 
 def read_file(client: httpx.Client, item: dict) -> tuple[limited_stats.FileResult, dict]:
-    """GET one file and reduce it while it streams. Returns the counts and the headers of the answer actually read."""
+    """GET one file and reduce it while it streams. Returns the counts and the headers of the answer actually read. A connection
+    that breaks while the file streams is a connection error like any other: the file is read again from its start (the counters
+    are new each time, so nothing is counted twice), after the same waits; a corrupt or truncated file is not retried."""
+    for attempt in range(len(RETRY_WAITS) + 1):
+        try:
+            return _read_once(client, item)
+        except httpx.TransportError as exc:
+            if attempt == len(RETRY_WAITS):
+                raise FetchError(f"GET {item['url']}: {type(exc).__name__}: {exc} after {len(RETRY_WAITS)} retries") from exc
+            sleep(RETRY_WAITS[attempt])
+    raise AssertionError("unreachable")
+
+
+def _read_once(client: httpx.Client, item: dict) -> tuple[limited_stats.FileResult, dict]:
     request = client.build_request("GET", item["url"], headers={"Accept-Encoding": "identity"})
     response = _retrying(lambda: client.send(request, stream=True), f"GET {item['url']}")
     try:

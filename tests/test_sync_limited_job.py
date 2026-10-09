@@ -8,6 +8,7 @@ import builtins
 import gzip
 from pathlib import Path
 
+import httpx
 import pytest
 from sqlalchemy import func, select
 
@@ -356,7 +357,6 @@ def test_other_client_errors_are_not_retried(env, universe, small_files, napping
 
 
 def test_a_connection_error_is_retried(env, universe, small_files, napping, monkeypatch):
-    import httpx
     publish(universe)
     real = universe.handle
     seen = {"n": 0}
@@ -370,3 +370,48 @@ def test_a_connection_error_is_retried(env, universe, small_files, napping, monk
     transport = httpx.MockTransport(flaky)
     report = sync_limited.main(ARGS, transport=transport)
     assert set(states(report).values()) == {"loaded"} and napping == [2]
+
+
+class _Breaks(httpx.SyncByteStream):
+    """A body that sends its first bytes and then loses the connection."""
+
+    def __init__(self, body: bytes):
+        self.body = body
+
+    def __iter__(self):
+        yield self.body[: len(self.body) // 2]
+        raise httpx.ReadError("connection reset by peer")
+
+
+def breaking_transport(universe, times: int):
+    """The twin, except that the first ``times`` GETs of a game file break half way through the body."""
+    left = {"n": times}
+
+    def handle(request):
+        response = universe.handle(request)
+        if request.method == "GET" and "game_data" in request.url.path and left["n"] > 0 and response.status_code == 200:
+            left["n"] -= 1
+            return httpx.Response(200, headers={k: v for k, v in response.headers.items() if k != "content-length"}, stream=_Breaks(response.content))
+        return response
+
+    return httpx.MockTransport(handle)
+
+
+def test_a_connection_that_breaks_while_a_file_streams_is_read_again_from_the_start(env, universe, small_files, napping):
+    publish(universe)
+    report = sync_limited.main(ARGS, transport=breaking_transport(universe, 2))
+    assert set(states(report).values()) == {"loaded"} and napping == [2, 8]
+    games = {g.card_name: g for g in rows(env, LimitedGameStat)}
+    assert games["Test Bear"].games_played == 12  # counted once, not once per attempt
+    db = database(env)
+    with db.sessions() as s:
+        assert s.get(LimitedSource, ("TST", "PremierDraft", "game")).records == 6
+    db.engine.dispose()
+
+
+def test_a_connection_that_keeps_breaking_fails_that_file_and_nothing_is_written_for_it(env, universe, small_files, napping):
+    publish(universe)
+    with pytest.raises(SystemExit) as error:
+        sync_limited.main(ARGS, transport=breaking_transport(universe, 10))
+    assert napping == [2, 8, 30] and "ReadError" in str(error.value) and "after 3 retries" in str(error.value)
+    assert rows(env, LimitedGameStat) == [] and len(rows(env, LimitedPickStat)) == 4  # the draft file was still read
