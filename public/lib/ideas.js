@@ -51,10 +51,10 @@ window.VaultIdeas = (() => {
   // "Fully covered": nothing lacking, and no copy is borrowed (the deck's cards may be wanted by other decks: that is the other deck's problem).
   const isCovered = (s) => !!s && s.complete === true && s.missing === 0 && s.borrowed === 0;
   const COVERED_TEXT = 'Every card is in your collection and no copy is borrowed. Nothing to decide here.';
-  // Which of the five states the page is in.
+  // Which state the page is in: the five of the design, and the one the Vault must not confuse with "nothing found" (no role known).
   function pageState({ deckId, summary, card, target }) {
     if (!deckId) return 'start';
-    if (card) return target && target.reason ? 'no-alternative' : 'alternatives';
+    if (card) return target && target.reason === 'no_role' ? 'no-role' : target && target.reason ? 'no-alternative' : 'alternatives';
     return isCovered(summary) ? 'covered' : 'deck';
   }
   function deckFacts(overview, chosenFormat) {
@@ -122,11 +122,25 @@ window.VaultIdeas = (() => {
   }
 
   // -- the selected card -------------------------------------------------------------------------------------------------------------
-  const roleWords = (roles) => (roles || []).map((r) => `${r.role.replace(/_/g, ' ')} (${r.strength}${r.basis === 'computed' ? ', by a rule over its text' : ''})`);
+  // The Vault's own roles (docs/functional-equivalents.md): a plain name and its strength; every one is found by a rule over the Oracle text.
+  const lowerFirst = (s) => (s ? s.charAt(0).toLowerCase() + s.slice(1) : s);
+  const roleWords = (roles) => (roles || []).map((r) => `${lowerFirst(r.name)} (${r.strength})`);
+  const coreRoles = (roles) => (roles || []).filter((r) => r.strength === 'core');
   const roleLine = (roles) => {
-    const words = roleWords(roles);
-    return words.length ? `Role: ${words.join(', ')}` : 'No coarse role known';
+    const core = coreRoles(roles).map((r) => `${lowerFirst(r.name)} (core)`), side = (roles || []).filter((r) => r.strength !== 'core').map((r) => lowerFirst(r.name));
+    if (!core.length && !side.length) return 'The Vault knows no role for this card yet';
+    return `Does: ${core.length ? core.join(', ') : 'nothing as its main job'}${side.length ? `; on the side: ${side.join(', ')}` : ''}`;
   };
+  // What a candidate does, what of the card's jobs it does not do, and what it adds: from the server's role lists, never free text.
+  const altDoes = (a) => { const core = coreRoles(a.roles).map((r) => lowerFirst(r.name)); return core.length ? `Does: ${core.join(', ')}` : ''; };
+  const altLacks = (a, targetName) => (a.lacks && a.lacks.length ? `Does not: ${a.lacks.map((r) => lowerFirst(r.name)).join(', ')} (${targetName} does)` : '');
+  const altExtra = (a) => (a.extra && a.extra.length ? `Also: ${a.extra.map((r) => lowerFirst(r.name)).join(', ')}` : '');
+  const article = (word) => (/^[aeiou]/i.test(word) ? 'an' : 'a');
+  const typeNote = (a, targetName) => (a.type_note ? `${article(a.type_note.candidate)} ${a.type_note.candidate.toLowerCase()}, where ${targetName} is ${article(a.type_note.target)} ${a.type_note.target.toLowerCase()}.` : '');
+  const TIERS = { same_job: 'Same job', similar: 'Similar, with a difference' };
+  const tierHeading = (tier, n) => `${TIERS[tier]} (${n.toLocaleString('en-US')})`;
+  const similarToggle = (n, open) => (open ? `Hide similar, with a difference (${n.toLocaleString('en-US')})` : `Show similar, with a difference (${n.toLocaleString('en-US')})`);
+  const byTier = (items, tier) => (items || []).filter((x) => x.tier === tier);
   function targetStatus(t) {
     if (!t || t.status == null) return { tone: 'owned', word: 'not in the deck', note: '' };
     return rowStatus({ ...t, card: t.card, also_wanted_by: [] });
@@ -140,6 +154,7 @@ window.VaultIdeas = (() => {
     return bits.join('; ') + '.';
   }
   const heading = (t) => (t && t.status === 'owned' ? 'Other cards you own that do the same job' : t && t.status == null ? 'Owned cards that do this job' : 'Owned alternatives');
+  const TEXT_CREDIT = 'Oracle text is Wizards of the Coast\'s, via Scryfall. Unofficial Fan Content, not endorsed by Wizards or Scryfall.';
   const ownedText = (a) => `${a.copies_owned} owned` + (a.borrowed ? '' : a.copies_free < a.copies_owned ? `, ${a.copies_free} free` : '');
   function altBadges(a) {
     const out = [];
@@ -164,7 +179,8 @@ window.VaultIdeas = (() => {
   const moveSteps = (move, cardName, toDeckName) =>
     `Move ${move.quantity > 1 ? move.quantity + ' copies' : 'a copy'} of ${cardName} from ${move.from_deck.name} to ${toDeckName}. The Vault changes no deck by itself: take the card out of ${move.from_deck.name}, then add it here.`;
   const PRICE_NOTE = (date) => `Prices are Scryfall's cheapest known${shortDate(date) ? ', from ' + shortDate(date) : ''}; the Vault contacts no shop.`;
-  const COARSE_NOTE = 'Matched on coarse roles: a hint, not proof that two cards play alike.';
+  const ROLES_NOTE = 'Roles are the Vault\'s own, found by rules over the Oracle text: a hint, not proof that two cards play alike.';
+  const NO_ROLE_NOTE = 'The Vault knows no role for this card yet, so it cannot look for cards that do the same job. That is not the same as "you own nothing like it".';
   const thumbAlt = (name, artist) => `${name}${artist ? ', illustrated by ' + artist : ''}`;
   // Scryfall serves each image at fixed sizes; the lane and the panel ask for the smallest (146 px wide), the zoom for the normal one.
   const thumbUrl = (url) => (typeof url === 'string' ? url.replace('/normal/', '/small/') : url);
@@ -187,8 +203,9 @@ window.VaultIdeas = (() => {
     headline, isCovered, pageState, deckFacts, colourLetters, tileLine,
     laneTitle, laneNote, rowStatus, rowLabel, needsDecision, decisionCards, borrowedCards, defaultFilter, moreLabel,
     needsWindow, windowRange,
-    roleLine, roleWords, allocationLine, targetStatus, heading, ownedText, altBadges, mv,
-    buyLabel, buyPlain, moveText, moveSteps, PRICE_NOTE, COARSE_NOTE, thumbAlt, thumbUrl,
+    roleLine, roleWords, coreRoles, altDoes, altLacks, altExtra, typeNote, tierHeading, similarToggle, byTier, TIERS, TEXT_CREDIT,
+    allocationLine, targetStatus, heading, ownedText, altBadges, mv,
+    buyLabel, buyPlain, moveText, moveSteps, PRICE_NOTE, ROLES_NOTE, NO_ROLE_NOTE, thumbAlt, thumbUrl,
     ownedCombos, comboKeys, comboLine, errorText,
   };
 })();

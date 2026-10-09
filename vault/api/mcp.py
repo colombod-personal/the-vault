@@ -487,14 +487,22 @@ TOOLS = [
                              "description": "Also ask Commander Spellbook for the deck's combos (sends the deck's card names to them)"},
           **PAGING}, ["deck_id"],
          path=lambda a: f"{V1}/decks/{int(a['deck_id'])}/ideas", query=("lane", "include_combos", "limit", "cursor")),
-    Tool("get_card_alternatives", "Cards the person owns that could stand in for a card in one of their saved decks, best first: "
-         "they share a core role with it (one of the eight coarse roles, a community's opinion: say so), are inside the deck's colour "
+    Tool("get_card_alternatives", "Cards the person owns that do the same job as a card in one of their saved decks, best first. The jobs "
+         "are the Vault's own 22 roles (a mana rock, a token doubler, a free counterspell, bounce, card draw once or every turn ...), found by "
+         "written rules over the Oracle text: the Vault's own, not Scryfall's community tags, and every role names the rule that found it "
+         "(`roles`, `rule`; say so). Two tiers, never merged: `same_job` (the candidate has the card's main job and, where it matters, "
+         "repeats or is free in the same way) before `similar` (it shares another job or a neighbouring one; `different` says what "
+         "differs; `tiers` counts both over the whole list). Each candidate says what it `lacks` (jobs of the asked-for card it does "
+         "not do), what it adds (`extra`), why (`why`, built from the roles: it is a suggestion, never 'the same card'), and carries "
+         "both Oracle texts (`oracle_text`, Wizards of the Coast's via Scryfall: quote them). Candidates are inside the deck's colour "
          "identity, legal in the format, and have copies left under the format's copy limit (an owned Sol Ring is not offered for a "
-         "Commander deck that already runs one). Cards the person has a free copy of come first, then those another deck holds "
-         "(`borrowed_from`, with a `move` option only when a donor copy exists, and the `buy` price of a copy, dated), then by "
-         "mana value difference; each says `why` it matches. `card` names the card the answer is about, with its `status` in the "
-         "deck, its roles and its own `buy` price. `format` defaults to the format set on the deck, else commander. With no "
-         "alternative, `reason` and `message` say why. Read-only; changing the deck is validate_deck_changes then update_deck.",
+         "Commander deck that already runs one); `filtered_out` and `filtered_note` count the owned cards that do this job but were not "
+         "offered, and why. A free copy comes first in a tier, then a card another deck holds (`borrowed_from`, with a `move` option only "
+         "when a donor copy exists, and the `buy` price of a copy, dated), then more shared jobs, then the mana value difference "
+         "(ranked and shown, never a filter). `card` names the card the answer is about, with its `status` in the deck, its `roles` and "
+         "its own `buy` price. `format` defaults to the format set on the deck, else commander. With nothing to offer, `reason` and "
+         "`message` say why: `no_role` means the Vault knows no role for the card, which is not the same as the person owning nothing "
+         "like it. Read-only; changing the deck is validate_deck_changes then update_deck.",
          {"deck_id": ID, "card": {"type": "string", "minLength": 1, "maxLength": 300, "description": "The card to find a stand-in for"},
           "format": {"type": "string", "enum": list(FORMATS), "description": "The format whose legality and copy limit apply"},
           **PAGING}, ["deck_id", "card"],
