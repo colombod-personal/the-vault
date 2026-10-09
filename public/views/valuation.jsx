@@ -20,6 +20,7 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
   const at = [api.base, m.version];
   const valuation = window.useVaultQuery(() => api.valuation(), at).data;
   const history = window.useVaultQuery(() => api.history(), at).data;
+  const inSelection = window.scopeActive(data.scope);  // a bucket and/or tag (#130)
   const full = useMemoVal(() => (valuation ? valuation.months : []).map((v) => ({
     ym: v.month, label: monthLabel(v.month),
     marketCum: v.market_cum, costCum: v.cost_cum || 0, gainCum: v.gain_cum || 0, cardsCum: v.copies_cum,
@@ -149,7 +150,7 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
         </p>
       )}
 
-      <DailyValue history={history} />
+      <DailyValue history={history} inSelection={inSelection} />
 
       <div className="panel" style={{ marginBottom: 24 }}>
         <div className="section-head" style={{ marginBottom: 18 }}>
@@ -173,7 +174,7 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
         <ValueChart series={series} costsHidden={m.costsHidden} />
 
         <p className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', lineHeight: 1.6, marginTop: 16, maxWidth: 760 }}>
-          Each point is your holdings as of that month. The cost line is what you actually paid over
+          Each point is {inSelection ? 'this selection\'s' : 'your'} holdings as of that month. The cost line is what you actually paid over
           time; the market line values those same holdings at the latest prices (calculated {fresh.abs}).
           The gold band between them is unrealised gain. For what your collection was actually worth on
           each day, see the price history above.
@@ -247,7 +248,7 @@ const DAY_RANGES = [['30', '30D'], ['90', '90D'], ['365', '1Y'], ['all', 'All']]
 const fmtDay = (iso, opts) => new Date(iso + 'T00:00:00').toLocaleDateString(undefined, opts || { day: 'numeric', month: 'short', year: 'numeric' });
 const fmtMoney = (v) => '$' + (Math.round(v * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-function DailyValue({ history }) {
+function DailyValue({ history, inSelection }) {
   const days = useMemoVal(() => (history || []).filter((d) => d && d.day).slice().sort((a, b) => a.day.localeCompare(b.day)), [history]);
   const [range, setRange] = useStateVal('90');
   const shown = useMemoVal(() => {
@@ -314,18 +315,26 @@ function DailyValue({ history }) {
               </div>
             )}
           </div>
-          <DailyChart days={shown} />
-          <p className="daily-note">
-            Each point is what your collection was worth that day, at that day's Scryfall prices. Marked days are
-            imports, so a jump there can be cards added, removed or swapped, not the market.
-          </p>
+          <DailyChart days={shown} inSelection={inSelection} />
+          {inSelection ? (
+            <p className="daily-note">
+              The Vault records one total for your whole inventory each day, so a bucket or tag has no recorded past. Each point is what the
+              copies in this selection now would have been worth that day, at that day's Scryfall prices. It shows how their value moved, not
+              what was in the selection back then.
+            </p>
+          ) : (
+            <p className="daily-note">
+              Each point is what your collection was worth that day, at that day's Scryfall prices. Marked days are
+              imports, so a jump there can be cards added, removed or swapped, not the market.
+            </p>
+          )}
         </>
       )}
     </div>
   );
 }
 
-function DailyChart({ days }) {
+function DailyChart({ days, inSelection }) {
   const wrapRef = useRefVal(null);
   const [w, setW] = useStateVal(900);
   const [hover, setHover] = useStateVal(null);
@@ -354,7 +363,7 @@ function DailyChart({ days }) {
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => lo + f * (hi - lo));
   // The server marks import days; older answers without the mark fall back to a change in card count.
   const isImport = (d, i) => d.imported ?? (i > 0 && d.copies !== days[i - 1].copies);
-  const imports = days.filter(isImport);
+  const imports = inSelection ? [] : days.filter(isImport);  // import days belong to the whole inventory, not to a selection
   const labelEvery = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(innerW / 90))));
 
   const onMove = (e) => {
@@ -406,7 +415,7 @@ function DailyChart({ days }) {
           <div className="vc-tip-month">{fmtDay(hv.day)}</div>
           <div className="vc-tip-row"><span className="sw gold"></span>Market<b>{fmtMoney(hv.market)}</b></div>
           {hv.cost != null && <div className="vc-tip-row"><span className="sw copper"></span>Paid<b>{fmtMoney(hv.cost)}</b></div>}
-          {isImport(hv, hover) && (
+          {!inSelection && isImport(hv, hover) && (
             <div className="vc-tip-add">
               {!prev ? `Import: ${hv.copies.toLocaleString()} cards`
                 : prev.copies === hv.copies ? 'Import (same card count)'

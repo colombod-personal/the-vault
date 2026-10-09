@@ -196,4 +196,16 @@ card's tags in the drawer with an assistant's tag marked "AI" and its app's name
 same tag) or removed, and the card's notes (`vault_metadata`) read only, one block per writer. A shared collection shows none of it. The
 server gave each card `tags_detail` (who wrote each tag) for this, and the summary `version` now moves with the tags.
 
-Not built yet: the web app's import with a bucket picker (#124) and the web part of #130 (analytics that follow the selected bucket or tag).
+Built since (#130, the app): the scope of the analytics (`public/views/scope.jsx`). One choice of bucket and/or tag, kept in the address
+(`#/dashboard?bucket=3&tag=trade`, the same query as `#/browse?bucket=&tag=`), drives the Vault overview, Sets (and a set's page), Value and
+Browse. **The rule: the scope is global to the app until cleared.** Choosing it on any of those four keeps it on the other three and in the links
+between them (the tabs, "Browse all", a set's tile); the Lab, Graph and Decks read the whole inventory, say so while a scope is set, and the
+choice is kept for the way back. A shared collection has no scope (buckets and tags are the owner's own). Every request of those pages
+carries the scope (`VaultApi` `collection().api.scoped({bucket, tag})`: summary, cards, sets, timeline, history, valuation, stats, breakdowns,
+names), so every figure is the server's for that selection and nothing is added up in the browser; a stored answer's key holds the selection and
+its freshness is the selection's own summary `version`. The bar says what is shown ("Showing: Trade box, tag trade, 12 cards, $332.23 market
+value", from the summary), says once that distinct counts do not add up across buckets (decision 5), and an empty selection is a plain "No
+cards in this selection" with a way back, not a page of zeros. The daily value history of a selection prices the copies held now
+(decision 5's note on `/history`), and the page says so and drops the import markers. Evidence: `docs/screenshots/scope-*`.
+
+Not built yet: the web app's import with a bucket picker (#124).
