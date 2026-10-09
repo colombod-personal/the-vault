@@ -45,7 +45,7 @@ This is an engineering document, not legal advice: have the privacy notice
 | `auth_codes` | yes | one-time sign-in codes for apps (2 minutes) | – (expire in minutes) | `purge_user` |
 | `collection_values` | yes | daily market value and cost | `value_history.json` | `purge_user` |
 | `native_nonces` | no | hashes of used native sign-in nonces and Facebook data-deletion requests, until they would expire | – | deleted when expired |
-| `passkey_challenges` | no | a pending passkey challenge (random, five minutes), naming no one | – | deleted when used or expired |
+| `passkey_challenges` | no | a passkey ceremony someone tried to finish (random id, five minutes; the challenge itself is in the session cookie), naming no one | – | deleted once expired |
 | `rate_hits` | no | per-minute request counts to the sign-in endpoints, keyed by a keyed hash of endpoint and IP (no IP address stored) | – | deleted after a few minutes |
 | `cards`, `price_snapshots` | no | public Scryfall card data and prices | – | kept (not about people) |
 

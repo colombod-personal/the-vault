@@ -449,9 +449,10 @@ class RateHit(Base):
 
 
 class PasskeyChallenge(Base):
-    """A pending passkey ceremony's challenge (vault.passkeys). The session cookie holds only the
-    id; verifying claims the row with a conditional DELETE, so each challenge is used once, even
-    by requests racing with the same cookie. Rows live five minutes and name no one."""
+    """A passkey ceremony that someone tried to finish (vault.passkeys), kept so it can be used once. The challenge itself
+    lives in the signed session cookie (#346): a row is written only when a verification is attempted, with the ceremony's id
+    as primary key, so of two requests racing with the same cookie only the first insert wins. Rows live until the
+    ceremony would have expired (five minutes) and name no one."""
 
     __tablename__ = "passkey_challenges"
 
