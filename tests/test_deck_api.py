@@ -289,6 +289,24 @@ def test_simulate_plays_the_curve_with_the_commander_in_the_command_zone(loaded)
     assert again["result"] == out  # the default seed comes from the deck: same deck, same answer
 
 
+def test_the_seed_an_answer_reports_can_be_sent_back_for_the_same_answer(loaded):
+    """#392: half of all decks had a default seed above the 2**31-1 the endpoint accepts, so the reported seed was refused."""
+    import hashlib
+
+    def digest(text):
+        return int(hashlib.sha256(text.encode()).hexdigest()[:8], 16)
+
+    texts = [f"Commander\n1 Test Commander\nDeck\n37 Test Mountain\n{30 + n} Dull Bear\n31 Cheap Ramp" for n in range(12)]
+    big = next(t for t in texts if digest(t) > 2**31 - 1)  # the old default would have been refused
+    body = {"text": big, "format": "commander", "games": 50, "samples": 1}
+    first = loaded.post(f"{V1}/simulate", json=body)
+    assert first.status_code == 200, first.text
+    seed = first.json()["result"]["seed"]
+    assert 0 <= seed <= 2**31 - 1
+    again = loaded.post(f"{V1}/simulate", json={**body, "seed": seed})
+    assert again.status_code == 200 and again.json()["result"] == first.json()["result"]
+
+
 def test_simulate_needs_enough_cards(loaded):
     assert loaded.post(f"{V1}/simulate", json={"text": "3 Test Mountain", "format": "modern"}).status_code == 400
 
