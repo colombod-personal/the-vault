@@ -61,8 +61,8 @@ const HELP_SECTIONS = [
   {
     id: 'assistant', title: 'Connect an AI assistant', views: [],
     body: [
-      'Use the Vault from Claude or ChatGPT: ask about your collection and decks, check rules with cited sources, and have an expert council review a deck. In Claude or ChatGPT you add The Vault and sign in with your Vault account: no token needed. You choose whether it may edit your collection and decks, and you can disconnect it any time under “Connected apps” in Account.',
-      'For Claude Code, Codex, Cursor or VS Code, create a personal access token under “Agents & API” in Account. The connect page has the steps for each.',
+      'Use the Vault from Claude, ChatGPT, Perplexity or Codex: ask about your collection and decks, check rules with cited sources, and have an expert council review a deck. In each of them you add The Vault and sign in with your Vault account in the browser: no token needed. You choose whether it may edit your collection and decks, and you can disconnect it any time under “Connected apps” in Account.',
+      'For Claude Code, Cursor, VS Code or your own scripts, you can create a personal access token under “Agents & API” in Account. The connect page has the steps for each.',
     ],
     links: [{ href: '/connect.html', label: 'Open the connect page' }],
   },
