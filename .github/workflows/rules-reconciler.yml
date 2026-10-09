@@ -1,0 +1,24 @@
+name: rules-reconciler
+# Reads the current and the previous Comprehensive Rules from Wizards of the Coast (nothing is stored: docs/reconciler-design.md) and
+# checks every rule number the skills and agents cite (#107). Fails for a number the current edition does not have (removed,
+# renumbered, or never a rule); a rule that changed is a warning. Read-only: it reports in the run's annotations and job summary.
+on:
+  schedule:
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  citations:
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19 (#180); move deliberately
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.12"
+      - run: |
+          pip install --require-hashes --no-deps -r requirements-lock.txt  # exact versions, hash-checked
+          pip install --no-build-isolation --no-deps -r requirements-vcs.txt  # mtg-toolkits at a pinned commit
+      - run: python scripts/check_rule_citations.py

@@ -35,6 +35,8 @@ function DeckOpening({ text, title, format, setFormat }) {
 
   const { answer, error, loading } = run;
   const r = answer && answer.result;
+  const overview = answer && answer.deck && answer.deck.overview;
+  const deckOverview = overview && r ? { ...overview, format: r.format } : overview;
   const locked = loading || wait > 0;
   const again = Sim.playAgain({ busy: loading && !!answer, wait });
   const intro = r && Sim.intro(r);
@@ -44,7 +46,7 @@ function DeckOpening({ text, title, format, setFormat }) {
     <div className="ds">
       <section className="panel" aria-labelledby="ds-h-intro">
         <h2 id="ds-h-intro" className="eyebrow ds-h">Opening turns</h2>
-        <p className="ds-meta"><strong>{Sim.deckLine(title, answer && answer.deck && answer.deck.overview)}</strong></p>
+        <p className="ds-meta"><strong>{Sim.deckLine(title, deckOverview)}</strong></p>
         <p className="ds-lead"><strong>{intro ? intro.lead : 'A simulation, not a prediction.'}</strong>{' '}
           {intro ? <>{intro.body} {intro.margin}</> : 'The Vault plays this list many times with a simple player (no opponent) and counts what happened in the first turns.'}</p>
         {r && <p className="ds-asplayed"><strong>As played:</strong> {Sim.asPlayed(r)}</p>}
@@ -133,7 +135,7 @@ function DeckOpening({ text, title, format, setFormat }) {
                   {p.plan && (
                     <div className="ds-plan" role="note">
                       <strong>{p.plan.title}</strong>
-                      <ul>{p.plan.items.map((it) => <li key={it.card}><span className="ds-cn">{it.card}</span> <span className="ds-why">{it.why}</span></li>)}</ul>
+                      <ul>{p.plan.items.map((it) => <li key={`${it.card}-${it.why}`}><span className="ds-cn">{it.card}</span> <span className="ds-why">{it.why}</span></li>)}</ul>
                       <p className="ds-sub">{p.plan.note}</p>
                     </div>
                   )}

@@ -102,6 +102,17 @@ def test_every_figure_and_sentence_equals_the_field_of_the_answer_it_reads(loade
 
 
 @needs_node
+def test_deck_line_uses_the_format_the_server_simulated(loaded):
+    sim, stats = real_answers(loaded, format="modern")
+    assert sim["deck"]["overview"]["format"] == "commander"
+    assert sim["result"]["format"] == "modern"
+    said = page_says({"simulate": sim, "stats": stats, "errors": [], "turns": 6})
+    assert said["deckLine"].startswith("Pasted decklist · modern · ")
+    assert " · commander · " not in said["deckLine"]
+    assert "modern · " in said["asPlayed"]
+
+
+@needs_node
 def test_the_deck_s_own_plan_is_shown_as_the_deck_s_not_a_fault(loaded, app):
     from tests.test_deck_api import CARDS, TODAY, card
     from vault import catalog_sync as cs
@@ -120,6 +131,7 @@ def test_the_deck_s_own_plan_is_shown_as_the_deck_s_not_a_fault(loaded, app):
     assert {"card": "Circle of Protection: Red", "why": plan_why(plan, "Circle of Protection: Red")} in discard["plan"]["items"]  # split at the last colon
     assert {"card": "Test Tower", "why": "no maximum hand size"} in discard["plan"]["items"]
     assert "lifts the hand limit" in discard["plan"]["note"]
+    assert '<li key={`${it.card}-${it.why}`}' in TAB
     plain = loaded.post(f"{V1}/simulate", json={"text": DECK, "format": "commander", "samples": 0}).json()
     assert plain["result"]["discard_may_be_the_plan"] == []
     assert page_says({"simulate": plain, "stats": {"curve": {}, "lands": 0, "nonland": 0, "average_mana_value_nonland": 0}, "errors": [], "turns": 6})["panels"][3]["groups"][0]["tone"] == "danger"
@@ -178,6 +190,7 @@ def test_the_tab_sits_after_stats_the_stats_tab_links_to_it_and_the_curve_is_one
 def test_the_tab_asks_the_server_for_everything_and_shows_the_states_the_design_names():
     assert "VaultApi.deckSimulate(text, { format, on_the_play: onPlay, turns, games: Sim.GAMES, samples: Sim.SAMPLES, seed })" in TAB
     assert "VaultApi.deckStats(text)" in TAB  # the curve comes from the stats call, in parallel
+    assert "format: r.format" in TAB and "Sim.deckLine(title, deckOverview)" in TAB
     assert "Math.random" in TAB and TAB.count("Math.random") == 1  # only the new seed; no figure is computed in the browser
     for needle in ('role="status"', 'role="alert"', "aria-pressed={onPlay}", "aria-busy=", "<details className=\"ds-game\" open={open}>", "What this simulation does not do",
                    "r.assumptions.map", "Try again", "Sample games, turn by turn", "The headline figures", "The odds, turn by turn", "{r.colour_warning}"):

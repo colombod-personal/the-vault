@@ -14,9 +14,11 @@ const S = sandbox.window.VaultDeckSim;
 const J = (o) => JSON.parse(JSON.stringify(o));
 const { simulate: a, stats, errors, turns } = input;
 const r = a.result;
+const overview = a.deck.overview;
+const deckOverview = overview && r ? { ...overview, format: r.format } : overview;
 
 console.log(JSON.stringify(J({
-  deckLine: S.deckLine(a.deck.name || 'Pasted decklist', a.deck.overview),
+  deckLine: S.deckLine(a.deck.name || 'Pasted decklist', deckOverview),
   intro: S.intro(r), asPlayed: S.asPlayed(r), tiles: S.tiles(r), panels: S.oddsPanels(r),
   samplesIntro: S.samplesIntro(r),
   games: r.samples.map((g, i) => ({ summary: S.gameSummary(g, i), turns: g.turns.map((t) => S.turnCells(t, r)) })),
