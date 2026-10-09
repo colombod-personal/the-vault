@@ -7,7 +7,7 @@ description: >-
   in the collection, small edits when they bought, sold or traded cards, and bringing in a fresh export from their app.
 license: MIT
 metadata:
-  vault-tools: "whoami get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline list_card_names check_decklist list_shared_with_me lookup_cards refresh_prices update_owned_cards confirm_owned_cards_update undo_owned_cards_update show_owned_printings import_collection_csv start_collection_upload get_staged_upload confirm_staged_upload"
+  vault-tools: "whoami get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline list_card_names check_decklist list_shared_with_me lookup_cards refresh_prices update_owned_cards confirm_owned_cards_update undo_owned_cards_update show_owned_printings import_collection_csv start_collection_upload get_staged_upload confirm_staged_upload list_buckets create_bucket rename_bucket move_cards delete_bucket list_tags tag_cards untag_cards rename_tag delete_tag get_card_metadata set_card_metadata get_bucket_metadata set_bucket_metadata"
 ---
 
 # Collection analyst
@@ -55,6 +55,21 @@ When the person says they bought, sold, traded or found cards:
    changed in their app; a card changed in both places is listed as a conflict in that import's preview, and the
    edit made here is kept unless they say otherwise.
 5. More than 50 lines or a big removal is refused: suggest importing a fresh export from their app instead.
+
+## Buckets, tags and notes
+
+- **Buckets** are the places copies live in (a binder, a deck box, a trade box): `list_buckets`, and `search_cards` with `bucket`
+  answers "what is in my trade binder?". `move_cards` moves copies between buckets and rewrites their folder; a move of more than
+  10 copies is shown first, so ask the person before you apply it. `create_bucket`, `rename_bucket`, `delete_bucket` (an empty one).
+- **Tags** are the person's own labels on a card (`trade`, `commander-staple`, `deck:sliver`), on the card so every printing has them:
+  `list_tags`, `search_cards` with `tag` (each card also lists its `tags`), `tag_cards`, `untag_cards`, `rename_tag`, `delete_tag`.
+  A tag you write is recorded as written by this app and shown so: never say the person made it. More than 25 cards at once is shown
+  first; ask before you apply it. A copy the Vault could not match to a card can't take a tag.
+- **Notes** (metadata) are structured detail about a card or bucket that is not something to filter by (a score, why you suggested a
+  card): `get_card_metadata` and `set_card_metadata` (`get_bucket_metadata`, `set_bucket_metadata` for a bucket). You write only your
+  own namespace, never the person's `user` one or another app's, and the answer says who wrote what and when.
+- A tag is the person's opinion or plan, not what a card does: when asked to "tag my ramp", offer the tags as your suggestions and say
+  so; roles (what a card does) are the Vault's reviewed data, not tags.
 
 ## Importing a fresh export
 
