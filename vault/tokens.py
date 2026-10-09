@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
+from .locks import lock_account
 from .models import AccessToken, ApiSession, AuthCode, RetiredRefreshToken, User
 
 ACCESS_TTL = timedelta(hours=1)
@@ -154,22 +155,30 @@ def redeem_code(db: Session, code: str, code_verifier: str, redirect_uri: str, d
     row = db.scalar(select(AuthCode).where(AuthCode.code_hash == _hash(code)))
     if row is None:
         raise TokenError("invalid_grant", "Unknown or already used code")
+    # The account lock first, and claiming the code and making the session are ONE transaction (#347): "Sign out the other
+    # browsers" takes the same lock and deletes the unredeemed codes, so a redeem is either finished before it (and its session
+    # deleted by it) or finds the code gone. Before, the claim was committed first and the session made after, outside any lock.
+    lock_account(db, row.user_id)
     # Single use, whatever happens next: claim it with a conditional delete, so of two requests
     # racing with the same code only one gets past here.
     claimed = db.execute(delete(AuthCode).where(AuthCode.id == row.id)).rowcount
-    db.commit()
     if not claimed:
+        db.rollback()
         raise TokenError("invalid_grant", "Unknown or already used code")
-    if _aware(row.expires_at) < _now():
-        raise TokenError("invalid_grant", "Code expired")
-    if row.redirect_uri != redirect_uri:
-        raise TokenError("invalid_grant", "redirect_uri does not match")
-    if not PKCE_VERIFIER.fullmatch(code_verifier or "") or not secrets.compare_digest(s256(code_verifier), row.code_challenge):
-        raise TokenError("invalid_grant", "PKCE verification failed")
-    user = db.get(User, row.user_id)
-    if user is None:  # the account was deleted after the code was made
-        raise TokenError("invalid_grant", "Unknown or already used code")
-    return issue(db, user, "app", device_name)
+    try:
+        if _aware(row.expires_at) < _now():
+            raise TokenError("invalid_grant", "Code expired")
+        if row.redirect_uri != redirect_uri:
+            raise TokenError("invalid_grant", "redirect_uri does not match")
+        if not PKCE_VERIFIER.fullmatch(code_verifier or "") or not secrets.compare_digest(s256(code_verifier), row.code_challenge):
+            raise TokenError("invalid_grant", "PKCE verification failed")
+        user = db.get(User, row.user_id)
+        if user is None:  # the account was deleted after the code was made
+            raise TokenError("invalid_grant", "Unknown or already used code")
+    except TokenError:
+        db.commit()  # the burn: a code that failed a check is spent
+        raise
+    return issue(db, user, "app", device_name)  # adds the session and commits it with the claim
 
 
 # -- personal access tokens (agents, scripts, MCP clients) ---------------------------------

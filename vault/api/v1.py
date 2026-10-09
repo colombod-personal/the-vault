@@ -22,6 +22,7 @@ from urllib.parse import urlencode, urlsplit
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, UploadFile
 from fastapi.responses import Response
+from starlette.concurrency import run_in_threadpool
 from mtg_toolkits import decklist, delta, normalize_set_code
 from mtg_toolkits.formats import FORMATS
 from mtg_toolkits.archidekt import ArchidektClient
@@ -151,29 +152,33 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             raise HTTPException(401, str(exc)) from exc
         except ProviderUnavailable as exc:
             raise HTTPException(503, f"{exc}. Try again shortly.", headers={"Retry-After": "30"}) from exc
-        # Each ID token signs in once: the nonce inside it is recorded, and committed on its own
-        # so nothing later in the sign-in can roll it back, until the token can no longer be
-        # used (its expiry plus the clock leeway ``verify`` allows).
-        db.execute(delete(NativeNonce).where(NativeNonce.expires < time.time()))
-        db.add(NativeNonce(id=hashlib.sha256(f"{provider}:{claims['nonce']}".encode()).hexdigest(),
-                           expires=float(claims["exp"]) + NATIVE_LEEWAY))
-        try:
-            db.commit()
-        except IntegrityError:
-            db.rollback()
-            raise HTTPException(401, "This sign-in was already used; sign in again") from None
-        name = body.name if provider == "apple" else claims.get("name")
-        if "account" not in request.state.scopes:  # a personal access token can't add sign-in methods
-            current = None
-        by_cookie = current is not None and getattr(request.state, "bearer", None) is None
-        try:
-            user = find_or_create(db, Profile(provider, str(claims["sub"]), claims.get("email"), name), current,
-                                  request.session.get("sk") if by_cookie else None)
-        except IdentityInUse as exc:
-            raise HTTPException(409, str(exc)) from exc
-        if by_cookie and user.id == current.id:  # signed in by a copied cookie would mint an app session for the account (#347)
-            require_live_session(db, request, user.id)
-        return tokens.issue(db, user, "app", body.device_name)
+        account = current if "account" in request.state.scopes else None  # a personal access token can't add sign-in methods
+
+        def mint() -> dict:
+            """The database work, in a worker thread: it can wait for the account lock, which an async handler must not do on the
+            event loop (#347)."""
+            # Each ID token signs in once: the nonce inside it is recorded, and committed on its own
+            # so nothing later in the sign-in can roll it back, until the token can no longer be
+            # used (its expiry plus the clock leeway ``verify`` allows).
+            db.execute(delete(NativeNonce).where(NativeNonce.expires < time.time()))
+            db.add(NativeNonce(id=hashlib.sha256(f"{provider}:{claims['nonce']}".encode()).hexdigest(),
+                               expires=float(claims["exp"]) + NATIVE_LEEWAY))
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+                raise HTTPException(401, "This sign-in was already used; sign in again") from None
+            name = body.name if provider == "apple" else claims.get("name")
+            try:  # the caller's session (a cookie or an app's token) is held to its live state when it links a sign-in (#347)
+                user = find_or_create(db, Profile(provider, str(claims["sub"]), claims.get("email"), name), account,
+                                      request if account is not None else None)
+            except IdentityInUse as exc:
+                raise HTTPException(409, str(exc)) from exc
+            if account is not None and user.id == account.id:  # a copied cookie or an app session minting another app session (#347)
+                require_live_session(db, request, user.id)
+            return tokens.issue(db, user, "app", body.device_name)
+
+        return await run_in_threadpool(mint)
 
     @router.post("/auth/token", tags=["auth"], response_model=S.TokenResponse,
                  summary="Redeem a browser sign-in code (PKCE) or rotate a refresh token",

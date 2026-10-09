@@ -484,7 +484,7 @@ four criteria; only the third is built, because the others wait for a decision f
 
 ### Built: "Sign out everywhere" ends the other sessions, then shows and removes sign-in methods (criterion 3)
 
-Four read-only agent reviews of this change (the author's and three independent ones) (2026-10-09, before any merge; no human review yet) found the problems recorded
+Five read-only agent reviews of this change (the author's and four independent ones) (2026-10-09, before any merge; no human review yet) found the problems recorded
 below as "found by review"; each is fixed and tested. The first version listed only what was added in the last 24 hours and signed out last.
 
 - **What the person sees, in this order on purpose.** Account, Sign-in methods, "Sign out everywhere" opens a panel.
@@ -515,16 +515,28 @@ below as "found by review"; each is fixed and tested. The first version listed o
   stays signed in; their other browsers sign in again). Removing nothing ends nothing. *Found by the second review* (the "Done" of the
   first version never rotated again). Test: the attacker signs in through the planted passkey, the owner removes it, the attacker's new
   cookie is 401 (`tests/test_passkeys.py`).
-- **A request already past authentication cannot mint anything after the session ended.** One helper, `require_live_session`
-  (`vault/auth.py`), re-reads `users.session_key` with `SELECT … FOR UPDATE` in the same transaction as the insert and compares it with
-  the cookie's (401 `SessionEnded` on a mismatch; a bearer-token caller has no cookie and is skipped). It runs right before the insert in:
-  the passkey register, `POST /me/tokens` (inside the idempotent work), the native sign-in that links or returns the cookie's own account,
-  `POST /api/auth/app-handoff` (the one-time code for the app) and the OAuth consent answer (the authorization code). The provider link
-  does the same under the locks it takes (`find_or_create(..., expect_key=)`, for a new identity and for moving one over; the callback
-  sends the person back to `/` with `session_ended`). Step 1 takes the same lock when it replaces the key, so a mint is ordered either
-  before it (and then deleted by it) or after it (and refused). Tests (`tests/test_sign_out_others_*.py`, `tests/test_passkeys.py`,
-  `tests/test_recent_sign_in_methods.py`): for each route the key is replaced between authentication and the check and nothing is
-  minted; with the check removed they fail. *Found by the third review* (the first version re-checked only the passkey and the link).
+- **A request already past authentication cannot mint anything after the session ended, and the account lock orders everything.**
+  `vault/locks.py` takes the account lock one way: `SELECT … FOR NO KEY UPDATE` on the user row (not `FOR UPDATE`: a refresh or a consent
+  inserts a row with a foreign key to the user, which takes `FOR KEY SHARE`; `FOR UPDATE` conflicts with it, and a refresh holding its
+  `api_sessions` row while waiting for the user row could deadlock with step 1, which holds the user row and deletes that session; the
+  test holds the lock and a refresh still completes) with `SET LOCAL lock_timeout = '5s'` (a lock that cannot be had is the Vault's usual
+  503 with `Retry-After`, not a hung worker). `require_live_session` (`vault/auth.py`) takes it and compares the key it reads with the
+  cookie's (401 `SessionEnded` on a mismatch); an **app session** (a bearer token with the account scope, which a copied cookie can mint
+  through the hand-over) is held to its own `api_sessions` row, which must still exist under the lock, and step 1 deletes those rows under
+  the same lock. It runs right before the insert in the passkey register (the count of passkeys is under it, for app callers too),
+  `POST /me/tokens` (inside the idempotent work), the native sign-in, `POST /api/auth/app-handoff`, the OAuth consent answer, and the
+  provider link (for a new identity and for moving one over: `find_or_create(..., hold=request)`; the callback sends the person back to `/`
+  with `session_ended`). **Every removal and step 1 call it first** (`hold_account`), so a request authenticated with an old key that
+  waited for step 1's lock is refused instead of rotating the key again and writing the new key into its own stale cookie (that would
+  have revived the stale cookie and killed the owner's); `rotate_session_key` also refuses a cookie that does not hold the live key. **The
+  code redeems take the lock before they claim** (`tokens.redeem_code`, `oauth_server.exchange_code`), and the app code's claim and the
+  session it makes are one transaction (before, the code was deleted and committed first and the session made outside any lock, so a
+  redeem that had already claimed the code survived step 1). A redeem is thus either finished before step 1 (and its session or recent grant
+  deleted by it) or finds the code gone. The async handlers that take these locks (`native_sign_in`, the provider callback) do their database
+  work in a worker thread, so waiting for a lock never stops the event loop. Tests (`tests/test_sign_out_others_*.py`,
+  `tests/test_passkeys.py`, `tests/test_recent_sign_in_methods.py`): for each route the key (or the app session) is ended between
+  authentication and the check and nothing is minted or removed and no cookie revived; a redeem waits for step 1 and finds the code gone;
+  a lock past its timeout is a 503; with the check, the order or `NO KEY` removed they fail. *Found by the third and fourth reviews.*
 - **The one rule for every removal: a method older than 24 hours must remain afterwards.** `established_methods` (`vault/auth.py`) counts
   the OTHER providers and passkeys older than the window, and each removal (`remove_identity`, `remove_passkey`,
   `remove_recent_methods`) has it inside its own `DELETE` statement after locking the account row, so two removals at once take turns
@@ -577,9 +589,6 @@ sign-in (criteria 1 and 2 below), which is why they are listed and not worked ar
   cookie, but not a method the attacker already planted.
 - *Step 1 ends every app session, but a personal access token or connected app made more than 24 hours ago is
   not ended,* because it is the person's own doing; if a copied session made one and the owner waited a day, it must be revoked by hand.
-- *A code redeemed at the same moment as step 1.* `/oauth/token` and `/api/v1/auth/token` do not take the account lock: a code redeemed
-  in the few milliseconds between step 1 reading and deleting the grants can leave one grant that step 1 did not see. It shows in
-  Connected apps (created in the last minute) and is revoked there; closing it means locking the account in both redeem paths.
 
 **Known effect on the owner (not fixed).** The cookie is re-issued by the response that rotates the key. A parallel request from the
 owner's own browser sent just before that response arrives still carries the old cookie and gets a 401: the web app then shows the

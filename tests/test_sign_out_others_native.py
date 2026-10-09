@@ -6,6 +6,8 @@ cookie whose key was replaced meanwhile. The tests replace the key between authe
 request already past authentication sees when "Sign out the other browsers" commits first."""
 
 import secrets
+import threading
+import time
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -14,6 +16,8 @@ from sqlalchemy import func, select
 
 from twins import Universe
 from vault import auth as auth_module
+from vault import tokens
+from vault.locks import lock_account
 from vault.api import v1 as v1_module
 from vault.app import create_app
 from vault.config import Settings
@@ -126,3 +130,56 @@ def test_a_hand_over_code_minted_with_the_copied_cookie_is_dead_after_step_1(cli
                                                  "redirect_uri": "vault://auth"})
     assert res.status_code == 400
     assert count(app, ApiSession) == 0 and count(app, AuthCode) == 0
+
+
+def test_a_redeem_that_already_claimed_the_code_cannot_outlive_step_1(client, app, idp):
+    """Finding 3: the redeem used to delete the code and commit before it made the session, outside any lock, so a redeem that had
+    already claimed the code survived step 1. Now it takes the account lock first and claims and issues in one transaction: with
+    step 1 holding the lock the redeem waits, finds the code deleted when it gets through, and mints nothing."""
+    verifier = handoff_ready(client, idp)
+    back = client.post("/api/auth/app-handoff", data={"decision": "continue"}, follow_redirects=False)
+    code = parse_qs(urlsplit(back.headers["location"]).query)["code"][0]
+    with app.state.db.sessions() as db:
+        uid = db.scalar(select(AuthCode.user_id))
+    answer = {}
+
+    def redeem():
+        answer["status"] = TestClient(app).post(
+            f"{V1}/auth/token", json={"grant_type": "authorization_code", "code": code, "code_verifier": verifier,
+                                       "redirect_uri": "vault://auth"}).status_code
+
+    with app.state.db.sessions() as step_1:
+        lock_account(step_1, uid)  # step 1 holds the account...
+        racer = threading.Thread(target=redeem)
+        racer.start()
+        time.sleep(0.7)
+        assert racer.is_alive()  # ...the redeem waits for it
+        step_1.query(AuthCode).delete()  # and step 1 deletes the unredeemed codes
+        step_1.commit()
+    racer.join(20)
+    assert answer["status"] == 400
+    assert count(app, ApiSession) == 0
+
+
+def test_an_app_session_cannot_link_a_sign_in_after_it_was_ended(client, app, idp, monkeypatch):
+    """Finding 2, the link path: a bearer caller adding a new identity is held to its live session row too."""
+    client.post("/api/auth/dev-login")
+    me = client.get(f"{V1}/me").json()["id"]
+    with app.state.db.sessions() as db:
+        secret = tokens.issue(db, db.get(User, me), client="ios")["access_token"]
+    real = auth_module.require_live_session
+
+    def end_the_session_first(db, request, user_id):
+        with app.state.db.sessions() as other:
+            other.query(ApiSession).delete()
+            other.commit()
+        return real(db, request, user_id)
+
+    monkeypatch.setattr(auth_module, "require_live_session", end_the_session_first)
+    raw = secrets.token_urlsafe(24)
+    token = idp.google.native_id_token(GOOGLE_IOS, idp.google.add_account("g-new", "new@gmail.com", "New"), nonce=raw)
+    res = TestClient(app).post(f"{V1}/auth/native/google", json={"id_token": token, "nonce": raw},
+                               headers={"Authorization": f"Bearer {secret}"})
+    assert res.status_code == 401 and "session ended" in res.json()["detail"]
+    with app.state.db.sessions() as db:
+        assert db.scalar(select(Identity.id).where(Identity.subject == "g-new")) is None  # nothing was linked

@@ -80,3 +80,33 @@ def test_a_consent_answer_already_past_authentication_mints_no_code_after_the_se
     res = client.answer(page)
     assert res.status_code != 303 and "location" not in res.headers and "session ended" in res.text
     assert count(app, OAuthCode) == 0
+
+
+def test_an_oauth_redeem_waits_for_step_1_and_finds_the_code_gone(app, client):
+    """The OAuth code redeem takes the account lock before it claims the code, so step 1 (which holds it while it deletes the
+    unredeemed codes) and a redeem cannot interleave into a grant that outlives the answer."""
+    import threading
+    import time
+
+    from vault.locks import lock_account
+
+    client.sign_in()
+    code = client.approve()["code"]
+    with app.state.db.sessions() as db:
+        uid = db.scalar(select(OAuthCode.user_id))
+    answer = {}
+
+    def redeem():
+        answer["res"] = client.redeem(code)
+
+    with app.state.db.sessions() as step_1:
+        lock_account(step_1, uid)
+        racer = threading.Thread(target=redeem)
+        racer.start()
+        time.sleep(0.7)
+        assert racer.is_alive()
+        step_1.query(OAuthCode).delete()
+        step_1.commit()
+    racer.join(20)
+    assert answer["res"].status_code == 400 and answer["res"].json()["error"] == "invalid_grant"
+    assert count(app, OAuthGrant) == 0

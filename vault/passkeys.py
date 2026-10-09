@@ -48,7 +48,7 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
 )
 
-from .auth import RECENT_SIGN_IN_METHOD_HOURS, Profile, established_methods, require_live_session, rotate_session_key
+from .auth import RECENT_SIGN_IN_METHOD_HOURS, Profile, established_methods, hold_account, require_live_session, rotate_session_key
 from .config import Settings
 from .models import Identity, Passkey, PasskeyChallenge, User, utcnow
 from .ratelimit import limited
@@ -210,8 +210,8 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         # The account has one WebAuthn user handle. If another device added the first passkey
         # while this request was open, its handle won: a passkey made with ours could never sign
         # in, so start again (the account row is locked so two of these can't both decide).
-        require_live_session(db, request, user.id)  # the session was ended (sign out everywhere, a removal) while this ran (#347)
-        if db.scalar(select(func.count(Passkey.id)).where(Passkey.user_id == user.id)) >= MAX_PASSKEYS:  # under the lock
+        require_live_session(db, request, user.id)  # takes the account lock too: the count below is under it, for bearer callers as well (#347)
+        if db.scalar(select(func.count(Passkey.id)).where(Passkey.user_id == user.id)) >= MAX_PASSKEYS:  # under the account lock
             raise too_many()
         identity = db.scalar(select(Identity).where(Identity.user_id == user.id, Identity.provider == PROVIDER))
         if identity is not None and identity.subject != pending["handle"]:
@@ -280,7 +280,7 @@ def remove_passkey(db: Session, user_id: int, passkey_id: int, request: Request 
     left" check. The account row is locked first (``SELECT … FOR UPDATE``), so they take turns,
     and the check is also part of the DELETE itself: one statement that removes the passkey only
     if another passkey or sign-in remains, evaluated when it runs. The caller commits."""
-    db.execute(select(User.id).where(User.id == user_id).with_for_update())
+    hold_account(db, user_id, request)
     passkey = db.get(Passkey, passkey_id, populate_existing=True)
     if passkey is None or passkey.user_id != user_id:
         raise HTTPException(404, "Passkey not found")

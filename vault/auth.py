@@ -41,6 +41,7 @@ from authlib.integrations.starlette_client import OAuth
 from joserfc.errors import JoseError
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
 from joserfc import jwt
 from joserfc.jwk import ECKey
 from sqlalchemy import delete, exists, func, or_, select
@@ -49,6 +50,7 @@ from sqlalchemy.orm import Session
 
 from . import outbound
 from .config import Settings
+from .locks import lock_account
 from .models import Identity, User, new_session_key, utcnow
 from .ratelimit import limited
 
@@ -207,17 +209,36 @@ def require_live_session(db: Session, request: Request, user_id: int) -> None:
     session, a personal access token, an authorization code, a hand-over code, a passkey) (#347).
 
     "Sign out the other browsers" replaces ``users.session_key`` and deletes what a copied cookie minted; a request that was
-    already past authentication when that committed would otherwise mint afterwards. This reads the key again with
-    ``SELECT … FOR UPDATE`` and compares it with the cookie's: on a mismatch (401, ``SessionEnded``) nothing is minted. The
-    lock is held until the caller's transaction ends, so the insert that follows is ordered after the rotation. Call it in the
-    same transaction as the insert, with nothing committed in between. A bearer-token caller has no cookie and is skipped:
-    its token is checked per request (and step 1 deletes app sessions)."""
-    if getattr(request.state, "bearer", None) is not None:
+    already past authentication when that committed would otherwise mint afterwards. This takes the account lock
+    (:func:`vault.locks.lock_account`) and compares the key it reads with the cookie's: on a mismatch (401, ``SessionEnded``)
+    nothing is minted. An app session (a bearer token with the account scope, which a copied cookie can mint through the
+    hand-over) is held to its own row instead: the ``api_sessions`` row of that token must still exist under the lock, and step 1
+    deletes those rows under the same lock. The lock is held until the caller's transaction ends, so the insert that follows is
+    ordered after the rotation. Call it in the same transaction as the insert, with nothing committed in between."""
+    live = lock_account(db, user_id)
+    bearer = getattr(request.state, "bearer", None)
+    if bearer is not None:
+        from . import tokens
+        from .models import ApiSession
+
+        if db.scalar(select(ApiSession.id).where(ApiSession.access_hash == tokens._hash(bearer),
+                                                 ApiSession.user_id == user_id)) is None:
+            db.rollback()
+            raise SessionEnded()
         return
-    live = db.scalar(select(User.session_key).where(User.id == user_id).with_for_update())
     if not session_key_matches(live, request.session.get("sk")):
         db.rollback()
         raise SessionEnded()
+
+
+def hold_account(db: Session, user_id: int, request: Request | None = None) -> None:
+    """The first statement of a removal or of step 1: lock the account and, for a request, hold it to its live session
+    (:func:`require_live_session`), so a request authenticated before the key was replaced cannot rotate it again and re-issue
+    its stale cookie as a live one. Without a request (a direct call) it only takes the lock."""
+    if request is None:
+        lock_account(db, user_id)
+    else:
+        require_live_session(db, request, user_id)
 
 
 def rotate_session_key(db: Session, user_id: int, request: Request | None = None) -> None:
@@ -225,7 +246,11 @@ def rotate_session_key(db: Session, user_id: int, request: Request | None = None
     caller's stays. Used wherever something that could have been added by a copied session is removed (#347): a session that
     signed in *through* the removed method shares the account's key, so removing the method alone would not end it. The
     caller's transaction commits; the account row is already locked by the removal."""
-    user = db.get(User, user_id)
+    user = db.get(User, user_id, populate_existing=True)
+    state = getattr(request, "state", None)
+    if request is not None and getattr(state, "bearer", None) is None and not session_key_matches(user.session_key, request.session.get("sk")):
+        db.rollback()  # a stale cookie must not turn the live key into one it holds (defence in depth: callers hold the account first)
+        raise SessionEnded()
     user.session_key = new_session_key()
     # Only the cookie of this account is re-issued: a bearer-token caller (no session) or a cookie of another account is left alone.
     if request is not None and request.session.get("uid") == user_id and "sk" in request.session:
@@ -242,7 +267,7 @@ def end_other_sessions(db: Session, user: User, request: Request) -> dict:
 
     # The account row first: a request that minted something and holds this lock finishes before the deletes below look for it,
     # and one that asks for the lock afterwards reads the new key and is refused (:func:`require_live_session`).
-    db.execute(select(User.id).where(User.id == user.id).with_for_update())
+    hold_account(db, user.id, request)  # also refuses a cookie whose key was replaced meanwhile (a late "step 1" of a copied session)
     since = utcnow() - timedelta(hours=RECENT_SIGN_IN_METHOD_HOURS)
     gone = {
         "apps_signed_out": db.execute(delete(ApiSession).where(ApiSession.user_id == user.id)).rowcount or 0,
@@ -295,7 +320,7 @@ def account_is_empty(db: Session, user_id: int) -> bool:
     return not any(db.scalar(q.limit(1)) is not None for q in held)
 
 
-def _claim_identity(db: Session, identity: Identity, current: User, expect_key: str | None = None) -> None:
+def _claim_identity(db: Session, identity: Identity, current: User, hold: Request | None = None) -> None:
     """Move ``identity`` from the (empty) account that owns it to ``current``, in the caller's
     transaction. Raises IdentityInUse, with nothing changed, when that account holds data.
 
@@ -309,9 +334,8 @@ def _claim_identity(db: Session, identity: Identity, current: User, expect_key: 
     # Both accounts locked (in id order, so two links the other way round can't deadlock): an
     # import into the other account waits, and then sees it gone or no longer owning this sign-in.
     db.execute(select(User.id).where(User.id.in_([other_id, current.id])).order_by(User.id).with_for_update())
-    if expect_key is not None and not session_key_matches(db.scalar(select(User.session_key).where(User.id == current.id)), expect_key):
-        db.rollback()  # the browser's session was ended while this request ran: it may not take a sign-in method (#347)
-        raise SessionEnded()
+    if hold is not None:  # the caller's session was ended while this request ran: it may not take a sign-in method (#347)
+        require_live_session(db, hold, current.id)
     identity_id = identity.id
     db.expire(identity)
     identity = db.get(Identity, identity_id, populate_existing=True)
@@ -409,7 +433,7 @@ def remove_recent_methods(db: Session, user_id: int, request: Request | None = N
     account row is locked first, as in :func:`remove_identity`; the caller commits."""
     from .models import Passkey
 
-    db.execute(select(User.id).where(User.id == user_id).with_for_update())
+    hold_account(db, user_id, request)
     since = utcnow() - timedelta(hours=RECENT_SIGN_IN_METHOD_HOURS)
     if not db.scalar(select(established_methods(user_id, since))):
         raise HTTPException(409, f"This account has no sign-in method older than {RECENT_SIGN_IN_METHOD_HOURS} hours, so "
@@ -445,7 +469,7 @@ def remove_identity(db: Session, user_id: int, identity_id: int, request: Reques
     and the "another way to sign in is left" check is part of the DELETE itself. The caller commits."""
     from .models import Passkey
 
-    db.execute(select(User.id).where(User.id == user_id).with_for_update())
+    hold_account(db, user_id, request)
     identity = db.get(Identity, identity_id, populate_existing=True)
     if identity is None or identity.user_id != user_id or identity.provider == PASSKEY_IDENTITY:
         raise HTTPException(404, "Sign-in method not found")
@@ -473,7 +497,7 @@ def remove_identity(db: Session, user_id: int, identity_id: int, request: Reques
     db.flush()
 
 
-def find_or_create(db: Session, profile: Profile, current: User | None = None, expect_key: str | None = None) -> User:
+def find_or_create(db: Session, profile: Profile, current: User | None = None, hold: Request | None = None) -> User:
     """The user owning ``profile``'s identity. A new identity is linked to ``current`` when
     someone is already signed in; otherwise it gets a new account. Never merged by e-mail.
 
@@ -485,7 +509,7 @@ def find_or_create(db: Session, profile: Profile, current: User | None = None, e
     (provider, subject) index lets one win, and the other then signs in to the winner's account."""
     if profile.email and len(profile.email) > 320:  # no real address is this long (users.email is String(320))
         profile = Profile(profile.provider, profile.subject, None, profile.name)
-    key = () if expect_key is None else (expect_key,)  # (only passed when there is a session key to hold the request to)
+    key = () if hold is None else (hold,)  # (only passed when there is a request to hold to its live session)
     try:
         return _find_or_create(db, profile, current, *key)
     except IntegrityError:
@@ -493,25 +517,22 @@ def find_or_create(db: Session, profile: Profile, current: User | None = None, e
         return _find_or_create(db, profile, current, *key)
 
 
-def _find_or_create(db: Session, profile: Profile, current: User | None, expect_key: str | None = None) -> User:
+def _find_or_create(db: Session, profile: Profile, current: User | None, hold: Request | None = None) -> User:
     name = (profile.name or "")[:200] or None  # users.name is String(200), whatever the provider sent
     identity = db.scalar(
         select(Identity).where(Identity.provider == profile.provider, Identity.subject == profile.subject)
     )
     if identity:
         if current is not None and identity.user_id != current.id:
-            _claim_identity(db, identity, current, expect_key)
+            _claim_identity(db, identity, current, hold)
         user = identity.user
         identity.email = profile.email or identity.email
     else:
         user = current or User(email=profile.email, name=name)
         if current is None:
             db.add(user)
-        elif expect_key is not None:  # a new identity joins the account: only while this browser's session is still live
-            live = db.scalar(select(User.session_key).where(User.id == current.id).with_for_update())
-            if not session_key_matches(live, expect_key):
-                db.rollback()
-                raise SessionEnded()
+        elif hold is not None:  # a new identity joins the account: only while the caller's session (cookie or app) is still live
+            require_live_session(db, hold, current.id)
         user.identities.append(Identity(provider=profile.provider, subject=profile.subject, email=profile.email))
     if name and not user.name:
         user.name = name
@@ -528,7 +549,7 @@ def sign_in(db: Session, request: Request, profile: Profile, link: bool = True) 
     Without it (passkey sign-in and sign-up, dev login) the browser simply switches accounts."""
     # A reviewer's demo session never takes a sign-in method of its own (#345): signing in with a provider switches accounts.
     current = session_user(db, request) if link and "rv" not in request.session else None
-    user = find_or_create(db, profile, current, request.session.get("sk") if current is not None else None)
+    user = find_or_create(db, profile, current, request if current is not None else None)
     if not user.session_key:
         user.session_key = new_session_key()
         db.commit()
@@ -631,39 +652,44 @@ def build_router(auth: Auth, get_db) -> APIRouter:
                 request.session.pop("app_flow", None)
                 return RedirectResponse(f"{app_flow['app_redirect_uri']}?{urlencode({'error': code})}", status_code=303)
             return RedirectResponse(f"/?{urlencode({'signin_error': code, 'provider': provider})}", status_code=303)
-        current = session_user(db, request)
-        owner = db.scalar(select(Identity.user_id).where(
-            Identity.provider == profile.provider, Identity.subject == profile.subject)) if current else None
-        try:
-            user = sign_in(db, request, profile)
-        except SessionEnded:
-            request.session.pop("app_flow", None)
-            return RedirectResponse(f"/?{urlencode({'signin_error': 'session_ended', 'provider': provider})}", status_code=303)
-        except IdentityInUse:
-            if app_flow:
+        def finish():
+            """The database work, in a worker thread: it can wait for the account lock, which an async handler must not do on the
+            event loop (#347)."""
+            current = session_user(db, request)
+            owner = db.scalar(select(Identity.user_id).where(
+                Identity.provider == profile.provider, Identity.subject == profile.subject)) if current else None
+            try:
+                user = sign_in(db, request, profile)
+            except SessionEnded:
                 request.session.pop("app_flow", None)
-                return RedirectResponse(f"{app_flow['app_redirect_uri']}?{urlencode({'error': 'identity_in_use'})}",
+                return RedirectResponse(f"/?{urlencode({'signin_error': 'session_ended', 'provider': provider})}", status_code=303)
+            except IdentityInUse:
+                if app_flow:
+                    request.session.pop("app_flow", None)
+                    return RedirectResponse(f"{app_flow['app_redirect_uri']}?{urlencode({'error': 'identity_in_use'})}",
+                                            status_code=303)
+                return RedirectResponse(f"/?{urlencode({'link_error': 'identity_in_use', 'provider': provider})}",
                                         status_code=303)
-            return RedirectResponse(f"/?{urlencode({'link_error': 'identity_in_use', 'provider': provider})}",
-                                    status_code=303)
-        # Linked while signed in: the web app says so once. When the sign-in came from another
-        # (empty) account, it also says whether that account was removed or kept.
-        linked = {}
-        if current is not None and owner != current.id:
-            linked = {"linked": provider}
-            if owner is not None:
-                linked["empty_account"] = "removed" if db.get(User, owner) is None else "kept"
-        if app_flow:
-            # The code goes to the app only after the person confirms here. Anyone can start this
-            # flow with their own PKCE challenge and send the link to someone; a silent sign-in
-            # must not then hand that person's code to whichever app claims the custom scheme.
-            request.session.pop("app_flow", None)
-            request.session["app_handoff"] = {**app_flow, "uid": user.id}
-            return RedirectResponse("/api/auth/app-handoff", status_code=303)
-        pending = request.session.pop("oauth_pending", None)
-        if isinstance(pending, dict) and time.time() - pending.get("t", 0) < OAUTH_PENDING_SECONDS:
-            return RedirectResponse("/oauth/authorize?" + str(pending.get("q", "")), status_code=303)
-        return RedirectResponse(f"/?{urlencode(linked)}" if linked else "/", status_code=303)
+            # Linked while signed in: the web app says so once. When the sign-in came from another
+            # (empty) account, it also says whether that account was removed or kept.
+            linked = {}
+            if current is not None and owner != current.id:
+                linked = {"linked": provider}
+                if owner is not None:
+                    linked["empty_account"] = "removed" if db.get(User, owner) is None else "kept"
+            if app_flow:
+                # The code goes to the app only after the person confirms here. Anyone can start this
+                # flow with their own PKCE challenge and send the link to someone; a silent sign-in
+                # must not then hand that person's code to whichever app claims the custom scheme.
+                request.session.pop("app_flow", None)
+                request.session["app_handoff"] = {**app_flow, "uid": user.id}
+                return RedirectResponse("/api/auth/app-handoff", status_code=303)
+            pending = request.session.pop("oauth_pending", None)
+            if isinstance(pending, dict) and time.time() - pending.get("t", 0) < OAUTH_PENDING_SECONDS:
+                return RedirectResponse("/oauth/authorize?" + str(pending.get("q", "")), status_code=303)
+            return RedirectResponse(f"/?{urlencode(linked)}" if linked else "/", status_code=303)
+
+        return await run_in_threadpool(finish)
 
     @router.get("/app-handoff", response_class=HTMLResponse)
     def app_handoff_page(request: Request, db: Session = Depends(get_db)):

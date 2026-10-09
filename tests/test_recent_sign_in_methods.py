@@ -597,14 +597,14 @@ def test_a_request_already_past_authentication_cannot_link_a_provider_after_the_
         user.session_key = new_session_key()  # a sign out everywhere committed first
         db.commit()
         with pytest.raises(SessionEnded):
-            find_or_create(db, Profile("google", "attacker-sub", None, None), current=user, expect_key=stale)
+            find_or_create(db, Profile("google", "attacker-sub", None, None), current=user, hold=cookie_request(stale))
         with pytest.raises(SessionEnded):
-            find_or_create(db, Profile("google", f"google-{donor}-1", None, None), current=user, expect_key=stale)
+            find_or_create(db, Profile("google", f"google-{donor}-1", None, None), current=user, hold=cookie_request(stale))
         db.rollback()
         assert db.scalar(select(Identity.id).where(Identity.subject == "attacker-sub")) is None
         assert db.scalar(select(Identity.user_id).where(Identity.id == existing)) == donor  # not moved
         # the live key is accepted
-        find_or_create(db, Profile("google", "owner-own-sub", None, None), current=db.get(User, owner), expect_key=user.session_key)
+        find_or_create(db, Profile("google", "owner-own-sub", None, None), current=db.get(User, owner), hold=cookie_request(user.session_key))
         assert db.scalar(select(Identity.id).where(Identity.subject == "owner-own-sub")) is not None
 
 
@@ -638,35 +638,56 @@ def test_a_token_is_still_made_while_the_session_lives(client):
     assert client.post(f"{V1}/me/tokens", json={"name": "ok", "scopes": ["read"], "expires_in_days": 30}).status_code == 201
 
 
-def test_the_cookie_is_reissued_only_for_the_account_whose_method_was_removed():
-    """rotate_session_key re-issues a cookie only when it is this account's (uid matches and it holds a key): a bearer caller
-    (no session) and a cookie of another account are left as they are."""
+def cookie_request(key, uid=None, bearer=None):
+    """What the account routes see of a request: its cookie's session (a dict) and, for an app, the bearer token."""
     from types import SimpleNamespace
 
-    from vault.auth import rotate_session_key
+    return SimpleNamespace(state=SimpleNamespace(bearer=bearer), session={} if key is None else {"sk": key, **({} if uid is None else {"uid": uid})})
 
-    row = SimpleNamespace(session_key="old")
+
+def test_the_cookie_is_reissued_only_when_it_holds_the_live_key_of_this_account():
+    """rotate_session_key refuses a cookie whose key is not the live one (a stale cookie in flight must not turn the account's
+    live key into one it holds), re-issues the cookie of this account, and leaves an app caller (no cookie) alone."""
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from vault.auth import SessionEnded, rotate_session_key
+
+    row = SimpleNamespace(session_key="live")
 
     class Db:
-        def get(self, model, ident):
+        def get(self, model, ident, **kw):
             return row
 
-    for session, reissued in (({"uid": 7, "sk": "old"}, True), ({}, False), ({"uid": 8, "sk": "other"}, False),
-                              ({"uid": 7}, False), ({"uid": 7, "sk": "old"}, True)):
-        row.session_key = "old"
-        request = SimpleNamespace(session=dict(session))
-        rotate_session_key(Db(), 7, request)
-        assert row.session_key != "old"  # the account's key always changes
-        assert (request.session.get("sk") == row.session_key) is reissued
-        assert request.session.get("sk") in (None, "other", "old", row.session_key)
-    rotate_session_key(Db(), 7, None)  # no request at all (a direct call): nothing to re-issue, nothing fails
+        def rollback(self):
+            pass
+
+    request = cookie_request("live", uid=7)
+    rotate_session_key(Db(), 7, request)  # the live key: rotated, and this cookie re-issued with the new one
+    assert row.session_key != "live" and request.session["sk"] == row.session_key
+
+    row.session_key = "live"
+    stale = cookie_request("K1-stale", uid=7)
+    with pytest.raises(SessionEnded) as caught:
+        rotate_session_key(Db(), 7, stale)
+    assert isinstance(caught.value, HTTPException) and caught.value.status_code == 401
+    assert row.session_key == "live" and stale.session["sk"] == "K1-stale"  # nothing rotated, nothing revived
+
+    other_account = cookie_request("live", uid=8)  # a live-looking cookie of another account: rotates, never re-issued to it
+    rotate_session_key(Db(), 7, other_account)
+    assert other_account.session["sk"] == "live" and row.session_key != "live"
+
+    row.session_key = "live"
+    app = cookie_request(None, bearer="an-app-token")  # an app session: the key rotates, there is no cookie to re-issue
+    rotate_session_key(Db(), 7, app)
+    assert row.session_key != "live" and app.session == {}
+    rotate_session_key(Db(), 7, None)  # no request at all (a direct call)
 
 
 def test_step_1_waits_for_a_mint_in_flight_and_then_deletes_it(client):
     """A token insert holds the account lock (as require_live_session does) while step 1 starts: step 1 waits, then its deletes
     see the committed token and remove it, instead of replacing the key first and leaving the token alive."""
-    from types import SimpleNamespace
-
     from vault.auth import end_other_sessions
     from vault.models import AccessToken
 
@@ -676,7 +697,8 @@ def test_step_1_waits_for_a_mint_in_flight_and_then_deletes_it(client):
 
     def step_1():
         with db.sessions() as s:
-            outcome["gone"] = end_other_sessions(s, s.get(User, me), SimpleNamespace(session={}))
+            user = s.get(User, me)
+            outcome["gone"] = end_other_sessions(s, user, cookie_request(user.session_key, uid=me))
             s.commit()
 
     with db.sessions() as s:
@@ -692,3 +714,122 @@ def test_step_1_waits_for_a_mint_in_flight_and_then_deletes_it(client):
     assert outcome["gone"]["tokens_removed"] == 1
     with db.sessions() as s:
         assert s.scalar(select(func.count(AccessToken.id)).where(AccessToken.user_id == me)) == 0
+
+
+# -- fifth round: what the fourth independent review found (2026-10-09) ------------------------------------------------------
+
+
+def rotate_first_in_auth(monkeypatch, app, keys):
+    """The account's session key is replaced after the request was authenticated and just before it takes the account lock."""
+    from vault import auth as auth_module
+    from vault.models import new_session_key
+
+    real = auth_module.require_live_session
+
+    def hook(db, request, user_id):
+        with app.state.db.sessions() as other:
+            row = other.get(User, user_id)
+            row.session_key = new_session_key()
+            keys.append(row.session_key)
+            other.commit()
+        return real(db, request, user_id)
+
+    monkeypatch.setattr(auth_module, "require_live_session", hook)
+
+
+@pytest.mark.parametrize("route", ["passkey", "identity", "recent", "step1"])
+def test_a_stale_cookie_in_flight_cannot_rotate_the_key_again_and_revive_itself(client, monkeypatch, route):
+    """Finding 1: a request authenticated with key K1 waits for the lock while the owner's step 1 commits K2. It must then be
+    refused: before, it rotated to K3 and wrote K3 into its own (stale) cookie, reviving it and killing the owner's K2 cookie."""
+    me = login(client, "ann@example.com")
+    planted_key = add_passkey(client, me, "Planted", hours_ago=1)
+    planted_provider = add_provider(client, me, "google", hours_ago=1)
+    with sessions(client) as db:
+        tokens.issue(db, db.get(User, me), client="ios")
+    keys = []
+    rotate_first_in_auth(monkeypatch, client.app, keys)
+    res = {"passkey": lambda: client.delete(f"{V1}/me/passkeys/{planted_key}"),
+           "identity": lambda: client.delete(f"{V1}/me/identities/{planted_provider}"),
+           "recent": lambda: client.delete(f"{V1}/me/sign-in-methods/recent"),
+           "step1": lambda: client.post("/api/auth/sign-out-others")}[route]()
+    assert res.status_code == 401 and "session ended" in res.json()["detail"]
+    with sessions(client) as db:
+        assert db.get(User, me).session_key == keys[0]  # the owner's key (K2) stands: it was not rotated again to K3
+        assert db.scalar(select(Passkey.id).where(Passkey.id == planted_key)) == planted_key  # nothing was removed
+        assert db.scalar(select(Identity.id).where(Identity.id == planted_provider)) == planted_provider
+        from vault.models import ApiSession
+        assert db.scalar(select(func.count(ApiSession.id)).where(ApiSession.user_id == me)) == 1  # step 1 did not run either
+    assert client.get(f"{V1}/me").status_code == 401  # the stale cookie was not revived
+
+
+def test_an_app_session_is_held_to_its_own_row_and_step_1_ends_it(client, monkeypatch):
+    """Finding 2: an app session minted by a copied cookie (hand-over and redeem: bearer, account scope) could mint a token
+    after step 1 because bearer callers were skipped. Now the account lock is taken and the session's row must still exist."""
+    from vault.api import v1 as v1_module
+    from vault.models import AccessToken, ApiSession
+
+    me = login(client, "ann@example.com")
+    with sessions(client) as db:
+        secret = tokens.issue(db, db.get(User, me), client="ios")["access_token"]
+    bearer = {"Authorization": f"Bearer {secret}"}
+    other = TestClient(client.app)
+    made = other.post(f"{V1}/me/tokens", json={"name": "while it lives", "scopes": ["read"], "expires_in_days": 30}, headers=bearer)
+    assert made.status_code == 201  # an app session may create a token (account scope), while its row exists
+
+    real = v1_module.require_live_session
+
+    def end_the_session_first(db, request, user_id):  # step 1 commits after authentication, before the lock
+        with sessions(client) as s:
+            s.execute(ApiSession.__table__.delete().where(ApiSession.user_id == user_id))
+            s.commit()
+        return real(db, request, user_id)
+
+    monkeypatch.setattr(v1_module, "require_live_session", end_the_session_first)
+    late = other.post(f"{V1}/me/tokens", json={"name": "after step 1", "scopes": ["read"], "expires_in_days": 30}, headers=bearer)
+    assert late.status_code == 401 and "session ended" in late.json()["detail"]
+    with sessions(client) as db:
+        assert db.scalar(select(func.count(AccessToken.id)).where(AccessToken.name == "after step 1")) == 0
+
+
+def test_a_lock_that_cannot_be_had_is_a_503_with_retry_after_not_a_hang(client, monkeypatch):
+    """Finding 4: the account lock is waited for a few seconds at most."""
+    from vault import locks
+    from vault.locks import lock_account
+
+    me = login(client, "ann@example.com")
+    monkeypatch.setattr(locks, "LOCK_TIMEOUT", "300ms")
+    with sessions(client) as holder:
+        lock_account(holder, me)  # another request of this person holds the account
+        started = time.time()
+        res = client.post(f"{V1}/me/tokens", json={"name": "waits", "scopes": ["read"], "expires_in_days": 30})
+        assert res.status_code == 503 and res.headers["Retry-After"] and time.time() - started < 5
+        holder.rollback()
+
+
+def test_the_account_lock_does_not_block_a_refresh_of_an_app_session(client):
+    """Finding 5: a refresh inserts a retired token (a foreign key to the user: FOR KEY SHARE). The account lock is FOR NO KEY
+    UPDATE, which does not conflict with it, so step 1 and a refresh cannot deadlock (with FOR UPDATE the refresh would wait for
+    the lock while holding the api_sessions row that step 1 then waits for)."""
+    from vault.locks import lock_account
+    from vault.models import ApiSession
+
+    me = login(client, "ann@example.com")
+    db = client.app.state.db
+    with db.sessions() as s:
+        issued = tokens.issue(s, s.get(User, me), client="ios")
+    done = {}
+
+    def refresh():
+        with db.sessions() as s:
+            done["answer"] = tokens.refresh(s, issued["refresh_token"])
+
+    with db.sessions() as step_1:
+        lock_account(step_1, me)  # step 1 holds the account
+        racer = threading.Thread(target=refresh)
+        racer.start()
+        racer.join(5)
+        assert not racer.is_alive() and "access_token" in done["answer"]  # the refresh was not made to wait
+        step_1.execute(ApiSession.__table__.delete().where(ApiSession.user_id == me))  # and step 1 can delete the session it touched
+        step_1.commit()
+    with db.sessions() as s:
+        assert s.scalar(select(func.count(ApiSession.id))) == 0
