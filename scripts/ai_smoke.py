@@ -156,7 +156,8 @@ def decks(c: Client) -> None:
 def prompts(c: Client) -> None:
     print("prompts and views")
     names = {p["name"] for p in c.rpc("prompts/list")["result"]["prompts"]}
-    check({"vault_start", "rules_judge", "explain_interaction", "upgrade_deck", "shopping_help"} <= names, "the first-run tour and the four prompts are listed")
+    check({"vault_start", "rules_judge", "explain_interaction", "upgrade_deck", "shopping_help", "council_review", "evaluate_deck", "import_collection",
+           "organise_collection", "reset_or_undo"} <= names, "the first-run tour and the prompts for the common jobs are listed")
     got = c.rpc("prompts/get", {"name": "rules_judge", "arguments": {"question": "Does Bolt kill a 3/3?"}})["result"]
     check("verify_citation" in got["messages"][0]["content"]["text"], "the rules_judge prompt tells the agent to verify citations")
     res = c.rpc("resources/list")["result"]["resources"]
