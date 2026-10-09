@@ -192,7 +192,7 @@ Nothing is dumped: a tool returns the card, rule or deck asked about, capped.
 | `find_combos` | `POST /decks/combos` | asked of Commander Spellbook on demand; nothing stored |
 | `shopping_list` | `POST /decks/shopping-list` | what you do not own, a dated Scryfall price, and a list to paste into a store's own tool: `format` = plain, cardkingdom (Deck Builder), tcgplayer (Mass Entry), cardmarket (want list), csv, all (syntax checked against each store's help page, `docs/data-sources.md`). With `finish`, `language`, `sets` or `condition` it picks the cheapest printing that fits and reports which one per line, or that none qualifies; needs the `oracle_printings` source. Scryfall's prices are not per condition |
 
-Prompts (`prompts/list`, `prompts/get`): `rules_judge`, `explain_interaction`, `upgrade_deck`,
+Prompts (`prompts/list`, `prompts/get`): `vault_start` (a read-only first tour from the person's own data, no arguments), `rules_judge`, `explain_interaction`, `upgrade_deck`,
 `shopping_help`. The server's `instructions` and every prompt carry the grounding rules: look things up,
 quote only verified text, repeat provenance, never present source material as the Vault's own.
 
