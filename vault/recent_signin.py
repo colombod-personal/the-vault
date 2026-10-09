@@ -19,8 +19,9 @@ browser's cookie gets ``auth_at``. What makes it safe:
 - only keyed hashes are stored; the code lives ten minutes, works once and dies after five tries (counted before it is compared,
   so parallel guesses cannot exceed five); compared in constant time;
 - at most three mails an hour for an account and :attr:`Settings.email_daily_cap` a day for all of them, then 429;
-- the answers say only that a code went "to the address on this account" with the address masked (``***@e***.com``); an account
-  with no usable address, or a Vault with no sender configured, says so and offers the passkey and provider paths;
+- the answers say only that a code went "to the address on this account" with the address masked (``***@e***.com``); the address is
+  :func:`mail_address` (a provider-verified address that has been on the account for a day, never ``users.email``); an account with
+  none, or a Vault with no sender configured, says so and offers the passkey and provider paths;
 - the mail says who asked (browser and system, and when) and to ignore it if that was not the person.
 """
 
@@ -45,7 +46,7 @@ from sqlalchemy.orm import Session
 from . import tokens
 from .config import Settings
 from .email import EmailError, EmailMessage, mask_address, usable_address
-from .models import ApiSession, EmailCode, User, utcnow
+from .models import ApiSession, EmailCode, Identity, User, utcnow
 from .ratelimit import limited
 
 log = logging.getLogger(__name__)
@@ -111,14 +112,31 @@ def require_recent(db: Session, request: Request, settings: Settings) -> None:
         raise stale_error(settings)
 
 
+def mail_address(db: Session, user_id: int) -> str | None:
+    """The address a confirmation code goes to: the e-mail of the OLDEST linked provider that has one a provider vouches for
+    (``Identity.email_verified``: Google and Apple say so in the ID token; Microsoft's and Facebook's addresses are never taken)
+    and that has been on the account for more than 24 hours. Not ``users.email``, which is whatever the first provider said, unverified,
+    and which a copied session could set on a passkey-only account by linking its own Google in a fresh window (found by review).
+    A new account has none for a day (it confirms with a passkey or provider); an address leaves with the identity that gave it."""
+    from .auth import RECENT_SIGN_IN_METHOD_HOURS
+
+    since = utcnow() - timedelta(hours=RECENT_SIGN_IN_METHOD_HOURS)
+    for address in db.scalars(select(Identity.email).where(
+            Identity.user_id == user_id, Identity.provider != "passkey", Identity.email_verified.is_(True),
+            Identity.email.is_not(None), Identity.created_at < since).order_by(Identity.created_at, Identity.id)):
+        if usable_address(address):
+            return address
+    return None
+
+
 def status(db: Session, request: Request, user: User, settings: Settings) -> dict:
     sender = getattr(request.app.state, "email_sender", None)
     by_app = getattr(request.state, "bearer", None) is not None
-    can_mail = sender is not None and usable_address(user.email) and not by_app
-    reason = None if can_mail else "app" if by_app else "no_sender" if sender is None else "no_address"
+    address = mail_address(db, user.id) if sender is not None and not by_app else None
+    reason = None if address else "app" if by_app else "no_sender" if sender is None else "no_address"
     return {"fresh": is_fresh(db, request, settings), "seconds_left": seconds_left(db, request, settings),
             "window_seconds": settings.recent_signin_seconds,
-            "email": {"available": can_mail, "to": mask_address(user.email) if can_mail else None, "reason": reason}}
+            "email": {"available": address is not None, "to": mask_address(address) if address else None, "reason": reason}}
 
 
 # -- the code ----------------------------------------------------------------------------------
@@ -128,10 +146,10 @@ def _mac(settings: Settings, *parts: object) -> str:
                     hashlib.sha256).hexdigest()
 
 
-def session_digest(settings: Settings, user: User, request: Request) -> str | None:
+def session_digest(settings: Settings, user: User, request: Request, rid: str | None = None) -> str | None:
     """Which browser session a code belongs to: the account's session key (so a sign-out ends it) and this browser's request id
     (so another browser on the same account is another session). None until this browser has asked for a code."""
-    rid = request.session.get("rid")
+    rid = rid or request.session.get("rid")
     return _mac(settings, "session", user.id, user.session_key, rid) if isinstance(rid, str) and rid else None
 
 
@@ -170,14 +188,16 @@ def _message(settings: Settings, to: str, code: str, token: str, asked_from: str
 
 LINK_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
-<meta name="referrer" content="no-referrer"><title>Confirm it's you</title>
+<meta name="referrer" content="same-origin"><title>Confirm it's you</title>
 <style>body{{font:16px/1.5 system-ui,sans-serif;max-width:28rem;margin:3rem auto;padding:0 1rem;color:#1b1b1b;background:#fff}}
 button{{font:inherit;min-height:44px;padding:.6rem 1.2rem;margin:.25rem .5rem 0 0;border-radius:.5rem;border:1px solid #555;background:#fff;color:#1b1b1b;cursor:pointer}}
 button[value=approve]{{background:#1b1b1b;color:#fff}}a{{color:inherit}}
 @media (prefers-color-scheme:dark){{body{{background:#121212;color:#eee}}button{{background:#222;color:#eee}}button[value=approve]{{background:#eee;color:#121212}}}}</style>
 </head><body><h1>{title}</h1>{body}</body></html>"""
 
-NO_STORE = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+# same-origin, not no-referrer: with no-referrer a browser sends `Origin: null` on the Approve form's POST, and the cross-site-write guard
+# (vault.app.reject_cross_site_writes) would refuse it. The token in the address still never leaves this site in a Referer.
+NO_STORE = {"Cache-Control": "no-store", "Referrer-Policy": "same-origin"}
 
 
 def _page(title: str, body: str, status_code: int = 200) -> HTMLResponse:
@@ -212,10 +232,12 @@ def build_router(settings: Settings, get_db, account_user) -> APIRouter:
         if sender is None:
             raise CodedError(409, "email_unavailable", "E-mailed codes are not available on this Vault. Confirm with a passkey or "
                                                         "a sign-in method you have linked.")
-        if not usable_address(user.email):
-            raise CodedError(409, "no_email_on_account", "This account has no e-mail address on file, so a code cannot be sent. "
-                                                          "Confirm with a passkey or a sign-in method you have linked.")
-        address, session_key = user.email, user.session_key
+        address = mail_address(db, user.id)
+        if address is None:
+            raise CodedError(409, "no_email_on_account", "This account has no e-mail address a sign-in provider vouches for that has been "
+                                                          "on it for a day, so a code cannot be sent. Confirm with a passkey or a sign-in "
+                                                          "method you have linked.")
+        session_key = user.session_key
         now = utcnow()
         # The caps are counted under locks (the Vault-wide one first, then the account's), so two requests at once cannot both pass.
         db.execute(select(func.pg_advisory_xact_lock(CAP_LOCK)))
@@ -236,10 +258,9 @@ def build_router(settings: Settings, get_db, account_user) -> APIRouter:
             raise CodedError(429, "email_daily_cap", "The Vault has sent all the sign-in e-mails it can for today. Confirm with a "
                                                      "passkey or a linked sign-in, or try again tomorrow.",
                              headers={"Retry-After": "3600"}, retry_after_seconds=3600)
-        rid = request.session.get("rid")
-        if not isinstance(rid, str) or not rid:
-            rid = request.session["rid"] = secrets.token_urlsafe(16)
-        digest = session_digest(settings, user, request)
+        before = session_digest(settings, user, request)  # the codes this cookie held until now
+        new_rid = secrets.token_urlsafe(16)  # a new request id on every ask: a copy of the cookie taken before no longer matches
+        digest = session_digest(settings, user, request, new_rid)
         code, token = f"{secrets.randbelow(10 ** 6):06d}", secrets.token_urlsafe(32)
         asked_from = describe_browser(request.headers.get("user-agent", ""))[:80]
         row = EmailCode(user_id=user.id, session_digest=digest, code_hash=_mac(settings, "code", user.id, digest, code),
@@ -257,8 +278,10 @@ def build_router(settings: Settings, get_db, account_user) -> APIRouter:
             raise CodedError(502, "email_send_failed", "The e-mail could not be sent just now. Try again in a minute, or confirm "
                                                         "with a passkey or a linked sign-in.") from None
         # Only now do the earlier codes of this browser stop working: a failed send leaves the last good one alone.
-        db.execute(update(EmailCode).where(EmailCode.user_id == user.id, EmailCode.session_digest == digest,
-                                           EmailCode.id != row_id, EmailCode.used_at.is_(None)).values(used_at=utcnow()))
+        request.session["rid"] = new_rid  # only now: a send that failed leaves this browser's last good code usable
+        if before is not None:  # the codes asked for from this browser before (and from any copy of its old cookie) stop here
+            db.execute(update(EmailCode).where(EmailCode.user_id == user.id, EmailCode.session_digest == before,
+                                               EmailCode.used_at.is_(None)).values(used_at=utcnow()))
         db.commit()
         log.info("a sign-in code was sent")  # never the address or the code
         return {"sent": True, "to": mask_address(address), "expires_in": CODE_SECONDS}

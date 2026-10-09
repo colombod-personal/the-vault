@@ -166,22 +166,20 @@ def test_a_passkey_counts_as_a_way_to_sign_in_when_a_provider_is_removed(signed_
     assert veteran.delete(f"{V1}/me/passkeys/{phone['id']}").status_code == 409
 
 
-def test_an_older_provider_is_unlinked_only_after_a_recent_sign_in(veteran, go_stale):
-    """A copied session cannot unlink the providers the owner has used for longer; the person, right after signing in, can
-    (the relaxation the recent-sign-in check allows, #347). Fresh: removable. Stale: 403 with the stable code, nothing changes."""
+def test_only_a_provider_linked_in_the_last_day_can_be_unlinked_even_after_a_recent_sign_in(veteran, go_stale):
+    """Unlinking is for what a copied session linked. An older provider is never removable through this route, signed in
+    recently or not: letting a fresh session unlink it was built and withdrawn (a patient attacker's own method, a day old, would
+    make the session fresh and unlink every provider the owner uses; docs/mcp-oauth-threat-model.md)."""
     me = veteran.get(f"{V1}/me").json()["id"]
     old = add_provider(veteran, me, "microsoft", hours_ago=72)
-    assert {m["name"]: m["removable"] for m in methods(veteran)["items"]} == {"Local dev sign-in": True, "Microsoft": True}
-    go_stale()
-    assert {m["name"]: m["removable_reason"] for m in methods(veteran)["items"]} == {
-        "Local dev sign-in": "recent_sign_in_required", "Microsoft": "recent_sign_in_required"}
-    res = veteran.delete(f"{V1}/me/identities/{old}")
-    assert res.status_code == 403 and res.json()["code"] == "recent_sign_in_required" and res.headers["X-Error"] == "recent_sign_in_required"
+    for _ in range(2):  # signed in a moment ago, then ten minutes later
+        assert {m["name"]: m["removable_reason"] for m in methods(veteran)["items"]} == {
+            "Local dev sign-in": "provider_too_old", "Microsoft": "provider_too_old"}
+        res = veteran.delete(f"{V1}/me/identities/{old}")
+        assert res.status_code == 409 and "last 24 hours" in res.json()["detail"]
+        go_stale()
     with sessions(veteran) as db:
         assert db.scalar(select(Identity.id).where(Identity.id == old)) == old
-    veteran.cookies.clear()
-    assert veteran.post("/api/auth/dev-login").status_code == 200  # signing in again is what makes it recent
-    assert veteran.get(f"{V1}/me/recent-sign-in").json()["fresh"] is True
 
 
 def test_the_passkey_handle_is_not_a_method_of_its_own(veteran):
@@ -312,11 +310,12 @@ def test_every_method_says_why_it_cannot_be_removed(veteran, go_stale):
     listed = {m["name"]: m for m in methods(veteran)["items"]}
     assert set(listed) == {"Local dev sign-in", "Microsoft", "Old laptop", "New phone"}
     assert all(m["created_at"] for m in listed.values())
-    assert all(m["removable"] and m["removable_reason"] is None for m in listed.values())  # the session signed in a moment ago
-    go_stale()  # ... and ten minutes later the old ones need a recent sign-in again; the new one never does
+    assert {n: m["removable_reason"] for n, m in listed.items()} == {  # the session signed in a moment ago
+        "Local dev sign-in": "provider_too_old", "Microsoft": "provider_too_old", "Old laptop": None, "New phone": None}
+    go_stale()  # ... and ten minutes later the old passkey needs a recent sign-in again; the new one never does
     listed = {m["name"]: m for m in methods(veteran)["items"]}
     assert {n: m["removable_reason"] for n, m in listed.items()} == {
-        "Local dev sign-in": "recent_sign_in_required", "Microsoft": "recent_sign_in_required",
+        "Local dev sign-in": "provider_too_old", "Microsoft": "provider_too_old",
         "Old laptop": "recent_sign_in_required", "New phone": None}
     assert listed["Old laptop"]["removable"] is False and listed["New phone"]["removable"] is True
     assert listed["New phone"]["recently_added"] is True and listed["Old laptop"]["recently_added"] is False
@@ -453,7 +452,7 @@ def test_removals_at_once_never_leave_only_new_methods(client):
     def run(name, fn, *args):
         with db.sessions() as s:
             try:
-                fn(s, uid, *args, fresh=True)
+                fn(s, uid, *args)
                 s.commit()
                 results[name] = "deleted"
             except HTTPException as exc:
@@ -461,7 +460,7 @@ def test_removals_at_once_never_leave_only_new_methods(client):
 
     threads = [threading.Thread(target=run, args=("g1", remove_identity, g1)),
                threading.Thread(target=run, args=("g2", remove_identity, g2)),
-               threading.Thread(target=run, args=("old", remove_passkey, old_key))]
+               threading.Thread(target=run, args=("old", lambda s, u, i: remove_passkey(s, u, i, fresh=True), old_key))]
     [t.start() for t in threads]
     [t.join(30) for t in threads]
     assert results == {"g1": "deleted", "g2": "deleted", "old": 409}

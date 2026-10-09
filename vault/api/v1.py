@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session
 from .. import analytics, deck_text, lab, oauth_server, outbound, tags as card_tags, tokens
 from ..catalog import Catalog
 from .. import recent_signin
-from ..auth import (RECENT_SIGN_IN_METHOD_HOURS, IdentityInUse, Profile, find_or_create, remove_identity,
+from ..auth import (RECENT_SIGN_IN_METHOD_HOURS, IdentityInUse, Profile, email_verified, find_or_create, remove_identity,
                     remove_recent_methods, require_live_session, sign_in_methods as account_sign_in_methods, why_not_removable)
 from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, history_summary, import_days, view_version
@@ -175,7 +175,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                     Identity.provider == provider, Identity.subject == str(claims["sub"]))) != account.id:
                 recent_signin.require_recent(db, request, settings)  # a sign-in new to the account is a link: only after a recent one (#347)
             try:  # the caller's session (a cookie or an app's token) is held to its live state when it links a sign-in (#347)
-                user = find_or_create(db, Profile(provider, str(claims["sub"]), claims.get("email"), name), account,
+                user = find_or_create(db, Profile(provider, str(claims["sub"]), claims.get("email"), name,
+                                              bool(claims.get("email")) and email_verified(claims.get("email_verified"))), account,
                                       request if account is not None else None)
             except IdentityInUse as exc:
                 raise HTTPException(409, str(exc)) from exc
@@ -370,7 +371,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                    summary="Unlink a provider (Google, Microsoft, Apple, Facebook) linked in the last 24 hours; "
                            "your last way to sign in can't be removed")
     def delete_identity(identity_id: Id, request: Request, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
-        remove_identity(db, user.id, identity_id, request, fresh=recent_signin.is_fresh(db, request, settings))
+        remove_identity(db, user.id, identity_id, request)
         db.commit()
         return {"deleted": True}
 

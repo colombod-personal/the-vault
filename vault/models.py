@@ -65,6 +65,8 @@ class Identity(Base):
     provider: Mapped[str] = mapped_column(String(20))  # google | microsoft | apple | facebook | dev
     subject: Mapped[str] = mapped_column(String(255))  # provider's stable user id
     email: Mapped[str | None] = mapped_column(String(320))
+    # The provider vouched for `email` when it was last given (Google, Apple). Only such an address receives a confirmation code (#347).
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     user: Mapped[User] = relationship(back_populates="identities")

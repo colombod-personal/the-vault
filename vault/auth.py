@@ -69,6 +69,14 @@ class Profile:
     subject: str
     email: str | None
     name: str | None
+    # The provider vouches for the address (Google and Apple say so in the ID token). Only such an address can receive a
+    # confirmation code (vault.recent_signin.mail_address, #347); Microsoft's and Facebook's are never taken as verified.
+    email_verified: bool = False
+
+
+def email_verified(value) -> bool:
+    """An ID token's ``email_verified``: a boolean, or the string "true" (Apple sends that)."""
+    return value is True or (isinstance(value, str) and value.lower() == "true")
 
 
 def microsoft_issuer_ok(claims, value: str) -> bool:
@@ -182,7 +190,8 @@ class Auth:
             parts = [n.get(k) for k in ("firstName", "lastName")] if isinstance(n, dict) else []
             name = " ".join(p for p in parts if isinstance(p, str) and p) or None
         email = info.get("email") or info.get("preferred_username")
-        return Profile(provider, str(info["sub"]), email, name)
+        verified = provider in ("google", "apple") and bool(info.get("email")) and email_verified(info.get("email_verified"))
+        return Profile(provider, str(info["sub"]), email, name, verified)
 
 
 PKCE_CHALLENGE = re.compile(r"[A-Za-z0-9_-]{43,128}")
@@ -415,11 +424,13 @@ def established_methods(user_id: int, since, *, skip_identity: int | None = None
 def why_not_removable(method: dict, methods: list[dict], fresh: bool = False) -> str | None:
     """Why ``method`` (one of ``methods``, from :func:`sign_in_methods`) would be refused if the person tried to remove it, or
     None. The same rules the removal routes apply, so the page shows a Remove button only where the route will say yes:
-    ``only_method`` (the last way to sign in), ``needs_older_method`` (no OTHER method older than the window would remain), and
-    ``recent_sign_in_required`` (the method was added more than the window ago and this session has not signed in recently:
-    ``fresh`` says it has; #347)."""
+    ``only_method`` (the last way to sign in), ``provider_too_old`` (a provider linked more than the window ago is not unlinked
+    here, signed in recently or not), ``needs_older_method`` (no OTHER method older than the window would remain) and, for a passkey
+    added more than the window ago, ``recent_sign_in_required`` (this session has not signed in recently: ``fresh`` says it has; #347)."""
     if len(methods) <= 1:
         return "only_method"
+    if method["kind"] == "provider" and not method["recently_added"]:
+        return "provider_too_old"
     if all(o["recently_added"] for o in methods if o is not method):
         return "needs_older_method"
     if not method["recently_added"] and not fresh:
@@ -454,17 +465,18 @@ def remove_recent_methods(db: Session, user_id: int, request: Request | None = N
     return gone
 
 
-def remove_identity(db: Session, user_id: int, identity_id: int, request: Request | None = None, fresh: bool = False) -> None:
-    """Unlink one of the account's providers (Google, Microsoft, Apple, Facebook), unless it is the last way to sign in (409).
-    Another person's identity, a passkey's handle and an unknown id are all a 404.
+def remove_identity(db: Session, user_id: int, identity_id: int, request: Request | None = None) -> None:
+    """Unlink one of the account's providers (Google, Microsoft, Apple, Facebook) that was added in the last
+    :data:`RECENT_SIGN_IN_METHOD_HOURS` (409 for an older one), unless it is the last way to sign in (409). Another
+    person's identity, a passkey's handle and an unknown id are all a 404.
 
-    A provider linked in the last :data:`RECENT_SIGN_IN_METHOD_HOURS` can always be unlinked (this is what "Sign out everywhere"
-    offers for what a copied session linked). An older one only by a session that signed in recently (``fresh``; otherwise
-    403 ``recent_sign_in_required``, #347): the person has just proved control of a method of their own, so a provider an attacker
-    linked days ago can go. In every case a method used for longer than the window must remain after the removal (409
-    otherwise): in an account whose methods are all new, a copied session could add a passkey and unlink the owner's only
-    provider, and nothing tells whose is whose; and a copied session inside its own ten fresh minutes can still never remove the
-    last old method, so the owner always keeps a way in (docs/mcp-oauth-threat-model.md).
+    Only a recent one, on purpose (#347), and still after the recent sign-in check was built: this route exists for "Sign out
+    everywhere", to remove what a copied session linked. Letting a fresh session unlink an OLDER provider was built, reviewed
+    and withdrawn: an attacker who planted a passkey in one fresh window and waited a day has a method older than 24 hours, signs
+    in with it (which is a recent sign-in) and could then unlink every provider the owner uses; nothing tells the owner's methods
+    from the attacker's once both are a day old. A method used for longer than the window must also remain after the removal
+    (409 otherwise): in an account whose methods are all new, a copied session could add a passkey and unlink the owner's only
+    provider. Unlinking an older provider is the next step (docs/mcp-oauth-threat-model.md says what it needs).
 
     Same shape as :func:`vault.passkeys.remove_passkey`: the account row is locked, so two removals take turns,
     and the "another way to sign in is left" check is part of the DELETE itself. The caller commits."""
@@ -476,15 +488,17 @@ def remove_identity(db: Session, user_id: int, identity_id: int, request: Reques
         raise HTTPException(404, "Sign-in method not found")
     db.expunge(identity)
     since = utcnow() - timedelta(hours=RECENT_SIGN_IN_METHOD_HOURS)
-    if identity.created_at < since and not fresh:
-        raise recent_signin.stale_error(request.app.state.settings if request is not None else None)
+    if identity.created_at < since:
+        raise HTTPException(409, f"Only a sign-in linked in the last {RECENT_SIGN_IN_METHOD_HOURS} hours can be unlinked here "
+                                 "(Account, Sign out everywhere).")
     passkeys = select(func.count(Passkey.id)).where(Passkey.user_id == user_id).scalar_subquery()
     providers = select(func.count(Identity.id)).where(
         Identity.user_id == user_id, Identity.provider != PASSKEY_IDENTITY).scalar_subquery()
     established = established_methods(user_id, since, skip_identity=identity_id)
     removed = db.execute(
         delete(Identity).where(Identity.id == identity_id, Identity.user_id == user_id,
-                               Identity.provider != PASSKEY_IDENTITY, passkeys + providers > 1, established > 0)
+                               Identity.provider != PASSKEY_IDENTITY, Identity.created_at >= since,
+                               passkeys + providers > 1, established > 0)
         .execution_options(synchronize_session=False)).rowcount
     if not removed:
         if db.scalar(select(passkeys + providers)) <= 1:
@@ -507,7 +521,7 @@ def find_or_create(db: Session, profile: Profile, current: User | None = None, h
     Two first sign-ins with one identity at the same time both try to create it; the unique
     (provider, subject) index lets one win, and the other then signs in to the winner's account."""
     if profile.email and len(profile.email) > 320:  # no real address is this long (users.email is String(320))
-        profile = Profile(profile.provider, profile.subject, None, profile.name)
+        profile = Profile(profile.provider, profile.subject, None, profile.name)  # (so not verified either)
     key = () if hold is None else (hold,)  # (only passed when there is a request to hold to its live session)
     try:
         return _find_or_create(db, profile, current, *key)
@@ -526,13 +540,16 @@ def _find_or_create(db: Session, profile: Profile, current: User | None, hold: R
             _claim_identity(db, identity, current, hold)
         user = identity.user
         identity.email = profile.email or identity.email
+        if profile.email:
+            identity.email_verified = profile.email_verified  # whether the address just given is vouched for, not the old one
     else:
         user = current or User(email=profile.email, name=name)
         if current is None:
             db.add(user)
         elif hold is not None:  # a new identity joins the account: only while the caller's session (cookie or app) is still live
             require_live_session(db, hold, current.id)
-        user.identities.append(Identity(provider=profile.provider, subject=profile.subject, email=profile.email))
+        user.identities.append(Identity(provider=profile.provider, subject=profile.subject, email=profile.email,
+                                        email_verified=bool(profile.email and profile.email_verified)))
     if name and not user.name:
         user.name = name
     if profile.email and not user.email:
@@ -768,7 +785,7 @@ def build_router(auth: Auth, get_db) -> APIRouter:
                   email: str = Query("dev@localhost", min_length=1, max_length=255)) -> dict:
         if not auth.settings.dev_login:
             raise HTTPException(404)
-        user = sign_in(db, request, Profile("dev", email, email, "Local developer"), link=False)
+        user = sign_in(db, request, Profile("dev", email, email, "Local developer", True), link=False)
         return {"id": user.id}
 
     return router

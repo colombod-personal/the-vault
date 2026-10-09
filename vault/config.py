@@ -96,7 +96,7 @@ class Settings:
     recent_signin_seconds: int = field(default_factory=lambda: int(_env("RECENT_SIGNIN_SECONDS", "600")))
     # E-mail (vault.email): the one-time code that confirms it is the person. Resend is the only sender; with no key the feature
     # is inert and the person confirms with a passkey or a linked sign-in. The key is a secret and is never logged.
-    resend_api_key: str = field(default_factory=lambda: _env("RESEND_API_KEY"))
+    resend_api_key: str = field(default_factory=lambda: _env("RESEND_API_KEY"), repr=False)
     email_from: str = field(default_factory=lambda: _env("EMAIL_FROM", "The Vault <login@mtgvault.cards>"))
     # Mails the Vault sends in one day, all accounts together (Resend's free plan allows 100 a day; the default leaves room).
     email_daily_cap: int = field(default_factory=lambda: int(_env("EMAIL_DAILY_CAP", "90")))

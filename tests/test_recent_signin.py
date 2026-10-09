@@ -263,30 +263,113 @@ def test_removing_an_older_passkey_needs_a_recent_sign_in_and_a_new_one_does_not
         assert db.scalar(select(func.count(Passkey.id)).where(Passkey.user_id == uid)) == 0
 
 
-def test_unlinking_an_older_provider_needs_a_recent_sign_in_and_a_new_one_does_not(client, universe, go_stale):
+def test_an_older_provider_stays_linked_even_to_a_fresh_session_and_a_new_one_is_free(client, universe, go_stale):
+    """The relaxation (unlinking an older provider after a recent sign-in) was built, reviewed and withdrawn; see remove_identity."""
     uid = web_account(client, universe)
     old = add_provider(client, uid, "microsoft", hours_ago=24 * 30)
     new = add_provider(client, uid, "facebook", hours_ago=2)
+    assert client.delete(f"{V1}/me/identities/{old}").status_code == 409  # fresh
     go_stale()
-    assert refused(client.delete(f"{V1}/me/identities/{old}"))
-    assert client.delete(f"{V1}/me/identities/{new}").status_code == 200
-    sign_in(client, universe.google, "g-ann")
-    assert client.delete(f"{V1}/me/identities/{old}").status_code == 200
-    assert status(client)["fresh"] is True
+    assert client.delete(f"{V1}/me/identities/{old}").status_code == 409  # stale: the same answer
+    assert client.delete(f"{V1}/me/identities/{new}").status_code == 200  # what Sign out everywhere offers needs no sign-in
 
 
 def test_a_fresh_session_still_cannot_remove_the_last_old_method(client, universe):
-    """The 24-hour rule stays under the new check: a copied cookie inside its ten minutes cannot lock the owner out. Here the
-    account's only old method would be unlinked in favour of a method added an hour ago: refused, even though the session is fresh."""
+    """The 24-hour rule stays under the new check: a copied cookie inside its ten fresh minutes cannot lock the owner out. The
+    account's only old method is a passkey; a method added an hour ago would be all that is left: refused, though the session is fresh."""
     uid = web_account(client, universe)
     with client.app.state.db.sessions() as db:
-        google = db.scalar(select(Identity.id).where(Identity.user_id == uid, Identity.provider == "google"))
-    add_passkey(client, uid, "Attacker", hours_ago=1)
+        db.execute(text("UPDATE identities SET created_at = now() - interval '1 hour' WHERE provider = 'google'"))
+        db.commit()
+    old = add_passkey(client, uid, "Owner", hours_ago=24 * 30)
     assert status(client)["fresh"] is True
-    res = client.delete(f"{V1}/me/identities/{google}")
+    res = client.delete(f"{V1}/me/passkeys/{old}")
     assert res.status_code == 409 and "older than 24 hours" in res.json()["detail"]
     listed = {m["name"]: m for m in client.get(f"{V1}/me/sign-in-methods").json()["items"]}
-    assert listed["Google"]["removable_reason"] == "needs_older_method"
+    assert listed["Owner"]["removable_reason"] == "needs_older_method"
+
+
+def test_the_address_a_code_goes_to_is_one_a_provider_vouches_for_and_that_is_a_day_old(client, universe, go_stale):
+    """Found by review: ``users.email`` is the first provider's unverified word, and a copied session could set it on a passkey-only
+    account by linking its own Google inside a fresh window. The code goes to a verified address of a provider that has been
+    linked for a day, the oldest first; nothing else is ever mailed."""
+    uid = web_account(client, universe)
+    universe.microsoft.add_account("m-1", "ann@outlook.com", "Ann")
+    sign_in(client, universe.microsoft, "m-1")  # Microsoft's address is never taken as verified
+    with client.app.state.db.sessions() as db:
+        rows = {i.provider: i for i in db.scalars(select(Identity).where(Identity.user_id == uid))}
+        assert rows["google"].email_verified is True and rows["microsoft"].email_verified is False
+        db.execute(text("UPDATE identities SET created_at = now() - interval '5 days' WHERE provider = 'microsoft'"))
+        db.commit()
+    go_stale()
+    assert status(client)["email"]["to"] == "***@g***.com"  # Google's (oldest, verified), not Microsoft's
+    # the copied session links its own Google inside a fresh window: its address is new, so it receives nothing
+    universe.google.add_account("g-eve", "eve@gmail.com", "Eve")
+    sign_in(client, universe.google, "g-ann")  # the owner (fresh again)
+    assert sign_in(client, universe.google, "g-eve") == "/?linked=google"
+    client.post(START)
+    assert [m["to"] for m in sent(universe)] == [["ann@gmail.com"]]
+
+
+def test_a_passkey_only_account_has_no_address_to_poison_for_a_day(app, universe):
+    with browser(app) as c:
+        options = c.post("/api/auth/passkey/signup/options", json={"name": "Pat"}, headers={"Origin": ORIGIN}).json()
+        c.post("/api/auth/passkey/signup/verify", json={"credential": SoftAuthenticator().create(options, ORIGIN), "name": "Phone"},
+               headers={"Origin": ORIGIN})
+        universe.google.add_account("g-eve", "eve@gmail.com", "Eve")
+        assert sign_in(c, universe.google, "g-eve") == "/?linked=google"  # a copied session, fresh, links its own Google
+        assert c.get(f"{V1}/me").json()["email"] == "eve@gmail.com"  # (the profile address, unverified for this purpose)
+        assert status(c)["email"] == {"available": False, "to": None, "reason": "no_address"}
+        assert c.post(START).json()["code"] == "no_email_on_account" and not sent(universe)
+
+
+def test_an_unverified_google_address_receives_nothing(client, universe):
+    universe.google.add_account("g-un", "un@gmail.com", "Un", email_verified=False)
+    sign_in(client, universe.google, "g-un")
+    age_methods(client, client.get(f"{V1}/me").json()["id"])
+    assert status(client)["email"]["reason"] == "no_address" and client.post(START).status_code == 409
+
+
+def test_a_second_ask_replaces_the_first_and_a_copy_of_the_old_cookie_gets_nothing(app, universe, go_stale):
+    with browser(app) as mine:
+        web_account(mine, universe)
+        go_stale()
+        mine.post(START)
+        first, _ = last_mail(universe)
+        copy = browser(app)
+        copy.cookies.update(mine.cookies)  # a copy taken after the first ask: it holds that ask's request id
+        mine.post(START)  # a new request id, the first code is dead
+        second, _ = last_mail(universe)
+        assert copy.post(CONFIRM, json={"code": first}).json()["code"] == "no_code"
+        assert copy.post(CONFIRM, json={"code": second}).json()["code"] == "no_code"
+        assert copy.post(POLL).json() == {"fresh": False, "waiting": False}
+        assert mine.post(CONFIRM, json={"code": second}).status_code == 200
+
+
+def test_the_approve_button_posts_with_the_sites_own_origin(client, universe, go_stale):
+    """A form POST sends ``Origin: null`` under ``Referrer-Policy: no-referrer``, which the cross-site-write guard refuses: the page
+    uses same-origin, so the browser sends the site's own origin, which is let through."""
+    web_account(client, universe)
+    go_stale()
+    client.post(START)
+    _, link = last_mail(universe)
+    token = link.split("token=")[1]
+    with browser(client.app) as phone:
+        assert phone.get(link.replace(ORIGIN, "")).headers["referrer-policy"] == "same-origin"
+        refused_ = phone.post("/api/auth/recent/email/link", data={"token": token, "decision": "approve"}, headers={"Origin": "null"})
+        assert refused_.status_code == 403  # what no-referrer would have produced
+        ok = phone.post("/api/auth/recent/email/link", data={"token": token, "decision": "approve"}, headers={"Origin": ORIGIN})
+        assert ok.status_code == 200 and "Approved" in ok.text
+
+
+def test_linking_from_the_app_flow_with_a_stale_session_goes_back_to_the_app_with_the_error(client, universe, go_stale):
+    web_account(client, universe)
+    universe.microsoft.add_account("m-app", "ann@outlook.com", "Ann")
+    go_stale()
+    location = client.get("/api/auth/login/microsoft", params={"app_redirect_uri": "vault://auth", "code_challenge": "a" * 43},
+                          follow_redirects=False).headers["location"]
+    assert go(client, universe.microsoft.approve(location, "m-app").url) == "vault://auth?error=recent_sign_in_required"
+    assert client.get(f"{V1}/me").json()["providers"] == ["google"]
 
 
 def test_sign_out_everywhere_works_without_a_recent_sign_in(client, universe, go_stale):
@@ -554,6 +637,7 @@ def test_the_vaults_daily_cap_stops_every_account(make_app, universe):
         web_account(ann, universe)
         universe.google.add_account("g-bob", "bob@gmail.com", "Bob")
         sign_in(bob, universe.google, "g-bob")
+        age_methods(bob, bob.get(f"{V1}/me").json()["id"])
         assert ann.post(START).status_code == 200 and bob.post(START).status_code == 200
         res = ann.post(START)
         assert res.status_code == 429 and res.json()["code"] == "email_daily_cap" and res.headers["retry-after"]
@@ -620,7 +704,7 @@ def test_a_link_prefetcher_cannot_spend_the_code(client, universe, go_stale):
         for _ in range(3):
             page = scanner.get(path)
             assert page.status_code == 200 and "Approve" in page.text and 'method="post"' in page.text
-            assert page.headers["cache-control"] == "no-store" and page.headers["referrer-policy"] == "no-referrer"
+            assert page.headers["cache-control"] == "no-store" and page.headers["referrer-policy"] == "same-origin"
             assert "Chrome on Windows" in page.text and "***@g***.com" in page.text
             assert "ann@gmail.com" not in page.text  # the address is masked on the page too
     assert client.post(POLL).json() == {"fresh": False, "waiting": True}  # nothing was approved

@@ -21,7 +21,7 @@ This is an engineering document, not legal advice: have the privacy notice
 | Table | Personal? | Contents | Export | Erasure |
 |---|---|---|---|---|
 | `users` | yes | display name, e-mail (from the sign-in provider) | `account.json` | `purge_user` |
-| `identities` | yes | provider, provider user id, e-mail, and when it was linked to the account (`linked_at`) | `account.json` | `purge_user` |
+| `identities` | yes | provider, provider user id, e-mail, whether the provider vouched for that e-mail (`email_verified`: the address a confirmation code may be sent to, #347), and when it was linked to the account (`linked_at`) | `account.json` | `purge_user` |
 | `imports` | yes | file name, date, change summary | `imports.json` | `purge_user` |
 | `collection_baselines` | yes | the cards (copies, condition, folder, price and date paid) of the last file you imported, so the next import can tell what changed in your app from what was edited here | `last_import_cards.json` | `purge_user` |
 | `bucket_baselines` | yes | the same record as `collection_baselines`, for a file imported into one bucket (#124): the cards of the last file imported into that bucket, so a re-import of that bucket applies only what changed in your app; one per bucket, replaced by the next import into it, forgotten by the next whole-collection import | `last_import_cards.json` (`by_bucket`) | `purge_user` (before the buckets), and with its bucket (`ON DELETE CASCADE`) |

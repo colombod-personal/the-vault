@@ -250,7 +250,7 @@ class RecentSignInEmail(BaseModel):
     to: str | None = Field(None, description="The address a code would go to, masked (***@e***.com); null when not available")
     reason: Literal["app", "no_sender", "no_address"] | None = Field(
         None, description="Why not: the caller is an app (it signs in again instead); the Vault has no mail sender configured "
-                          "(RESEND_API_KEY); the account has no usable address")
+                          "(RESEND_API_KEY); the account has no address a provider vouches for that has been on it for 24 hours")
 
 
 class RecentSignIn(Hal):
@@ -691,10 +691,10 @@ class SignInMethodItem(Hal):
     recently_added: bool = Field(description="Added in the last `recent_hours` hours")
     added_minutes_ago: int
     removable: bool = Field(description="False when removing it would be refused (409)")
-    removable_reason: Literal["only_method", "needs_older_method", "recent_sign_in_required"] | None = Field(
-        None, description="Why not: it is the only way to sign in; no OTHER method older than `recent_hours` would remain; "
-                          "it was added more than `recent_hours` ago and this session has not signed in recently "
-                          "(GET /me/recent-sign-in, then confirm it's you)")
+    removable_reason: Literal["only_method", "provider_too_old", "needs_older_method", "recent_sign_in_required"] | None = Field(
+        None, description="Why not: it is the only way to sign in; a provider linked more than `recent_hours` ago is not unlinked "
+                          "here; no OTHER method older than `recent_hours` would remain; a passkey added more than `recent_hours` "
+                          "ago and this session has not signed in recently (GET /me/recent-sign-in, then confirm it's you)")
 
 
 class SignInMethodPage(Page):
