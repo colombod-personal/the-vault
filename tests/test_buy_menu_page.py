@@ -17,7 +17,7 @@ def view(name: str) -> str:
 
 
 def test_the_menu_is_on_a_missing_card_in_the_ideas_view_the_lab_buy_rows_and_the_deck_page():
-    assert "<BuyMenu card={name} />" in view("ideas.jsx") and view("ideas.jsx").count("<BuyMenu") == 2  # the alternatives list and the "none" panel
+    assert "<BuyMenu card={name} />" in view("ideas.jsx") and view("ideas.jsx").count("<BuyMenu") == 3  # no role, no same-job alternative, and the alternatives list
     assert "<BuyMenu card={p.card} />" in view("lab.jsx")
     deck = view("deck.jsx")
     assert "{r.need > 0 && <BuyMenu card={r.name} />}" in deck  # only a card the person still needs

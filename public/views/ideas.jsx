@@ -474,12 +474,67 @@ function IdeasThumb({ name, image, onZoom }) {
   );
 }
 
+// One owned card that could stand in: what it does, what it does not, both Oracle texts, and what to do with it.
+function IdeasAlt({ alt, t, name, deck, deckId, inDeck, onGo, openOwned, setZoom }) {
+  const Text = window.VaultIdeas;
+  const deckRoute = (swap) => ({ view: 'decks', deckId: String(deckId), ...(swap ? { swap } : {}) });
+  const does = Text.altDoes(alt), lacks = Text.altLacks(alt, name), extra = Text.altExtra(alt), kind = Text.typeNote(alt, name);
+  return (
+    <li className={`ideas-alt tier-${alt.tier}`}>
+      <IdeasThumb name={alt.card} image={alt.image} onZoom={setZoom} />
+      <div className="ideas-alt-body">
+        <p className="ideas-alt-name">
+          <button type="button" className="row-link" onClick={() => openOwned(alt.card)}>{alt.card}</button>
+          <span className="ideas-copies">{Text.ownedText(alt)}</span>
+        </p>
+        <p className="ideas-meta">{[alt.type_line, alt.mana_cost, Text.mv(alt.mana_value)].filter(Boolean).join(' · ')}</p>
+        {does && <p className="ideas-does">{does}</p>}
+        {lacks && <p className="ideas-lacks">{lacks}</p>}
+        {extra && <p className="ideas-does">{extra}</p>}
+        {kind && <p className="ideas-meta">{kind}</p>}
+        <p className="ideas-why">{alt.why}</p>
+        {Text.altBadges(alt).length > 0 && (
+          <p className="ideas-badges">{Text.altBadges(alt).map((b) => <span key={b.kind} className={`ideas-badge ${b.kind === 'borrowed' ? 'borrowed' : ''}`}>{b.text}</span>)}</p>
+        )}
+        {alt.oracle_text && (
+          <details className="ideas-texts">
+            <summary>Oracle text of both cards</summary>
+            <p className="ideas-text-name">{name}</p>
+            <p className="ideas-text">{t.oracle_text}</p>
+            <p className="ideas-text-name">{alt.card}</p>
+            <p className="ideas-text">{alt.oracle_text}</p>
+            <p className="ideas-credit">{Text.TEXT_CREDIT}</p>
+          </details>
+        )}
+        <div className="ideas-actions">
+          {!alt.borrowed && inDeck && (
+            <a className="btn sm primary" href={Text.swapHash(deckId, [name], [alt.card])}
+               onClick={ideasLink(() => onGo(deckRoute({ cut: [name], add: [alt.card] })))}>Swap into the deck<span className="ideas-sr">: {alt.card} for {name}</span></a>
+          )}
+          {!alt.borrowed && !inDeck && (
+            <a className="btn sm primary" href={Text.swapHash(deckId, [], [alt.card])}
+               onClick={ideasLink(() => onGo(deckRoute({ cut: [], add: [alt.card] })))}>Swap into the deck<span className="ideas-sr">: add {alt.card}</span></a>
+          )}
+          {alt.move && <IdeasMove move={alt.move} cardName={alt.card} toDeck={deck} cut={inDeck ? [name] : []} add={[alt.card]} onGo={onGo} />}
+          {alt.borrowed && alt.buy && (
+            <a className="btn sm" href={alt._links && alt._links.scryfall ? alt._links.scryfall.href : Text.scryfallSearch(alt.card)} target="_blank" rel="noopener noreferrer">
+              {Text.buyLabel(alt.buy)}<span className="ideas-sr"> {alt.card} on Scryfall</span></a>
+          )}
+        </div>
+        {alt.image && alt.image.artist && <p className="ideas-credit">Art: {alt.image.artist} · Scryfall</p>}
+      </div>
+    </li>
+  );
+}
+
 function IdeasPanel({ deck, deckId, cardName, format, data, rowCard, onGo, onUp, openCard, setZoom }) {
   const Text = window.VaultIdeas;
   const q = useIdeasQuery(() => window.VaultApi.deckAlternatives(deckId, cardName, { format, limit: Text.ALT_PAGE }), [deckId, cardName, format, data.meta.version]);
   const a = q.data;
   const [rest, setRest] = useStateI({ items: [], next: undefined, busy: false, error: null });
+  const [showSimilar, setShowSimilar] = useStateI(false);
   useEffectI(() => { setRest({ items: [], next: undefined, busy: false, error: null }); }, [a]);
+  useEffectI(() => { setShowSimilar(false); }, [deckId, cardName, format]);
   const next = rest.next !== undefined ? rest.next : a && a._links && a._links.next ? a._links.next.href : null;
   const items = a ? a.items.concat(rest.items) : [];
   const more = async () => {
@@ -502,6 +557,12 @@ function IdeasPanel({ deck, deckId, cardName, format, data, rowCard, onGo, onUp,
   const scryfall = a && a._links && a._links.scryfall ? a._links.scryfall.href : Text.scryfallSearch(name);
   const lacking = !!t && t.status != null && t.status !== 'owned';
   const toBuy = !!t && t.not_owned > 0;
+  const noRole = !!a && a.reason === 'no_role';
+  const counts = a && a.tiers ? a.tiers : { same_job: 0, similar: 0 };
+  const same = Text.byTier(items, 'same_job'), similar = Text.byTier(items, 'similar');
+  const noSameJob = !!a && !noRole && counts.same_job === 0;  // nothing does exactly this job: the message says so (and lists the similar ones, collapsed)
+  const moreWanted = !!next && (same.length < counts.same_job || showSimilar);
+  const altProps = { t, name, deck, deckId, inDeck, onGo, openOwned, setZoom };
 
   return (
     <section className="panel ideas-panel" aria-labelledby="ideas-panel-h">
@@ -535,62 +596,37 @@ function IdeasPanel({ deck, deckId, cardName, format, data, rowCard, onGo, onUp,
         </div>
       )}
 
-      {a && items.length > 0 && (
+      {noRole && (
+        <div className="ideas-none ideas-norole" role="status">
+          <p className="ideas-none-text">{a.message || Text.NO_ROLE_NOTE}</p>
+          {t && t.oracle_text && (
+            <details className="ideas-texts" open>
+              <summary>Oracle text</summary>
+              <p className="ideas-text">{t.oracle_text}</p>
+              <p className="ideas-credit">{Text.TEXT_CREDIT}</p>
+            </details>
+          )}
+          <div className="ideas-actions">
+            <a className="btn" href={scryfall} target="_blank" rel="noopener noreferrer">Open on Scryfall ↗</a>
+            {lacking && t.buy && <a className="btn" href={scryfall} target="_blank" rel="noopener noreferrer">{Text.buyLabel(t.buy)}<span className="ideas-sr"> on Scryfall</span></a>}
+            {lacking && <BuyMenu card={name} />}
+          </div>
+        </div>
+      )}
+
+      {a && !noRole && counts.same_job > 0 && (
         <>
-          <h3 className="ideas-h3">{Text.heading(t)}</h3>
-          <ul className="ideas-alts" aria-label={Text.heading(t)}>
-            {items.map((alt) => (
-              <li key={alt.oracle_id} className="ideas-alt">
-                <IdeasThumb name={alt.card} image={alt.image} onZoom={setZoom} />
-                <div className="ideas-alt-body">
-                  <p className="ideas-alt-name">
-                    <button type="button" className="row-link" onClick={() => openOwned(alt.card)}>{alt.card}</button>
-                    <span className="ideas-copies">{Text.ownedText(alt)}</span>
-                  </p>
-                  <p className="ideas-meta">{[alt.type_line, alt.mana_cost, Text.mv(alt.mana_value)].filter(Boolean).join(' · ')}</p>
-                  <p className="ideas-why">{alt.why}</p>
-                  {Text.altBadges(alt).length > 0 && (
-                    <p className="ideas-badges">{Text.altBadges(alt).map((b) => <span key={b.kind} className={`ideas-badge ${b.kind === 'borrowed' ? 'borrowed' : ''}`}>{b.text}</span>)}</p>
-                  )}
-                  <div className="ideas-actions">
-                    {!alt.borrowed && inDeck && (
-                      <a className="btn sm primary" href={Text.swapHash(deckId, [name], [alt.card])}
-                         onClick={ideasLink(() => onGo(deckRoute({ cut: [name], add: [alt.card] })))}>Swap into the deck<span className="ideas-sr">: {alt.card} for {name}</span></a>
-                    )}
-                    {!alt.borrowed && !inDeck && (
-                      <a className="btn sm primary" href={Text.swapHash(deckId, [], [alt.card])}
-                         onClick={ideasLink(() => onGo(deckRoute({ cut: [], add: [alt.card] })))}>Swap into the deck<span className="ideas-sr">: add {alt.card}</span></a>
-                    )}
-                    {alt.move && <IdeasMove move={alt.move} cardName={alt.card} toDeck={deck} cut={inDeck ? [name] : []} add={[alt.card]} onGo={onGo} />}
-                    {alt.borrowed && alt.buy && (
-                      <a className="btn sm" href={alt._links && alt._links.scryfall ? alt._links.scryfall.href : Text.scryfallSearch(alt.card)} target="_blank" rel="noopener noreferrer">
-                        {Text.buyLabel(alt.buy)}<span className="ideas-sr"> {alt.card} on Scryfall</span></a>
-                    )}
-                  </div>
-                  {alt.image && alt.image.artist && <p className="ideas-credit">Art: {alt.image.artist} · Scryfall</p>}
-                </div>
-              </li>
-            ))}
+          <h3 className="ideas-h3">{Text.tierHeading('same_job', counts.same_job)}</h3>
+          <ul className="ideas-alts" aria-label={Text.TIERS.same_job}>
+            {same.map((alt) => <IdeasAlt key={alt.oracle_id} alt={alt} {...altProps} />)}
           </ul>
-          {next && (
-            <div className="ideas-more">
-              <button type="button" className="btn xs" disabled={rest.busy} onClick={more}>{rest.busy ? 'Loading…' : 'Show more alternatives'}</button>
-              {rest.error && <span role="alert" className="ideas-inline-error">Couldn't load more: {rest.error}</span>}
-            </div>
-          )}
-          {lacking && t.buy && (
-            <div className="ideas-or">
-              <p>Or buy {name}: {Text.buyPlain(t.buy)}. <a href={scryfall} target="_blank" rel="noopener noreferrer">Open on Scryfall ↗</a>{' '}
-                <a href="#/lab" onClick={ideasLink(() => onGo({ view: 'lab' }))}>Your buy list in the Lab</a></p>
-              <BuyMenu card={name} />
-            </div>
-          )}
         </>
       )}
 
-      {a && items.length === 0 && (
+      {a && !noRole && noSameJob && (
         <div className="ideas-none" role="status">
           <p className="ideas-none-text">{a.message || 'You own nothing else that does this job in this deck\'s colours and format.'}</p>
+          {a.filtered_note && <p className="ideas-meta">{a.filtered_note}</p>}
           <div className="ideas-actions">
             {lacking && t.buy && <a className="btn primary" href={scryfall} target="_blank" rel="noopener noreferrer">{Text.buyLabel(t.buy).replace(/^Buy /, 'Buy for ')}<span className="ideas-sr"> on Scryfall</span></a>}
             <a className="btn" href={scryfall} target="_blank" rel="noopener noreferrer">Open on Scryfall ↗</a>
@@ -600,13 +636,45 @@ function IdeasPanel({ deck, deckId, cardName, format, data, rowCard, onGo, onUp,
         </div>
       )}
 
+      {a && !noRole && counts.similar > 0 && (
+        <div className="ideas-similar">
+          <button type="button" className="btn sm" aria-expanded={showSimilar} aria-controls="ideas-similar-list" onClick={() => setShowSimilar(!showSimilar)}>
+            {Text.similarToggle(counts.similar, showSimilar)}
+          </button>
+          {showSimilar && (
+            <ul id="ideas-similar-list" className="ideas-alts" aria-label={Text.TIERS.similar}>
+              {similar.map((alt) => <IdeasAlt key={alt.oracle_id} alt={alt} {...altProps} />)}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {a && !noRole && items.length > 0 && (
+        <>
+          {moreWanted && (
+            <div className="ideas-more">
+              <button type="button" className="btn xs" disabled={rest.busy} onClick={more}>{rest.busy ? 'Loading…' : 'Show more alternatives'}</button>
+              {rest.error && <span role="alert" className="ideas-inline-error">Couldn't load more: {rest.error}</span>}
+            </div>
+          )}
+          {!noSameJob && a.filtered_note && <p className="ideas-meta">{a.filtered_note}</p>}
+          {lacking && t.buy && !noSameJob && (
+            <div className="ideas-or">
+              <p>Or buy {name}: {Text.buyPlain(t.buy)}. <a href={scryfall} target="_blank" rel="noopener noreferrer">Open on Scryfall ↗</a>{' '}
+                <a href="#/lab" onClick={ideasLink(() => onGo({ view: 'lab' }))}>Your buy list in the Lab</a></p>
+              <BuyMenu card={name} />
+            </div>
+          )}
+        </>
+      )}
+
       {a && (
         <div className="ideas-fine-block">
-          <p className="ideas-fine"><strong>{Text.COARSE_NOTE}</strong> Format: {a.format}{a.format_from === 'default' ? ' (the default; change it above)' : ''}; colours: {(a.color_identity || []).join('') || 'colourless'}.</p>
+          <p className="ideas-fine"><strong>{Text.ROLES_NOTE}</strong> Format: {a.format}{a.format_from === 'default' ? ' (the default; change it above)' : ''}; colours: {(a.color_identity || []).join('') || 'colourless'}; roles version {a.roles_version}.</p>
           <details className="ideas-fine">
             <summary>About these roles and prices</summary>
             <p>{a.roles_note}</p>
-            <p>{Text.PRICE_NOTE(a.prices_date)} Card data and roles are Scryfall's.</p>
+            <p>{Text.PRICE_NOTE(a.prices_date)} Card data is Scryfall's; the roles are the Vault's.</p>
           </details>
           {t && t.image && t.image.artist && <p className="ideas-credit">Art: {t.image.artist} · image via Scryfall · © Wizards of the Coast</p>}
         </div>

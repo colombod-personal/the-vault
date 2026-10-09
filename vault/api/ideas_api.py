@@ -32,9 +32,24 @@ Id = Annotated[int, Path(ge=1, le=S.MAX_ID)]
 LaneName = Literal[di.LANES]
 FormatName = Literal[dt.FORMATS]
 USED = ("oracle_cards", "oracle_tags", "oracle_prices")
-NO_ROLE = ("The Vault knows no coarse role for this card (ramp, draw, removal, sweeper, counterspell, tutor, recursion, sacrifice "
-           "outlet), so it cannot say what could stand in for it.")
+NO_ROLE = ("The Vault knows no role for this card yet, so it cannot look for cards that do the same job. That is not the same as "
+           "'you own nothing like it'.")
 NONE_FOUND = "You own nothing else that does this job in this deck's colours and format."
+NO_SAME_JOB = ("You own nothing else that does exactly this job in this deck's colours and format; the cards listed are similar, with a "
+               "difference, and each says what differs.")
+USED_BY_ALTERNATIVES = ("oracle_cards", "oracle_prices")  # the roles are the Vault's own rules over the Oracle text: no tags
+
+
+def filtered_note(counts: dict, colours: list[str], fmt: str) -> str | None:
+    """What the colour, format and copy filters removed, in a sentence (nothing is hidden: the cards are counted, not named)."""
+    bits = []
+    if counts.get("colour_identity"):
+        bits.append(f"{counts['colour_identity']} outside this deck's colour identity ({''.join(colours) or 'colourless'})")
+    if counts.get("format"):
+        bits.append(f"{counts['format']} not legal in {fmt}")
+    if counts.get("in_deck"):
+        bits.append(f"{counts['in_deck']} already in the deck up to the format's limit, or held only by this deck")
+    return f"Owned cards that do this job but were not offered: {', '.join(bits)}." if bits else None
 
 
 def build_router(get_db, current_user, transport=None) -> APIRouter:
@@ -64,9 +79,9 @@ def build_router(get_db, current_user, transport=None) -> APIRouter:
             deck_overview.refresh_note(deck, out["overview"])
         return out
 
-    def provenance(sources: dict, what: str, *extra: prov.Provenance) -> list[prov.Provenance]:
+    def provenance(sources: dict, what: str, *extra: prov.Provenance, used: tuple = USED) -> list[prov.Provenance]:
         """Scryfall's card data, roles (Scryfall Tagger) and prices are the inputs; the Vault computes the allocation and the match."""
-        inputs = [prov.for_catalog(n, sources.get(n)) for n in USED if n in sources] + list(extra)
+        inputs = [prov.for_catalog(n, sources.get(n)) for n in used if n in sources] + list(extra)
         return [prov.computed(what, inputs, as_of=date.today())]
 
     @router.get("", response_model=S.DeckIdeas, response_model_by_alias=True,
@@ -118,7 +133,7 @@ def build_router(get_db, current_user, transport=None) -> APIRouter:
                            "overlap": link(f"{V1}/decks/overlap"), "purchases": link(f"{V1}/decks/overlap/purchases")}}
 
     @router.get("/alternatives", response_model=S.DeckAlternatives, response_model_by_alias=True,
-                summary="Owned cards that could stand in for a card in this deck: the same core role, in the deck's colours and format")
+                summary="Owned cards that do the same job as a card in this deck (or a similar one, with the difference said), in the deck's colours and format")
     def deck_alternatives(request: Request, deck_id: Id,
                           card: str = Query(min_length=1, max_length=300, description="The card to find a stand-in for (it need not be in the deck)"),
                           format: FormatName | None = Query(None, description="The format whose legality and copy limit apply (default: the "
@@ -140,11 +155,15 @@ def build_router(get_db, current_user, transport=None) -> APIRouter:
             r.pop("_sort")
             r["_links"] = {"scryfall": link(r["scryfall_uri"])} if r["scryfall_uri"] else {}
         buy, price_day = di.price_page(db, user.id, page, target)
-        message = NO_ROLE if found["reason"] == "no_role" else NONE_FOUND if found["reason"] == "none_found" else None
+        message = (NO_ROLE if found["reason"] == "no_role" else NONE_FOUND if found["reason"] == "none_found"
+                   else NO_SAME_JOB if not found["tiers"]["same_job"] else None)
         body = page_body(request, page, nxt, len(rows), card=card, format=format, limit=limit)
         return {**body, "deck": deck_block(deck, resolved), "card": {**found["target"], "buy": buy}, "format": fmt, "format_from": origin,
-                "color_identity": found["color_identity"], "reason": found["reason"], "message": message, "roles_note": di.ROLES_NOTE,
-                "prices_date": price_day, "provenance": provenance(sources, "owned alternatives for a card in a deck"),
+                "color_identity": found["color_identity"], "reason": found["reason"], "message": message, "tiers": found["tiers"],
+                "filtered_out": found["filtered_out"], "filtered_note": filtered_note(found["filtered_out"], found["color_identity"], fmt),
+                "roles_version": found["roles_version"], "roles_note": di.ALT_ROLES_NOTE, "prices_date": price_day,
+                "provenance": provenance(sources, f"owned cards that do the same job as a card in a deck: the Vault's own rules over the Oracle text, "
+                                         f"version {found['roles_version']}", used=USED_BY_ALTERNATIVES),
                 "_links": {**body["_links"], "deck": link(f"{V1}/decks/{deck.id}"), "ideas": link(f"{V1}/decks/{deck.id}/ideas"),
                            **({"scryfall": link(target.scryfall_uri)} if target.scryfall_uri else {}),
                            "purchases": link(f"{V1}/decks/overlap/purchases")}}

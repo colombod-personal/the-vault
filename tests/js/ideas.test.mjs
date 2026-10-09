@@ -30,6 +30,7 @@ test('the page is in one of the five states of the design', () => {
   assert.equal(I.pageState({ deckId: '1', summary: covered }), 'covered');
   assert.equal(I.pageState({ deckId: '1', summary: missing, card: 'X', target: { reason: null } }), 'alternatives');
   assert.equal(I.pageState({ deckId: '1', summary: missing, card: 'X', target: { reason: 'none_found' } }), 'no-alternative');
+  assert.equal(I.pageState({ deckId: '1', summary: missing, card: 'X', target: { reason: 'no_role' } }), 'no-role');  // the Vault does not know the card: not "nothing found"
 });
 
 test('a row says missing, borrowed, partly held or owned, with the numbers the server gave', () => {
@@ -120,16 +121,38 @@ test('alternatives say how many are owned, why they match, who holds them, and w
   assert.equal(I.moveText({ from_deck: { id: 2, name: 'Avatar Aang' }, quantity: 1 }), 'Move from Avatar Aang');
   assert.match(I.moveSteps({ from_deck: { id: 2, name: 'Avatar Aang' }, quantity: 1 }, 'Doubling Season', 'Sliver Swarm'), /Move a copy of Doubling Season from Avatar Aang to Sliver Swarm\. The Vault changes no deck by itself/);
   assert.match(I.PRICE_NOTE('2026-10-06'), /Scryfall's cheapest known, from 6 Oct; the Vault contacts no shop\./);
-  assert.match(I.COARSE_NOTE, /coarse roles/);
+  assert.match(I.ROLES_NOTE, /Vault's own, found by rules over the Oracle text/);
 });
 
-test('roles are said with their strength and where a rule, not a Tagger tag, found them', () => {
-  const roles = [{ role: 'ramp', strength: 'core', basis: 'scryfall_tagger' }, { role: 'sacrifice_outlet', strength: 'incidental', basis: 'computed' }];
-  assert.equal(I.roleLine(roles), 'Role: ramp (core), sacrifice outlet (incidental, by a rule over its text)');
-  assert.equal(I.roleLine([]), 'No coarse role known');
+test("roles are the Vault's own, said with their strength; a card with none says so, and that is not 'nothing like it'", () => {
+  const roles = [{ role: 'token-doubler', name: 'Token doubler', strength: 'core', basis: 'computed' }, { role: 'counter-doubler', name: 'Counter doubler', strength: 'core', basis: 'computed' },
+    { role: 'lifegain', name: 'Lifegain', strength: 'incidental', basis: 'computed' }];
+  assert.equal(I.roleLine(roles), 'Does: token doubler (core), counter doubler (core); on the side: lifegain');
+  assert.equal(I.roleLine([roles[2]]), 'Does: nothing as its main job; on the side: lifegain');
+  assert.equal(I.roleLine([]), 'The Vault knows no role for this card yet');
+  assert.match(I.NO_ROLE_NOTE, /not the same as "you own nothing like it"/);
+  assert.deepEqual(I.roleWords(roles.slice(0, 1)), ['token doubler (core)']);
   const t = { in_deck: 1, status: 'missing', need: 2, gets: 0, not_owned: 1, held_by_other_deck: 1, borrowed_from: 'First' };
   assert.equal(I.allocationLine(t), 'The deck lists 2; this deck holds 0; 1 to buy; 1 held by First.');
   assert.equal(I.allocationLine({ in_deck: 0, status: null }), 'This card is not in the deck.');
+});
+
+test("a candidate says what it does, what it does not do, what it adds and how its type differs, from the server's lists", () => {
+  const alt = { tier: 'same_job', roles: [{ name: 'Token doubler', strength: 'core' }, { name: 'Lifegain', strength: 'incidental' }],
+    lacks: [{ role: 'counter-doubler', name: 'Counter doubler' }], extra: [{ role: 'free-counterspell', name: 'Free counterspell' }],
+    type_note: { target: 'Enchantment', candidate: 'Creature' } };
+  assert.equal(I.altDoes(alt), 'Does: token doubler');
+  assert.equal(I.altLacks(alt, 'Doubling Season'), 'Does not: counter doubler (Doubling Season does)');
+  assert.equal(I.altExtra(alt), 'Also: free counterspell');
+  assert.equal(I.typeNote(alt, 'Doubling Season'), 'a creature, where Doubling Season is an enchantment.');
+  assert.equal(I.typeNote({ type_note: { target: 'Sorcery', candidate: 'Instant' } }, 'X'), 'an instant, where X is a sorcery.');
+  assert.equal(I.altLacks({ lacks: [] }, 'X') + I.altExtra({ extra: [] }) + I.typeNote({ type_note: null }, 'X') + I.altDoes({ roles: [] }), '');
+  assert.equal(I.tierHeading('same_job', 1), 'Same job (1)');
+  assert.equal(I.tierHeading('similar', 1234), 'Similar, with a difference (1,234)');
+  assert.equal(I.similarToggle(3, false), 'Show similar, with a difference (3)');
+  assert.equal(I.similarToggle(3, true), 'Hide similar, with a difference (3)');
+  assert.deepEqual(I.byTier([{ tier: 'same_job', card: 'A' }, { tier: 'similar', card: 'B' }], 'similar').map((x) => x.card), ['B']);
+  assert.match(I.TEXT_CREDIT, /Wizards of the Coast's, via Scryfall\. Unofficial Fan Content/);
 });
 
 test('combos mark only the cards of combos the person holds in full', () => {

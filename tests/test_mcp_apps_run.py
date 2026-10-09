@@ -136,6 +136,24 @@ def test_the_combos_view_lists_each_combo_with_its_source_and_a_link_through_the
     assert snaps[1]["requests"].count("ui/open-link") == 1  # links go through the host
 
 
+def test_the_combos_view_shows_the_vaults_reading_apart_from_spellbooks_list_and_never_reads_an_unasked_spellbook_as_zero_combos(tmp_path):
+    """#172: possible_loops is the Vault's reading, labelled as such; when Spellbook could not be asked the view says so, not "0 combo(s)"."""
+    loops = {"source": "the Vault's reading of card text", "not_from": "Commander Spellbook", "covers": ["token for mana"],
+             "summary": "The Vault's reading of the card text found 0 possible loop(s) and 1 engine(s) one mana short of a loop (pattern: token for mana).",
+             "loops": [{"confidence": "one_short", "cards": ["Sliver Queen", "Manaweft Sliver", "Heart Sliver"], "reading": "These cards make an engine that is one mana short of a loop: x.",
+                        "steps": ["Pay {2} (Sliver Queen): a 1/1 Sliver token.", "Net: -1 mana per token."], "needs": "one more mana", "assumes": ["no opponent acts"],
+                        "verify": "Read each card with get_card_oracle; ask a judge before relying on it."}],
+             "note": "A reading of the text, not a proof, and not Commander Spellbook's. Finding none says only that these patterns found none."}
+    down = {"deck": {"id": 1, "name": "D", "overview": {"format": "commander", "commanders": ["A"], "cards": 100, "color_identity": "G"}},
+            "result": {"spellbook": {"unavailable": "Commander Spellbook did not answer in time. No Commander Spellbook combos are listed."}, "limits": "Only combos known to Commander Spellbook.",
+                       "possible_loops": loops},
+            "provenance": [{"kind": "computed", "source": "The Vault", "origin": "the Vault's reading of card text", "as_of": "2026-10-09", "notice": "Fan Content notice."}]}
+    text = run("combos", tmp_path, {"deck_id": 1}, down)[0]["text"]
+    assert "Possible loops: the Vault's reading, not Commander Spellbook's" in text and "Pay {2} (Sliver Queen)" in text and "Net: -1 mana per token." in text
+    assert "Needs: one more mana" in text and "not a proof, and not Commander Spellbook's" in text
+    assert "did not answer in time" in text and "combo(s) in this deck" not in text  # an unasked Spellbook is never "0 combos"
+
+
 def test_the_upgrades_view_pairs_each_add_with_a_cut_and_shows_the_price_difference(agent, bot, token, saved, tmp_path):
     args = {"deck_id": saved, "format": "commander", "budget_usd": 5, "roles": ["ramp"]}
     up = answer(bot, token, "find_upgrades", **args)
