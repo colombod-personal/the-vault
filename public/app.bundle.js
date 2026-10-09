@@ -1,5 +1,5 @@
 /* The Vault front end. Built by web/build.mjs from tweaks-panel.jsx, views/account.jsx, views/setIcon.jsx, views/dashboard.jsx, views/buckets.jsx, views/tags.jsx, views/scope.jsx, views/browse.jsx, views/sets.jsx, views/deck.jsx, views/deck_change.jsx, views/lab.jsx, views/graph.jsx, views/valuation.jsx, views/help.jsx, app.jsx. Do not edit.
-   sources-sha256: d33210ad2525f1c27a92b6a8dc49db8e8fa95a2e9a096c1b7ab8f87951f7927e */
+   sources-sha256: e18f7dc5c7a67c88085e01591419894d6378cbcfe84ceac364fbf2c4d6f3ec23 */
 /* tweaks-panel.jsx */
 const __TWEAKS_STYLE=`
   .twk-panel{position:fixed;right:16px;bottom:16px;z-index:2147483646;width:280px;

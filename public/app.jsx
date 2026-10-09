@@ -85,8 +85,8 @@ function vaultScopeFromSearch(search) {
   const bucket = Number(q.get('bucket')), tag = q.get('tag') || '';
   return { ...(Number.isInteger(bucket) && bucket > 0 ? { bucket } : {}), ...(VAULT_TAG.test(tag) ? { tag } : {}) };
 }
-// #/decks/7?swap=<url-encoded JSON {"cut":[...],"add":[...]}> opens the deck's change flow with those cards (the Ideas view's "Swap into the
-// deck"): the route carries the JSON as written; the deck page reads it, and drops it from the address once the flow is done.
+// #/decks/7?swap=<url-encoded JSON {"cut":[...],"add":[...]}> opens the deck's change flow with those cards (a "Swap into the
+// deck" link): the route carries the JSON as written; the deck page reads it, and drops it from the address once the flow is done.
 function vaultSwapFromSearch(search) {
   const swap = new URLSearchParams(search || '').get('swap');
   return swap ? { swap } : {};
