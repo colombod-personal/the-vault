@@ -34,7 +34,7 @@ def load(path):
 
 # The only jobs that may write issues (#64: the budget guard opens or updates a GitHub issue, which needs `issues: write`). Each one
 # holds no secret and no environment (test_the_issue_writers_hold_nothing_else): a read-only token everywhere else.
-ISSUE_WRITERS = {("sync-prices.yml", "alert"), ("sync-catalog.yml", "alert"), ("neon-monthly-check.yml", "remind"),
+ISSUE_WRITERS = {("sync-prices.yml", "alert"), ("sync-catalog.yml", "alert"), ("sync-limited.yml", "alert"), ("neon-monthly-check.yml", "remind"),
                  ("issue-progress.yml", "progress")}  # writes the Progress block of the issues a PR names (AGENTS.md section 8)
 
 
@@ -299,6 +299,27 @@ def test_the_sync_workflows_pass_the_guards_messages_to_an_alert_job_and_check_n
     assert usage["run"].startswith("python -m jobs.neon_usage") and usage["if"] == "${{ !cancelled() }}"  # reported even if the sync failed
     assert usage["env"]["NEON_API_KEY"] == "${{ secrets.NEON_API_KEY }}" and "NEON_PROJECT_ID" in usage["env"]
     assert "python -m jobs.sync_catalog" in {s.get("id"): s for s in catalog["jobs"]["sync"]["steps"]}["load"]["run"]
+    limited = load(ROOT / ".github" / "workflows" / "sync-limited.yml")  # #178: the same guard, in the same shape
+    assert set(limited["jobs"]["sync"]["outputs"]) == {"storage_alert"}
+    assert limited["jobs"]["alert"]["needs"] == "sync" and "always()" in limited["jobs"]["alert"]["if"]
+    assert "python -m jobs.sync_limited" in {s.get("id"): s for s in limited["jobs"]["sync"]["steps"]}["load"]["run"]
+
+
+def test_the_limited_job_runs_weekly_or_by_hand_only_from_main_and_stays_off_until_the_owner_names_it():
+    """#178: the weekly 17Lands job. The switch is the existing repository variable CATALOG_SOURCES (read by the job, which does nothing
+    when `limited_17lands` is not in it); the workflow never sets it, takes the sets and formats as inputs passed through env, and
+    has a timeout (a cap: the run time is measured by the first real run)."""
+    wf = load(ROOT / ".github" / "workflows" / "sync-limited.yml")
+    assert len(wf["on"]["schedule"]) == 1 and re.fullmatch(r"\d+ \d+ \* \* 1", wf["on"]["schedule"][0]["cron"])  # Mondays
+    assert set(wf["on"]) == {"schedule", "workflow_dispatch"} and set(wf["on"]["workflow_dispatch"]["inputs"]) == {"sets", "formats", "force"}
+    job = wf["jobs"]["sync"]
+    assert job["if"] == "github.ref == 'refs/heads/main'" and job["environment"] == ENVIRONMENT and job["timeout-minutes"] == 120
+    assert wf["concurrency"] == ENVIRONMENT
+    load_step = next(s for s in job["steps"] if s.get("id") == "load")
+    assert load_step["env"]["CATALOG_SOURCES"] == "${{ vars.CATALOG_SOURCES }}"
+    assert set(load_step["env"]) == {"CATALOG_SOURCES", "LIMITED_SETS", "LIMITED_FORMATS", "LIMITED_FORCE"}
+    text = (ROOT / ".github" / "workflows" / "sync-limited.yml").read_text(encoding="utf-8")
+    assert "gh variable" not in text and "CATALOG_SOURCES=" not in text and "GITHUB_ENV" in text  # nothing here sets the variable
 
 
 def test_a_monthly_reminder_issue_covers_what_the_guard_cannot_read():

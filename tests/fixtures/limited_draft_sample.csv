@@ -1,0 +1,10 @@
+expansion,event_type,draft_id,draft_time,rank,event_match_wins,event_match_losses,pack_number,pick_number,pick,pick_maindeck_rate,pick_sideboard_in_rate,pack_card_Test Bear,pack_card_Test Bolt,pack_card_Test Elf,pack_card_Front Face // Back Face
+TST,PremierDraft,draft-a,2026-09-10 10:00:00,gold,5,2,0,0,Test Bolt,0.5,0.1,1,1,1,1
+TST,PremierDraft,draft-a,2026-09-10 10:00:20,gold,5,2,0,1,Test Elf,0.5,0.1,1,0,1,0
+TST,PremierDraft,draft-a,2026-09-10 10:00:40,gold,5,2,0,2,Front Face // Back Face,0.5,0.1,1,0,0,1
+TST,PremierDraft,draft-a,2026-09-10 10:02:00,gold,5,2,0,8,Test Bear,0.5,0.1,1,0,0,0
+TST,PremierDraft,draft-a,2026-09-10 10:03:00,gold,5,2,1,0,Test Bear,0.5,0.1,1,1,0,0
+TST,PremierDraft,draft-a,2026-09-10 10:03:20,gold,5,2,1,1,Test Bolt,0.5,0.1,0,1,0,0
+TST,PremierDraft,draft-b,2026-09-12 09:00:00,gold,5,2,0,0,Test Bolt,0.5,0.1,1,1,1,1
+TST,PremierDraft,draft-b,2026-09-12 09:00:20,gold,5,2,0,1,Test Bear,0.5,0.1,1,0,1,1
+TST,PremierDraft,draft-b,2026-09-12 09:00:40,gold,5,2,0,2,Test Elf,0.5,0.1,0,0,1,1
