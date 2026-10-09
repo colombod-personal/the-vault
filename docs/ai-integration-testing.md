@@ -352,3 +352,19 @@ The shipped flow (the `council_brief` tool, with the Vault's expert skills and a
 - **ChatGPT** (2026-10-09, the owner's ChatGPT with the Vault app): https://chatgpt.com/c/6ac83103-c9e0-83eb-8a33-c1f4746aa303, prompt "Review my sliver deck with the expert council. I want to tune it."; it opened the Deck stats and Find upgrades views, answered "Sliver Swarm: Expert Council Review", led with the deck and ran the `council_brief` panel (Commander specialist, synergy analyst, casual-table representative, rules judge, devil's advocate, with the line that the views are not independent in one chat). The audit found 1 wrong figure of 13 checked claims (lands 52, the tool says 54), a model error with an unambiguous tool answer.
 
 Evidence and audits: #104 and #235.
+
+
+## Real runs of the setup in Codex and Perplexity (2026-10-09)
+
+Both as the demo reviewer, on the owner's machine and accounts, nothing saved.
+
+**Codex** (codex-cli 0.154.0, #155, #34, #38)
+1. `npx skills add colombod-personal/the-vault -y` in a scratch folder: 7 s, eight skills into `.agents/skills`.
+2. `codex mcp add vault --url https://mtgvault.cards/api/mcp`: Codex detected OAuth and printed an authorize URL with `client_id=https://chatgpt.com/oauth/codex/client.json` (a client metadata document: no client registered by hand) and a `http://127.0.0.1:<port>/callback` redirect.
+3. The Vault's page 'Connect Codex (chatgpt.com) to your Vault?' ('This app runs on this computer ... Continue only if you just started it yourself', signed in as Demo reviewer); Allow; Codex printed 'Successfully logged in'.
+4. `codex exec -s read-only -m gpt-5.5 "... call whoami ... get_rule 702.19b"`: both tools ran, 18 s from command to answer, rule text with provenance. (The default model of this Codex config, `gpt-6-sol`, is refused with a ChatGPT account: use `-m`.)
+5. A rules question with the rules-judge skill: Codex read the skill, called `whoami` x2, `find_rules_term` x4, `get_rule` x12, `verify_citation` x6, `present_steps` x2, quoted 702.19b and 702.16e verbatim and said the citation was verified (58 s).
+
+**Perplexity** (web, Pro plan, #362)
+1. Connectors, Custom connector: name The Vault, URL `https://mtgvault.cards/api/mcp`; open it and press Add connector: the Vault's consent page (client `https://www.perplexity.ai/.well-known/mcp-client.json`) with the demo reviewer already signed in; Allow; the connector shows Connected with every tool and per-tool permissions (Disable, Always ask, Allow).
+2. In Computer mode, naming the Vault in the question: `whoami`, `search_cards`, `list_decks`, `deck_stats` and a preview-only `update_owned_cards` all answered correctly (Perplexity reaches tools through `list_external_tools`, `describe_external_tools` and `call_external_tool`); nothing was saved. The connector tile shows Perplexity's generic plug icon: its form has no icon field.
