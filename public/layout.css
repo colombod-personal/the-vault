@@ -370,6 +370,43 @@ html, body { max-width: 100%; overflow-x: clip; }
   .lab-chart { padding: 8px; }
 }
 
+/* ---- Tags in the app (#128): chips on the rows, the filter, the bulk bar, the card drawer's tags and notes ---- */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.tag-bar .tag-note { flex: 1 1 100%; margin: 0; font-size: 12px; }
+p.tag-note { margin: 0 0 14px; font-size: 12px; }
+.tag-row { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.tag-chip, .tag-chip-lg { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border: 1px solid var(--border-2); border-radius: 999px;
+  background: var(--surface); font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--text-2); max-width: 100%; }
+.tag-chip .tag-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tag-chip-lg { overflow-wrap: anywhere; }
+.tag-chip-lg { padding: 4px 10px; font-size: 13px; color: var(--text); }
+.tag-chip.ai, .tag-item.ai .tag-chip-lg { border-style: dashed; border-color: var(--gold); }
+.tag-mark { padding: 0 4px; border-radius: 3px; background: var(--gold); color: var(--bg); font-size: 10px; font-weight: 700; letter-spacing: 0.06em; }
+.tag-list { list-style: none; margin: 0 0 12px; padding: 0; }
+.tag-item { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.tag-by { flex: 1 1 60px; font-size: 12px; }
+.tag-actions { display: flex; gap: 4px; }
+.btn.tag-x { min-width: 32px; font-size: 18px; line-height: 1; }
+.tag-bulk .input { flex: 1 1 200px; min-width: 0; max-width: 320px; }
+.tag-confirm { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 8px; border-top: 1px solid var(--border); }
+.tag-error { font-size: 12px; color: var(--danger); }
+.meta-ns { padding: 8px 0; border-top: 1px solid var(--border); }
+.meta-ns.ai { border-left: 3px dashed var(--gold); padding-left: 10px; }
+.meta-head { display: flex; align-items: center; gap: 6px; margin: 0 0 2px; font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.04em; }
+.meta-when { margin: 0 0 6px; font-size: 12px; }
+.meta-dl { margin: 0; display: grid; gap: 4px; font-size: 13px; }
+.meta-dl dt { font-family: var(--mono); font-size: 12px; color: var(--text-2); }
+.meta-dl dd { margin: 0 0 2px; overflow-wrap: anywhere; }
+.meta-dl .meta-dl, .meta-dl .meta-list { padding-left: 10px; border-left: 1px solid var(--border); }
+.meta-list { margin: 0; padding-left: 18px; font-size: 13px; overflow-wrap: anywhere; }
+.meta-text { white-space: pre-wrap; }
+@media (max-width: 760px) {
+  .tag-bulk .input { flex: 1 1 100%; max-width: none; min-height: 44px; }
+  .tag-x { min-width: 44px; min-height: 44px; }
+  .tbl td:first-child .tag-chip { max-width: 150px; }  /* the name column is narrow on a phone: a long tag is cut with an ellipsis (the card drawer shows it whole) */
+  .tag-actions .btn { min-width: 44px; }
+}
+
 /* ==== Phone layout (up to 760px wide) ====
    Everything from here to the end of the file is inside phone-width media queries (only .m-only,
    phone-only elements, is hidden outside them), so wider screens render exactly as before; a test

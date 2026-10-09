@@ -276,3 +276,16 @@ test('the web app\'s Undo asks first, then applies exactly the preview it was sh
   assert.equal((await api.recentImports())[0].undoable, true);
   assert.equal(calls[2].url, '/api/v1/imports?limit=20');
 });
+
+test('the web app tag calls name the tag in the path, tag the card ids it was given and send confirm only when asked (#128)', async () => {
+  const { api, calls } = load((url) => json(200, url.endsWith('/tags') ? { items: [{ tag: 'deck:sliver', cards: 2, by_source: { person: 1, assistant: 1, system: 0 } }], _links: {} } : { applied: true }));
+  assert.equal((await api.tags())[0].by_source.assistant, 1);
+  assert.equal(calls[0].url, '/api/v1/collection/tags');
+  await api.tagCards('deck:sliver', ['a', 'b']);
+  assert.deepEqual(calls[1], { url: '/api/v1/collection/tags/deck%3Asliver/cards', method: 'POST', body: { card_ids: ['a', 'b'] } });  // no confirm: more than 25 cards would only be shown
+  await api.untagCards('trade', ['a'], true);
+  assert.deepEqual(calls[2], { url: '/api/v1/collection/tags/trade/cards/remove', method: 'POST', body: { card_ids: ['a'], confirm: true } });
+  await api.cardMetadata('abc');
+  assert.equal(calls[3].url, '/api/v1/collection/cards/abc/metadata');
+  assert.equal(calls[3].method, 'GET');  // the notes are read only in the app
+});

@@ -155,4 +155,11 @@ bucket and, for a tag, the person's tags stamp, so a tag change never serves a s
 distinct counts do not (the section 5 rule; `tests/test_analytics_filters.py`). The daily value history is recorded for the whole
 inventory only, so a filtered `/history` prices the copies held now in the selection at each recorded day's prices.
 
-Not built yet: importing into one bucket (#124), the tags view of the app (#128) and the web part of #130 (analytics that follow the selected bucket or tag).
+Built since (#128, the app): tags in Browse and the card drawer (`public/views/tags.jsx`): chips under each card's name, the tag filter
+(`#/browse?tag=`, combinable with `bucket=`), tick boxes on every list (the bucket move bar stays bucket-only) with a bulk bar to tag or
+untag the ticked cards (more than 25 waits for a button that says the count), "Manage tags" (rename, remove from every card), the
+card's tags in the drawer with an assistant's tag marked "AI" and its app's name and accepted (the person tags the same card with the
+same tag) or removed, and the card's notes (`vault_metadata`) read only, one block per writer. A shared collection shows none of it. The
+server gave each card `tags_detail` (who wrote each tag) for this, and the summary `version` now moves with the tags.
+
+Not built yet: importing into one bucket (#124), the web part of #130 (analytics that follow the selected bucket or tag).

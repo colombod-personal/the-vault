@@ -234,6 +234,8 @@ window.VaultApi = (() => {
       v: c.value, fd: (c.acquired && c.acquired.first) || '', ld: (c.acquired && c.acquired.last) || '',
       id: c.scryfall_id, fin: c.finish, src: c.price.source, href: c._links && c._links.self ? c._links.self.href : null,
       scry: slimCard(c.card),
+      // tags are the owner's own: a shared collection has none (undefined). `tagsDetail` says who wrote each (#128).
+      tags: c.tags, tagsDetail: c.tags_detail,
     };
   }
   const setItem = (s) => ({ code: s.code, name: s.name, qty: s.copies, value: s.market_value, unique: s.printings,
@@ -445,6 +447,18 @@ window.VaultApi = (() => {
     deleteBucket: (id) => call(V1 + '/collection/buckets/' + id, { method: 'DELETE' }),
     moveCards: (from, to, lines, confirm) => create(V1 + '/collection/buckets/' + from + '/move', { json: { to, lines, confirm } }),
     cardDetail: (href) => call(href),
+    // tags (#128): labels on cards, the person's own. A tag is on the card, so any printing's id tags it; more than 25 cards come back
+    // `applied: false` and are applied only when sent again with confirm.
+    tags: () => all(V1 + '/collection/tags'),
+    tagDetail: (tag) => call(V1 + '/collection/tags/' + encodeURIComponent(tag)),
+    tagCards: (tag, ids, confirm) => create(V1 + '/collection/tags/' + encodeURIComponent(tag) + '/cards',
+      { json: confirm ? { card_ids: ids, confirm: true } : { card_ids: ids } }),
+    untagCards: (tag, ids, confirm) => create(V1 + '/collection/tags/' + encodeURIComponent(tag) + '/cards/remove',
+      { json: confirm ? { card_ids: ids, confirm: true } : { card_ids: ids } }),
+    renameTag: (tag, name) => call(V1 + '/collection/tags/' + encodeURIComponent(tag), { method: 'PATCH', json: { name } }),
+    deleteTag: (tag) => call(V1 + '/collection/tags/' + encodeURIComponent(tag), { method: 'DELETE' }),
+    // what the person and their assistants keep on a card (vault_metadata): read only in the app
+    cardMetadata: (id) => call(V1 + '/collection/cards/' + encodeURIComponent(id) + '/metadata'),
     archidektDeck: (id, refresh = false) => call(V1 + '/archidekt/decks/' + encodeURIComponent(id) + '?detail=cards' + (refresh ? '&refresh=true' : '')),
     logout: (everywhere = false) => call('/api/auth/logout' + (everywhere ? '?everywhere=true' : ''), { method: 'POST' })
       .finally(() => localStore.clear()),
