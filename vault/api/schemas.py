@@ -326,6 +326,7 @@ class ImportItem(Hal):
     lines: list[dict] | None = Field(None, description="For assistant edits: each printing, copies before and after")
     merge: dict | None = Field(None, description="For imports: how the file was applied (mode, what came from the person's app, "
                                                  "which edits made in the Vault were kept, the conflicts and their answers)")
+    bucket: dict | None = Field(None, description="For an import into one bucket: its id and name; every other bucket was left alone")
     undoable: bool | None = Field(None, description="For assistant edits: true on the one change set that can be undone now "
                                   "(the latest, until the collection changes again); POST /collection/changes/undo")
     undone: bool | None = Field(None, description="For assistant edits: true once it was undone")

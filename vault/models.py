@@ -222,6 +222,21 @@ class CollectionBaseline(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class BucketBaseline(Base):
+    """The base of a re-import into one bucket (#124): the last file imported into that bucket as it was imported, the same
+    thing ``CollectionBaseline`` holds for a whole-collection import, kept per scope (docs/collections.md, decision 6). Replaced by
+    every import into the bucket, forgotten by the next whole-collection import (which becomes the latest word on every bucket),
+    and deleted with its bucket. Never changed by the Vault's own edits."""
+
+    __tablename__ = "bucket_baselines"
+
+    bucket_id: Mapped[int] = mapped_column(ForeignKey("buckets.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    import_id: Mapped[int | None] = mapped_column(ForeignKey("imports.id", ondelete="SET NULL"))
+    cards: Mapped[list] = mapped_column(JSON)  # vault.merge.stored()
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Deck(Base):
     """A saved decklist (plain text, any common format)."""
 
@@ -766,6 +781,10 @@ class StagedUpload(Base):
     content: Mapped[bytes | None] = mapped_column(LargeBinary)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The bucket the import goes into (#124), chosen when the link is made (or on the upload page) and used by the preview and the
+    # apply; none: the whole collection. CASCADE: a link whose bucket is deleted is deleted, never a whole-collection import.
+    bucket_id: Mapped[int | None] = mapped_column(ForeignKey("buckets.id", ondelete="CASCADE"))
+    bucket_bound: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))  # made for it: the page can't change it
 
 
 class ArchidektDeckCache(Base):

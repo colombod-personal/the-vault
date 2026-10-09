@@ -74,6 +74,23 @@ def loaded(rows: list[dict] | None) -> dict[str, dict] | None:
     return None if rows is None else {s["k"]: s for s in rows}
 
 
+FOLDER, ROW_COPIES = 2, 5  # where a stored row (``condition, language, folder, price, date, quantity, trade``) keeps them
+
+
+def restricted(rows: list[dict] | None, wanted_folder) -> dict[str, dict] | None:
+    """The cards of a stored snapshot, limited to the rows whose folder ``wanted_folder(folder)`` accepts: what a whole-collection
+    file said about one bucket (#124), the base of the first import into it. ``None`` when the snapshot can't say (no snapshot, or a
+    card rebuilt from a record, migration 0110, whose folders are unknown)."""
+    if rows is None or any(s["r"] is None for s in rows):
+        return None
+    out: dict[str, dict] = {}
+    for s in rows:
+        mine = [r for r in s["r"] if wanted_folder(r[FOLDER])]
+        if mine:
+            out[s["k"]] = {**s, "r": mine, "q": sum(r[ROW_COPIES] for r in mine)}
+    return out
+
+
 @dataclass
 class Plan:
     mode: str
@@ -185,9 +202,10 @@ QUESTION = {
 }
 
 
-def describe(plan: Plan, baseline: dict | None, *, limit: int = LIST_LIMIT) -> dict:
+def describe(plan: Plan, baseline: dict | None, *, limit: int = LIST_LIMIT, bucket: str | None = None) -> dict:
     """The answer shown to the person (preview) and kept on the import (history): what the app changed and is applied,
-    which Vault edits are kept, and the conflicts, each with the answer that will be used unless they say otherwise."""
+    which Vault edits are kept, and the conflicts, each with the answer that will be used unless they say otherwise.
+    With ``bucket`` (the name of the bucket an import goes into, #124) the words are about that bucket alone."""
     how = {
         "first": "This is the first import, so the file becomes the collection.",
         "no_baseline": "The Vault has no record of an earlier file for this collection, so this import replaces it with "
@@ -195,6 +213,16 @@ def describe(plan: Plan, baseline: dict | None, *, limit: int = LIST_LIMIT) -> d
         "merge": "Only what changed in your app since the last import is applied; edits made here are kept.",
         "replace": "You chose to replace everything: the file replaces the collection and edits made here are discarded.",
     }[plan.mode]
+    if bucket is not None:
+        how = {
+            "first": f"The bucket {bucket!r} is empty, so the file becomes its contents.",
+            "no_baseline": f"The Vault has no record of an earlier file for the bucket {bucket!r}, so this import replaces what "
+                           "it holds with the file. From now on re-imports into it keep what you change here.",
+            "merge": f"Only what changed in your app since the last import into the bucket {bucket!r} is applied; edits made "
+                     "here to it are kept.",
+            "replace": f"You chose to replace everything: the file replaces the bucket {bucket!r} and edits made here to it are "
+                       "discarded.",
+        }[plan.mode] + " Every other bucket is left as it is."
     conflicts = [{**c, "question": QUESTION[c["kind"]]} for c in plan.conflicts[:limit]]
     return {
         "mode": plan.mode, "how": how, "baseline": baseline,

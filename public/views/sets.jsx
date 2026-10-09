@@ -26,7 +26,7 @@ function Sets({ data, onSetClick }) {
     <div data-screen-label="03 Sets">
       <div style={{ marginBottom: 24 }}>
         <p className="eyebrow">Holdings by expansion</p>
-        <h1 className="h1" style={{ marginTop: 6 }}>{data.meta.uniqueSets} sets in the vault.</h1>
+        <h1 className="h1" style={{ marginTop: 6 }}>{data.meta.uniqueSets} sets in {window.scopeActive(data.scope) ? 'this selection' : 'the vault'}.</h1>
       </div>
 
       <div className="panel" style={{ marginBottom: 16, padding: 16 }}>
@@ -77,7 +77,18 @@ function SetDetail({ data, code, onBack, openCard }) {
   const sets = window.useVaultQuery(() => api.sets({ q: code }), at).data;
   const set = sets && sets.items.find(s => s.code === code);
   const page = window.useVaultQuery(() => api.cards({ set: code, sort: '-value', limit: 60 }), at).data;
-  if (!set) return null;
+  if (!sets) return null;
+  if (!set) {  // a set with no copies in the selection (the bucket or tag was changed on this page)
+    return (
+      <div data-screen-label="03 Set Detail">
+        <button className="btn ghost" onClick={onBack} style={{ marginBottom: 16 }}>← Back to all sets</button>
+        <div className="panel scope-empty" role="status">
+          <h2 className="h2">No copies of {code} here.</h2>
+          <p className="muted">{window.scopeActive(data.scope) ? 'None of the cards in this selection is from that set.' : 'You own no cards from that set.'}</p>
+        </div>
+      </div>
+    );
+  }
   const cards = page ? page.items : [];
   const more = page ? page.total - cards.length : 0;
   return (

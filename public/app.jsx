@@ -73,29 +73,37 @@ const VAULT_START_NOTICE = (() => {
 // entry too, so Back closes it before leaving the view.
 const VAULT_VIEWS = ['dashboard', 'browse', 'sets', 'decks', 'lab', 'graph', 'valuation', 'help'];
 const VAULT_TAG = /^[a-z0-9:-]{1,40}$/;  // a tag's shape (the server's rule): anything else in the address is ignored
+// The views that follow the scope (#130): one bucket, one tag or both, kept in the address (#/dashboard?bucket=3&tag=trade). It is global
+// to the app until cleared: choosing it in Browse, the Vault, Sets or Value keeps it in the other three. Lab, Graph and Decks read the
+// whole inventory and keep the choice for when the person comes back. VAULT_ANALYTICS are the views whose figures come from the
+// selection's own summary (Browse lists the selection's cards itself).
+const VAULT_SCOPED = new Set(['browse', 'dashboard', 'sets', 'setdetail', 'valuation']);
+const VAULT_ANALYTICS = new Set(['dashboard', 'sets', 'setdetail', 'valuation']);
+const vaultScopeOf = (r) => ({ ...(r && r.bucket ? { bucket: r.bucket } : {}), ...(r && r.tag ? { tag: r.tag } : {}) });
+function vaultScopeFromSearch(search) {
+  const q = new URLSearchParams(search || '');
+  const bucket = Number(q.get('bucket')), tag = q.get('tag') || '';
+  return { ...(Number.isInteger(bucket) && bucket > 0 ? { bucket } : {}), ...(VAULT_TAG.test(tag) ? { tag } : {}) };
+}
 function vaultRouteFromHash(fallback) {
   const [path, search] = location.hash.replace(/^#\/?/, '').split('?');
   const [view, arg] = path.split('/').map((p) => decodeURIComponent(p || ''));
-  if (view === 'browse') {  // #/browse?bucket=3&tag=trade: one bucket's copies, the cards with one tag, or both
-    const q = new URLSearchParams(search || '');
-    const bucket = Number(q.get('bucket')), tag = q.get('tag') || '';
-    return { view, ...(Number.isInteger(bucket) && bucket > 0 ? { bucket } : {}), ...(VAULT_TAG.test(tag) ? { tag } : {}) };
-  }
-  if (view === 'sets' && arg) return { view: 'setdetail', code: arg };
+  if (view === 'sets' && arg) return { view: 'setdetail', code: arg, ...vaultScopeFromSearch(search) };
   if (view === 'decks' && arg) return { view: 'decks', deckId: arg };
   if (view === 'help') return { view: 'help', section: arg || '' };
-  return { view: VAULT_VIEWS.includes(view) ? view : fallback };
+  const known = VAULT_VIEWS.includes(view) ? view : fallback;
+  return { view: known, ...(VAULT_SCOPED.has(known) ? vaultScopeFromSearch(search) : {}) };
 }
 function vaultHashFor(route) {
-  if (route.view === 'setdetail') return `#/sets/${encodeURIComponent(route.code)}`;
-  if (route.view === 'decks' && route.deckId) return `#/decks/${encodeURIComponent(route.deckId)}`;
-  if (route.view === 'help') return helpHashFor(route.section);
-  if (route.view === 'browse' && (route.bucket || route.tag)) {
-    const parts = [route.bucket ? `bucket=${encodeURIComponent(route.bucket)}` : '', route.tag && VAULT_TAG.test(route.tag) ? `tag=${route.tag}` : ''];
-    const query = parts.filter(Boolean).join('&');
-    return query ? `#/browse?${query}` : '#/browse';
-  }
-  return `#/${route.view}`;
+  let hash;
+  if (route.view === 'setdetail') hash = `#/sets/${encodeURIComponent(route.code)}`;
+  else if (route.view === 'decks' && route.deckId) return `#/decks/${encodeURIComponent(route.deckId)}`;
+  else if (route.view === 'help') return helpHashFor(route.section);
+  else hash = `#/${route.view}`;
+  if (!VAULT_SCOPED.has(route.view)) return hash;
+  const parts = [route.bucket ? `bucket=${encodeURIComponent(route.bucket)}` : '', route.tag && VAULT_TAG.test(route.tag) ? `tag=${route.tag}` : ''];
+  const query = parts.filter(Boolean).join('&');
+  return query ? `${hash}?${query}` : hash;
 }
 const vaultUrlFor = (route) => location.pathname + location.search + vaultHashFor(route);
 
@@ -134,9 +142,24 @@ function App() {
   const refreshAgain = useRefApp(null);        // asked for while one was running: true (auto) or 'manual'
   const viewingRef = useRefApp(null);
   viewingRef.current = viewing;
+  // The scope (#130) is the route's while on a view that follows it, else the last one chosen (kept for the way back). A shared
+  // collection has none: buckets and tags are the owner's own.
+  const [keptScope, setKeptScope] = useStateApp(() => (VAULT_SCOPED.has(route.view) ? vaultScopeOf(route) : {}));
+  const scope = viewing ? {} : VAULT_SCOPED.has(route.view) ? vaultScopeOf(route) : keptScope;
+  const scopeRef = useRefApp(scope);
+  scopeRef.current = scope;
+  useEffectApp(() => {
+    if (VAULT_SCOPED.has(route.view)) setKeptScope((k) => {
+      const next = vaultScopeOf(route);
+      return k.bucket === next.bucket && k.tag === next.tag ? k : next;
+    });
+  }, [route]);
+  const scoped = window.useScoped(data, scope, !viewing && VAULT_ANALYTICS.has(route.view));
 
-  // Go to a view: a new history entry, unless an open card or panel's entry can be reused.
-  const setRoute = (next) => {
+  // Go to a view: a new history entry, unless an open card or panel's entry can be reused. The views that follow the scope
+  // get the current one unless the caller names its own.
+  const setRoute = (raw) => {
+    const next = VAULT_SCOPED.has(raw.view) && !viewingRef.current ? { ...scopeRef.current, ...raw } : raw;
     setRouteState(next);
     setDrawerCard(null);
     setAccountOpen(false);
@@ -153,14 +176,19 @@ function App() {
     if (history.state && history.state.overlay) history.back(); // popstate closes it
     else close();
   };
-  // The bucket Browse shows lives in the address (#/browse?bucket=3) without a history entry of its own, like its other filters.
-  const setBrowseFilter = (next) => {
+  // The scope lives in the address (#/browse?bucket=3, #/dashboard?bucket=3&tag=trade) without a history entry of its own, like
+  // Browse's other filters. Choosing one on a view that follows it changes it for all of them; {} clears it.
+  const setScope = (chosen) => {
+    const picked = vaultScopeOf(chosen);
+    scopeRef.current = picked;
+    setKeptScope(picked);
+    const { bucket, tag, ...rest } = route;
+    const next = VAULT_SCOPED.has(route.view) ? { ...rest, ...picked } : route;
     setRouteState(next);
     history.replaceState({ route: next }, '', vaultUrlFor(next));
   };
-  const setBucket = (bucket) => setBrowseFilter({ view: 'browse', ...(bucket ? { bucket } : {}), ...(route.tag ? { tag: route.tag } : {}) });
-  // The tag Browse filters by lives in the address too (#/browse?tag=trade), next to the bucket if one is chosen.
-  const setTag = (tag) => setBrowseFilter({ view: 'browse', ...(route.bucket ? { bucket: route.bucket } : {}), ...(tag ? { tag } : {}) });
+  const setBucket = (bucket) => setScope({ ...scope, bucket });
+  const setTag = (tag) => setScope({ ...scope, tag });
   // After copies moved between buckets: the collection's version changed, so ask again (without blanking the page).
   const reloadCollection = async () => {
     const j = await window.VaultApi.collection();
@@ -257,6 +285,7 @@ function App() {
       if (s.kind === 'collection') {
         const j = await window.VaultApi.sharedCollection(s.id);
         setData(j);
+        viewingRef.current = { id: s.id, from: s.from };  // before the route, so the address carries no bucket or tag
         setViewing({ id: s.id, from: s.from });
         setRoute({ view: 'dashboard' });
       } else {
@@ -477,20 +506,27 @@ function App() {
         <main>
           {route.view !== 'help' && <div className="help-row"><HelpHint view={route.view} shared={!!viewing} /></div>}
           {route.view === 'help' && <Help section={route.section} />}
+          {(route.view === 'lab' || route.view === 'graph') && window.scopeActive(scope) && (
+            <p className="muted scope-aside" role="status">This page reads your whole inventory. Your bucket or tag choice is kept for the Vault, Browse, Sets and Value pages.</p>
+          )}
           {route.view === 'dashboard' && (
-            <Dashboard
-              data={data}
-              gotoBrowse={(q) => nav('browse', { initialQuery: q })}
-              gotoSets={() => nav('sets')}
-              gotoSet={code => nav('setdetail', { code })}
-              gotoValuation={() => nav('valuation')}
-              onRefresh={viewing ? null : () => runRefresh(false)}
-              onBulkSync={doBulkSync}
-              refreshing={refreshing}
-              refreshProgress={refreshProgress}
-              refreshError={refreshError}
-              openCard={openCard}
-            />
+            <ScopeFrame inventory={data} scoped={scoped} scope={scope} onScope={setScope} viewing={!!viewing}>
+              {(d) => (
+                <Dashboard
+                  data={d}
+                  gotoBrowse={(q) => nav('browse', { initialQuery: q })}
+                  gotoSets={() => nav('sets')}
+                  gotoSet={code => nav('setdetail', { code })}
+                  gotoValuation={() => nav('valuation')}
+                  onRefresh={viewing ? null : () => runRefresh(false)}
+                  onBulkSync={doBulkSync}
+                  refreshing={refreshing}
+                  refreshProgress={refreshProgress}
+                  refreshError={refreshError}
+                  openCard={openCard}
+                />
+              )}
+            </ScopeFrame>
           )}
           {route.view === 'browse' && (
             <Browse data={data} openCard={openCard} initialQuery={route.initialQuery} bucket={route.bucket} onBucket={setBucket}
@@ -498,10 +534,14 @@ function App() {
                     onChanged={reloadCollection} readOnly={!!viewing} />
           )}
           {route.view === 'sets' && (
-            <Sets data={data} onSetClick={code => nav('setdetail', { code })} />
+            <ScopeFrame inventory={data} scoped={scoped} scope={scope} onScope={setScope} viewing={!!viewing}>
+              {(d) => <Sets data={d} onSetClick={code => nav('setdetail', { code })} />}
+            </ScopeFrame>
           )}
           {route.view === 'setdetail' && (
-            <SetDetail data={data} code={route.code} onBack={() => nav('sets')} openCard={openCard} />
+            <ScopeFrame inventory={data} scoped={scoped} scope={scope} onScope={setScope} viewing={!!viewing}>
+              {(d) => <SetDetail data={d} code={route.code} onBack={() => nav('sets')} openCard={openCard} />}
+            </ScopeFrame>
           )}
           {route.view === 'decks' && (
             <DeckView key={deckText && deckText.shareId ? 'share' + deckText.shareId : deckText || 'deck'} data={data} openCard={openCard} initialText={deckText}
@@ -515,16 +555,20 @@ function App() {
             <GraphView data={data} openCard={openCard} />
           )}
           {route.view === 'valuation' && (
-            <Valuation
-              data={data}
-              onBack={() => nav('dashboard')}
-              onRefresh={viewing ? null : () => runRefresh(false)}
-              onBulkSync={doBulkSync}
-              refreshing={refreshing}
-              refreshProgress={refreshProgress}
-              refreshError={refreshError}
-              openCard={openCard}
-            />
+            <ScopeFrame inventory={data} scoped={scoped} scope={scope} onScope={setScope} viewing={!!viewing}>
+              {(d) => (
+                <Valuation
+                  data={d}
+                  onBack={() => nav('dashboard')}
+                  onRefresh={viewing ? null : () => runRefresh(false)}
+                  onBulkSync={doBulkSync}
+                  refreshing={refreshing}
+                  refreshProgress={refreshProgress}
+                  refreshError={refreshError}
+                  openCard={openCard}
+                />
+              )}
+            </ScopeFrame>
           )}
         </main>
 
