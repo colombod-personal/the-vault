@@ -69,3 +69,20 @@ def test_the_cuts_and_adds_of_the_validator_are_length_capped_on_rest_too(signed
     assert signed_in.post("/api/v1/decks/validate-changes", json=body).status_code == 422
     body["adds"] = ["x" * 300]
     assert signed_in.post("/api/v1/decks/validate-changes", json=body).status_code in (200, 503)  # a long name is just unknown
+
+
+def full(text):
+    return [(l.quantity, l.name, l.set_code, l.collector_number, l.finish, l.section, l.categories) for l in deck_text.parse_text(text).lines]
+
+
+def test_a_rendered_list_reads_back_to_the_same_cards_in_the_same_sections():
+    """#163: the deck page saves the text the validator renders, so rendering must lose no card, printing, finish, category or section."""
+    text = ("Commander\n1 Atraxa, Praetors' Voice (CMM) 1068\n\nCompanion\n1 Lurrus of the Dream-Den\n\n"
+            "Deck\n1 Sol Ring (C21) 263 *F* [Ramp, Artifacts]\n1 Mana Vault (EMA) 5 *E*\n3 Island\n1 Fire // Ice\n1 Thing (ABC)\n\n"
+            "Sideboard\n2 Duress\n\nMaybeboard\n1 Cyclonic Rift [Maybeboard]\n")
+    assert full(deck_text.render(deck_text.parse_text(text).lines)) == full(text)
+
+
+def test_a_list_of_main_deck_cards_only_has_no_header_and_an_empty_list_is_empty():
+    cards = deck_text.parse_text("Deck\n2 Island\n1 Sol Ring").lines
+    assert deck_text.render(cards) == "2 Island\n1 Sol Ring" and deck_text.render([]) == ""

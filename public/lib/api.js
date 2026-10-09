@@ -538,6 +538,10 @@ window.VaultApi = (() => {
     deckSeen: (id, text) => call(V1 + '/decks/' + id + '/seen', { method: 'POST', json: text ? { text } : {} }),
     // deck analysis, computed by the server from the card catalog (each answer is { result, provenance })
     deckStats: (text) => call(V1 + '/decks/stats', { method: 'POST', json: { text } }),
+    // the deck page's change flow (#163): a saved deck with cuts and adds checked, applying nothing; `result.deck_text` is the list the
+    // check ran on, which updateDeck then saves. A card name is looked up in the card catalog (an exact name, else near names).
+    deckValidateChanges: (deck_id, format, cuts, adds) => call(V1 + '/decks/validate-changes', { method: 'POST', json: { deck_id, format, cuts, adds, include_text: true } }),
+    catalogCard: (name) => call(V1 + '/catalog/cards' + query({ name })),
     deckLegality: (text, format) => call(V1 + '/decks/legality', { method: 'POST', json: { text, format } }),
     deckUpgrades: (text, format, budget_usd, roles) => call(V1 + '/decks/upgrades', { method: 'POST', json: { text, format, budget_usd, use_collection: true, ...(roles ? { roles } : {}) } }),
     deckCombos: (text) => call(V1 + '/decks/combos', { method: 'POST', json: { text } }),

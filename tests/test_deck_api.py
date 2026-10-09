@@ -373,3 +373,52 @@ def test_the_validator_reports_what_a_plan_does_to_the_price_of_the_deck(loaded)
     assert r["deck_cost_before_usd"] == computed(post(loaded, "stats", text=VALID))["estimated_cost_usd"]
     free = computed(post(loaded, "validate-changes", text=VALID, format="commander", cuts=["Test Mountain"], adds=[]))
     assert free["cut_cards"] == [{"name": "Test Mountain", "price_usd": None}] and free["cut_unpriced"] == ["Test Mountain"] and free["net_change_usd"] == 0.0
+
+
+SAVED = (
+    "Commander\n1 Test Commander\n\nDeck\n1 Test Rock (C21) 263 *F* [Ramp, Artifacts]\n1 Test Burn\n1 Dull Bear\n5 Test Mountain\n\n"
+    "Sideboard\n1 Other Rock\n// a comment the parser skips\nnot a card line at all\n"
+)
+
+
+def test_the_validator_returns_the_list_it_checked_only_when_asked(loaded):
+    """#163 task 0: the deck page saves exactly what the check ran on. The default answer is unchanged."""
+    saved = loaded.post("/api/v1/decks", json={"name": "Elves", "text": SAVED}).json()
+    plan = {"deck_id": saved["id"], "format": "commander", "cuts": ["Dull Bear", "2x Test Mountain"], "adds": ["cheap ramp", "1 Cheap Ramp", "Pricey Ramp"]}
+    assert "deck_text" not in computed(loaded.post(f"{V1}/validate-changes", json=plan))
+    r = computed(loaded.post(f"{V1}/validate-changes", json={**plan, "include_text": True}))
+    assert r["deck_text"] == (
+        "Commander\n1 Test Commander\n\n"
+        "Deck\n1 Test Rock (C21) 263 *F* [Ramp, Artifacts]\n1 Test Burn\n3 Test Mountain\n2 Cheap Ramp\n1 Pricey Ramp\n\n"
+        "Sideboard\n1 Other Rock")  # cuts out, adds in the main deck (named as the catalog names them, counted), printings and categories kept
+    assert r["deck_text_dropped"] == ["not a card line at all"] and r["cuts"] == 3 and r["adds"] == 3
+    again = computed(loaded.post(f"{V1}/validate-changes", json={"text": r["deck_text"], "format": "commander", "cuts": [], "adds": []}))
+    assert again["cards_after"] == r["cards_after"]  # the text reads back to the deck the check judged
+
+
+def test_saving_the_checked_text_updates_the_deck_and_records_a_version(loaded):
+    saved = loaded.post("/api/v1/decks", json={"name": "Elves", "text": SAVED, "source_url": "https://archidekt.com/decks/12345"}).json()
+    r = computed(loaded.post(f"{V1}/validate-changes", json={"deck_id": saved["id"], "format": "commander", "cuts": ["Dull Bear"],
+                                                             "adds": ["Cheap Ramp"], "include_text": True}))
+    done = loaded.put(f"/api/v1/decks/{saved['id']}", json={"name": "Elves", "text": r["deck_text"]})
+    assert done.status_code == 200 and done.json()["text"] == r["deck_text"] and done.json()["source_url"] == "https://archidekt.com/decks/12345"
+    versions = loaded.get(f"/api/v1/decks/{saved['id']}/versions").json()["items"]
+    assert versions[0]["source"] == "edited" and {(c["card"], c["before"], c["after"]) for c in versions[0]["changes"]} == {("Dull Bear", 1, 0), ("Cheap Ramp", 0, 1)}
+
+
+def test_the_checked_text_of_someone_elses_deck_is_not_given_and_a_read_token_cannot_save(loaded, app):
+    from fastapi.testclient import TestClient
+
+    from test_agents import auth, make_token
+
+    mine = loaded.post("/api/v1/decks", json={"name": "Mine", "text": SAVED}).json()
+    body = {"deck_id": mine["id"], "format": "commander", "cuts": ["Dull Bear"], "adds": [], "include_text": True}
+    with TestClient(app) as other:
+        other.post("/api/auth/dev-login", params={"email": "bob@example.com"})
+        assert other.post(f"{V1}/validate-changes", json=body).status_code == 404
+    read = auth(make_token(loaded))
+    with TestClient(app) as bot:
+        checked = bot.post(f"{V1}/validate-changes", json=body, headers=read)
+        assert checked.status_code == 200 and "deck_text" in checked.json()["result"]  # checking is a read
+        assert bot.put(f"/api/v1/decks/{mine['id']}", json={"name": "Mine", "text": "1 Test Rock"}, headers=read).status_code == 403  # saving is a write
+    assert loaded.get(f"/api/v1/decks/{mine['id']}").json()["text"] == SAVED

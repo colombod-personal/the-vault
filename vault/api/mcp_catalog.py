@@ -165,9 +165,11 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              "number are ignored." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
              {"text": deck, "deck_id": DECK_ID, "format": fmt, "adds": {"type": "array", "maxItems": 60, "items": {"type": "string", "maxLength": 300}},
               "cuts": {"type": "array", "maxItems": 60, "items": {"type": "string", "maxLength": 300}},
-              "budget_usd": {"type": "number", "minimum": 0, "maximum": 100000, "description": "The most the adds may cost in total"}},
+              "budget_usd": {"type": "number", "minimum": 0, "maximum": 100000, "description": "The most the adds may cost in total"},
+              "include_text": {"type": "boolean", "default": False, "description": "Also return deck_text, the list after the cuts and adds "
+                               "(the adds go in the main deck), the exact text to give update_deck"}},
              ["format"], method="POST", path=lambda a: f"{V1}/decks/validate-changes",
-             body=lambda a: _deck_body(a, "format", "adds", "cuts", "budget_usd"),
+             body=lambda a: _deck_body(a, "format", "adds", "cuts", "budget_usd", "include_text"),
              provenance=("computed",)),
         Tool("present_steps", "Show the person a step-by-step explanation (an interaction, a stack, a ruling) with each cited rule attached. "
              "Write the steps yourself, citing rule numbers you looked up with get_rule; the Vault attaches each rule's verbatim text and "

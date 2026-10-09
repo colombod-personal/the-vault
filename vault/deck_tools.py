@@ -406,11 +406,14 @@ def card_names(items: list[str]) -> list[str]:
     return out
 
 
-def validate_changes(db: Session, text: str, fmt: str, adds: list[str], cuts: list[str], budget_usd: float | None) -> dict:
+def validate_changes(db: Session, text: str, fmt: str, adds: list[str], cuts: list[str], budget_usd: float | None,
+                     with_text: bool = False) -> dict:
     """Apply cuts and adds to a deck and check the result: every named card exists and is in the
     deck (cuts), is legal and in the deck's colors (adds), the resulting deck is still legal, and
     the adds' total price is within budget. A card with no price makes the budget unverifiable, so
-    it is reported as an issue rather than assumed free."""
+    it is reported as an issue rather than assumed free. With ``with_text`` the answer also carries ``deck_text``, the list the check ran
+    on (the cuts taken out, the adds in the main deck, every card as the catalog names it), so a caller that saves the plan saves what was
+    checked (#163)."""
     fmt = check_format(fmt)
     adds, cuts = card_names(adds), card_names(cuts)
     deck = parse(text)
@@ -486,7 +489,7 @@ def validate_changes(db: Session, text: str, fmt: str, adds: list[str], cuts: li
     introduced = [i for i in outcome["issues"] if i not in existing]
     issues += [{**i, "kind": "result_" + i["kind"]} for i in introduced
                if i["kind"] not in ("unknown_card", "not_legal", "color_identity") or i["card"] not in {x.get("card") for x in issues}]
-    return {"valid": not issues, "issues": issues, "existing_issues": existing, "format": fmt, "adds": len(adds), "cuts": len(cut_names),
+    out = {"valid": not issues, "issues": issues, "existing_issues": existing, "format": fmt, "adds": len(adds), "cuts": len(cut_names),
             "cards_after": outcome["cards_checked"], "added_cost_usd": round(total, 2), "budget_usd": budget_usd,
             "cuts_not_refunded": True,
             # What the plan does to the deck's price: the adds, the cuts (each with its own price) and the deck as a whole.
@@ -497,3 +500,16 @@ def validate_changes(db: Session, text: str, fmt: str, adds: list[str], cuts: li
             "cut_value_usd": cut_value, "cut_unpriced": cut_unpriced, "net_change_usd": round(total - cut_value, 2),
             "deck_cost_before_usd": cost_before, "deck_cost_after_usd": round(cost_before - cut_value + total, 2),
             "not_checked": outcome["not_checked"]}
+    if with_text:
+        out["deck_text"] = deck_text.render(after_lines + _added_lines(resolved_adds, add_lines))
+        out["deck_text_dropped"] = deck.unparsed[:20]  # lines of the saved text that are not cards (a comment, a typo): not in deck_text
+    return out
+
+
+def _added_lines(resolved: Resolved, lines: list[decklist.DeckLine]) -> list[decklist.DeckLine]:
+    """The adds as main-deck lines, one per card with its copies counted, named as the catalog names the card."""
+    counts: dict[str, int] = {}
+    for line, entry in zip(lines, resolved.entries):
+        name = entry.card.name if entry.card else line.name
+        counts[name] = counts.get(name, 0) + 1
+    return [decklist.DeckLine(n, name) for name, n in counts.items()]

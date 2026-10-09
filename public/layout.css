@@ -193,6 +193,38 @@ html, body { max-width: 100%; overflow-x: clip; }
 .deck-glance { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; margin-top: 12px; }
 .deck-badge { margin-left: 8px; padding: 1px 6px; border-radius: 3px; font-family: var(--mono); font-size: 10px; color: var(--good); border: 1px solid var(--good); white-space: nowrap; }
 
+/* ---- Deck page: the change flow (cut and add cards, check, confirm; views/deck_change.jsx) ---- */
+.dc { margin-bottom: 16px; }
+.dc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.dc-head h2 { font-size: 22px; margin: 0; outline: none; }
+.dc-lede { font-size: 13px; line-height: 1.5; margin: 6px 0 10px; color: var(--text-2); }
+.dc-note { font-size: 12px; line-height: 1.5; color: var(--gold); margin: 6px 0; }
+.dc-small { font-size: 12px; line-height: 1.5; margin: 6px 0; }
+.dc-error { font-size: 13px; line-height: 1.5; color: var(--danger); margin: 8px 0; }
+.dc-step { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+.dc-step .label-mono { display: block; margin: 8px 0 4px; }
+.dc-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.dc-row .input { flex: 1 1 220px; min-width: 0; }
+.dc-pick, .dc-chips, .dc-problems { list-style: none; margin: 8px 0 0; padding: 0; }
+.dc-pick li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.dc-pick-name { min-width: 0; overflow-wrap: anywhere; }
+.dc-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.dc-chip { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--border-2); border-radius: 999px; padding: 0 2px 0 12px; font-size: 13px; max-width: 100%; }
+.dc-chip.cut { border-color: var(--danger); }
+.dc-chip.add { border-color: var(--good); }
+.dc-chip span { overflow-wrap: anywhere; }
+.dc-x { min-width: 44px; min-height: 44px; background: none; border: 0; color: inherit; font-size: 18px; cursor: pointer; border-radius: 999px; }
+.dc-x:hover { color: var(--gold); }
+.dc-suggest, .dc-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.dc-result { margin-top: 12px; }
+.dc-verdict { font-size: 20px; margin: 0 0 8px; }
+.dc-problems li { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.dc-detail { display: block; font-size: 12px; margin-top: 2px; }
+.dc-line { font-size: 13px; line-height: 1.5; margin: 4px 0; }
+.dc-save { white-space: normal; text-align: left; height: auto; min-height: 44px; line-height: 1.35; }
+.dc-saved { outline: none; margin-top: 12px; }
+.dc-saved-line { font-size: 16px; font-weight: 600; line-height: 1.4; }
+
 /* ---- In-app help: the "?" on each view, the Help view and the first-visit welcome ---- */
 .help-row { display: flex; justify-content: flex-end; margin-bottom: 4px; }
 .help-hint {

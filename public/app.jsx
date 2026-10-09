@@ -563,7 +563,7 @@ function App() {
           )}
           {route.view === 'decks' && (
             <DeckView key={deckText && deckText.shareId ? 'share' + deckText.shareId : deckText || 'deck'} data={data} openCard={openCard} initialText={deckText}
-              deckId={route.deckId} onOpenDeckId={(id) => { setDeckText(null); nav('decks', id ? { deckId: String(id) } : {}); }} />
+              deckId={route.deckId} swap={viewing ? undefined : route.swap} onOpenDeckId={(id) => { setDeckText(null); nav('decks', id ? { deckId: String(id) } : {}); }} />
           )}
           {route.view === 'lab' && (
             <Lab data={data} openCard={openCard} readOnly={!!viewing} onImported={onImported} onOpenDeck={openDeck}

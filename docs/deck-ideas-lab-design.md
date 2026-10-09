@@ -174,6 +174,19 @@ Where the code settles a point the design left open (tests: `tests/test_deck_ide
 - **Rate limit.** 120 reads a minute per person across both routes (each lane page recomputes the allocation).
 - **Measured** (`test_the_first_ideas_page_of_a_100_card_deck_makes_a_small_constant_number_of_queries`, a 100-card deck beside 12 other saved decks, local Postgres): the first `ideas` page makes 11 queries and `alternatives` 16, and the query count does not grow with the deck.
 
+<<<<<<< HEAD
+## As built, the change flow (deck page, #163 task 0)
+
+A saved deck of the person's own has **Change this deck** (`public/views/deck_change.jsx`, wording in `public/lib/deck_change.js`; a pasted list, a shared deck or an unsaved deck has no flow):
+
+- **Cut:** a search box over the deck's own list; each match has a Cut button (one copy a press, up to the copies the deck holds). **Add:** a name field that is looked up in the card catalog (`GET /catalog/cards?name=`: an exact name, else near names to pick from); only the catalog's name for a card is ever added, so there is no free text that is not a card.
+- **Check:** `POST /decks/validate-changes` against the saved deck (`deck_id`), with `include_text: true`, applying nothing. The page says, in plain words, the server's problems (each with the server's own detail), the problems the deck already had, the list's size after the change, what the adds and cuts cost and the deck's price before and after, and what the person owns of each added card and still has to buy (the coverage of the resulting list, `POST /decks/coverage`). Changing a card after a check hides the confirmation until it is checked again.
+- **Confirm:** one button that names the change (Cut 2 cards, add 2 cards to Sliver Swarm; with problems it reads Save anyway: ...). A card that is not in the deck or not in the catalog cannot be saved over. The button calls `PUT /decks/{id}` with the name and the `deck_text` the check ran on, so what is saved is what was checked; the Vault records a version (History), the page marks the new list as seen, reads the saved deck again and says it is saved.
+- **The new text is the server's.** `validate_changes(..., with_text=True)` renders the list (`deck_text.render`): the cuts removed, the adds in the main deck as one line per card, printings, finishes and categories kept, sections as Commander, Companion, Deck, Sideboard, Maybeboard; saved lines that are not cards (a stray comment) are not in it and are listed as `deck_text_dropped`. The browser never rewrites a decklist.
+- **Archidekt decks:** the Vault's copy changes, Archidekt's does not, and the flow says so in one line; the page keeps reading the list from Archidekt, so it says that too and that Update saved copy would put that list back.
+- **A swap in the address:** `#/decks/<id>?swap=<url-encoded JSON {"cut":[...],"add":[...]}>` (the Ideas view's Swap into the deck) opens the flow with those cuts and adds, looks the adds up in the catalog (a name it does not know is listed and left out), checks the proposal and drops the parameter from the address. A parameter that cannot be read fills nothing and says so. The route carries it as `swap` (`vaultRouteFromHash`, `vaultHashFor` in `public/app.jsx`).
+- Phone-first (390 px: no sideways scroll, targets 44 px, text 12 px), Esc closes the flow and returns focus to its button, the heading takes focus on opening. Screenshots: `docs/screenshots/deck-change-*`.
+=======
 ## As built (web, #163 tasks 2 and 3)
 
 Files: `public/views/ideas.jsx` (the page), `public/lib/ideas.js` (wording, addresses, windowing: `window.VaultIdeas`), `public/lib/api.js` (`deckIdeas`, `deckAlternatives`), the styles in `public/layout.css` (`.ideas-*`). Tests: `tests/js/ideas.test.mjs`, `tests/test_ideas_page.py` (real answers through the page's own wording, and the removals); the browser run is `scripts/ideas_evidence.py`. Where the code settles a point the design left open:
@@ -189,6 +202,7 @@ Files: `public/views/ideas.jsx` (the page), `public/lib/ideas.js` (wording, addr
 - **Weight.** Lane rows carry no image. Only the selected card and its alternatives show a thumbnail (Scryfall's `small`, 146 px wide, drawn 40 by 56, `loading="lazy"`; never cropped); a larger image opens in a dialog only when the thumbnail is tapped, with the artist and Scryfall credit. Lanes show 25 cards, then "Show more" follows the lane's own cursor; a lane with more than 40 cards loaded draws only the rows in view. No physics, no animation.
 - **Removed.** All seven Graph modes, `graph.jsx`, the cytoscape script (so every page no longer loads a third-party script from unpkg), the Graph tab and its icon, the Graph help section, the "Graph default top-N" tweak, the Cytoscape credits row and notices, and the styles only the Graph used (`.graph-stage`, `.graph-legend`, `.m-matrix`, `.m-stack`, `.m-3col`, `button.pip`). `tests/test_ideas_page.py` fails if any returns or a link names a removed mode.
 - **Measured** (`python scripts/ideas_evidence.py`, headless Chromium on a local server with synthetic data: three saved Commander decks of 100 cards, a Sliver deck with 8 missing and 4 borrowed cards, a 50-card Other lane): 390 px in all five states and with a lane open: no horizontal overflow, no tap target under 44 px, no text under 12 px (11 px labels). Opening the deck on a throttled phone (4x CPU, 150 ms and 1.6 Mbit/s): lanes drawn in about 220 ms, longest main-thread task under the 200 ms budget (none over 50 ms), first `ideas` page 35.8 KB, 3.9 KB gzipped, no image requested; a selected card requests 4 images, all `small` thumbnails. A cold load of the deck's address with the cache off and the scripts from the CDN draws the lanes after about 2.1 s on the same throttled phone (React and the bundle dominate; informational, not the budget).
+>>>>>>> origin/main
 
 ## Decisions for the owner
 
@@ -200,7 +214,7 @@ Files: `public/views/ideas.jsx` (the page), `public/lib/ideas.js` (wording, addr
 
 ## Tasks that follow (under #163)
 
-0. Web (deck page): the cut and add change flow with `validate_deck_changes` and a confirmation before `update_deck` (needed by Swap into the deck; it does not exist today).
+0. ~~Web (deck page): the cut and add change flow with `validate_deck_changes` and a confirmation before `update_deck` (needed by Swap into the deck; it does not exist today)~~ Built ("As built, the change flow" below).
 1. ~~Server: `GET /decks/{id}/ideas` and `/ideas/alternatives` (with the validated `format` input), tools `get_deck_ideas` and `get_card_alternatives`, tests above~~ Done ("As built"); alternatives run on the coarse roles behind `deck_ideas.equivalence`, which #166's `equivalents` replaces.
 2. ~~Web: the Ideas view with the five states, Clear, Esc and Back, lazy images and windowed lanes, the performance test.~~ Done ("As built (web)").
 3. ~~Remove the Graph modes, `graph.jsx`, the cytoscape script and the dead styles; redirect `#/graph`.~~ Done.
