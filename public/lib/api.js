@@ -440,6 +440,19 @@ window.VaultApi = (() => {
       body.append('file', file);
       return create(V1 + '/imports', { body });
     },
+    // Import into one bucket (#122, #124): the file is compared with that bucket's copies only and replaces only them. The preview
+    // changes nothing and names the bucket and what it leaves alone (`bucket`, `untouched`); importInto applies the same file, with a
+    // fresh Idempotency-Key for each confirm. 400 unreadable file, 404 bucket, 409 conflict, 429 limit: the server's words.
+    importPreview: (file, bucketId) => {
+      const body = new FormData();
+      body.append('file', file);
+      return call(V1 + '/imports/preview?bucket_id=' + encodeURIComponent(bucketId), { method: 'POST', body });
+    },
+    importInto: (file, bucketId) => {
+      const body = new FormData();
+      body.append('file', file);
+      return create(V1 + '/imports?bucket_id=' + encodeURIComponent(bucketId), { body });
+    },
     // buckets (#125): the places copies live in; a move writes the target's name as the copies' folder and is recorded as a change
     buckets: () => all(V1 + '/collection/buckets'),
     createBucket: (name) => create(V1 + '/collection/buckets', { json: { name } }),

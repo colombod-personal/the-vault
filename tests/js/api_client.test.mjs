@@ -15,11 +15,16 @@ const json = (status, body, headers = {}) => ({
 // `route(url, init)` answers each request; returns the client, the requests made and every
 // localStorage write.
 function load(route, { cookie = '', indexedDB } = {}) {
-  const calls = [], writes = [];
+  const calls = [], writes = [], headers = [];
+  let keys = 0;
   const sandbox = {
     fetch: async (url, init = {}) => {
       if (url === '/api/v1' && !init.method) return json(200, { _links: {} });  // the twins check at start-up
-      calls.push({ url, method: init.method || 'GET', body: init.body ? JSON.parse(init.body) : null });
+      // a JSON body is recorded parsed; an uploaded file (FormData) as its fields, with the file's name
+      const body = typeof init.body === 'string' ? JSON.parse(init.body)
+        : init.body ? Object.fromEntries([...init.body].map(([k, v]) => [k, v.name || v])) : null;
+      calls.push({ url, method: init.method || 'GET', body });
+      headers.push(init.headers || {});
       return route(url, init);
     },
     localStorage: {
@@ -27,14 +32,14 @@ function load(route, { cookie = '', indexedDB } = {}) {
       clear: () => writes.push(['clear']), key: () => null, length: 0,
     },
     location: { href: 'https://vault.test/' }, document: { cookie }, indexedDB,
-    crypto: { randomUUID: () => 'uuid' }, Event: class { constructor(type) { this.type = type; } },
+    crypto: { randomUUID: () => 'uuid-' + (++keys) }, FormData, Event: class { constructor(type) { this.type = type; } },
     dispatchEvent: () => true, URL, URLSearchParams, Headers: Map, clearTimeout, Promise, Date, Math, JSON, console,
     // long waits (the local copy's time limit) are shortened so the tests stay fast
     setTimeout: (fn, ms) => setTimeout(fn, Math.min(ms, 20)),
   };
   sandbox.window = sandbox;
   vm.runInNewContext(readFileSync(new URL('../../public/lib/api.js', import.meta.url), 'utf8'), sandbox);
-  return { api: sandbox.window.VaultApi, calls, writes };
+  return { api: sandbox.window.VaultApi, calls, writes, headers };
 }
 
 const progress = (o) => ({ processed: 300, not_found: 0, unmatched_rows: 0, unavailable: false, prices_as_of: '2026-10-03',
@@ -288,4 +293,28 @@ test('the web app tag calls name the tag in the path, tag the card ids it was gi
   await api.cardMetadata('abc');
   assert.equal(calls[3].url, '/api/v1/collection/cards/abc/metadata');
   assert.equal(calls[3].method, 'GET');  // the notes are read only in the app
+});
+
+test('the web app imports a file into one bucket: a preview first (nothing written), then the same file with a fresh key each time (#122)', async () => {
+  const preview = { bucket: { id: 7, name: 'Trade box', rows: 3, copies: 7 }, untouched: { buckets: 3, rows: 8, copies: 86, note: 'n' }, changes: { added: 1 } };
+  const { api, calls, headers } = load((url) => json(url.startsWith('/api/v1/imports/preview') ? 200 : 201, url.startsWith('/api/v1/imports/preview') ? preview : { id: 9 }));
+  const file = new File(['Folder Name,Quantity\n'], 'trade.csv', { type: 'text/csv' });
+  assert.deepEqual(await api.importPreview(file, 7), preview);
+  assert.deepEqual(calls[0], { url: '/api/v1/imports/preview?bucket_id=7', method: 'POST', body: { file: 'trade.csv' } });
+  assert.equal(headers[0]['Idempotency-Key'], undefined);  // a preview writes nothing, so it carries no key
+  await api.importInto(file, 7);
+  await api.importInto(file, 7);
+  assert.deepEqual(calls[1], { url: '/api/v1/imports?bucket_id=7', method: 'POST', body: { file: 'trade.csv' } });
+  assert.deepEqual([headers[1]['Idempotency-Key'], headers[2]['Idempotency-Key']], ['uuid-1', 'uuid-2']);  // each confirm is its own request
+  await api.importCsv(file);
+  assert.equal(calls[3].url, '/api/v1/imports');  // the top bar's import still takes the whole collection
+});
+
+test('an import into a bucket shows the server\'s own words for a bad file, a missing bucket, a conflict and the limit (#122)', async () => {
+  for (const [status, detail] of [[400, 'No cards found in the file.'], [404, 'No such bucket'], [409, 'The collection changed'], [429, 'Too many imports']]) {
+    const { api } = load(() => json(status, { detail }));
+    const file = new File(['x'], 'a.csv');
+    await assert.rejects(api.importPreview(file, 3), (e) => e.status === status && e.message === detail);
+    await assert.rejects(api.importInto(file, 3), (e) => e.status === status && e.message === detail);
+  }
 });

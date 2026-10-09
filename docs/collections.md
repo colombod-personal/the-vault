@@ -196,4 +196,15 @@ card's tags in the drawer with an assistant's tag marked "AI" and its app's name
 same tag) or removed, and the card's notes (`vault_metadata`) read only, one block per writer. A shared collection shows none of it. The
 server gave each card `tags_detail` (who wrote each tag) for this, and the summary `version` now moves with the tags.
 
-Not built yet: the web app's import with a bucket picker (#124) and the web part of #130 (analytics that follow the selected bucket or tag).
+Built since (#122, the web part of import into one bucket): in Browse, "Manage buckets", each bucket has "Import file...": the file goes to
+`POST /imports/preview?bucket_id=` first, and the dialog says, from the answer alone (the browser adds nothing up), the bucket it goes into and
+what that bucket holds now, the server's own sentence on how the file is applied (`merge.how`), the cards new, gone, with more and with fewer
+copies, the copies in and out, the cards the person's edits keep and the conflicts (the edit made in the Vault is kept), the rows without a
+known printing (the first five listed), and everything left alone (`untouched`: copies, rows, other buckets, tags and notes). The Confirm
+button names the bucket and the counts ("Import into Trade box: ... 86 copies elsewhere stay as they are"); it sends `POST /imports?bucket_id=`
+with a fresh `Idempotency-Key`, then reloads the collection and the bucket list and shows the result line. Cancel writes nothing. An
+unreadable file (400), a missing bucket (404), a changed collection (409) and the limit (429) show in the dialog as the server words them. The
+top bar's "Import CSV" is unchanged (the whole collection, no preview). Tests: `tests/js/api_client.test.mjs` (`importPreview`, `importInto`),
+phone measure and screenshots in the pull request.
+
+Not built yet: the web part of #130 (analytics that follow the selected bucket or tag).
