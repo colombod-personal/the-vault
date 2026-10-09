@@ -455,11 +455,12 @@ def find_or_create(db: Session, profile: Profile, current: User | None = None, e
     (provider, subject) index lets one win, and the other then signs in to the winner's account."""
     if profile.email and len(profile.email) > 320:  # no real address is this long (users.email is String(320))
         profile = Profile(profile.provider, profile.subject, None, profile.name)
+    key = () if expect_key is None else (expect_key,)  # (only passed when there is a session key to hold the request to)
     try:
-        return _find_or_create(db, profile, current, expect_key)
+        return _find_or_create(db, profile, current, *key)
     except IntegrityError:
         db.rollback()
-        return _find_or_create(db, profile, current, expect_key)
+        return _find_or_create(db, profile, current, *key)
 
 
 def _find_or_create(db: Session, profile: Profile, current: User | None, expect_key: str | None = None) -> User:
