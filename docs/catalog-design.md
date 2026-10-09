@@ -304,7 +304,7 @@ Commander Spellbook results or query on demand is decided in
   that keeps Neon's change history small and readers never see a half-loaded catalog. The job is
   idempotent and safe to re-run.
 - Writes `catalog_sources` last. `whoami` and every cited answer read the stamps from it.
-- Schema changes come through Alembic migrations as usual (`vault/migrations`).
+- Schema changes come through Alembic migrations as usual (`vault/migrations`). A migration must keep the previous release working on the new schema (add, do not rename or drop in the same release): an older instance that cold-starts after a newer deploy migrated the database now boots on the newer schema instead of failing (`database_ahead_of_code` is logged, #169), so a destructive change needs two releases.
 
 ## Tests and twins
 

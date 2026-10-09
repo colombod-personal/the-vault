@@ -139,3 +139,17 @@ def test_the_migrations_have_exactly_one_head():
     config = Config()
     config.set_main_option("script_location", str(Path(vault.db.__file__).parent / "migrations"))
     assert len(ScriptDirectory.from_config(config).get_heads()) == 1
+
+
+def test_a_database_ahead_of_the_code_starts_and_is_left_alone(database, caplog):
+    """#169: a newer deploy migrated the database, then an older instance cold-started. It used to fail at import ("Can't
+    locate revision"), a 500 for every request that instance got; now it runs on the newer schema and says so."""
+    database.migrate()
+    with database.engine.begin() as conn:
+        conn.execute(text("UPDATE alembic_version SET version_num = '9999'"))
+    with caplog.at_level("WARNING", logger="vault.access"):
+        database.start()
+        database.migrate()
+    assert _revision(database) == "9999"  # not downgraded, not stamped back
+    assert "database_ahead_of_code" in caplog.text
+    assert not database.pending_migration
