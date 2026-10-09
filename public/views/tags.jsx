@@ -49,17 +49,18 @@ function TagChips({ detail, tags }) {
 }
 
 // Above Browse: the tag filter (kept in the address as #/browse?tag=trade, with the bucket if one is chosen).
-function TagBar({ tags, loaded, value, onChange, onManage, version }) {
+// `quiet` (the analytics views' scope bar, #130): just the choice, without the tag's detail line or the "no tags yet" hint about ticking cards.
+function TagBar({ tags, loaded, value, onChange, onManage, version, quiet }) {
   const [detail, setDetail] = useStateTg(null);
   useEffectTg(() => {
     setDetail(null);
-    if (!value) return undefined;
+    if (!value || quiet) return undefined;
     let dead = false;
     window.VaultApi.tagDetail(value).then((d) => { if (!dead) setDetail(d); }, () => {});
     return () => { dead = true; };
   }, [value, version]);
   if (loaded && tags.length === 0 && !value) {
-    return <p className="muted tag-note">No tags yet. Tick cards below, or open a card, to tag it (for example trade or deck:sliver).</p>;
+    return quiet ? null : <p className="muted tag-note">No tags yet. Tick cards below, or open a card, to tag it (for example trade or deck:sliver).</p>;
   }
   const known = tags.some((t) => t.tag === value);
   const assistants = detail ? detail.assistants : [];
@@ -75,7 +76,7 @@ function TagBar({ tags, loaded, value, onChange, onManage, version }) {
           </option>
         ))}
       </select>
-      <button type="button" className="btn xs" onClick={onManage}>Manage tags</button>
+      {onManage && <button type="button" className="btn xs" onClick={onManage}>Manage tags</button>}
       {detail && (
         <p className="muted tag-note" role="status">
           {tgPlural(detail.cards, 'card', 'cards')} tagged {detail.tag}, {detail.owned_cards} of them in your collection now.

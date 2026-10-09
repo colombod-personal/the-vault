@@ -282,6 +282,24 @@ p.tag-note { margin: 0 0 14px; font-size: 12px; }
   .tag-actions .btn { min-width: 44px; }
 }
 
+/* ---- The scope of the analytics (#130): the bar above the Vault, Sets and Value pages ---- */
+.scope-bar { margin-bottom: 20px; padding: 12px 14px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); }
+.scope-pickers { display: flex; flex-wrap: wrap; gap: 0 28px; }
+.scope-bar .bucket-bar { margin-bottom: 10px; }
+.scope-bar .bucket-bar .select { flex: 0 1 280px; }
+.scope-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.scope-showing { margin: 0; flex: 1 1 260px; font-family: var(--mono); font-size: 12px; color: var(--text-2); overflow-wrap: anywhere; }
+.scope-showing strong { color: var(--gold); font-weight: 600; }
+.scope-note { margin: 8px 0 0; font-size: 12px; max-width: 760px; }
+.scope-empty { text-align: center; padding: 32px 16px; }
+.scope-empty .btn { margin-top: 12px; }
+.scope-aside { margin: 0 0 14px; font-size: 12px; }
+@media (max-width: 760px) {
+  .scope-bar { padding: 10px 12px; }
+  .scope-pickers, .scope-pickers .bucket-bar { width: 100%; }
+  .scope-bar .bucket-bar .select { flex: 1 1 100%; }
+}
+
 /* ==== Phone layout (up to 760px wide) ====
    Everything from here to the end of the file is inside phone-width media queries (only .m-only,
    phone-only elements, is hidden outside them), so wider screens render exactly as before; a test

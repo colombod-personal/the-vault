@@ -185,14 +185,21 @@ window.VaultApi = (() => {
   // Open a collection (yours, or one shared with you): its summary, and a client for everything
   // else about it. Views ask the server for what they show (P&L, breakdowns, valuation, pages of
   // printings, …); nothing is computed in the browser.
-  async function loadCollection(base) {
+  // A scope is the bucket and/or the tag the analytics are limited to (#130): { bucket: 3, tag: 'trade' }, either or both,
+  // or {} for the whole inventory. The server limits every answer; the scope is part of each request's URL (so of its local
+  // copy's key) and of the summary's `version`.
+  const scopeOf = (s) => ({ ...(s && s.bucket ? { bucket: Number(s.bucket) } : {}), ...(s && s.tag ? { tag: String(s.tag) } : {}) });
+
+  async function loadCollection(base, scope) {
     const who = account();
+    const scoped = scopeOf(scope);
+    const href = base + query(scoped);  // the summary of the selection; its `version` stands for every answer about it
     let summary, origin = {};
     try {
-      summary = await call(base);
+      summary = await call(href);
     } catch (e) {
       if (e.status === 401) await localStore.clear();
-      const saved = e.status === 0 && who ? await localStore.get(`summary:${who}:${base}`) : null; // offline: last copy
+      const saved = e.status === 0 && who ? await localStore.get(`summary:${who}:${href}`) : null; // offline: last copy
       if (!saved || saved.format !== FORMAT) throw e;
       summary = saved.body;
       origin = { offline: true, savedAt: saved.savedAt };
@@ -200,10 +207,10 @@ window.VaultApi = (() => {
     localStore.del('collection:' + base);  // copies saved by older versions (formats 1 and 2)
     if (who && !origin.offline) {
       localStore.del(`collection:${who}:${base}`);
-      localStore.set(`summary:${who}:${base}`, { format: FORMAT, savedAt: new Date().toISOString(), body: summary });
+      localStore.set(`summary:${who}:${href}`, { format: FORMAT, savedAt: new Date().toISOString(), body: summary });
     }
-    versions[base] = summary.version;
-    return assemble(summary, base, origin);
+    versions[href] = summary.version;
+    return assemble(summary, base, origin, scoped, href);
   }
 
   // A collection item's `card` (Scryfall's data, kept in Postgres by the daily sync) in the shape
@@ -242,15 +249,15 @@ window.VaultApi = (() => {
     colors: s.colors || {}, released: s.released_at || null });
 
   // A page of a list, with `more()` for the next page (null on the last).
-  function pager(base, mapItem) {
+  function pager(key, mapItem) {
     const wrap = (seen) => (page) => {
       const next = nextHref(page, seen);
       return {
         ...page, items: page.items.map(mapItem),
-        more: next ? () => { seen.add(next); return cachedGet(base, next).then(wrap(seen)); } : null,
+        more: next ? () => { seen.add(next); return cachedGet(key, next).then(wrap(seen)); } : null,
       };
     };
-    return (href) => cachedGet(base, href).then(wrap(new Set([href])));
+    return (href) => cachedGet(key, href).then(wrap(new Set([href])));
   }
   // Up to `n` items of a list (every item when n is Infinity), following `next` links.
   async function upTo(first, n) {
@@ -264,40 +271,47 @@ window.VaultApi = (() => {
   }
 
   // Everything a view can ask about one collection; `base` is /api/v1/collection or
-  // /api/v1/shared/{id}/collection. Each call is one server resource (docs/api.md).
-  function collectionApi(base) {
-    const cardsPage = pager(base, cardItem);
-    const setsPage = pager(base, setItem);
-    const plainPage = pager(base, (x) => x);
+  // /api/v1/shared/{id}/collection. Each call is one server resource (docs/api.md). With a `scope` (the bucket and/or tag, #130)
+  // every call passes it, so each figure is the server's for that selection; `key` is the address of the selection's summary,
+  // whose version decides when a stored answer is stale.
+  function collectionApi(base, scope = {}, key = base) {
+    const cardsPage = pager(key, cardItem);
+    const setsPage = pager(key, setItem);
+    const plainPage = pager(key, (x) => x);
+    const inScope = (params) => ({ ...params, ...scope });
+    const scopeQs = query(scope);
     return {
-      base,
+      base, scope,
+      // The same questions about a bucket and/or a tag: loads that selection's summary (`meta`, as `collection()` does) and the
+      // client that asks about it. Own collection only (a shared one answers 404).
+      scoped: (next) => loadCollection(base, next),
       // printings, one page: q, set, name, printing, finish, condition, limit; sort: name, -name,
       // -value, value, -quantity, set, -acquired, acquired. The page has `total` and `value_total`.
-      cards: (params) => cardsPage(base + '/cards' + query(params)),
+      cards: (params) => cardsPage(base + '/cards' + query(inScope(params))),
       // the most valuable printing of a card name (to open a card from a per-name list)
-      topPrinting: (name) => cardsPage(base + '/cards' + query({ name: name.split(' // ')[0], sort: '-value', limit: 1 }))
+      topPrinting: (name) => cardsPage(base + '/cards' + query(inScope({ name: name.split(' // ')[0], sort: '-value', limit: 1 })))
         .then((p) => p.items[0] || null),
       // every set: q; sort: -value, value, -quantity, quantity, -unique, unique, name, code, release, -release
-      sets: (params) => upTo(setsPage(base + '/sets' + query({ ...params, limit: 500 })), Infinity),
+      sets: (params) => upTo(setsPage(base + '/sets' + query(inScope({ ...params, limit: 500 }))), Infinity),
       // one row per card name, `n` rows at most: sort, colors (array of W U B R G M C), type, min_value
-      names: (params = {}, n = 100) => upTo(plainPage(base + '/names' + query({
+      names: (params = {}, n = 100) => upTo(plainPage(base + '/names' + query(inScope({
         ...params, colors: params.colors && params.colors.length ? params.colors.join(',') : null,
-        limit: Math.min(500, n) })), n),
-      stats: (limit = 8) => cachedGet(base, base + '/stats' + query({ limit })).then((s) => ({
+        limit: Math.min(500, n) }))), n),
+      stats: (limit = 8) => cachedGet(key, base + '/stats' + query(inScope({ limit }))).then((s) => ({
         ...s,
         most_valuable: (s.most_valuable || []).map(cardItem),
         biggest_gains: (s.biggest_gains || []).map(cardItem),
         biggest_losses: (s.biggest_losses || []).map(cardItem),
       })),
-      breakdowns: () => cachedGet(base, base + '/breakdowns'),
-      valuation: () => cachedGet(base, base + '/valuation'),
-      timeline: () => cachedGet(base, base + '/timeline').then((t) => t.months),
-      history: () => upTo(plainPage(base + '/history' + query({ limit: 500 })), Infinity).then((p) => p.items),
+      breakdowns: () => cachedGet(key, base + '/breakdowns' + scopeQs),
+      valuation: () => cachedGet(key, base + '/valuation' + scopeQs),
+      timeline: () => cachedGet(key, base + '/timeline' + scopeQs).then((t) => t.months),
+      history: () => upTo(plainPage(base + '/history' + query(inScope({ limit: 500 }))), Infinity).then((p) => p.items),
     };
   }
 
   // The summary in the shape the views use (`meta`), plus the client for the rest (`api`).
-  function assemble(summary, base, origin) {
+  function assemble(summary, base, origin, scope = {}, key = base) {
     const conditions = {};
     for (const [k, v] of Object.entries(summary.by_condition)) conditions[CONDITION[k] || k] = v;
     return {
@@ -314,7 +328,8 @@ window.VaultApi = (() => {
         knownCostMarket: summary.known_cost_market ?? null, knownCostCopies: summary.known_cost_copies ?? null,
         unknownCostCopies: summary.unknown_cost_copies ?? null,
       },
-      api: collectionApi(base),
+      scope,  // the bucket and/or tag these figures are limited to ({} = the whole inventory)
+      api: collectionApi(base, scope, key),
     };
   }
 
