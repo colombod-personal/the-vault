@@ -146,7 +146,12 @@ function combosBody(into, env) {
   // Combos from Commander Spellbook (find_combos): theirs, written by their community, each with a link to its page.
   var r = env.result || env;
   var t = r.totals || {};
-  into.appendChild(h("p", { text: (t.included || 0) + " combo(s) in this deck, " + (t.almost_included || 0) + " one card short. Listed by Commander Spellbook." }));
+  if (r.spellbook && r.spellbook.unavailable) {
+    // the answer holds no Spellbook list at all: say so, never "0 combos"
+    into.appendChild(h("p", { class: "bad", text: r.spellbook.unavailable }));
+  } else {
+    into.appendChild(h("p", { text: (t.included || 0) + " combo(s) in this deck, " + (t.almost_included || 0) + " one card short. Listed by Commander Spellbook." }));
+  }
   function group(title, list, short) {
     if (!(list || []).length) { return; }
     into.appendChild(h("h2", { text: title }));
@@ -166,6 +171,21 @@ function combosBody(into, env) {
   group("One card short", r.almost_included, true);
   if (r.limits) { into.appendChild(h("p", { class: "small muted", text: r.limits })); }
   (r.notes || []).forEach(function (n) { into.appendChild(h("p", { class: "small muted", text: n })); });
+  var pl = r.possible_loops;
+  if (pl) {
+    // the Vault's own reading of card text, kept apart from Spellbook's list and labelled as such
+    into.appendChild(h("h2", { text: "Possible loops: the Vault's reading, not Commander Spellbook's" }));
+    into.appendChild(h("p", { text: pl.summary || "" }));
+    (pl.loops || []).forEach(function (l) {
+      var box = h("div", { class: "box" }, [h("div", {}, [h("strong", { text: (l.cards || []).join(" + ") })]), h("div", { text: l.reading || "" })]);
+      (l.steps || []).forEach(function (s) { box.appendChild(h("div", { class: "small", text: s })); });
+      if (l.needs) { box.appendChild(h("div", { class: "bad", text: "Needs: " + l.needs })); }
+      (l.assumes || []).forEach(function (a) { box.appendChild(h("div", { class: "small muted", text: "Assumes: " + a })); });
+      if (l.verify) { box.appendChild(h("div", { class: "small muted", text: l.verify })); }
+      into.appendChild(box);
+    });
+    if (pl.note) { into.appendChild(h("p", { class: "small muted", text: pl.note })); }
+  }
 }
 function reportSize() {
   var send_ = function () { notify("ui/notifications/size-changed", { width: Math.ceil(document.documentElement.scrollWidth), height: Math.ceil(document.documentElement.scrollHeight) }); };

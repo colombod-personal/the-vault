@@ -213,8 +213,15 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              body=lambda a: {k: a[k] for k in ("title", "cards", "steps", "version") if a.get(k) is not None},
              provenance=("catalog",), ui="steps"),
         Tool("find_combos", "Combos present in a decklist, and combos one card short (with the missing cards), asked of Commander Spellbook "
-             "on demand. Descriptions are theirs and are attributed; the Vault keeps no copy of their data. It lists only combos Commander Spellbook knows: finding none does not mean the deck has " "no infinite combos." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
-             {"text": deck, "deck_id": DECK_ID}, [], method="POST", path=lambda a: f"{V1}/decks/combos", body=lambda a: _deck_body(a),
+             "on demand. Descriptions are theirs and are attributed; the Vault keeps no copy of their data. It lists only combos Commander Spellbook knows: finding none does not mean the deck has " "no infinite combos." + " With `include_possible_loops` it also gives the Vault's own reading of the deck's card text for a possible loop "
+             "Spellbook does not list (`possible_loops`): labelled the Vault's reading and not Spellbook's, off by default, with its arithmetic, "
+             "what it assumes and which patterns it covers (today one: a repeatable ability that pays mana for a creature token, with something "
+             "that lets the token tap for mana and haste); it is returned even when Spellbook cannot be asked."
+             " Give `deck_id` (a saved deck, from list_decks) or `text`.",
+             {"text": deck, "deck_id": DECK_ID,
+              "include_possible_loops": {"type": "boolean", "default": False,
+                                         "description": "Also give the Vault's reading of the card text for possible loops Commander Spellbook does not list"}},
+             [], method="POST", path=lambda a: f"{V1}/decks/combos", body=lambda a: _deck_body(a, "include_possible_loops"),
              provenance=("computed",), ui="combos"),
         Tool("shopping_list", "The cards of a decklist the person does not own, with a dated Scryfall price of each, as paste-ready text for a "
              "store's own list tool: `format` is plain, cardkingdom (Card Kingdom's Deck Builder), tcgplayer (Mass Entry with set and "

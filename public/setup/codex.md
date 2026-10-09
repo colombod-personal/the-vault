@@ -12,7 +12,7 @@ The Vault gives Codex Magic: The Gathering rules (read live from Wizards of the 
 - A collection imported (the Import page takes Dragon Shield, Moxfield or generic CSV exports). Setup works without one; the first tour then explains how to import.
 - Codex: the Codex CLI, the Codex IDE extension or Codex cloud.
 - Documentation this page follows (read 2026-10-06): [Codex: MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
-- Status: written from that documentation, not run in a real Codex account yet. Anything marked "not verified yet" is something only a real run can settle.
+- Status: the Codex CLI steps were run once in a real Codex (codex-cli 0.154.0, 2026-10-09, a demo Vault account): adding the server started OAuth with a client metadata document, the Vault's consent page appeared, and a Vault question was answered in 18 seconds. The IDE extension and Codex cloud were not run in a real account yet. Anything marked "not verified yet" is something only a real run can settle.
 
 ## Do this
 
