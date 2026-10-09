@@ -20,6 +20,12 @@ def used_mb(db):
     return db_budget.usage(db)["database_mb"]
 
 
+def fixed_size(monkeypatch, used: float, limit: float) -> None:
+    """A real database's size moves by a page between two reads (#307, #373), so a test that needs an exact share fixes the size."""
+    monkeypatch.setattr(db_budget, "usage", lambda _db: {"database_mb": used, "tables_mb": {}})
+    monkeypatch.setenv("NEON_STORAGE_LIMIT_MB", str(limit))
+
+
 def test_usage_names_the_database_size_and_the_largest_tables(db):
     report = db_budget.usage(db)
     assert report["database_mb"] > 0 and 0 < len(report["tables_mb"]) <= db_budget.TOP_TABLES
@@ -46,13 +52,13 @@ def test_a_database_size_that_moves_between_reads_does_not_change_the_band(db, m
 
 
 def test_at_70_percent_it_warns_but_does_not_stop(db, monkeypatch, capsys):
-    monkeypatch.setenv("NEON_STORAGE_LIMIT_MB", str(used_mb(db) / 0.75))
+    fixed_size(monkeypatch, 15.0, 20.0)  # 75%
     db_budget.check(db, refuse=True)
     assert "::warning::" in capsys.readouterr().out
 
 
 def test_at_85_percent_a_job_that_adds_data_stops_but_one_that_does_not_carries_on(db, monkeypatch, capsys):
-    monkeypatch.setenv("NEON_STORAGE_LIMIT_MB", str(used_mb(db) / 0.9))
+    fixed_size(monkeypatch, 18.0, 20.0)  # 90%
     db_budget.check(db, refuse=False)  # the price sync: warns, keeps syncing
     with pytest.raises(SystemExit, match="not adding data"):
         db_budget.check(db, refuse=True)
@@ -70,7 +76,7 @@ def test_the_catalog_job_refuses_before_downloading_anything_when_the_database_i
 def test_at_70_percent_the_last_check_fails_the_job_with_a_clear_message_and_hands_it_to_the_workflow(db, monkeypatch, tmp_path, capsys):
     out = tmp_path / "github_output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
-    monkeypatch.setenv("NEON_STORAGE_LIMIT_MB", str(used_mb(db) / 0.75))
+    fixed_size(monkeypatch, 15.0, 20.0)  # 75%
     with pytest.raises(SystemExit) as stop:
         db_budget.check(db, stage="after the price sync", fail_at_warn=True)
     message = str(stop.value)
