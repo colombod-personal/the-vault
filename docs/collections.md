@@ -116,5 +116,15 @@ are the person; an OAuth app or a personal access token is an assistant, recorde
 tagging or untagging is shown first and applied only with confirm. `/collection/cards` takes `tag` and lists each card's `tags` (own
 collection only; the ETag includes the person's tags so a change shows). Tests: `tests/test_tags_api.py`, `tests/test_tag_tools.py`.
 
-Not built yet: the `vault_metadata` routes and tools (rest of #127), importing into one bucket (#124), the tag and bucket filters on the
+Built since (#127, metadata; this settles #119): `GET`, `PUT` and `DELETE /collection/cards/{id}/metadata` and `/collection/buckets/{id}/metadata`
+and the tools `get_card_metadata`, `set_card_metadata`, `get_bucket_metadata`, `set_bucket_metadata`. The document is
+`{"version": 1, "user": {...}, "ai.<app>": {...}, "system": {...}, "written": {namespace: {at, by}}}` (`vault/metadata.py`). A writer
+owns one namespace, decided by how it is signed in (the person: `user`; an OAuth app or personal token: `ai.` plus the app's host or
+the token's name) and replaces it as a whole; nobody writes `system` through the API; `written` is the Vault's record, not the
+caller's. Limits refuse instead of truncating: 8 KB for the whole document (also checked by the database), 6 levels deep. A version
+older than the code's is upgraded on read by one upgrader per step (`metadata.UPGRADERS`), a newer one is refused (409). Tag
+assignments carry the same column but have no route yet (nothing needs it: a tag is a label, the notes live on the card).
+Tests: `tests/test_metadata.py`.
+
+Not built yet: importing into one bucket (#124), the tag and bucket filters on the
 analytics (#130), the web app (#125, #128).
