@@ -82,7 +82,7 @@ RULES: tuple[Rule, ...] = (
          _re(r"\byou (?:may )?draw\b|(?<!opponent )(?<!opponents )\bdraws? (?:a|an|one|two|three|four|five|seven|x|that many|\d+) cards?\b|\btarget player draws\b|\beach player draws\b")),
     Rule("removal-destroy-exile", "removal", "'destroy' or 'exile' (up to N) target creature, artifact, enchantment, planeswalker, battle or permanent",
          "an optional 'may' or a conditional clause is not read; 'exile target card from a graveyard' is correctly not matched",
-         _re(r"\b(?:destroy|exile) (?:up to (?:one|two|three|x) )?(?:another )?target (?:[a-z-]+ )*?(?:creature|permanent|artifact|enchantment|planeswalker|battle)s?\b")),
+         _re(r"\b(?:destroy|exile) (?:up to (?:one|two|three|x) )?(?:another )?target (?:[a-z-]+ )*?(?:creature|permanent|artifact|enchantment|planeswalker|battle)s?\b(?! cards?\b)")),
     Rule("removal-damage", "removal", "'deals N damage to any target / target creature / planeswalker / battle' (burn and fight spells)",
          "damage aimed only at players is not matched; damage shared out 'divided as you choose' is",
          _re(r"deals? (?:\d+|x) damage (?:divided as you choose among (?:one or two|one, two, or three) targets|(?:to )?(?:any target|up to [a-z]+ (?:other )?target|target (?:[a-z-]+ )*?(?:creature|planeswalker|battle)))")),

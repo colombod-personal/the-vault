@@ -33,6 +33,7 @@ CASES = [
     ("Doom Blade", "Instant", "Destroy target nonblack creature.", {"removal": "removal-destroy-exile"}, ()),
     ("Anguished Unmaking", "Instant", "Exile target nonland permanent. You lose 3 life.", {"removal": "removal-destroy-exile"}, ()),
     ("Cleanse", "Sorcery", "Exile target card from a graveyard.", {}, ("removal",)),  # a graveyard card is not a permanent
+    ("Grave Hate", "Instant", "Exile target creature card from a graveyard.", {}, ("removal",)),  # nor is a creature card in one (#166)
     ("Lightning Bolt", "Instant", "Lightning Bolt deals 3 damage to any target.", {"removal": "removal-damage"}, ()),
     ("Disfigure", "Instant", "Target creature gets -2/-2 until end of turn.", {"removal": "removal-shrink-fight"}, ()),
     ("Pacifism", "Enchantment — Aura", "Enchant creature\nEnchanted creature can't attack or block.", {"removal": "removal-pacify"}, ()),

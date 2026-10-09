@@ -25,7 +25,10 @@ console.log(JSON.stringify(J({
   decisions: I.decisionCards(lanes).map((c) => c.card),
   borrowed: I.borrowedCards(lanes).map((c) => c.card),
   alternatives: alt ? alt.items.map((a) => ({ card: a.card, owned: I.ownedText(a), badges: I.altBadges(a), buy: a.buy ? I.buyLabel(a.buy) : null,
-    move: a.move ? I.moveText(a.move) : null, swap: I.swapHash(ideas.deck.id, [alt.card.card], [a.card]), thumb: a.image ? I.thumbUrl(a.image.normal) : null })) : null,
+    move: a.move ? I.moveText(a.move) : null, swap: I.swapHash(ideas.deck.id, [alt.card.card], [a.card]), thumb: a.image ? I.thumbUrl(a.image.normal) : null,
+    tier: a.tier, does: I.altDoes(a), lacks: I.altLacks(a, alt.card.card), extra: I.altExtra(a), type: I.typeNote(a, alt.card.card), why: a.why })) : null,
+  tiers: alt ? { same: I.tierHeading('same_job', alt.tiers.same_job), similar: I.tierHeading('similar', alt.tiers.similar), toggle: I.similarToggle(alt.tiers.similar, false),
+    sameCards: I.byTier(alt.items, 'same_job').map((a) => a.card), similarCards: I.byTier(alt.items, 'similar').map((a) => a.card) } : null,
   target: alt ? { status: I.targetStatus(alt.card), role: I.roleLine(alt.card.roles), allocation: I.allocationLine(alt.card), buy: I.buyLabel(alt.card.buy),
     heading: I.heading(alt.card), state: I.pageState({ deckId: String(ideas.deck.id), summary: ideas.summary, card: alt.card.card, target: alt }) } : null,
 })));
