@@ -164,7 +164,10 @@ function DeckLibrary({ myDecks, onOpen, onRetry, notice }) {
           </>
         )}
         <p className="muted" style={{ fontSize: 11, marginTop: 8, fontFamily: 'var(--mono)', lineHeight: 1.5 }}>
-          Archidekt decks are fetched by the Vault server. For Moxfield, export the list as text and paste it.
+          Archidekt decks are fetched by the Vault server, one deck each time you ask. Archidekt's terms do not allow listing
+          your decks automatically, so you paste each link (<a href="https://github.com/colombod-personal/the-vault/blob/main/docs/compliance.md#archidekt" target="_blank" rel="noopener noreferrer">why</a>).
+          Private decks cannot be read: make the deck public or unlisted on Archidekt. The Vault never asks for your Archidekt login.
+          For Moxfield, export the list as text and paste it.
         </p>
       </div>
 
