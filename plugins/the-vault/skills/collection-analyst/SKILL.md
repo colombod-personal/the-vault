@@ -78,6 +78,12 @@ When they bring a new export from their app (Dragon Shield, Moxfield, CSV): a fi
 `get_staged_upload` once they say it is uploaded. An import applies only what changed in their app since their last
 import and keeps the edits made here.
 
+By default a file is the person's whole collection. If the file is only one binder, box or folder, ask which bucket it is for
+(`list_buckets`) and pass `bucket_id` (to `import_collection_csv`, or to `start_collection_upload` when the link is made): the file is
+then compared with that bucket only and replaces only it. Every other bucket, with its tags and notes, stays as it is, and the cards
+land in that bucket whatever folder the file names. The preview names the bucket and totals what it leaves alone; say both. If the
+person did not pick a bucket on the upload page the preview says `bucket: null`: the whole collection.
+
 1. Preview first (no `confirm`). Show three things from `merge`: what their app changed (the only part that is
    applied), the edits made here that are kept, and each conflict.
 2. A conflict is a card changed in both places, or dropped by their app but edited here. Ask about each one, one card

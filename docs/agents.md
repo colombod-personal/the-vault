@@ -130,7 +130,7 @@ Tools (the `share_id` argument reads a collection someone shared with you):
 | `list_decks`, `get_deck`, `save_deck`*, `update_deck`* | `/decks` |
 | `get_archidekt_deck` | `/archidekt/decks/{id}` |
 | `lookup_cards` (any card by id, set + number, or name; up to 75) | `POST /cards/lookup` |
-| `list_imports`, `import_collection_csv`* (Dragon Shield, Moxfield or generic CSV) | `/imports` |
+| `list_imports`, `import_collection_csv`* (Dragon Shield, Moxfield or generic CSV; `bucket_id`: into one bucket only) | `/imports` |
 | `list_export_formats` (download links for Dragon Shield, Moxfield, Archidekt, generic CSV, text) | `/collection/exports` |
 | `list_shared_with_me`, `get_shared_deck` | `/shared` |
 

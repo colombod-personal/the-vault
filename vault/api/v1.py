@@ -37,8 +37,8 @@ from ..auth import IdentityInUse, Profile, find_or_create
 from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, import_days, view_version
 from .. import archidekt_cache, deck_import, deck_match, deck_overview, deck_refresh, deck_versions, experts, owned_changes
-from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, ImportOptions, export_collection, import_collection,
-                        preview_import as preview_collection_import, user_entries)
+from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, ImportOptions, NoSuchBucket, export_collection,
+                        import_collection, preview_import as preview_collection_import, user_entries)
 from ..models import AccessToken, ApiSession, Bucket, Card, Deck, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
 from ..native import LEEWAY as NATIVE_LEEWAY, NativeTokenError, NativeVerifier, ProviderUnavailable
 from ..passkeys import remove_passkey
@@ -687,6 +687,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             out |= {"app": i.app, "lines": (i.changes or {}).get("lines")}
         elif (i.changes or {}).get("merge"):
             out["merge"] = i.changes["merge"]  # what the app changed, which Vault edits were kept, the conflicts
+            if i.changes.get("bucket"):
+                out["bucket"] = i.changes["bucket"]  # an import into one bucket (#124): which
         if i.kind == "assistant":  # the web app shows Undo on the entry that can be undone (docs/owned-cards-updates.md, rule 5)
             out |= {"undoable": i.id == undoable_id, "undone": bool((i.changes or {}).get("undone_by"))}
         return out
@@ -705,6 +707,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 return _import(import_collection(db, user, file.filename or "upload.csv", content, options))
             except ImportConflict as exc:
                 raise HTTPException(409, str(exc)) from exc
+            except NoSuchBucket as exc:
+                raise HTTPException(404, str(exc)) from exc
             except ImportError_ as exc:
                 raise HTTPException(400, str(exc)) from exc
 
@@ -718,6 +722,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         content = await file.read(MAX_UPLOAD_BYTES + 1)
         try:
             return preview_collection_import(db, user, content, options)
+        except NoSuchBucket as exc:
+            raise HTTPException(404, str(exc)) from exc
         except ImportError_ as exc:
             raise HTTPException(400, str(exc)) from exc
 

@@ -170,6 +170,11 @@ def _base(args: dict) -> str:
 
 
 ID = {"type": "integer", "minimum": 1, "maximum": MAX_ID}
+# Into one bucket (#124): the file is compared with that bucket's copies and replaces only them.
+IMPORT_BUCKET = {"bucket_id": {**ID, "description": "Import into this bucket only (from list_buckets): the file is compared with that "
+                                                    "bucket's copies and replaces only them; every other bucket, its tags and its notes "
+                                                    "stay as they are, and the file's cards land in this bucket whatever folder the "
+                                                    "file names. Omit for the whole collection (the default)"}}
 SHARE = {"share_id": {**ID, "description": "Read a collection someone shared with you (from list_shared_with_me) instead of your own"}}
 DECKLIST = {"type": "string", "maxLength": 50_000}  # as the API's TextIn and DeckIn
 CONFIRM = {"type": "boolean", "description": "true only after the person agreed to this exact change"}
@@ -483,30 +488,37 @@ TOOLS = [
          "Dragon Shield, Moxfield and generic CSV exports are detected automatically. With confirm false or absent it "
          "returns what would change, what comes from the app, which Vault edits are kept and the conflicts (cards changed "
          "on both sides; each keeps the Vault's edit unless answered otherwise), and changes nothing; with confirm true it "
-         "imports the file. replace_everything makes the file replace the whole collection instead.",
+         "imports the file. replace_everything makes the file replace the whole collection instead. With bucket_id the file "
+         "is compared with that bucket only and replaces only it; the answer names the bucket and totals what is left alone.",
          {"csv": {"type": "string", "description": "The CSV file's content"},
-          "filename": {"type": "string", "default": "agent-import.csv"}, "confirm": CONFIRM, **MERGE_ARGS}, ["csv"],
+          "filename": {"type": "string", "default": "agent-import.csv"}, "confirm": CONFIRM, **IMPORT_BUCKET, **MERGE_ARGS}, ["csv"],
          method="POST", path=lambda a: f"{V1}/imports" if a.get("confirm") is True else f"{V1}/imports/preview",
-         query=MERGE_QUERY, write=True, destructive=True),
+         query=MERGE_QUERY + ("bucket_id",), write=True, destructive=True),
     Tool("start_collection_upload", "For a collection file too big to paste: a one-time link (one hour) for the "
          "person to upload the file. Nothing is imported: the file waits until they confirm. Give them the link, then "
-         "call get_staged_upload when they say it is uploaded.", method="POST", path=lambda a: f"{V1}/uploads", write=True),
+         "call get_staged_upload when they say it is uploaded. With bucket_id the upload goes into that bucket only, fixed "
+         "when the link is made; without it the upload page lets the person pick one of their buckets, or the whole collection.",
+         {"bucket_id": IMPORT_BUCKET["bucket_id"]}, method="POST", path=lambda a: f"{V1}/uploads", query=("bucket_id",), write=True),
     Tool("get_staged_upload", "A file the person uploaded through start_collection_upload: still waiting, or what "
          "importing it would change (what comes from their app, which Vault edits are kept, the conflicts) and which rows "
-         "match no known printing (fix those in the file and upload again).",
+         "match no known printing (fix those in the file and upload again). Names the bucket the upload goes into, if any, and "
+         "what it leaves alone.",
          {"upload_id": ID, **MERGE_ARGS}, ["upload_id"], path=lambda a: f"{V1}/uploads/{int(a['upload_id'])}",
          query=MERGE_QUERY),
     Tool("confirm_staged_upload", "Imports a file uploaded through start_collection_upload: applies what changed in the "
          "person's app since their last import and keeps edits made in the Vault. With confirm false or absent it returns "
          "the preview (including the conflicts and its `content_hash`) and changes nothing; with confirm true it imports it, "
          "and only the file that was previewed: pass that preview's `content_hash`. "
-         "replace_everything makes the file replace the whole collection instead.",
+         "replace_everything makes the file replace the whole collection instead. An upload bound to a bucket (the bucket_id "
+         "of start_collection_upload, or the one the person picked on the upload page) is compared with and replaces that bucket "
+         "only: the preview names it; bucket_id here is a check that it is the bucket the upload is bound to.",
          {"upload_id": ID, "confirm": CONFIRM, **MERGE_ARGS,
+          "bucket_id": {**ID, "description": "The bucket the upload is bound to (the preview names it); refused if it is another"},
           "content_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "From the preview; needed with confirm true"}},
          ["upload_id"],
          method=lambda a: "POST" if a.get("confirm") is True else "GET",
          path=lambda a: f"{V1}/uploads/{int(a['upload_id'])}" + ("/apply" if a.get("confirm") is True else ""),
-         query=MERGE_QUERY + ("content_hash",), write=True, destructive=True),
+         query=MERGE_QUERY + ("bucket_id", "content_hash"), write=True, destructive=True),
     Tool("show_owned_printings", "Pictures of the printings of one card the person owns (set, number, finish, copies, "
          "Scryfall image with artist credit), most copies first. Use it when they ask to see which ones they have, or "
          "to help them match a card in their hand. Hosts with MCP Apps show the pictures; otherwise give the list.",
