@@ -96,8 +96,12 @@ the bulletins, not from a series of measurements.
   (migration 0104, and the catalog job refuses a `rules` source: `tests/test_rules_parser.py`); `vault/rules_live.py` (fetch, parse, BM25,
   navigation map, cache keyed by edition) feeds the rules tools; a keyword or glossary term in a question puts its defining rule first.
 
-Open points for the design: cold-start latency on Vercel (about 0.6 s extra, first call only), and a short retry
-with backoff when Wizards' server is slow.
+Measured on production, 2026-10-09 (Vercel runtime logs, `mcp_tool` events, `duration_ms`; `vercel logs --environment production --query mcp_tool`):
+the first `get_rule` call on a cold instance took 382 ms (it fetched and parsed Wizards' rules file), the repeat call a moment later 20 ms.
+A tool that touches no outside source shows the same cold-start cost: `whoami` 835 ms and 390 ms on two cold instances against 19 to 20 ms warm.
+So the cold start of a rules call is about 0.4 s over a warm one, first call only, which agrees with the estimate below (#145).
+
+Open point for the design: a short retry with backoff when Wizards' server is slow.
 
 ## Design (#145, agreed with the owner 2026-10-05)
 
