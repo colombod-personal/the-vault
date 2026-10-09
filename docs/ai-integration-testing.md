@@ -342,3 +342,13 @@ ChatGPT, #155 Codex, #156 GitHub Copilot, #362 Perplexity) and copies the verdic
 | Failure paths | |
 | Defects found (each filed as an issue) | |
 | Result | NOT RUN |
+
+
+## Expert council through `council_brief` in real hosts (2026-10-08 and 2026-10-09)
+
+The shipped flow (the `council_brief` tool, with the Vault's expert skills and agents behind it) was run in two real hosts as the demo reviewer, with every claim of the answer audited against the tool output (tables on #235):
+
+- **claude.ai** (2026-10-08, owner's Chrome, a new incognito chat, the connector The Vault): the answer opened with the deck (Sliver Swarm (demo), Commander, Sliver Overlord, 100 cards, WUBRG), called `council_brief` (a panel of five) and its audit found 0 wrong claims of 17.
+- **ChatGPT** (2026-10-09, the owner's ChatGPT with the Vault app): https://chatgpt.com/c/6ac83103-c9e0-83eb-8a33-c1f4746aa303, prompt "Review my sliver deck with the expert council. I want to tune it."; it opened the Deck stats and Find upgrades views, answered "Sliver Swarm: Expert Council Review", led with the deck and ran the `council_brief` panel (Commander specialist, synergy analyst, casual-table representative, rules judge, devil's advocate, with the line that the views are not independent in one chat). The audit found 1 wrong figure of 13 checked claims (lands 52, the tool says 54), a model error with an unambiguous tool answer.
+
+Evidence and audits: #104 and #235.
