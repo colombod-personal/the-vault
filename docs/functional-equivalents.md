@@ -1,6 +1,6 @@
 # Functional equivalents: owned cards that do the same job as a missing card (research and design for #166, epic #174)
 
-Status: **draft for owner review.** Written 2026-10-09. Nothing here is built and **no data was ingested**: the research read public pages and ran a
+Status: **research and design agreed by the owner on 2026-10-09 ("take the recommendations", every open decision as recommended); built in the pull request for #166: see section 12.** Sections 1 to 11 are the research and design as written before the build (where the build differs, section 12 says so). Written 2026-10-09. The research itself **ingested no data**: it read public pages and ran a
 few dozen read-only Scryfall searches (about 80 requests with an accurate User-Agent; one early burst got a 429 and was backed off for 70 s, which is why
 the numbers below are search totals and the real measurement belongs in a job that reads the bulk file). Nothing was read from the owner's collection.
 
@@ -397,6 +397,8 @@ Not the same as "nothing like it".
 
 ## 10. Decisions for the owner
 
+Answered on 2026-10-09: the owner took every recommendation below (1, 2, 3, 4 and 6 are built, section 12; decision 5, sending the question to Scryfall, is still only the owner's to make).
+
 1. **Is the vocabulary in section 5 the right size and wording?** Recommendation: yes as a start (22 slugs, two modifiers); remove `lifegain` and `evasion` if you
    would rather keep equivalents about the jobs you named. Change a name, not a slug, as often as you like; slugs stay.
 2. **Two tiers ("same job" and "similar, with a difference") or only the first?** Recommendation: two tiers, the second collapsed.
@@ -412,3 +414,108 @@ Not the same as "nothing like it".
 repeatable versus one-shot draw, mana doubling), each with cards it must and must not match. 3. The agreement report between rules and tags over a loaded
 catalog, and the per-deck report for the owner's four decks; publish both in this file. 4. Everything in the "Tasks that follow" of
 `docs/card-roles-design.md` (schema, pipelines, `equivalents`, MCP tools, the suggestion queue).
+
+## 12. As built (#166)
+
+The owner approved the recommended defaults of section 10 on 2026-10-09 ("take the recommendations"): the Vault's own text rules first, the 22-role vocabulary of section 5, two tiers, mana value ranked and shown (not a filter), and Scryfall's community tags only as an internal second input after the #62 terms record. That record does not exist, so **no tag is read by any of this**: the code that finds roles for equivalents (`vault/equivalents.py`) imports no tag table, no catalog source and no network client (a test fails if it does), and **no data was ingested from any outside source** (the only inputs are the Oracle text and the type line the catalog already holds). Decision 5 (sending the question to Scryfall) is still the owner's to make and still blocks release 2.
+
+What replaced what: `deck_ideas.equivalence` (two cards were equivalent when they shared a core coarse role, candidates found through Tagger tags) is gone. `deck_ideas.alternatives` now asks `vault.equivalents`; the lanes of the Ideas view and `deck_stats` keep the eight coarse roles (`vault/deck_tools.py`) exactly as they were. No migration: there is no `card_roles` table (the roles are computed from the text on request and cached in the process by catalog content hash); the table, the pipelines and the suggestion queue of `docs/card-roles-design.md` stay for #174.
+
+### 12.1 The vocabulary, as coded
+
+Order is the priority: a card's **primary job** is its first `core` role in this order. Slugs are stable; names may be reworded. Roles of one **family** are neighbours (a one-shot draw is a neighbour of an every-turn draw).
+
+| Slug | Plain name | Family | What it means |
+|---|---|---|---|
+| `mana-rock` | Mana rock | ramp | A non-creature permanent that taps for mana |
+| `mana-creature` | Mana creature | ramp | A creature that taps for mana |
+| `land-ramp` | Land ramp | ramp | Puts lands onto the battlefield or allows extra land drops |
+| `treasure` | Treasure | ramp | Makes Treasure tokens, once or again and again |
+| `mana-multiplier` | Mana doubler | ramp | Makes lands or other sources produce more mana |
+| `draw-once` | Card draw (once) | draw | A spell or effect that draws a fixed amount, one time |
+| `draw-engine` | Card draw (every turn or every trigger) | draw | Draws again and again while it stays |
+| `tutor` | Tutor | tutor | Searches the library for a card that is not just a land |
+| `recursion` | Get cards back | graveyard | Returns cards from the graveyard to hand |
+| `reanimate` | Reanimate | graveyard | Returns creatures from a graveyard to the battlefield |
+| `token-maker` | Token maker | tokens | Creates creature or other tokens, once or again and again |
+| `token-doubler` | Token doubler | token-doubling | Doubles the tokens you create |
+| `counter-doubler` | Counter doubler | counter-doubling | Doubles the counters put on your permanents |
+| `counterspell` | Counterspell | counter | Counters a spell or ability |
+| `free-counterspell` | Free counterspell | counter | A counterspell that can be cast without paying its mana cost |
+| `spot-removal` | Spot removal | removal | Removes or neutralises one target permanent |
+| `bounce` | Bounce | removal | Returns permanents to their owners' hands (one or all) |
+| `sweeper` | Board wipe | removal | Removes many permanents at once |
+| `sacrifice-outlet` | Sacrifice outlet | sacrifice | Lets you sacrifice permanents again and again |
+| `protection` | Protect my stuff | protection | Keeps your permanents from removal or counters |
+| `lifegain` | Lifegain | lifegain | Gains life |
+| `evasion` | Evasion | evasion | Makes creatures hard to block |
+
+### 12.2 The rules, as coded
+
+Each rule is a function of the card's Oracle text (reminder text removed, the card's own name as `~`, every face) and its type line. Every role a card gets is shown as `basis: "computed"` with the id of its rule. A role is `core` (the card exists to do it) unless it is a **rider** (`treasure`, `token-maker` that does not repeat, `draw-once`, `protection`, `lifegain`, `evasion`) on a card that has another job, which makes it `incidental` (Mind Stone is a mana rock; its draw is a side effect). Whether a Treasure, a token or a draw **repeats** is read from the line that makes it: `whenever`, `at the beginning of`, `each time`, or an activated ability on a permanent repeats; a spell, an `enters` or `dies` trigger, or a cost that sacrifices the card itself does not. Rules version: `2026-10-09.1` (the answers carry it; it changes with any rule).
+
+| Rule | Role | Matches | Known to get wrong |
+|---|---|---|---|
+| `mana-rock-taps` | `mana-rock` | a non-creature artifact or enchantment with an activated '{T}: Add ...' ability | a rock that adds mana only under a condition, or at a cost per use, is matched like Sol Ring; a Treasure-making card is not a rock |
+| `mana-creature-taps` | `mana-creature` | a creature that is not a land with an activated '{T}: Add ...' ability | a creature that adds mana only under a condition is matched; a land creature (Dryad Arbor) is deliberately a land, not a mana creature |
+| `land-ramp-fetch` | `land-ramp` | a non-land card that searches the library for a land (or a basic type) and puts it onto the battlefield | does not check that the land comes in untapped or that the spell is cheap; a land that fetches a land (Evolving Wilds) is deliberately not ramp |
+| `land-ramp-extra-drop` | `land-ramp` | 'you may play an additional land' (or two, or any number), 'play lands from the top of your library', or a land put onto the battlefield from hand | a card that gives the extra land drop only to opponents is matched too |
+| `treasure-create` | `treasure` | creates one or more Treasure tokens; repeats when it is a trigger or an activated ability of a permanent | a one-shot Treasure on a spell that is mostly something else is matched but marked incidental; a payoff that only watches Treasures being created is not |
+| `mana-doubling` | `mana-multiplier` | 'if you tap a permanent for mana, it produces twice as much', 'whenever you tap a land for mana, add one mana of any type', 'adds an additional' | matches symmetrical versions that help every player; an effect worded in a way not listed here is missed |
+| `draw-once` | `draw-once` | 'draw a card/two/X cards' in a spell, an 'enters' trigger or an ability that spends the card itself | a symmetrical wheel or a draw that is only a drawback is matched like a plain draw spell; a payoff that only watches draws ('whenever you draw') is not |
+| `draw-engine` | `draw-engine` | a draw in a 'whenever', 'at the beginning of' or activated ability of a permanent (Phyrexian Arena, Rhystic Study) | a conditional trigger that rarely happens is matched like an upkeep draw; so is a creature that draws when it deals damage |
+| `tutor-library` | `tutor` | 'search your library for' something that is not only a land | a card that fetches a named, narrow card is matched like Demonic Tutor |
+| `recursion-to-hand` | `recursion` | 'return ... card(s) from a graveyard to your/its owner's hand' | a card that returns only itself ('return ~ from your graveyard') is not matched; one that returns cards of an opponent's graveyard is |
+| `reanimate-to-battlefield` | `reanimate` | 'return/put ... card from a graveyard onto the battlefield', and 'return enchanted creature card to the battlefield' (Animate Dead) | a reanimation of only the card itself is not matched; a card that puts any card, not only creatures, is matched |
+| `token-create` | `token-maker` | 'create ... token(s)' that are not only Treasure; repeats when it is a trigger or an activated ability of a permanent | a one-shot token on a spell or creature is core unless the card has another job; 'create a token that's a copy' is matched like any other token |
+| `token-doubling` | `token-doubler` | 'if an effect would create one or more tokens under your control, it creates twice that many' (and the 'would be created' wording) | a doubler that applies only to some tokens (creature tokens: Parallel Lives) is matched like one for all tokens |
+| `counter-doubling` | `counter-doubler` | 'if you would put one or more counters ... put/it puts twice that many' | an effect that adds one more ('that many plus one': Hardened Scales) is deliberately not a doubler; a doubler for only some counters is matched like one for all |
+| `counter-spell` | `counterspell` | 'counter target spell' or 'counter target ... ability', 'counter that spell' | a counter with a heavy condition (only creature spells, only noncreature) is matched like an unconditional one |
+| `counter-free` | `free-counterspell` | a counterspell whose text also lets it be cast 'without paying its mana cost' or 'rather than pay this spell's mana cost' | a counterspell with a free mode that has a steep cost (exiling a card, returning a land) is matched like one that is free in a plain situation |
+| `removal-target` | `spot-removal` | 'destroy' or 'exile' target creature/artifact/enchantment/planeswalker/permanent, damage to a target, '-N/-N', fights, 'can't attack or block' Auras | an optional 'may' or a conditional clause is not read; 'exile target creature card from a graveyard' is correctly not matched |
+| `removal-edict` | `spot-removal` | 'target player/opponent sacrifices a creature' (an edict) | an edict that the opponent can dodge by having a worse creature is matched like a precise removal spell |
+| `bounce-owner-hand` | `bounce` | 'return target/all/each ... permanent, creature, artifact, enchantment, planeswalker, land or spell to its owner's hand' (not your own permanents, not cards from a graveyard) | a bounce that only rescues your own card ('target creature you control') is deliberately left out; a bounce with a restriction ('attacking creature') is matched like an unrestricted one |
+| `sweeper-coarse` | `sweeper` | 'destroy/exile all creatures/permanents/...' (not 'you control'), damage to each creature, 'all creatures get -X/-X', 'each player sacrifices all creatures' | a sweeper that spares a type or has an exception in a later sentence is still matched |
+| `sweeper-bounce-all` | `sweeper` | 'return all/each creatures/permanents ... to their owners' hands' | a mass bounce that hits only attackers or one colour is matched like a full wipe |
+| `sweeper-overload` | `sweeper` | a spell with Overload that is also a bounce or removal spell (Overload turns 'target' into 'each') | the overload cost is often very high; it is read as the card's identity, not as a common mode |
+| `sacrifice-outlet` | `sacrifice-outlet` | a cost of 'Sacrifice a/another/an/two creature(s), permanent ...:' before a colon (a repeatable outlet) | an outlet limited to one type of permanent (a Treasure, a land) is matched like a creature outlet |
+| `protection-grant` | `protection` | permanents you control (or a target one) gain/have hexproof, indestructible, shroud or protection from something; 'phase out' | a keyword the card has printed on itself is not matched; a protection that only helps one named permanent is matched like a group effect |
+| `lifegain-gain` | `lifegain` | 'you gain N life', 'you gain life equal to', 'target/each player gains N life' | an opponent's gain that is a drawback for them ('its controller gains life equal to its power') is not matched; a payoff that only watches life gain is not |
+| `lifegain-lifelink` | `lifegain` | lifelink (a keyword, or granted to creatures) | always a side effect of a creature, so always marked incidental |
+| `evasion-grant` | `evasion` | creatures you control, a target creature, or an Aura/Equipment's creature gain/have flying, menace, shadow, fear, intimidate or horsemanship | a keyword the creature has printed on itself is not matched; trample is not counted as evasion |
+| `evasion-unblockable` | `evasion` | creatures you control or a target creature 'can't be blocked' | 'can't be blocked by' a narrow kind of creature is matched like a plain unblockable |
+
+Not measured: how often these rules agree with Tagger over the whole catalog (that needs the tags, which stay off), and how many of the owner's real cards get no role (no access to the collection; the numbers belong in the first production check). The test table (`tests/test_equivalents.py`) holds one or more real cards for every rule and the cards each must not match, among them the owner's examples.
+
+### 12.3 Matching, as coded
+
+Filters first, as in section 6 and never hidden: the candidate is owned, not the card itself, not a basic land, in the deck's colour identity, legal (or restricted) in the format, with copies left under the format's limit and not only this deck's own copies. The answer **counts** what the colour, format and copy filters removed (`filtered_out`, `filtered_note`: "3 outside this deck's colour identity (WUG)") and names none of it as an option.
+
+- **Same job (`same_job`):** the candidate has the target's primary job as a core role, and the modifiers agree: a Treasure or token maker that repeats for one that repeats, and, where the target's job has a refinement (`free-counterspell` refines `counterspell`), the candidate has it too. A candidate that does more is still the same job and says what it adds (`extra`: a free counterspell for a plain one).
+- **Similar, with a difference (`similar`):** it shares another core role with the target, or has a core role of the same family (a one-shot draw for a draw engine), or has the primary job but not the modifier. `different` says which, `lacks` lists the target's core roles it does not do ("Does not: counter doubler"), and `why` is built from the role entries only (a test checks that it can name no role the data does not hold).
+- **No role (`no_role`):** a target with no core role matches nothing, and the answer says "The Vault knows no role for this card yet ... That is not the same as 'you own nothing like it'". Cloudstone Curio is the fixture for it (it returns your own permanents; no role of the vocabulary covers that), and it replaces the Curio example of the lab design.
+- **Order:** same job before similar, then a free copy before a card another deck holds, then more shared jobs, then the smaller mana value difference, then the name. The tiers page as one list (cursor), and `tiers` counts both over the whole list.
+- **The type is said when it differs** (`type_note`: a creature for an enchantment), and both Oracle texts are in the answer (`oracle_text`, Wizards' text via Scryfall, shown with the Fan Content notice).
+
+Examples as the tests hold them (`tests/test_equivalents_api.py`): Doubling Season (token doubler and counter doubler): Anointed Procession is the same job and does not double counters; Vorinclex is similar (counter doubler only, a creature). Rhystic Study (draw engine): Phyrexian Arena and Mystic Remora are the same job, Divination is similar (draws once). Cyclonic Rift (bounce, and a board wipe when overloaded): Evacuation is the same job with both, Unsummon the same job without the wipe, Wrath of God similar. Fierce Guardianship (counterspell, free): Force of Will is the same job, Counterspell is similar ("counterspell but not free counterspell"). Smothering Tithe (Treasure again and again): Dockside Extortionist is similar (Treasure once). Parallel Lives: Doubling Season, held by another deck, is the same job and borrowed.
+
+### 12.4 The interface
+
+Existing route and tool, new answer: `GET /decks/{id}/ideas/alternatives` and `get_card_alternatives` (documented in `docs/api.md`, `docs/ai-parity.md`, `public/llms.txt`). Each row has `tier`, `roles` (name, strength, rule, `repeatable`), `shared_roles`, `lacks`, `extra`, `different`, `type_note`, `oracle_text`, `why`, `mana_value_change`; the answer has `tiers`, `filtered_out`, `filtered_note`, `roles_version`, and the target's `roles`, `primary_role` and `oracle_text`. No new tool: the design of this note lists none, and `roles_of` / `equivalents` as tools belong to the data layer of #174 (a `card_roles` table). Provenance: a `computed` block naming the rules version, with Scryfall's card data and prices as inputs and the Fan Content notice; Scryfall's tags are not an input of this answer.
+
+The Ideas view (`public/views/ideas.jsx`, wording in `public/lib/ideas.js`) draws the panel: "Same job (n)" with each candidate's roles, what it does not do, the difference in one sentence and an "Oracle text of both cards" fold; "Show similar, with a difference (n)" (collapsed until asked, at both widths); the nothing-found state with the counts of what the filters set aside and the similar ones one tap away; the borrowed state with the lender, Move and the price of a copy; and the no-role state with the card's own text. Screenshots of the real view (a local server on synthetic data, placeholder art, never production), 1400 and 390 px:
+
+| State | 1400 px | 390 px |
+|---|---|---|
+| Found: same job, similar collapsed | `docs/screenshots/ideas-equivalents-found-1400.jpg` | `docs/screenshots/ideas-equivalents-found-390.jpg` |
+| Found, with both Oracle texts open | `docs/screenshots/ideas-equivalents-texts-1400.jpg` | `docs/screenshots/ideas-equivalents-texts-390.jpg` |
+| Found, with the similar tier open | `docs/screenshots/ideas-equivalents-similar-1400.jpg` | `docs/screenshots/ideas-equivalents-similar-390.jpg` |
+| Nothing found for the same job (cards outside the colours counted, similar one tap away) | `docs/screenshots/ideas-equivalents-nothing-1400.jpg` | `docs/screenshots/ideas-equivalents-nothing-390.jpg` |
+| Found, but borrowed by another deck | `docs/screenshots/ideas-equivalents-borrowed-1400.jpg` | `docs/screenshots/ideas-equivalents-borrowed-390.jpg` |
+| No role known | `docs/screenshots/ideas-equivalents-norole-1400.jpg` | `docs/screenshots/ideas-equivalents-norole-390.jpg` |
+
+The phone check (`scripts/measure_phone.js`) at 390 px passed in all six: no horizontal overflow, no tap target under 44 px, no text under 12 px (`scripts/equivalents_evidence.py` takes them against a local server; the synthetic seed data is not committed).
+
+### 12.5 Left for later
+
+Release 2 (Scryfall's tags as an internal second input, with the agreement report between rules and tags) waits for the #62 terms record and decision 5. The `card_roles` table, the reviewer pipeline, `role_suggestions` and the "Suggest a role" button wait for #174; so do `roles_of(card | deck)` as a tool and the deck-level role counts on the new vocabulary. The per-deck report on the owner's four decks (roles per card, cards with no role) needs the real collection and is a first production check. Co-occurrence inside the person's own decks as a tie-breaker (section 2.4) is not built.

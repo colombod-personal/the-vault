@@ -9,12 +9,41 @@ Cursor, GitHub Copilot, OpenCode and many other agents read.
 |---|---|
 | `rules-judge` | Rules questions: look up cards and rulings, find rules, verify every quote, answer step by step |
 | `interaction-explainer` | How cards interact: the stack and timing walked through with rule citations |
-| `deck-upgrader` | Swaps within a budget: how the curve plays (`simulate_draws`), candidates from the Vault, then `validate_deck_changes` before presenting a plan |
+| `deck-upgrader` | Swaps within a budget: how the curve plays (`simulate_draws`), what the collection already gives (`get_deck_ideas`, `get_card_alternatives`), candidates from the Vault, then `validate_deck_changes` before presenting a plan; saving, changing and deleting a deck |
 | `shopping-assistant` | What a deck still needs from your collection, with dated prices and a list to paste into a store |
 | `expert-council` | A council of on-topic experts reviews a deck or a rules question: independent views, a devil's advocate, then a checked plan with the discussion on request (Commander first) |
 | `archidekt-deck-helper` | A public Archidekt deck checked against your collection: legality, budget upgrades, a change list to apply on Archidekt, what to buy, and shop search links |
-| `collection-analyst` | Questions about your own collection: value, gains, what you own |
+| `collection-analyst` | Your own collection: value, gains and losses, spare copies, what you own, imports, small edits, buckets and tags, sharing, reset and undo |
 | `vault-attribution` | How to show Vault data: pass on provenance, never present Scryfall's or Wizards' material as the Vault's own |
+
+## Flows: the common jobs, step by step
+
+A **flow** is a multi-step procedure for one job, written as a `## Flow: ...` section of the skill that owns it, not as a skill of its
+own. Every step names the tools it calls (`Calls:`), what to show the person (`Show:`) and when to stop (`Stop:`); a step that calls a
+write tool always has a `Stop:` (the person's yes to a preview). Each flow has an MCP prompt that carries the same steps for hosts
+without skills (the Vault's own `prompts/list`), and `tests/test_capabilities.py` checks that the prompt and the flow name the same tools.
+
+| Job | Flow (skill) | MCP prompt |
+|---|---|---|
+| Import a collection | Import a collection (`collection-analyst`) | `import_collection` |
+| Evaluate a deck from a link | Evaluate a deck from a link (`archidekt-deck-helper`) | `evaluate_deck` |
+| Buy what a deck is missing | Buy what a deck is missing (`shopping-assistant`) | `shopping_help` |
+| A rules question, with citations | Answer a rules question with citations (`rules-judge`) | `rules_judge` |
+| Tune a deck with the council | Tune a deck with the council (`expert-council`) | `council_review` |
+| Sort with buckets and tags | Organise with buckets and tags (`collection-analyst`) | `organise_collection` |
+| Reset or undo | Reset or undo (`collection-analyst`) | `reset_or_undo` |
+| Upgrade a deck within a budget | Upgrade a deck within a budget (`deck-upgrader`) | `upgrade_deck` |
+
+## Every capability is reachable
+
+`docs/ai-parity.md` lists what a person can do in the web app and the tool for it. `tests/test_capabilities.py` reads that file and
+the skills and agents and fails, naming the row and the tool, when a tool is in no skill (`metadata.vault-tools`) or in no agent.
+An agent is read-only, so a write tool counts for an agent when the agent lists a skill that declares it: the generated agent text
+says the change is left to the main assistant, which previews and asks first. `council_brief` and `expert_brief` are exempt for
+agents (they are how a connector gets the agents). When you add a tool, add it to the skill that owns the job (extend a skill, do not
+add a parallel one), to an agent that lists that skill (its allow list, for a read tool), to the flow's steps and to the prompt.
+`tests/test_tool_names.py` checks that every tool named by an agent, a skill, a generated host file, a prompt or the server's
+instructions exists, so a renamed tool fails with the file that still names it.
 
 ## Install
 
@@ -82,7 +111,7 @@ person should run the first-question check on `connect.html` in each.
 
 ## Agents
 
-The ready-made agents (the judge, the deckbuilder, the buyer, and the expert council's members) live in `agents/` as one neutral source. `scripts/build_plugin.py` makes the Claude Code versions (inside the plugin, limited to the Vault's own tools by a `tools:` allow list), the GitHub Copilot versions (a `tools:` allow list of `vault/<tool>`), and Codex and Cursor versions, in `agent-definitions/` (copy instructions in its README). Edit `agents/`, never the generated files; `tests/test_agent_definitions.py` checks them against the real tools and skills.
+The ready-made agents (the judge, the deckbuilder, the buyer, the curator for your own collection, and the expert council's members) live in `agents/` as one neutral source. `scripts/build_plugin.py` makes the Claude Code versions (inside the plugin, limited to the Vault's own tools by a `tools:` allow list), the GitHub Copilot versions (a `tools:` allow list of `vault/<tool>`), and Codex and Cursor versions, in `agent-definitions/` (copy instructions in its README). Edit `agents/`, never the generated files; `tests/test_agent_definitions.py` checks them against the real tools and skills.
 
 What each assistant enforces differs, and `agent-definitions/README.md` (generated) says exactly that: Claude Code and Copilot have an allow list; Codex limits the Vault server's tools (`enabled_tools`) and runs read-only but cannot take its other tools away; Cursor has only a read-only mode (its subagent format has no tool list). Sources read 2026-10-07: GitHub Docs and VS Code docs (custom agents, `tools` and `<server>/<tool>`), Codex docs (custom agent TOML, `mcp_servers`, `enabled_tools`), Cursor docs (subagents).
 

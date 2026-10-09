@@ -6,14 +6,14 @@ Two answers, both computed here and only shown by the web view and the assistant
 - ``ideas``: the deck's cards in role **lanes**. Every card of the deck (every copy) is in exactly one lane, chosen by a fixed
   priority over its roles; each card carries what the allocation of ``vault.deck_independence`` (#165) says about it (``gets``,
   ``not_owned``, ``held_by_other_deck``), a ``status`` computed from them, and borrowing as an independent annotation.
-- ``alternatives``: for a card, the cards the person owns that do the same job in this deck: sharing a **core** role, in the
-  deck's colour identity, legal in the format, with copies left under the format's copy limit. Those are filters, applied before
-  ranking. Whether two cards are equivalent is decided by one small function, :func:`equivalence`, so the finer roles of #166 can
-  replace it without touching the rest.
+- ``alternatives``: for a card, the cards the person owns that do the same job in this deck (#166, ``vault.equivalents``): they
+  share a **core** role of the Vault's own 22-role vocabulary, are in the deck's colour identity and legal in the format, and have
+  copies left under the format's copy limit. Those are filters, applied before ranking, and the answer counts what they removed.
+  Two tiers: *same job* and *similar, with a difference*, never merged.
 
-Phase 1 runs on today's eight coarse roles (``deck_tools.ROLE_TAGS``): Scryfall Tagger tags, and for a role where a card has no
-tag the Vault's Oracle-text rules (``role_rules``), always marked as such. Candidates for alternatives are found through tags only
-(a database query that rules over text cannot replace); the target card's own roles include the rules.
+The lanes of ``ideas`` still use the eight coarse roles (``deck_tools.ROLE_TAGS``: Scryfall Tagger tags, and for a role where a
+card has no tag the Vault's Oracle-text rules, always marked as such). The alternatives do **not** read Scryfall's tags: they run
+on the Vault's rules over the Oracle text alone, the owned cards narrowed first by words in their text, then read by the rules.
 """
 
 from __future__ import annotations
@@ -22,15 +22,16 @@ from dataclasses import dataclass
 from urllib.parse import urlencode
 
 from mtg_toolkits import delta
-from sqlalchemy import func, select
+from sqlalchemy import Text, cast, func, or_, select
 from sqlalchemy.orm import Session
 
 from . import analytics
 from . import deck_independence as di
 from . import deck_tools as dt
+from . import equivalents as eq
 from .card_faces import all_text, front_mana_cost
 from .catalog_queries import NON_PLAYABLE_LAYOUTS
-from .models import Entry, OracleCard, OracleTagLink
+from .models import Entry, OracleCard
 
 OTHER, LANDS = "other", "lands"
 LANE_ROLES = tuple(dt.ROLE_TAGS)  # the priority: a card goes to the first of these it has
@@ -43,6 +44,12 @@ STATUS_ORDER = {"missing": 0, "partial": 1, "owned": 2}  # what needs a decision
 ROLES_NOTE = ("Roles are the Vault's eight coarse roles (ramp, draw, removal, sweeper, counterspell, tutor, recursion, sacrifice "
               "outlet): Scryfall Tagger tags, a community's opinion, and where a card has no tag for a role, a rule over its Oracle text "
               "(basis 'computed'). A match on a coarse role is a hint, not proof that two cards play alike.")
+ALT_ROLES_NOTE = ("Roles are the Vault's own: 22 jobs a player recognises (a mana rock, a token doubler, a free counterspell, bounce ...), found by "
+                  "written rules over each card's Oracle text and type line, and always marked computed with the rule that found them. They are "
+                  "not Scryfall's community tags, which the alternatives do not read. A role is a hint, not proof that two cards play alike: "
+                  "'same job' means the candidate has the card's main job (and, where it matters, repeats or is free in the same way); 'similar, "
+                  "with a difference' means it shares another job or a neighbouring one, and says what differs. Both Oracle texts are shown; the "
+                  "Vault does not judge which card is stronger.")
 LANE_NOTE = ("Every copy is in exactly one lane. A card goes to the first of ramp, draw, removal, sweeper, counterspell, tutor, "
              "recursion, sacrifice outlet that it has a role for (its other roles are its tags); a card with no role goes to Other, "
              "and every land to Lands. Basic lands are never short: the allocation leaves them out, as deck independence does.")
@@ -57,7 +64,7 @@ def key_of(name: str) -> tuple:
     return (name.split(" // ")[0].strip().casefold(),)
 
 
-# -- roles: strength and equivalence (the part #166 replaces) -----------------------------------------------------------
+# -- roles of the lanes: strength (the eight coarse roles; the alternatives use vault.equivalents) --------------------------
 
 WEAK = {"weak", "very_weak", "very weak"}
 
@@ -65,16 +72,8 @@ WEAK = {"weak", "very_weak", "very weak"}
 def role_strength(entry: dict) -> str:
     """``core`` (the card exists to do this) or ``incidental`` (does it on the side) for one role of a card, from
     ``deck_tools.role_entries``: a Tagger tag weighted weak is incidental, any other weight core, and a role found by a rule over
-    the Oracle text is core (the rules are narrow on purpose). Replaced when the finer roles of #166 exist."""
+    the Oracle text is core (the rules are narrow on purpose)."""
     return "incidental" if entry.get("basis") != "computed" and entry.get("tag_weight") in WEAK else "core"
-
-
-def equivalence(target: dict[str, str], candidate: dict[str, str]) -> dict | None:
-    """Whether ``candidate`` can stand in for ``target``, given each card's roles as ``{role: "core" | "incidental"}``. The one
-    decision #166's ``equivalents`` will replace: today two cards are equivalent when they share at least one **core** role, and
-    the more core roles they share the better. Returns ``None`` (not equivalent) or ``{"roles": [...shared core roles...]}``."""
-    shared = [role for role, strength in target.items() if strength == "core" and candidate.get(role) == "core"]
-    return {"roles": shared} if shared else None
 
 
 # -- the deck's cards ---------------------------------------------------------------------------------------------------
@@ -259,79 +258,123 @@ def _image(card: OracleCard) -> dict | None:
     return {"normal": card.image_normal, "artist": card.artist} if card.image_normal else None
 
 
+CANDIDATE_LIMIT = 3000  # owned cards read by the rules for one target (the words in their text narrow them first)
+
+
+def _word_filter(words: list[str]):
+    """Owned cards whose Oracle text (any face) has one of these words: the database narrows, the rules then decide."""
+    faces = cast(OracleCard.faces, Text)
+    return or_(*[or_(OracleCard.oracle_text.ilike(f"%{w}%"), faces.ilike(f"%{w}%")) for w in words])
+
+
+def _within(card: OracleCard, colours: list[str]) -> bool:
+    return set(card.color_identity or []) <= set(colours)
+
+
+def _name_of(slug: str) -> dict:
+    return {"role": slug, "name": eq.ROLES[slug].name}
+
+
+def _difference(d: dict) -> dict:
+    out = {"kind": d["kind"], "target": _name_of(d["target"]), "candidate": _name_of(d["candidate"])}
+    if d["kind"] == "repeats":
+        out.update(target_repeats=d["target_repeats"], candidate_repeats=d["candidate_repeats"])
+    return out
+
+
+def _type_note(target: OracleCard, card: OracleCard) -> dict | None:
+    """A spell offered for a permanent, or the other way round, is a difference the person should see."""
+    a, b = eq.main_type(target.type_line), eq.main_type(card.type_line)
+    return {"target": a, "candidate": b} if a and b and a != b else None
+
+
 def alternatives(db: Session, user_id: int, deck, decks: list, resolved: dt.Resolved, target: OracleCard, fmt: str) -> dict:
-    """Owned cards that can stand in for ``target`` in this deck, best first (all of them: the caller pages). No price is looked
-    up here; the caller prices the page it shows."""
+    """Owned cards that do the same job as ``target`` in this deck, best first (all of them: the caller pages). No price is looked
+    up here; the caller prices the page it shows.
+
+    The roles are the Vault's own (``vault.equivalents``): rules over the Oracle text, nothing from Scryfall's tags. Filters first
+    (owned, colour identity, format legality, copies left under the format's limit, not the card itself, no basic land), and the
+    answer counts what the colour, format and copy filters removed so the page can say so; then two tiers, *same job* before
+    *similar, with a difference*, and inside a tier a free copy before one another deck holds, then more shared jobs, then the
+    mana value difference (ranked and shown, never a filter)."""
     fmt = dt.check_format(fmt)
     alloc = di.allocate(decks, di.owned_counts(db, user_id))
     lines = {l.key: l for l in deck_lines(resolved)}
     mine = lines.get(key_of(target.name))
-    found_roles = dt.role_entries(db, [target])[target.oracle_id]
-    target_roles = {r: role_strength(e) for r, e in found_roles.items()}
-    core = [r for r, s in target_roles.items() if s == "core"]
+    target_roles = eq.roles_of(target)
+    core = eq.core(target_roles)
     colours = deck_identity(resolved, fmt)
     s = state(alloc, deck, key_of(target.name), mine.need, is_basic(target, target.name)) if mine else None
-    out = {"format": fmt, "color_identity": colours, "rows": [], "reason": None,
+    out = {"format": fmt, "color_identity": colours, "rows": [], "reason": None, "roles_version": eq.RULES_VERSION,
+           "tiers": {eq.SAME: 0, eq.SIMILAR: 0}, "filtered_out": {"colour_identity": 0, "format": 0, "in_deck": 0},
            "target": {"card": target.name, "oracle_id": target.oracle_id, "in_deck": mine.need if mine else 0,
                       "status": s["status"] if s else None, "need": mine.need if mine else None, "gets": s["gets"] if s else None,
                       "not_owned": s["not_owned"] if s else None, "held_by_other_deck": s["held_by_other_deck"] if s else None,
                       "borrowed_from": s["holders"][0].deck.name if s and s["holders"] else None,
-                      "roles": [{"role": r, "strength": role_strength(e), "basis": e["basis"]} for r, e in found_roles.items()],
-                      "core_roles": core, "type_line": target.type_line, "mana_cost": front_mana_cost(target),
-                      "mana_value": target.cmc, "image": _image(target), "scryfall_uri": target.scryfall_uri}}
+                      "roles": [eq.role_view(h) for h in target_roles.values()],
+                      "core_roles": list(core), "primary_role": eq.primary(target_roles), "type_line": target.type_line,
+                      "mana_cost": front_mana_cost(target), "mana_value": target.cmc, "oracle_text": all_text(target) or None,
+                      "image": _image(target), "scryfall_uri": target.scryfall_uri}}
     if not core:
         out["reason"] = "no_role"
         return out
-    tag_ids = {t for r in core for t in dt.role_tag_ids(db)[r]}
     front = func.lower(func.split_part(Entry.name, " // ", 1))  # one expression, so the select and the group by share its parameters
     owned = select(front).where(Entry.user_id == user_id).group_by(front).having(func.sum(Entry.quantity) > 0)
     query = (select(OracleCard)
-             .where(OracleCard.oracle_id.in_(select(OracleTagLink.oracle_id).where(OracleTagLink.tag_id.in_(list(tag_ids)))),
-                    OracleCard.oracle_id != target.oracle_id, OracleCard.digital.is_(False),
-                    OracleCard.layout.notin_(list(NON_PLAYABLE_LAYOUTS)), OracleCard.legalities[fmt].astext.in_(dt.LEGAL),
-                    func.lower(func.split_part(OracleCard.name, " // ", 1)).in_(owned),
-                    *[~OracleCard.color_identity.contains([c]) for c in dt.COLORS if c not in colours])
-             .order_by(OracleCard.name).limit(2000))
-    found = list(db.scalars(query))
+             .where(OracleCard.oracle_id != target.oracle_id, OracleCard.digital.is_(False),
+                    OracleCard.layout.notin_(list(NON_PLAYABLE_LAYOUTS)),
+                    func.lower(func.split_part(OracleCard.name, " // ", 1)).in_(owned), _word_filter(eq.needles_for(core)))
+             .order_by(OracleCard.name).limit(CANDIDATE_LIMIT))
     seen: set[tuple] = {key_of(target.name)}
-    candidates = []
-    for card in found:
+    for card in db.scalars(query):
         key = key_of(card.name)
         if key in seen or is_basic(card, card.name):
             continue
         seen.add(key)
-        candidates.append((key, card))
-    tagged = dt.roles_of(db, [c.oracle_id for _, c in candidates])
-    for key, card in candidates:
-        theirs = {r: role_strength({"basis": "scryfall_tagger", "tag_weight": w}) for r, w in tagged.get(card.oracle_id, {}).items()}
-        match = equivalence(target_roles, theirs)
-        if match is None:
+        theirs = eq.roles_of(card)
+        found = eq.match(target_roles, theirs)
+        if found is None:
+            continue
+        # the filters: counted, never hidden (the answer says how many owned cards do this job but cannot be offered, and why)
+        if not _within(card, colours):
+            out["filtered_out"]["colour_identity"] += 1
+            continue
+        if card.legalities.get(fmt) not in dt.LEGAL:
+            out["filtered_out"]["format"] += 1
             continue
         in_deck = lines[key].need if key in lines else 0
         limit = copy_limit(card, fmt)
         room = None if limit is None else limit - in_deck
-        if room is not None and room <= 0:  # the deck already holds as many as the format allows (an owned Sol Ring in a deck that runs it)
-            continue
         c = alloc.cards.get(key)
         have = alloc.have.get(key, 0)
         spare = have - (c.need_all if c else 0)  # copies no saved deck needs
         holders = [r for r, _ in (c.wants if c else []) if r.deck.id != deck.id and c.gets.get(r.deck.id, 0) > 0]
-        if spare <= 0 and not holders:  # every copy owned is this deck's own: there is nothing to offer
+        if (room is not None and room <= 0) or (spare <= 0 and not holders):
+            # the deck already holds as many as the format allows (an owned Sol Ring in a deck that runs it), or every copy owned is this deck's own
+            out["filtered_out"]["in_deck"] += 1
             continue
         borrowed = spare <= 0
         mv = card.cmc or 0.0
         diff = abs(mv - (target.cmc or 0.0))
+        sentence = eq.why(found, target_roles, theirs, target.name)
+        cost = eq.mana_value_words(target.cmc, card.cmc, target.name)
+        out["tiers"][found.tier] += 1
         out["rows"].append({
             "card": card.name, "oracle_id": card.oracle_id, "type_line": card.type_line, "mana_cost": front_mana_cost(card),
             "mana_value": mv, "image": _image(card), "scryfall_uri": card.scryfall_uri, "copies_owned": have,
             "copies_free": max(0, spare), "borrowed": borrowed,
             "borrowed_from": holders[0].deck.name if borrowed else None,
             "borrowed_from_deck_id": holders[0].deck.id if borrowed else None,
-            "shared_roles": [{"role": r, "target": target_roles[r], "candidate": theirs[r]} for r in match["roles"]],
-            "why": f"both: {', '.join(match['roles'])} (core, coarse role); mana value {mv:g} vs {(target.cmc or 0.0):g}",
-            "mana_value_difference": round(diff, 2), "legal": True, "in_colours": True, "in_deck": in_deck,
+            "tier": found.tier, "roles": [eq.role_view(h) for h in theirs.values()],
+            "shared_roles": [{"role": r, "name": eq.ROLES[r].name, "target": target_roles[r].strength, "candidate": theirs[r].strength,
+                              "rule": theirs[r].rule} for r in found.shared],
+            "lacks": [_name_of(r) for r in found.lacks], "extra": [_name_of(r) for r in found.extra],
+            "different": [_difference(d) for d in found.different], "type_note": _type_note(target, card),
+            "why": sentence + (f"; {cost}" if cost else ""), "oracle_text": all_text(card) or None,
+            "mana_value_difference": round(diff, 2), "mana_value_change": None if target.cmc is None else round(mv - target.cmc, 2),
+            "legal": True, "in_colours": True, "in_deck": in_deck,
             "remaining_allowance": room, "move": _move(holders, 1) if borrowed else None, "buy": None,
-            "_sort": [1 if borrowed else 0, -len(match["roles"]), round(diff, 2), card.name.lower()]})
+            "_sort": [0 if found.tier == eq.SAME else 1, 1 if borrowed else 0, -len(found.shared), round(diff, 2), card.name.lower()]})
     if not out["rows"]:
         out["reason"] = "none_found"
     return out

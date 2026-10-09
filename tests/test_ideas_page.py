@@ -98,7 +98,7 @@ def test_a_missing_card_with_alternatives_lists_them_with_the_servers_numbers(la
     body = alternatives(lab, deck, "Cultivate")
     said = says(lab, deck, "Cultivate")
     assert said["target"]["state"] == "alternatives" and said["target"]["heading"] == "Owned alternatives"
-    assert said["target"]["role"] == "Role: ramp (core)"
+    assert said["target"]["role"] == "Does: land ramp (core)"
     t = body["card"]
     assert said["target"]["allocation"] == f"The deck lists {t['need']}; this deck holds {t['gets']}; {t['not_owned']} to buy."
     assert said["target"]["buy"] == "Buy $0.40 (Scryfall, 4 Oct)" and t["buy"]["unit_price"] == 0.4
@@ -228,7 +228,7 @@ def test_lanes_and_cards_are_reachable_by_keyboard_and_named():
     assert 'aria-labelledby="ideas-panel-h"' in IDEAS and "document.getElementById('ideas-panel-h')" in IDEAS  # focus goes to the panel's heading
     assert 'role="status"' in IDEAS and 'role="alert"' in IDEAS and "aria-pressed={filterNow === 'missing'}" in IDEAS
     block = CSS.split(".ideas-lane-toggle {", 1)[1]
-    assert ".ideas-fine summary { display: flex; align-items: center; min-height: 44px; }" in block and "min-height: 48px" in block
+    assert ".ideas-fine summary, .ideas-texts summary { display: flex; align-items: center; min-height: 44px; }" in block and "min-height: 48px" in block
 
 
 def test_the_page_reads_the_two_routes_and_the_combos_only_on_request():
@@ -236,7 +236,8 @@ def test_the_page_reads_the_two_routes_and_the_combos_only_on_request():
     assert "window.VaultApi.deckIdeas(deckId)" in IDEAS and "window.VaultApi.deckAlternatives(deckId, cardName, { format, limit: Text.ALT_PAGE })" in IDEAS
     assert "window.VaultApi.follow(next)" in IDEAS and "include_combos: 'true'" in IDEAS and "Show combos you already own" in IDEAS
     assert "window.VaultApi.decks(true)" in IDEAS
-    assert "coarse roles" in LIB and "COARSE_NOTE" in IDEAS and "the Vault contacts no shop" in LIB
+    assert "Vault\\'s own, found by rules over the Oracle text" in LIB and "ROLES_NOTE" in IDEAS and "the Vault contacts no shop" in LIB
+    assert "coarse" not in LIB and "coarse" not in IDEAS  # the alternatives no longer use the eight coarse roles
 
 
 def test_the_browser_computes_nothing_but_formatting():

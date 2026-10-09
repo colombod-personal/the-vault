@@ -597,6 +597,17 @@ p.tag-note { margin: 0 0 14px; font-size: 12px; }
 .ideas-zoom { position: relative; display: grid; gap: 8px; width: min(360px, 100%); padding: 16px; outline: none; }
 .ideas-zoom img { display: block; width: 100%; height: auto; border-radius: 12px; }
 .ideas-zoom .close-x { position: absolute; top: 4px; right: 4px; }
+/* #166: what a candidate does and does not do, both Oracle texts, the similar tier (collapsed until asked for) */
+.ideas-does, .ideas-lacks { margin: 0; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--gold); }
+.ideas-lacks { color: var(--text-2); }
+.ideas-texts { font-size: 13px; }
+.ideas-texts summary { cursor: pointer; padding: 6px 0; color: var(--text-2); }
+.ideas-texts summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.ideas-text-name { margin: 8px 0 0; font-weight: 600; }
+.ideas-text { margin: 2px 0 0; white-space: pre-line; line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
+.ideas-similar { display: grid; gap: 8px; justify-items: start; }
+.ideas-similar .ideas-alts { width: 100%; }
+.ideas-norole { border-style: dashed; }
 
 @media (max-width: 1000px) {
   .ideas-main { grid-template-columns: minmax(0, 1fr); }
@@ -617,7 +628,8 @@ p.tag-note { margin: 0 0 14px; font-size: 12px; }
   .ideas-panel-h { font-size: 24px; }
   .ideas-alt { gap: 10px; }
   .ideas-more .btn, .ideas-actions .btn { min-height: 44px; }
-  .ideas-fine summary { display: flex; align-items: center; min-height: 44px; }
+  .ideas-fine summary, .ideas-texts summary { display: flex; align-items: center; min-height: 44px; }
+  .ideas-similar .btn { min-height: 44px; }
 }
 
 /* ---- Value (#95): the ledger of months is a list on a phone, the summary leads ----
