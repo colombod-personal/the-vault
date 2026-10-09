@@ -448,12 +448,15 @@ TOOLS = [
          query=MERGE_QUERY),
     Tool("confirm_staged_upload", "Imports a file uploaded through start_collection_upload: applies what changed in the "
          "person's app since their last import and keeps edits made in the Vault. With confirm false or absent it returns "
-         "the preview (including the conflicts) and changes nothing; with confirm true it imports it. "
+         "the preview (including the conflicts and its `content_hash`) and changes nothing; with confirm true it imports it, "
+         "and only the file that was previewed: pass that preview's `content_hash`. "
          "replace_everything makes the file replace the whole collection instead.",
-         {"upload_id": ID, "confirm": CONFIRM, **MERGE_ARGS}, ["upload_id"],
+         {"upload_id": ID, "confirm": CONFIRM, **MERGE_ARGS,
+          "content_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "From the preview; needed with confirm true"}},
+         ["upload_id"],
          method=lambda a: "POST" if a.get("confirm") is True else "GET",
          path=lambda a: f"{V1}/uploads/{int(a['upload_id'])}" + ("/apply" if a.get("confirm") is True else ""),
-         query=MERGE_QUERY, write=True, destructive=True),
+         query=MERGE_QUERY + ("content_hash",), write=True, destructive=True),
     Tool("show_owned_printings", "Pictures of the printings of one card the person owns (set, number, finish, copies, "
          "Scryfall image with artist credit), most copies first. Use it when they ask to see which ones they have, or "
          "to help them match a card in their hand. Hosts with MCP Apps show the pictures; otherwise give the list.",
