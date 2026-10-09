@@ -53,7 +53,10 @@ def content_hash(content: bytes, bucket_id: int | None = None) -> str:
     """The file's identity in a preview and in the apply that must match it. Into a bucket (#124) the bucket is part of it: the
     link can be used again, so a changed bucket must not pass for the one that was previewed. For the whole collection it is the
     file's own hash, as it was."""
-    return hashlib.sha256(content if bucket_id is None else content + b"\0bucket=%d" % bucket_id).hexdigest()
+    if bucket_id is None:
+        return hashlib.sha256(content).hexdigest()
+    # a hash of the file's hash, so no file whose bytes happen to end like a bucket marker can pass for another scope (#124 review)
+    return hashlib.sha256(b"bucket:%d:" % bucket_id + hashlib.sha256(content).digest()).hexdigest()
 
 
 def _now() -> datetime:
@@ -237,7 +240,7 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         else:
             chosen = None
             if asked:  # one of this person's own buckets, nobody else's
-                number = int(asked) if asked.isdigit() and len(asked) < 10 else 0
+                number = int(asked) if asked.isascii() and asked.isdecimal() and len(asked) < 10 else 0
                 found = db.scalar(select(Bucket.id).where(Bucket.id == number, Bucket.user_id == staged.user_id)) if number else None
                 if found is None:
                     return page("Unknown bucket", "<h1>That bucket was not found</h1><p>Go back and pick one of your buckets, "

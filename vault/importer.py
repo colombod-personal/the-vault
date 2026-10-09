@@ -123,7 +123,11 @@ def _baseline(db: Session, user: User, scope: Bucket | None = None) -> tuple[dic
         return None, None
     cards = merge.loaded(row.cards)
     if derived:
-        cards = merge.restricted(row.cards, lambda folder: buckets.bucket_name(folder).lower() == scope.name.lower())
+        # The rows the last whole file wrote about this bucket: those whose folder names it now, or named it when its copies
+        # arrived (a rename changes the label only, so the folder of its rows still says the old name: #124 review).
+        named = {buckets.bucket_name(f).lower() for f in db.scalars(select(Entry.folder).where(Entry.bucket_id == scope.id).distinct())}
+        named.add(scope.name.lower())
+        cards = merge.restricted(row.cards, lambda folder: buckets.bucket_name(folder).lower() in named)
         if cards is None:
             return None, None
     source = db.get(Import, row.import_id) if row.import_id else None

@@ -266,6 +266,28 @@ def test_the_first_scoped_import_into_a_bucket_that_came_from_a_whole_import_kee
     assert baselines(app) == (1, 1)  # now the bucket has a base of its own
 
 
+def test_a_renamed_bucket_still_gets_the_base_of_its_old_folder_name(app, stocked, assistant):
+    """A rename changes the label only: the rows' folder still says 'Trade', so the base derived from the last whole file must be
+    found by that name too, or the bucket would be compared with an empty base (#124 security review)."""
+    bot_, token = assistant
+    ids = bucket_ids(stocked)
+    sell(bot_, token, "A Killer Among Us", "MKM", "167", 1)  # 4 -> 3 in Trade
+    assert stocked.patch(f"{BUCKETS}/{ids['Trade']}", json={"name": "Swaps"}).status_code == 200
+    f = trade_file(extra=[(CAVERN, 1)], folder="Trade")
+    seen = preview_file(stocked, f, bucket_id=ids["Trade"])
+    assert seen["merge"]["mode"] == "merge" and seen["merge"]["baseline"]["derived_from"]
+    assert seen["merge"]["kept_vault_edits"]["count"] == 1 and seen["merge"]["from_your_app"]["added"] == 1
+
+
+def test_the_hash_of_a_bucket_upload_cannot_be_matched_by_another_file_for_another_scope():
+    from vault.uploads import content_hash
+
+    y = b"Folder Name,Quantity\nTrade,1\n"
+    assert content_hash(y, 5) != content_hash(y + b"\0bucket=5") and content_hash(y, 5) != content_hash(y, 6)
+    assert content_hash(y) == hashlib.sha256(y).hexdigest()  # the whole collection's hash is the file's own, as it was
+    assert content_hash(y, 5) != hashlib.sha256(y).hexdigest()
+
+
 def test_a_bucket_that_holds_copies_but_has_no_base_at_all_is_replaced_and_the_preview_says_so(app, stocked):
     ids = bucket_ids(stocked)
     with app.state.db.sessions() as db:
@@ -473,6 +495,7 @@ def test_choosing_a_bucket_on_the_page_binds_the_upload_to_it(app, stocked):
             theirs = bob.post(BUCKETS, json={"name": "Bob's"}).json()
             assert put_file(browser, ticket, smaller, bucket=str(theirs["id"])).status_code == 400  # not this person's
         assert put_file(browser, ticket, smaller, bucket="not-a-number").status_code == 400
+        assert put_file(browser, ticket, smaller, bucket="²").status_code == 400  # str.isdigit() is true for it, int() refuses it
         ok = put_file(browser, ticket, smaller, bucket=str(ids["Trade"]))
         assert ok.status_code == 200 and "Trade" in ok.text and "left as they are" in ok.text
         assert stocked.get(f"{V1}/uploads/{started['id']}").json()["bucket"]["name"] == "Trade"
