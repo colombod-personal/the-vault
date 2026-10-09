@@ -19,6 +19,7 @@ CREDITED_AS = {
     "Archidekt": ["Archidekt"],
     "Moxfield": ["Moxfield"],  # only as a CSV format: the Vault never fetches from it
     "EDHREC": ["EDHREC"],  # only the popularity rank Scryfall includes: the Vault never fetches from it
+    "17Lands public data sets (`limited_17lands`)": ["17Lands", "CC BY 4.0", "Creative Commons Attribution 4.0"],  # per-card counts, with the credit text
 }
 NOT_USED = ("Cardmarket price guide", "Card Kingdom price list", "Magic Madhouse product feed")
 

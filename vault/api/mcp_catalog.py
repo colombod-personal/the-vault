@@ -17,7 +17,9 @@ Rules, cards and prices - how to answer:
 - Never answer a rules or card question from memory. Call get_card_oracle (and get_rulings), then
   find the rules: find_rules_term for a named game term, search_rules for a question, rules_outline to
   browse; open each with get_rule and read its children, siblings and references. Say which rule number
-  and which edition (version) you used. The rules are read live from Wizards of the Coast.
+  and which edition (version) you used. The rules are read live from Wizards of the Coast. For a recent
+  update, or a rule you only know from an older source, call rules_changes: it compares the previous
+  edition with the current one.
 - Quote only text a tool returned. Before you present a quote as an official rule, ruling or card
   text, call verify_citation; if it fails, use the source_text it returns instead of your wording.
 - If the sources do not settle a question, say you are not sure and point to the official rules or a judge.
@@ -30,6 +32,13 @@ Rules, cards and prices - how to answer:
   is not power. Prices are dated and come from Scryfall; they are not a store's price today.
 - Budgets and legality are enforced by the Vault: before you present a list of changes, call
   validate_deck_changes and only present it if valid is true. The Vault never fills a store cart.
+- Limited statistics (get_limited_card_stats) are 17Lands' data from Magic Arena games and drafts, shared under CC BY 4.0, not
+  the Vault's and not paper Magic. Ask which set and format first; say "According to data from 17Lands (set, format, date)" in the
+  first sentence that uses a number and repeat the answer's `attribution`; give the number of games beside every rate; say a rate is
+  computed by the Vault and can differ from 17lands.com. Follow each card's `sample`: below 200 games in hand never rank, recommend or
+  compare the card; compare two cards only when both are at the `ok` level and their 95% ranges do not overlap, otherwise say the data
+  does not settle it. Never turn a rate into a grade, a tier or a "best pick", and never say a win rate shows the card causes wins.
+  17Lands does not endorse the Vault.
 - Shops: you have no shop's price, stock or shipping. Never say which shop is cheapest, never call a
   price "current", never say anything goes into a cart. Give the dated Scryfall price and let the person
   compare shops themselves (a shop's own search link is fine). Never place or fill an order for the person, and
@@ -80,6 +89,27 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              {"name": {"type": "string", "minLength": 1, "maxLength": 300, "description": "Exact card name"},
               "oracle_id": {"type": "string", "minLength": 36, "maxLength": 36}},
              path=lambda a: f"{V1}/catalog/cards", query=("name", "oracle_id"), provenance=("catalog",), ui="card"),
+        Tool("get_limited_card_stats", "Win rates and pick positions for the cards of one Limited set, from 17Lands' public data (Magic Arena, "
+             "CC BY 4.0): games in hand, win rate in hand with its 95% range and the set's baseline, games drawn, where the card is last seen and "
+             "taken, each with its sample size and the exact warning when the sample is small. Cards are given by name (`cards`, either face of "
+             "a double-faced card), or the best sorted by one metric (`sort`); a sorted list leaves out the cards under 200 of the sort's own "
+             "sample: games in hand for win_rate_in_hand and games_in_hand, packs seen for avg_last_seen_pick, picks for avg_taken_at. "
+             "Computed by the Vault from 17Lands' per-card counts, so figures can differ from 17lands.com; `attribution` is the credit to repeat. "
+             "`not_found` lists names not in the data; a set that is not loaded answers with what is.",
+             {"set": {"type": "string", "minLength": 2, "maxLength": 10, "pattern": "^[A-Za-z0-9]+$",
+                      "description": "17Lands' set code, such as HOB (case does not matter)"},
+              "format": {"type": "string", "enum": ["PremierDraft", "TradDraft"], "default": "PremierDraft",
+                         "description": "PremierDraft (best of one) or TradDraft (best of three)"},
+              "cards": {"type": "array", "maxItems": 40, "items": {"type": "string", "minLength": 1, "maxLength": 300},
+                        "description": "Card names to look up; leave out to list the best by `sort`"},
+              "sort": {"type": "string", "enum": ["win_rate_in_hand", "games_in_hand", "avg_last_seen_pick", "avg_taken_at"],
+                       "default": "win_rate_in_hand", "description": "Used when `cards` is empty. win_rate_in_hand and games_in_hand: highest first, only cards with 200 or "
+                       "more games in hand. avg_last_seen_pick: earliest first, only cards seen in 200 or more packs. avg_taken_at: earliest "
+                       "first, only cards picked 200 or more times"},
+              "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20},
+              "cursor": PAGING["cursor"]}, ["set"],
+             path=lambda a: f"{V1}/catalog/limited/{quote(a['set'], safe='')}", query=("format", "cards", "sort", "limit", "cursor"),
+             provenance=("catalog",), title="Limited card statistics (17Lands)"),
         Tool("get_rulings", "A card's rulings (Wizards' text via Scryfall), newest first, at most 25 a page. More "
              "remain when `next_offset` is not null: pass it back as `offset` to read the next page.",
              {"oracle_id": {"type": "string", "minLength": 36, "maxLength": 36, "description": "From get_card_oracle"},
@@ -103,6 +133,18 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              "from memory: only text returned by the rules tools is the current edition's.",
              {"name": {"type": "string", "minLength": 2, "maxLength": 120}}, ["name"],
              path=lambda a: f"{V1}/catalog/rules/term/{quote(a['name'], safe='')}", provenance=("catalog",)),
+        Tool("rules_changes", "What changed in the Comprehensive Rules between the previous edition and the current one, read live from "
+             "Wizards of the Coast (the Vault stores neither): both editions' dates, the rule numbers added, removed, renumbered and "
+             "changed, each changed rule with its first changed sentence, in rule order and capped, plus the rulings published and the "
+             "legality changes the Vault recorded since the previous edition took effect. Call it when a rule you rely on may be new or "
+             "different, when the question is about a recent rules change, or to check a rule number you remember is still the same "
+             "rule. A rule not listed did not change. Say which two editions you compared.",
+             {"previous": {"type": "string", "format": "date", "maxLength": 10, "description": "The date in the previous edition's file name (YYYY-MM-DD); "
+                           "by default it is found on Wizards' CDN, which keeps earlier files"},
+              "since": {"type": "string", "format": "date", "maxLength": 10, "description": "First day of the rulings and legality window (YYYY-MM-DD); "
+                        "by default the day the previous edition took effect"},
+              "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 25, "description": "At most this many of each list"}},
+             path=lambda a: f"{V1}/catalog/rules/changes", query=("previous", "since", "limit"), provenance=("catalog",)),
         Tool("get_rule", "One rule by number (e.g. '613.1a') or a glossary term ('glossary:Trample'), with where it sits: its "
              "parent, children, previous and next rule, the rules it cites and the rules that cite it. This is the only source for "
              "a rule's wording: when a rule is asked for or quoted, call it, and never quote a rule from memory (the rules change "
@@ -133,7 +175,7 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
         Tool("simulate_draws", "How a deck's mana curve plays: a few sample games of the first turns (opening hand, draws, land "
              "drops, what gets cast) and the odds over many games: land drops made, mana by turn, cards in hand, the chance of "
              "discarding to hand size, 'five mana by turn 5'. Says when discarding or a big hand is the deck's plan, and lists "
-             "what the simulation does not model. Explain the numbers in plain words; they are a hint, not a promise." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
+             "what the simulation does not model. `margin_points` is how far a percentage can be off at that many games. Explain the numbers in plain words; they are a hint, not a promise." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
              {"text": deck, "deck_id": DECK_ID, "format": fmt,
               "on_the_play": {"type": "boolean", "default": True, "description": "Going first"},
               "turns": {"type": "integer", "minimum": 1, "maximum": 10, "default": 6},
@@ -250,8 +292,9 @@ PROMPTS = [
      "text": "Answer this Magic: The Gathering rules question as a careful judge would: {question}\n\n" + GROUNDING +
              "\nSteps: identify the cards and the situation and look each card up with get_card_oracle and get_rulings; find the relevant rules "
              "with find_rules_term for a named game term, search_rules for the mechanic in plain words, or rules_outline to browse, and open each "
-             "with get_rule, reading its children, siblings, parent and references; verify every quote with verify_citation; then answer step by "
-             "step, citing rule numbers and the rules edition. If the sources do not settle it, say so."},
+             "with get_rule, reading its children, siblings, parent and references (rules_changes for a recent update or a rule you only know from an "
+             "older source); verify every quote with verify_citation; then answer step by "
+             "step, citing every rule number with the rules edition (version). If the sources do not settle it, say so."},
     {"name": "explain_interaction", "title": "Explain a card interaction",
      "description": "Walk through how two or more cards interact, step by step, with the rules that apply.",
      "arguments": [_arg("cards", "The cards, comma separated"), _arg("scenario", "What is on the battlefield or stack", False)],
@@ -290,7 +333,7 @@ PROMPTS = [
              "find_combos, check_decklist and get_deck_overlap. Seat only experts for this format (for commander: the Commander expert and a "
              "casual table voice), plus a rules judge and a devil's advocate, and the synergy or collection analyst if useful. Give each at most "
              "three points with evidence (read card text with get_card_oracle), then let the devil's advocate challenge them with evidence; a rules disagreement is settled "
-             "only by a quote checked with verify_citation. Answer with the plan first (checked with "
+             "only by a quote checked with verify_citation (and rules_changes when a rule a member relies on may have changed lately). Answer with the plan first (checked with "
              "validate_deck_changes, shown only if valid is true), then Agreed, Disputed and Not checked in one line each, and offer the full "
              "discussion on request. Label metagame knowledge as opinion."},
     {"name": "evaluate_deck", "title": "Check a deck from a link",

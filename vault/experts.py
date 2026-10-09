@@ -86,7 +86,9 @@ def council(fmt: str | None, goal: str | None = None, team_format: str | None = 
                        "a deck weak or strong from its curve or roles; label any bracket placement above the computed floor "
                        "as opinion (deck_stats with include_combos returns `bracket`, the floor and its inputs). For a deck of "
                        "three or more colours, say simulate_draws does not check colours (colour_warning). Never quote a "
-                       "card's cost, type or text from memory."),
+                       "card's cost, type or text from memory. Cite every rule number with the Comprehensive Rules edition (`version`) a "
+                       "rules tool returned, as \"rule <number> (Comprehensive Rules, <version>)\"; a member who relies on a rule that "
+                       "may have changed lately calls rules_changes first and says which two editions it compared."),
     }
     if key and key not in FORMAT_EXPERTS:
         out["note"] = (f"There is no {key} expert yet: the panel runs without a format expert, and says so.")

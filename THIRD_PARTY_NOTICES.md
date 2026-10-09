@@ -70,6 +70,12 @@ The MIT licence covers our code only, not these:
   [Scryfall's terms](https://scryfall.com/docs/api). Images are shown with artist credit and
   never cropped, and the Vault stays free. Card art belongs to the artists and Wizards of the
   Coast.
+- **17Lands** per-card Limited statistics are worked out from 17Lands' public data sets, which are licensed under
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) ("Unless otherwise noted", read on 2026-10-09). The data is not
+  stored: the server streams the game and draft files, keeps per-card counts and throws the files away. The credit, the
+  statement that the Vault changed the data (counts reduced; percentages, ranges and warnings recomputed) and the "not produced or
+  endorsed by 17Lands" line are in `public/credits.html` and in every answer that carries these figures. The licence provides the
+  data without warranty (its section 5).
 - **Archidekt, Dragon Shield and Moxfield** are named for interoperability (reading and writing
   file formats and public decks). They are trademarks of their owners, and the Vault is not
   affiliated with any of them.

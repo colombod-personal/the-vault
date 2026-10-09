@@ -4,8 +4,8 @@
 (never derived from an address); ``stores`` is a JSON list of at most three ``{name, url, search_url}`` the person typed. Nothing else is
 stored: no postcode, address, coordinates, IP address or device language. No data changes.
 
-Revision ID: 0119
-Revises: 0118
+Revision ID: 0121
+Revises: 0120
 Create Date: 2026-10-09 18:00:00
 """
 
@@ -14,8 +14,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = '0119'
-down_revision = '0118'
+revision = '0121'
+down_revision = '0120'
 branch_labels = None
 depends_on = None
 

@@ -7,7 +7,7 @@ description: >-
   dispute settled, or a deep look at what a deck is trying to do.
 license: MIT
 metadata:
-  vault-tools: "whoami council_brief expert_brief list_decks get_deck deck_stats simulate_draws deck_legality find_combos check_decklist get_deck_overlap validate_deck_changes verify_citation get_card_oracle"
+  vault-tools: "whoami council_brief expert_brief list_decks get_deck deck_stats simulate_draws deck_legality find_combos check_decklist get_deck_overlap validate_deck_changes verify_citation get_card_oracle rules_changes get_limited_card_stats"
 ---
 
 # Expert council
@@ -63,7 +63,7 @@ checked plan. Nothing in this flow changes the person's collection or decks.
      not independent.
    - Stop: a member answers only inside its expertise.
 5. **Challenge.**
-   - Calls: `verify_citation` for any rules quote in dispute.
+   - Calls: `verify_citation` for any rules quote in dispute, `rules_changes` when a rule a member relies on may have changed lately.
    - Show: give all views and any proposed changes to the devil's advocate. Each objection must cite evidence; a rules
      disagreement is settled only by a quote checked with `verify_citation`.
    - Stop: if the rules do not settle it, say so and suggest a judge.
@@ -98,8 +98,16 @@ settled only by a quote checked with `verify_citation`. If the rules do not sett
   in that order. Having the cards in the deck is not having them together; check them with `get_card_oracle` and ask the
   judge before anyone relies on a reading.
 - Metagame knowledge is opinion until the Vault has a source for it (issue #105); label it.
+- **Limited statistics** (the draft or sealed expert): win rates and pick positions come only from `get_limited_card_stats`, which
+  holds 17Lands' Magic Arena data (CC BY 4.0) for the sets the Vault has loaded. Ask the set and format first (a deck's format does not
+  say which Arena set). Pass the answer's `attribution` on in the first sentence that uses a number, give the sample beside every rate,
+  compare two cards only when both are at the `ok` level and their 95% ranges do not overlap (otherwise say the data does not settle it),
+  never rank, recommend or compare a card at the too_few level (a sorted list already leaves out the cards under 200 of the sort's own sample: games in hand, or packs seen for avg_last_seen_pick, or picks for avg_taken_at; its left_out says how many), and never turn a rate into a grade or a "best pick". It is Arena data
+  and a correlation, not proof a card wins games; the percentages are the Vault's, computed from 17Lands' counts.
 - Popularity (EDHREC rank) is not power; roles are Scryfall Tagger tags, a community's opinion.
-- The rules edition used (from `whoami`, if asked) and that prices are Scryfall's, dated.
+- **The rules edition with every rule number**: "rule <number> (Comprehensive Rules, <version>)", the `version` a rules tool returned
+  (`whoami` also names it). The rules change between editions: a member who relies on a rule that may have changed lately, or whose
+  question names an update, calls `rules_changes` first and says which two editions it compared. Prices are Scryfall's, dated.
 
 ## Do not
 

@@ -269,7 +269,7 @@ with screenshots at 1400 and 390 px. 6. One real click through each shop link by
 ## 10. As built (2026-10-09, #212)
 
 Built as designed (option A, the seven recommended defaults), in `vault/buy_links.py` (templates, countries, orders, typed-store checks),
-`vault/api/buy_api.py` (`GET /buy/menu`, `GET /buy/countries`, `GET`/`PUT`/`DELETE /me/buy-settings`), migration `0119_buy_settings`, the
+`vault/api/buy_api.py` (`GET /buy/menu`, `GET /buy/countries`, `GET`/`PUT`/`DELETE /me/buy-settings`), migration `0121_buy_settings` (0119 was the number first assigned; main took 0119 and 0120 meanwhile), the
 MCP tool `where_to_buy` (read only), `public/lib/buy.js` and `public/views/buy.jsx` (the menu on the Ideas panel, the Lab's Buy rows and a
 deck page's needed cards, and Account, "Where I buy"). Screenshots at 1400 and 390 px are in `docs/screenshots/where-to-buy-*.jpg`.
 

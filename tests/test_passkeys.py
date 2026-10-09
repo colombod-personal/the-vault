@@ -3,12 +3,15 @@ adding and removing passkeys, and the attacks WebAuthn must stop."""
 
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
+
+from webauthn.helpers import bytes_to_base64url
 
 from twins.authenticator import SoftAuthenticator
 from vault.app import create_app
@@ -79,6 +82,10 @@ def test_add_a_second_passkey_and_remove_one(client):
     client.cookies.clear()
     login(client, laptop)  # either device opens the same account
     phone_id = next(k["id"] for k in keys if k["name"] == "Phone")
+    # Both are new, and a passkey is removed only while another method older than a day stays (#347): a day passes.
+    with client.app.state.db.sessions() as db:
+        db.execute(text("UPDATE passkeys SET created_at = now() - interval '2 days'"))
+        db.commit()
     assert client.delete(f"{V1}/me/passkeys/{phone_id}").json() == {"deleted": True}
     last = client.get(f"{V1}/me/passkeys").json()["items"][0]["id"]
     res = client.delete(f"{V1}/me/passkeys/{last}")
@@ -222,7 +229,8 @@ def test_two_removals_at_once_cannot_remove_the_last_passkey(database_url, tmp_p
         s.add(user)
         s.flush()
         s.add(Identity(user_id=user.id, provider="passkey", subject="h"))
-        keys = [Passkey(user_id=user.id, credential_id=f"c{i}", public_key=b"k", name=f"Key {i}") for i in (1, 2)]
+        keys = [Passkey(user_id=user.id, credential_id=f"c{i}", public_key=b"k", name=f"Key {i}",
+                        created_at=datetime.now(timezone.utc) - timedelta(days=2)) for i in (1, 2)]  # older than a day (#347)
         s.add_all(keys)
         s.commit()
         uid, (first, second) = user.id, [k.id for k in keys]
@@ -345,3 +353,82 @@ def test_a_sign_in_without_the_accounts_user_handle_is_refused(client):
     assertion["response"].pop("userHandle", None)
     res = post(client, "/api/auth/passkey/login/verify", {"credential": assertion})
     assert res.status_code == 401 and client.get(f"{V1}/me").status_code == 401
+
+
+def _fill_passkeys(client, user_id, count, start=0):
+    with client.app.state.db.sessions() as db:
+        db.add_all([Passkey(user_id=user_id, credential_id=bytes_to_base64url(f"filler-{start + i}".encode()), public_key=b"k", name=f"Filler {start + i}")
+                    for i in range(count)])
+        db.commit()
+
+
+def test_an_account_holds_at_most_twenty_passkeys(client):  # #347: a copied session cannot bury the real ones under hundreds
+    from vault.passkeys import MAX_PASSKEYS
+
+    assert MAX_PASSKEYS == 20
+    signup(client, SoftAuthenticator())
+    uid = client.get(f"{V1}/me").json()["id"]
+    _fill_passkeys(client, uid, 18)  # 19 now: one more fits
+    options = post(client, "/api/auth/passkey/register/options")
+    assert options.status_code == 200
+    _fill_passkeys(client, uid, 1, start=100)  # another device took the last place while this request was open
+    late = post(client, "/api/auth/passkey/register/verify",
+                {"credential": SoftAuthenticator().create(options.json(), ORIGIN), "name": "One too many"})
+    assert late.status_code == 409 and "20 passkeys" in late.json()["detail"]
+    full = post(client, "/api/auth/passkey/register/options")
+    assert full.status_code == 409 and "Remove one you no longer use first" in full.json()["detail"]
+    with client.app.state.db.sessions() as db:
+        assert db.scalar(select(func.count(Passkey.id)).where(Passkey.user_id == uid)) == 20
+
+
+def test_an_attacker_who_signs_in_through_a_planted_passkey_ends_when_the_owner_removes_it(client):
+    """#347: a copied cookie registers the attacker's own passkey; the owner signs out the other browsers; the attacker signs
+    in with the planted passkey (a fresh cookie on the account's key); the owner removes it. The key changes with the removal,
+    so the attacker's new cookie is dead and the owner's browser still works."""
+    owner_phone, attacker_key = SoftAuthenticator(), SoftAuthenticator()
+    signup(client, owner_phone)
+    with client.app.state.db.sessions() as db:  # the owner's passkey has been there a while
+        db.execute(text("UPDATE passkeys SET created_at = now() - interval '5 days'"))
+        db.commit()
+    attacker = TestClient(client.app, base_url=ORIGIN)
+    for name, value in dict(client.cookies).items():
+        attacker.cookies.set(name, value)
+    options = post(attacker, "/api/auth/passkey/register/options").json()
+    assert post(attacker, "/api/auth/passkey/register/verify",
+                {"credential": attacker_key.create(options, ORIGIN), "name": "Attacker"}).json()["added"] is True
+
+    assert post(client, "/api/auth/sign-out-others").json()["ok"] is True  # step 1
+    assert attacker.get(f"{V1}/me").status_code == 401  # the copied cookie is dead...
+    attacker.cookies.clear()
+    assert login(attacker, attacker_key).json() == {"signed_in": True}  # ...but the planted passkey signs in again
+    assert attacker.get(f"{V1}/me").status_code == 200
+
+    planted = next(k["id"] for k in client.get(f"{V1}/me/passkeys").json()["items"] if k["name"] == "Attacker")
+    assert client.delete(f"{V1}/me/passkeys/{planted}").json() == {"deleted": True}  # step 2: the owner removes it
+    assert attacker.get(f"{V1}/me").status_code == 401  # the attacker's new session ends with it
+    assert client.get(f"{V1}/me").status_code == 200  # the owner stays signed in
+
+
+def test_a_passkey_request_already_past_authentication_cannot_add_after_the_session_ended(client, monkeypatch):
+    """#347: the account's session key is replaced after the request was authenticated and before the write. The key is
+    re-read under the account lock, so the request is refused (401) and no passkey is added."""
+    from vault import passkeys as passkeys_module
+    from vault.models import new_session_key
+
+    signup(client, SoftAuthenticator())
+    uid = client.get(f"{V1}/me").json()["id"]
+    options = post(client, "/api/auth/passkey/register/options").json()
+    real_take = passkeys_module._take
+
+    def take_then_rotate(request, db, kind):
+        pending = real_take(request, db, kind)
+        with client.app.state.db.sessions() as other:  # sign out everywhere commits while this request is running
+            other.get(User, uid).session_key = new_session_key()
+            other.commit()
+        return pending
+
+    monkeypatch.setattr(passkeys_module, "_take", take_then_rotate)
+    res = post(client, "/api/auth/passkey/register/verify", {"credential": SoftAuthenticator().create(options, ORIGIN), "name": "Late"})
+    assert res.status_code == 401 and "session ended" in res.json()["detail"]
+    with client.app.state.db.sessions() as db:
+        assert db.scalar(select(func.count(Passkey.id)).where(Passkey.user_id == uid)) == 1

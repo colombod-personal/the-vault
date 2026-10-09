@@ -17,7 +17,7 @@ import secrets
 from datetime import date, datetime, timezone
 
 from mtg_toolkits.models import CollectionEntry, Condition, Finish
-from sqlalchemy import JSON, Boolean, CheckConstraint, Index, LargeBinary, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, Uuid, text
+from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, Index, LargeBinary, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, Uuid, text
 from sqlalchemy import DDL, event
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
@@ -785,6 +785,69 @@ class OraclePrinting(Base):
     usd: Mapped[float | None] = mapped_column(Float)
     usd_foil: Mapped[float | None] = mapped_column(Float)
     usd_etched: Mapped[float | None] = mapped_column(Float)
+
+
+class LimitedGameStat(Base):
+    """Per-card game counts (games, never copies) from 17Lands' public game data, one row per set, format and card (#178, docs/limited-data-design.md).
+
+    Third-party data (17Lands, CC BY 4.0), reduced by the Vault to counts: no game, deck, player or time of a game is kept, and
+    the table has no user. Rates, intervals and sample warnings are worked out when read (``vault.limited_stats``), never stored."""
+
+    __tablename__ = "limited_game_stats"
+
+    set_code: Mapped[str] = mapped_column(String(10), primary_key=True)  # 17Lands' expansion code, upper case
+    format: Mapped[str] = mapped_column(String(20), primary_key=True)  # PremierDraft or TradDraft
+    card_name: Mapped[str] = mapped_column(String(200), primary_key=True)  # as 17Lands names the card
+    oracle_id: Mapped[str | None] = mapped_column(String(36), index=True)  # the catalog's card, matched by name; null when none matches
+    games_played: Mapped[int] = mapped_column(Integer, default=0)  # games with the card in the main deck (#GP)
+    wins_played: Mapped[int] = mapped_column(Integer, default=0)
+    opening: Mapped[int] = mapped_column(Integer, default=0)  # games with the card in the kept opening hand (#OH)
+    wins_opening: Mapped[int] = mapped_column(Integer, default=0)
+    drawn: Mapped[int] = mapped_column(Integer, default=0)  # games with the card drawn later, not tutored (#GD)
+    wins_drawn: Mapped[int] = mapped_column(Integer, default=0)
+    in_hand: Mapped[int] = mapped_column(Integer, default=0)  # games with the card in hand at least once, opener or draw (#GIH): a union
+    wins_in_hand: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class LimitedPickStat(Base):
+    """Per-card pick counts from 17Lands' public draft data (#178): how often a card was seen, where it was last seen, how often
+    it was taken and at which pick. Same rules as :class:`LimitedGameStat`: counts only, no draft, no drafter."""
+
+    __tablename__ = "limited_pick_stats"
+
+    set_code: Mapped[str] = mapped_column(String(10), primary_key=True)
+    format: Mapped[str] = mapped_column(String(20), primary_key=True)
+    card_name: Mapped[str] = mapped_column(String(200), primary_key=True)
+    oracle_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    seen: Mapped[int] = mapped_column(Integer, default=0)  # packs (per drafter and pack round) in which the card was seen
+    last_seen_sum: Mapped[int] = mapped_column(Integer, default=0)  # sum of the pick number (1 to 15) at which it was last seen
+    picked: Mapped[int] = mapped_column(Integer, default=0)  # times it was taken
+    picked_sum: Mapped[int] = mapped_column(Integer, default=0)  # sum of the pick numbers at which it was taken
+
+
+class LimitedSource(Base):
+    """What was read from 17Lands, one row per set, format and kind (``game`` or ``draft``): the version of the data behind every
+    figure (the file's own ETag and Last-Modified, not the page's date), and the window it covers. Written last, in the same
+    transaction as the rows it describes."""
+
+    __tablename__ = "limited_sources"
+
+    set_code: Mapped[str] = mapped_column(String(10), primary_key=True)
+    format: Mapped[str] = mapped_column(String(20), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(10), primary_key=True)
+    etag: Mapped[str | None] = mapped_column(Text)
+    last_modified: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    content_length: Mapped[int | None] = mapped_column(BigInteger)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    records: Mapped[int] = mapped_column(BigInteger, default=0)  # games (kind game) or picks (kind draft) used
+    skipped_records: Mapped[int] = mapped_column(BigInteger, default=0)  # games left out for inconsistent data
+    wins: Mapped[int | None] = mapped_column(BigInteger)  # games won among the games used (game kind): baseline = wins / records
+    first_picks: Mapped[int | None] = mapped_column(BigInteger)  # draft kind: rows at the first pick of a pack round...
+    empty_first_picks: Mapped[int | None] = mapped_column(BigInteger)  # ...and how many of them show an empty pack (P1P1 data missing)
+    first_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cards: Mapped[int] = mapped_column(Integer, default=0)
+    unmatched_cards: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class CatalogSource(Base):

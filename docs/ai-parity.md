@@ -65,6 +65,7 @@ All collection tools also read a collection someone shared with you (`share_id`,
 | Stats, legality, upgrades, combos | A deck's page tabs: “Stats”, “Legality”, “Upgrades” (“Find upgrades”), “Combos” | `POST /decks/stats`, `/legality`, `/upgrades`, `/validate-changes`, `/combos` | `deck_stats`, `deck_legality`, `find_upgrades`, `validate_deck_changes`, `find_combos` (each takes a saved `deck_id` or pasted text) | read | no (the check of a proposed change is in “Change this deck”, above) |
 | The Vault's reading of a deck's card text for a possible loop Commander Spellbook does not list (#172) | none yet: the “Combos” tab lists only Commander Spellbook's combos (the web part is the next slice of #172) | `POST /decks/combos` with `include_possible_loops: true` | `find_combos` (`include_possible_loops`; answers `possible_loops`, labelled the Vault's reading and not Spellbook's) | read | yes: no web view of it yet (#172) |
 | Shopping list | A deck's page: “Buy list” tab (“Copy list”) | `POST /decks/shopping-list` | `shopping_list` (`format`: plain, cardkingdom, tcgplayer, cardmarket, csv; `finish`, `language`, `sets`, `condition`) | read | partly: the web tab copies the plain list; store formats and printing rules are assistant-side (#55) |
+| Simulate the first turns of a deck (mana curve odds) | A deck's page: “Opening turns” tab (1,000 simulated games: the headline figures, the odds turn by turn (panels Land drops, Mana by turn, Cards in hand and Discard risk, with the deck's own plan note), “Sample games, turn by turn”, “What this simulation does not do”; the controls “On the play”, “On the draw”, “Turns”, “Format” and the button Play again with a new seed) | `POST /decks/simulate` (`margin_points`: how far a percentage can be off at that many games), `POST /decks/stats` for the curve | `simulate_draws` (takes a saved `deck_id` or pasted text; `games` is not a tool argument, the web app asks for 1,000) | read | partly: the tab always plays 1,000 games with 5 samples and offers 4, 6, 8 or 10 turns; the tool takes 1 to 10 turns and 0 to 10 samples |
 | Open a menu of shops for a card you do not own (#212): plain links in the order for your country, the stores you typed, the Wizards store locator and Scryfall; no prices | Ideas: a missing card's panel (the “Where to buy” menu, also on the “Lab” tab's “Buy” rows and a deck page's “Need” cards) | `GET /buy/menu?card=` | `where_to_buy` | read | no |
 | Simulate the first turns of a deck (mana curve odds) | none yet: the web visual is #138 | `POST /decks/simulate` | `simulate_draws` (takes a saved `deck_id` or pasted text) | read | yes: no web view of it (#138) |
 | Check the connection (who, scopes, data versions) | none: assistants only | `GET /agent/whoami`, `/catalog/status` | `whoami` | read | no |
@@ -84,7 +85,9 @@ All collection tools also read a collection someone shared with you (`share_id`,
 | Action | UI place | REST route | MCP tool | Scope | Gap |
 |---|---|---|---|---|---|
 | Card details, rulings | The card drawer (click a card in Browse, the Vault tab or a deck): image, oracle text, artist credit; rulings are not shown in the web app | `/catalog/cards`, `/cards/{id}/rulings`, `/cards/lookup` | `get_card_oracle`, `get_rulings`, `lookup_cards` | read | partly: no rulings in the web app |
+| Limited statistics for a set: win rates, games in hand and pick positions of its cards, each with its sample and the 17Lands credit | none: the web app has no Limited view; the credit is on the Credits page, in its Limited statistics section (a page of its own, not part of the app) | `/catalog/limited/{set}` (`format`, `cards`, `sort`, `limit`, `cursor`) | `get_limited_card_stats` | read | partly: assistants only |
 | Rules search, a rule | none: the web app has no rules view (“Help” explains the app, not the rules) | `/rules/search`, `/rules`, `/rules/term/{name}`, `/rules/{n}` | `search_rules`, `rules_outline`, `find_rules_term`, `get_rule`, `verify_citation`, `present_steps` | read | partly: assistants only |
+| What changed in the rules, rulings and legality since the previous edition (#107) | none: assistants only | `/rules/changes` | `rules_changes` | read | partly: assistants only |
 
 ## Account: kept out of AI apps on purpose
 
@@ -95,8 +98,8 @@ Shown on the consent screen as "It will never be able to". These stay web-only.
 | Change my name | Account panel, “Profile” (“Save”) | `PATCH /me` | Account data (right to rectification is done by the person) |
 | Export all my data | Account panel, “Your data” (“Download my data (.zip)”) | `GET /me/export` | Bulk personal data; the person downloads it themselves |
 | Delete my account | Account panel, “Your data” (the delete button) | `DELETE /me` | Irreversible |
+| Tokens, passkeys, sessions, connected apps, sign-in methods | Account panel: “Agents & API” (“Create token”), “Connected apps” (“Disconnect”), “Sign-in methods” (“Add a passkey”, “Sign out everywhere”), “Sign out” | `/me/tokens`, `/me/passkeys`, `/me/sign-in-methods`, `/me/identities`, `/me/sessions`, `/me/apps`, `/login/*` | Would let an app grant itself more access or lock the person out |
 | Choose where I buy, and the stores I typed (#212) | Account panel, “Where I buy” (“Save”, “Remove”) | `GET`, `PUT` and `DELETE /me/buy-settings`, `GET /buy/countries` | A setting that says roughly where a person lives is changed by the person, not an assistant (`where_to_buy` only reads the order it produces) |
-| Tokens, passkeys, sessions, connected apps, sign-in methods | Account panel: “Agents & API” (“Create token”), “Connected apps” (“Disconnect”), “Sign-in methods” (“Add a passkey”), “Sign out” | `/me/tokens`, `/me/passkeys`, `/me/sessions`, `/me/apps`, `/login/*` | Would let an app grant itself more access or lock the person out |
 
 ## Skills, agents and flows (#102)
 
@@ -113,4 +116,4 @@ what is not covered. The real-host check (that Claude, ChatGPT, Codex, Cursor an
 - ~~G5 Delete a deck~~: `delete_deck`, preview then `confirm`.
 - ~~G6 Sharing~~: `list_my_shares`, `accept_share`, `stop_sharing` (confirm). Creating a share stays with the person (see the table).
 - ~~Deck items (name search, import from link, `deck_id` analysis)~~: done in #96 (`list_decks` with `query`, `import_deck_from_link`, `deck_id` on every deck tool).
-- G7 Web side of the simulation: `simulate_draws` has no place in the web app yet (#138). Store formats and printing rules of `shopping_list` have no control in the web app's “Buy list” tab (#55).
+- ~~G7 Web side of the simulation~~: the deck page's “Opening turns” tab (#138). Store formats and printing rules of `shopping_list` have no control in the web app's “Buy list” tab (#55).
