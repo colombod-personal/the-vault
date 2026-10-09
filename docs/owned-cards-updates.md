@@ -90,8 +90,10 @@ Other kinds of conflict: `removed_in_vault` (the assistant removed every copy, t
   told apart, the file replaces the collection as imports always did, and the preview says so. The next import then has a
   base.
 - **Limits.** Cards are compared by their state, so an undone edit that the undo put back as a plain row (the original
-  was in a folder, or Mint) counts as an edit on the next import and is kept, with the same number of copies. Until
-  buckets exist (#118) there is one base per person; with buckets it is one per scope (docs/collections.md).
+  was in a folder, or Mint) counts as an edit on the next import and is kept, with the same number of copies. There is one
+  base for the whole collection and one per bucket that had a file imported into it (`bucket_baselines`, #124: an import with
+  `bucket_id` compares the file with that bucket's copies only, replaces only them, and stores its own base; the rules above are
+  the same, read about that bucket; docs/collections.md says how the scopes meet).
 
 ## The tools
 

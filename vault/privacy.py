@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from .importer import export_collection
 from .sharing import display_name
-from .models import AccessToken, ApiSession, Bucket, CardAnnotation, TagAssignment, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionBaseline, CollectionValue, Deck, DeckVersion, Entry, Identity, Import, Share, StagedUpload, User
+from .models import AccessToken, ApiSession, Bucket, BucketBaseline, CardAnnotation, TagAssignment, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionBaseline, CollectionValue, Deck, DeckVersion, Entry, Identity, Import, Share, StagedUpload, User
 from .prices import history
 from .collection_view import CollectionView
 
@@ -129,7 +129,13 @@ def export_archive(db: Session, user: User) -> bytes:
             "imported_at": baseline.created_at if baseline else None,
             "cards": [{"name": c["n"], "set": c["s"], "number": c["c"], "finish": c["f"], "copies": c["q"], "rows": c["r"]}
                       for c in (baseline.cards if baseline else [])],
-            "columns_of_rows": ["condition", "language", "folder", "price_paid", "date_paid", "quantity", "trade_quantity"]}))
+            "columns_of_rows": ["condition", "language", "folder", "price_paid", "date_paid", "quantity", "trade_quantity"],
+            # the last file imported into one bucket (#124), for each bucket that had one
+            "by_bucket": [{"bucket": name, "imported_at": b.created_at,
+                           "cards": [{"name": c["n"], "set": c["s"], "number": c["c"], "finish": c["f"], "copies": c["q"],
+                                      "rows": c["r"]} for c in b.cards]}
+                          for b, name in db.execute(select(BucketBaseline, Bucket.name).join(Bucket, Bucket.id == BucketBaseline.bucket_id)
+                                                    .where(BucketBaseline.user_id == user.id).order_by(Bucket.position, Bucket.id))]}))
         z.writestr("value_history.json", _json(history(db, user)))
         z.writestr("buckets.json", _json(_buckets(db, user)))
         z.writestr("tags.json", _json([{"card": t.oracle_id, "tag": t.tag, "source": t.source, "source_detail": t.source_detail,
@@ -205,6 +211,7 @@ def personal_data(user_id: int) -> dict:
         "tag_assignments": delete(TagAssignment).where(TagAssignment.user_id == user_id),
         "card_annotations": delete(CardAnnotation).where(CardAnnotation.user_id == user_id),
         "entries": delete(Entry).where(Entry.user_id == user_id),
+        "bucket_baselines": delete(BucketBaseline).where(BucketBaseline.user_id == user_id),  # before the buckets they belong to
         "buckets": delete(Bucket).where(Bucket.user_id == user_id),  # after the entries: a bucket with copies can't be deleted
         "collection_baselines": delete(CollectionBaseline).where(CollectionBaseline.user_id == user_id),
         "imports": delete(Import).where(Import.user_id == user_id),
