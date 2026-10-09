@@ -82,10 +82,50 @@ def test_the_settings_are_removed_on_their_own_and_a_second_removal_is_harmless(
 
 def test_a_retried_save_with_the_same_key_is_answered_from_the_first(signed_in):
     first = signed_in.put(f"{V1}/me/buy-settings", json={"country": "GB"}, headers={"Idempotency-Key": "buy-1"})
-    signed_in.put(f"{V1}/me/buy-settings", json={"country": "US"})
     again = signed_in.put(f"{V1}/me/buy-settings", json={"country": "GB"}, headers={"Idempotency-Key": "buy-1"})
     assert again.headers["idempotent-replayed"] == "true" and again.json() == first.json()
-    assert signed_in.get(f"{V1}/me/buy-settings").json()["country"] == "US"  # the replay changed nothing
+    signed_in.put(f"{V1}/me/buy-settings", json={"country": "US"})
+    later = signed_in.put(f"{V1}/me/buy-settings", json={"country": "GB"}, headers={"Idempotency-Key": "buy-1"})
+    assert later.headers["idempotent-replayed"] == "true" and later.json()["country"] == "US"  # rebuilt from the live row: it changed nothing
+    assert signed_in.get(f"{V1}/me/buy-settings").json()["country"] == "US"
+
+
+def test_the_stored_answer_of_a_save_holds_no_country_or_store_and_remove_leaves_nothing_behind(signed_in, app):
+    from vault.models import IdempotentRequest
+
+    signed_in.put(f"{V1}/me/buy-settings", json={"country": "GB", "stores": [STORE]}, headers={"Idempotency-Key": "buy-2"})
+    with app.state.db.sessions() as db:
+        rows = list(db.scalars(select(IdempotentRequest)))
+        assert [r.body for r in rows] == [{"saved": True}]  # nothing personal is kept in the retry record
+    signed_in.put(f"{V1}/me/buy-settings", json={"country": "DE"}, headers={"Idempotency-Key": "buy-3"})
+    assert signed_in.delete(f"{V1}/me/buy-settings").json() == {"deleted": True}
+    with app.state.db.sessions() as db:
+        assert list(db.scalars(select(IdempotentRequest))) == []  # Remove also forgets the retry records of the saves
+
+
+def test_the_daily_retention_job_deletes_stored_answers_past_their_day(signed_in, app):
+    from datetime import datetime, timedelta, timezone
+
+    from vault import retention
+    from vault.models import IdempotentRequest
+
+    signed_in.put(f"{V1}/me/buy-settings", json={"country": "GB"}, headers={"Idempotency-Key": "old-one"})
+    signed_in.put(f"{V1}/me/buy-settings", json={"country": "US"}, headers={"Idempotency-Key": "new-one"})
+    with app.state.db.sessions() as db:
+        old = db.scalar(select(IdempotentRequest).where(IdempotentRequest.key == "old-one"))
+        old.created_at = datetime.now(timezone.utc) - timedelta(hours=25)
+        db.commit()
+        assert retention.apply(db)["idempotent_requests_deleted"] == 1
+        assert [r.key for r in db.scalars(select(IdempotentRequest))] == ["new-one"]
+
+
+def test_an_empty_save_makes_no_row_and_an_unreadable_address_is_a_422_not_a_500(signed_in, app):
+    assert signed_in.put(f"{V1}/me/buy-settings", json={}).json()["country"] is None
+    with app.state.db.sessions() as db:
+        assert list(db.scalars(select(BuySettings))) == []
+    for url in ("https://[x/", "https://good.com\uff0fevil.example/", "https://0x7f.0.0.1/"):
+        res = signed_in.put(f"{V1}/me/buy-settings", json={"stores": [{"name": "A", "url": url}]})
+        assert res.status_code == 422, (url, res.status_code)
 
 
 def test_the_countries_to_choose_from_are_listed_with_the_shops_each_gets_first(signed_in):

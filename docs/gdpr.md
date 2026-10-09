@@ -43,7 +43,7 @@ This is an engineering document, not legal advice: have the privacy notice
 | `oauth_codes` | yes | one-time authorization codes (hash, client, redirect URI, challenge; 60 seconds) | – (expire in a minute) | `purge_user`; deleted when expired |
 | `oauth_clients` | no | what an AI app said about itself: its client id (a metadata URL or a registered id), name, redirect URIs. No person is named | – | deleted when unused and expired (a day for registrations and cached documents) |
 | `access_tokens` | yes | personal access tokens: name, prefix, scopes, dates, hash | `access_tokens.json` (no hashes) | `purge_user` |
-| `idempotent_requests` | yes | stored answers to retried POSTs (24 hours) | – (short-lived copies of answers already in the export) | `purge_user` |
+| `idempotent_requests` | yes | stored answers to retried POSTs and PUTs (24 hours, deleted by the daily retention job; the answer of a saved "Where I buy" setting holds none of it) | – (short-lived copies of answers already in the export) | `purge_user` |
 | `staged_uploads` | yes | a collection file an assistant asked the person to upload (the file itself, its name, when, and the bucket it goes into, if any), until it is applied or its link expires (one hour); only a hash of the link is stored | – (the person's own file, gone within the hour; the import it becomes is in the export) | applied, deleted when expired (the daily job, and whenever someone starts a link), `purge_user` |
 | `auth_codes` | yes | one-time sign-in codes for apps (2 minutes) | – (expire in minutes) | `purge_user` |
 | `collection_values` | yes | daily market value and cost | `value_history.json` | `purge_user` |

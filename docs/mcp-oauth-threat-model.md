@@ -493,5 +493,5 @@ exposes, and what stops misuse:
   (a country, shop names the person chose to enter), the person controls whether any is set, and it is a read of their own data like
   the collection tools.
 - **Storage and lifetime.** The record holds only `country`, `stores` and `updated_at`; it is in the data map and export
-  (`buy_settings.json`) and erased with the account, and a `PUT`'s stored answer (24 hours, `idempotent_requests`) is erased with it.
+  (`buy_settings.json`) and erased with the account, and a `PUT` stores no settings in its idempotency record (only `{"saved": true}`; a replay is rebuilt from the live row, so "Remove" leaves nothing behind), "Remove" also deletes the person's stored `PUT` records, and the daily retention job deletes every stored answer past its 24 hours (found by the security review of this change: the 24 hours used to be enforced only when the same person made another keyed request).
   Writes are limited to 30 a minute per person.

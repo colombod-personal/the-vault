@@ -13,6 +13,8 @@ ever rendered as a link: it is checked for shape here and never requested.
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import date
 from urllib.parse import quote_plus, urlsplit
@@ -155,7 +157,7 @@ def order_for(country: str | None) -> tuple[list[str], list[str]]:
 # -- the shops the person typed -------------------------------------------------------------------------------------------------------
 
 def _clean_text(value: object, what: str, limit: int) -> str:
-    text = " ".join(str(value or "").split())
+    text = " ".join("".join(ch for ch in str(value or "") if unicodedata.category(ch) != "Cf").split())  # no bidi or zero-width characters
     if not text:
         raise BuyError(f"{what} is needed.")
     if len(text) > limit or any(ord(ch) < 32 or ord(ch) == 127 for ch in str(value)):
@@ -163,11 +165,18 @@ def _clean_text(value: object, what: str, limit: int) -> str:
     return text
 
 
+_LOCAL_SUFFIXES = (".localhost", ".local", ".internal", ".lan", ".home.arpa", ".intranet", ".corp")
+
+
 def _host_ok(host: str) -> bool:
     labels = host.split(".")
-    return len(labels) >= 2 and all(label and len(label) <= 63 and not label.startswith("-") and not label.endswith("-")
-                                    and all(ch.isalnum() or ch == "-" for ch in label) for label in labels) \
-        and not all(label.isdigit() for label in labels)  # a shop is a name, not an address like 10.0.0.1
+    if not (len(labels) >= 2 and all(label and len(label) <= 63 and not label.startswith("-") and not label.endswith("-")
+                                     and all(ch.isalnum() or ch == "-" for ch in label) for label in labels)):
+        return False
+    # a shop is a name, not an address: browsers read a last label that is all digits or 0x-hex as an IPv4 address (10.0.0.1, 0x7f.1, 2130706433)
+    if labels[-1].isdigit() or re.fullmatch(r"0[xX][0-9a-fA-F]*", labels[-1]):
+        return False
+    return not host.endswith(_LOCAL_SUFFIXES) and host != "localhost"
 
 
 def _clean_address(value: object, what: str, *, search: bool = False) -> str:
@@ -179,13 +188,18 @@ def _clean_address(value: object, what: str, *, search: bool = False) -> str:
         raise BuyError(f"{what} is at most {URL_MAX} characters.")
     if any(ord(ch) <= 32 or ord(ch) == 127 for ch in text):
         raise BuyError(f"{what} must not contain spaces or control characters.")
+    if not search and PLACEHOLDER in text:
+        raise BuyError(f"{what} is the shop's page: {PLACEHOLDER} belongs in the search address only.")
     if search:
         if text.count(PLACEHOLDER) != 1:
             raise BuyError(f"{what} must contain {PLACEHOLDER} exactly once, where the card's name goes (copy it from the shop's own search page).")
         authority = text.split("://", 1)[-1].split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
         if PLACEHOLDER in authority:
             raise BuyError(f"{what}: {PLACEHOLDER} may only be in the path or the query, never in the shop's host name.")
-    parts = urlsplit(text.replace(PLACEHOLDER, "card"))
+    try:
+        parts = urlsplit(text.replace(PLACEHOLDER, "card"))
+    except ValueError:  # an address urlsplit cannot read ("https://[x/", a host that changes under Unicode normalisation)
+        raise BuyError(f"{what} is not a web address the Vault can read.") from None
     if parts.scheme != "https":
         raise BuyError(f"{what} must start with https:// (other kinds of address are not accepted).")
     if parts.username is not None or parts.password is not None or "@" in parts.netloc:
@@ -218,11 +232,20 @@ def clean_stores(raw: object) -> list[dict]:
     return [clean_store(item) for item in raw]
 
 
+def _shown_host(address: str) -> str | None:
+    """The host as a browser will use it (punycode for a non-ASCII name), so a look-alike letter is not shown as the plain one."""
+    host = urlsplit(address).hostname
+    try:
+        return host.encode("idna").decode("ascii") if host else host
+    except UnicodeError:
+        return host
+
+
 def store_row(index: int, store: dict, card: str | None = None) -> dict:
     """A stored store as the menu shows it. With a card and a search address the row searches for the card; otherwise it opens the page."""
     searches = bool(store.get("search_url")) and card is not None
     href = store["search_url"].replace(PLACEHOLDER, quote_plus(front_face(card))) if searches else store["url"]
-    return {"id": f"store-{index + 1}", "name": store["name"], "host": urlsplit(href).hostname, "url": href,
+    return {"id": f"store-{index + 1}", "name": store["name"], "host": _shown_host(href), "url": href,
             "opens": "a search for the card on the store's own site" if searches else "the store's page",
             "typed_by_you": True}
 
@@ -231,7 +254,7 @@ def settings_view(country: str | None, stores: list[dict]) -> dict:
     """What GET /me/buy-settings answers: the saved choices, with the stores as the person typed them."""
     return {"country": country, "country_name": COUNTRIES.get(country) if country else None,
             "stores": [{"id": f"store-{i + 1}", "name": s["name"], "url": s["url"], "search_url": s.get("search_url"),
-                        "host": urlsplit(s["url"]).hostname} for i, s in enumerate(stores)],
+                        "host": _shown_host(s["url"])} for i, s in enumerate(stores)],
             "limits": {"stores": MAX_STORES, "name": NAME_MAX, "address": URL_MAX, "placeholder": PLACEHOLDER}}
 
 
@@ -262,7 +285,7 @@ def menu(card: str, country: str | None, stores: list[dict]) -> dict:
         "more_shops": [shop_row(SHOPS[i], card) for i in more],
         "locator": {"name": LOCATOR_NAME, "url": LOCATOR_URL, "terms": LOCATOR_TERMS, "link_format_checked": LOCATOR_CHECKED,
                     "opens": "the official store finder's own page: type your town or postcode there"},
-        "scryfall": {"name": "Scryfall", "url": "https://scryfall.com/search?q=" + quote_plus(f'!"{front_face(card)}"'),
+        "scryfall": {"name": "Scryfall", "url": "https://scryfall.com/search?q=" + quote_plus('!"' + front_face(card).replace('"', "") + '"'),
                      "opens": "the card's page on Scryfall, which has its own buy links"},
         "notice": FOOTER,
         "prices": "No price, stock or shipping is shown: the Vault fetches nothing from any shop.",

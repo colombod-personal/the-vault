@@ -102,6 +102,16 @@ def test_a_typed_store_opens_its_page_or_searches_for_the_card():
 GOOD = {"name": "Aldershot Game Shop", "url": "https://aldershotgames.example.co.uk/", "search_url": "https://aldershotgames.example.co.uk/search?q={card}"}
 
 
+def test_invisible_formatting_characters_are_dropped_from_a_name_and_a_shown_host_is_the_one_a_browser_uses():
+    assert b.clean_store({"name": "Shop\u202egnp.exe\u200b", "url": "https://shop.example.com/"})["name"] == "Shopgnp.exe"
+    row = b.store_row(0, {"name": "S", "url": "https://k\u00e4rtchen.example/", "search_url": None})
+    assert row["host"] == "xn--krtchen-5wa.example"  # punycode, so a look-alike letter is not shown as the plain one
+
+
+def test_a_quote_in_a_card_name_cannot_change_the_scryfall_search_text():
+    assert b.menu('He said "hi"', None, [])["scryfall"]["url"] == "https://scryfall.com/search?q=%21%22He+said+hi%22"
+
+
 def test_a_good_store_is_kept_as_typed():
     assert b.clean_store(GOOD) == GOOD
     assert b.clean_store({"name": "  A   B ", "url": "https://shop.example.com"})["name"] == "A B"
@@ -116,6 +126,10 @@ def test_a_good_store_is_kept_as_typed():
     ("url", "https://localhost/"), ("url", "https://10.0.0.1/"), ("url", "https://shop/"), ("url", "https://-bad.example.com/"),
     ("url", "https://shop.example.com:8443/"), ("url", "https://shop .example.com/"), ("url", "https://shop.example.com/\npath"),
     ("url", "https://" + "a" * 300 + ".example.com/"), ("url", ""),
+    ("url", "https://[x/"), ("url", "https://good.com\uff0fevil.example/"), ("url", "https://\u2100.com/"),   # urlsplit cannot read them: a reason, not a 500
+    ("url", "https://0x7f.0.0.1/"), ("url", "https://0x7f.1/"), ("url", "https://2130706433/"), ("url", "https://foo.localhost/"),
+    ("url", "https://printer.local/"), ("url", "https://router.home.arpa/"),         # an address in any spelling a browser reads, or a local name
+    ("url", "https://{card}.example.com/"), ("url", "https://shop.example.com/{card}"),  # {card} belongs in the search address only
     ("name", ""), ("name", "x" * 81), ("name", "bad\x00name"),
     ("search_url", "https://shop.example.com/search"),     # no {card}
     ("search_url", "https://shop.example.com/{card}/{card}"),

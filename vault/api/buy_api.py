@@ -14,10 +14,12 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from .. import buy_links
-from ..models import BuySettings, User, utcnow
+from ..models import BuySettings, IdempotentRequest, User, utcnow
 from ..provenance import Provenance
 from ..ratelimit import per_user
 from .hal import link, page_body, paginate
@@ -143,10 +145,10 @@ def build_router(get_db, current_user, account_user) -> APIRouter:
             raise HTTPException(422, str(exc)) from None
 
         def run() -> dict:
-            row = db.get(BuySettings, user.id)
-            if row is None:
-                row = BuySettings(user_id=user.id, country=None, stores=[])
-                db.add(row)
+            if not (sent & {"country", "stores"}):
+                return settings_body(db, user)  # nothing to save: no row is made
+            db.execute(pg_insert(BuySettings).values(user_id=user.id, country=None, stores=[], updated_at=utcnow()).on_conflict_do_nothing())
+            row = db.scalars(select(BuySettings).where(BuySettings.user_id == user.id).with_for_update()).one()
             if "country" in sent:
                 row.country = country
             if stores is not None:
@@ -155,7 +157,8 @@ def build_router(get_db, current_user, account_user) -> APIRouter:
             db.flush()
             return settings_body(db, user)
 
-        return idempotent(request, db, user, 200, run)
+        # The stored answer of a retried save holds no country and no store (it would outlive "Remove"): a replay is rebuilt from the live row.
+        return idempotent(request, db, user, 200, run, redact=lambda body: {"saved": True}, replay=lambda stored: settings_body(db, user))
 
     @router.delete("/me/buy-settings", tags=["buy"], summary="Remove everything saved about where you buy")
     def delete_settings(request: Request, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
@@ -163,7 +166,8 @@ def build_router(get_db, current_user, account_user) -> APIRouter:
         row = db.get(BuySettings, user.id)
         if row is not None:
             db.delete(row)
-            db.commit()
+        db.execute(delete(IdempotentRequest).where(IdempotentRequest.user_id == user.id, IdempotentRequest.endpoint == f"PUT {V1}/me/buy-settings"))
+        db.commit()
         return {"deleted": row is not None}
 
     @router.get("/buy/countries", tags=["buy"], response_model=CountryPage, response_model_by_alias=True,
