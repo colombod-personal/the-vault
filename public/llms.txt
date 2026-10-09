@@ -237,6 +237,11 @@ be revoked (Account → Connected apps for OAuth).
     edition can be read: another `version` is refused with the current one named); `rules_changes` compares the previous
     edition with the current one (both read live from Wizards' CDN, nothing kept): the rules added, removed, renumbered and
     changed, each changed one with its first changed sentence, plus the rulings and legality changes since
+  - Limited statistics: `get_limited_card_stats` (set code, `format` PremierDraft or TradDraft, `cards` by name or a `sort`): win rate
+    in hand, games in hand and where a card is last seen and taken, from 17Lands' public data (Magic Arena games and drafts, CC BY 4.0),
+    for the sets the Vault has loaded; each figure has its sample (`too_few` under 200 games in hand, `low`, `ok` from 1,000) and an exact
+    warning, and the answer's `attribution` is the credit to repeat. Computed by the Vault from 17Lands' counts, so it can differ from
+    17lands.com; Arena data, not paper; a correlation, not proof a card wins; never a grade or a "best pick"; not endorsed by 17Lands
   - the expert council (the same experts the plugin installs): `council_brief` (the panel for a format and
     goal, each member's brief, the chair's procedure), `expert_brief` (one expert)
   - deck analysis, computed by the Vault: `deck_stats` (with a Commander Bracket floor from Wizards' published rules;

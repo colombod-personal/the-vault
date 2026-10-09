@@ -83,6 +83,7 @@ All collection tools also read a collection someone shared with you (`share_id`,
 | Action | UI place | REST route | MCP tool | Scope | Gap |
 |---|---|---|---|---|---|
 | Card details, rulings | The card drawer (click a card in Browse, the Vault tab or a deck): image, oracle text, artist credit; rulings are not shown in the web app | `/catalog/cards`, `/cards/{id}/rulings`, `/cards/lookup` | `get_card_oracle`, `get_rulings`, `lookup_cards` | read | partly: no rulings in the web app |
+| Limited statistics for a set: win rates, games in hand and pick positions of its cards, each with its sample and the 17Lands credit | none: the web app has no Limited view; the credit is on the Credits page, in its Limited statistics section (a page of its own, not part of the app) | `/catalog/limited/{set}` (`format`, `cards`, `sort`, `limit`, `cursor`) | `get_limited_card_stats` | read | partly: assistants only |
 | Rules search, a rule | none: the web app has no rules view (“Help” explains the app, not the rules) | `/rules/search`, `/rules`, `/rules/term/{name}`, `/rules/{n}` | `search_rules`, `rules_outline`, `find_rules_term`, `get_rule`, `verify_citation`, `present_steps` | read | partly: assistants only |
 | What changed in the rules, rulings and legality since the previous edition (#107) | none: assistants only | `/rules/changes` | `rules_changes` | read | partly: assistants only |
 

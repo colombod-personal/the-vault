@@ -6,6 +6,7 @@
 """
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 from alembic.autogenerate import compare_metadata
@@ -153,3 +154,35 @@ def test_a_database_ahead_of_the_code_starts_and_is_left_alone(database, caplog)
     assert _revision(database) == "9999"  # not downgraded, not stamped back
     assert "database_ahead_of_code" in caplog.text
     assert not database.pending_migration
+
+
+def test_the_limited_statistics_migration_goes_down_and_up_again(blank_database_url):
+    """0120 (#178) has a way back, like 0111 and 0118: down to 0118 drops its three tables and their indexes, up creates them again."""
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import inspect
+
+    import vault.db
+    from vault.db import Database
+
+    database = Database(blank_database_url)
+    config = Config()
+    config.set_main_option("script_location", str(Path(vault.db.__file__).parent / "migrations"))
+    names = {"limited_game_stats", "limited_pick_stats", "limited_sources"}
+
+    def step(direction, revision):
+        with database.engine.begin() as conn:
+            config.attributes["connection"] = conn
+            getattr(command, direction)(config, revision)
+
+    try:
+        step("upgrade", "0120")
+        assert names <= set(inspect(database.engine).get_table_names())
+        step("downgrade", "0118")
+        assert not names & set(inspect(database.engine).get_table_names())
+        step("upgrade", "0120")
+        tables = set(inspect(database.engine).get_table_names())
+        assert names <= tables
+        assert {i["name"] for i in inspect(database.engine).get_indexes("limited_game_stats")} == {"ix_limited_game_stats_oracle_id"}
+    finally:
+        database.engine.dispose()
