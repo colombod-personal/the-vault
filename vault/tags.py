@@ -76,23 +76,32 @@ def oracle_ids_for(db: Session, user: User, tag: str) -> set[str]:
     return set(db.scalars(select(TagAssignment.oracle_id).where(TagAssignment.user_id == user.id, TagAssignment.tag == tag)))
 
 
-def tags_of(db: Session, user: User, oracle_ids: set[str]) -> dict[str, list[str]]:
-    """The person's tags on these cards, in name order."""
+def details_of(db: Session, user: User, oracle_ids: set[str]) -> dict[str, list[dict]]:
+    """The person's tags on these cards in name order, each with who wrote it: ``{tag, source, source_detail}`` (``source_detail``
+    is the app's name for an assistant's tag, so the app can mark it as the assistant's and never as the person's own)."""
     if not oracle_ids:
         return {}
-    out: dict[str, list[str]] = {}
-    for oracle_id, tag in db.execute(select(TagAssignment.oracle_id, TagAssignment.tag).where(
+    out: dict[str, list[dict]] = {}
+    for oracle_id, tag, source, detail in db.execute(select(
+            TagAssignment.oracle_id, TagAssignment.tag, TagAssignment.source, TagAssignment.source_detail).where(
             TagAssignment.user_id == user.id, TagAssignment.oracle_id.in_(oracle_ids)).order_by(TagAssignment.tag)):
-        out.setdefault(oracle_id, []).append(tag)
+        out.setdefault(oracle_id, []).append({"tag": tag, "source": source, "source_detail": detail})
     return out
 
 
+def tags_of(db: Session, user: User, oracle_ids: set[str]) -> dict[str, list[str]]:
+    """The person's tags on these cards, in name order."""
+    return {oid: [d["tag"] for d in rows] for oid, rows in details_of(db, user, oracle_ids).items()}
+
+
 def stamp(db: Session, user: User) -> str:
-    """Changes whenever the person's tags do (a tag added, removed or renamed): part of the ETag of answers that show tags."""
-    count, newest, names = db.execute(select(func.count(), func.coalesce(func.max(TagAssignment.id), 0),
-                                             func.coalesce(func.sum(func.hashtext(TagAssignment.tag)), 0))
-                                      .where(TagAssignment.user_id == user.id)).one()
-    return f"t{count}.{newest}.{names}"
+    """Changes whenever the person's tags do (a tag added, removed or renamed, or an assistant's tag accepted): part of the ETag of
+    answers that show tags."""
+    count, newest, names, who = db.execute(select(
+        func.count(), func.coalesce(func.max(TagAssignment.id), 0), func.coalesce(func.sum(func.hashtext(TagAssignment.tag)), 0),
+        func.coalesce(func.sum(func.hashtext(TagAssignment.source + func.coalesce(TagAssignment.source_detail, ""))), 0))
+        .where(TagAssignment.user_id == user.id)).one()
+    return f"t{count}.{newest}.{names}.{who}"
 
 
 def assign(db: Session, user: User, tag: str, cards: list[tuple[str, str, str]], writer: Writer) -> tuple[int, int, int]:

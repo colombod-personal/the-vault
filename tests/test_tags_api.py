@@ -187,7 +187,7 @@ def test_a_shared_collection_shows_no_tags_and_cannot_be_filtered_by_them(client
     sign_in_as(client, "bob@example.com")
     share_id = client.post("/api/v1/shares/accept", json={"token": token}).json()["id"]
     base = f"/api/v1/shared/{share_id}/collection/cards"
-    assert client.get(base).status_code == 200 and all("tags" not in c for c in client.get(base).json()["items"])
+    assert client.get(base).status_code == 200 and all("tags" not in c and "tags_detail" not in c for c in client.get(base).json()["items"])
     assert client.get(base, params={"tag": "x"}).status_code == 404
 
 
@@ -231,3 +231,36 @@ def test_a_retried_post_with_the_same_key_tags_once(stocked):
     again = stocked.post(f"{T_}/retry/cards", json={"card_ids": ids["Mountain"]}, headers=headers)
     assert first.status_code == again.status_code == 200 and first.json() == again.json() and first.json()["added"] == 1
     assert stocked.get(f"{T_}/retry").json()["cards"] == 1
+
+
+def test_each_card_says_who_wrote_each_tag_on_the_list_and_on_the_detail_and_accepting_changes_the_etag(stocked):
+    """#128: the web app marks an assistant's tag as the assistant's on the card; the source is per card, not per tag."""
+    ids = card_ids(stocked)
+    rw = stocked.post("/api/v1/me/tokens", json={"name": "Claude helper", "scopes": ["read", "write"]}).json()["token"]
+    mine = dict(stocked.cookies.items())
+    stocked.cookies.clear()
+    stocked.post(f"{T_}/idea/cards", json={"card_ids": ids["Mountain"]}, headers={"Authorization": f"Bearer {rw}"})
+    for name, value in mine.items():
+        stocked.cookies.set(name, value)
+    stocked.post(f"{T_}/idea/cards", json={"card_ids": ids["Sol Ring"][:1]})  # the person tags another card with the same tag
+    stocked.post(f"{T_}/plain/cards", json={"card_ids": ids["Mountain"]})
+    items = {c["name"]: c for c in stocked.get(CARDS).json()["items"]}
+    assert items["Mountain"]["tags"] == ["idea", "plain"]
+    assert items["Mountain"]["tags_detail"] == [{"tag": "idea", "source": "assistant", "source_detail": "token 'Claude helper'"},
+                                                {"tag": "plain", "source": "person", "source_detail": None}]
+    assert items["Sol Ring"]["tags_detail"] == [{"tag": "idea", "source": "person", "source_detail": None}]
+    assert stocked.get(f"{CARDS}/{ids['Mountain'][0]}").json()["tags_detail"] == items["Mountain"]["tags_detail"]
+    before = stocked.get(CARDS)
+    assert stocked.post(f"{T_}/idea/cards", json={"card_ids": ids["Mountain"]}).json()["accepted"] == 1
+    after = stocked.get(CARDS, headers={"If-None-Match": before.headers["etag"]})  # accepting moves no count and no name: still a change
+    assert after.status_code == 200 and after.headers["etag"] != before.headers["etag"]
+    assert {c["name"]: c for c in after.json()["items"]}["Mountain"]["tags_detail"][0]["source"] == "person"
+
+
+def test_the_collection_version_moves_with_the_tags_so_a_client_cache_by_version_never_shows_old_tags(stocked):
+    ids = card_ids(stocked)
+    first = stocked.get("/api/v1/collection")
+    stocked.post(f"{T_}/trade/cards", json={"card_ids": ids["Mountain"]})
+    second = stocked.get("/api/v1/collection", headers={"If-None-Match": first.headers["etag"]})
+    assert second.status_code == 200 and second.json()["version"] != first.json()["version"]
+    assert stocked.get("/api/v1/collection").json()["version"] == second.json()["version"]  # and only when they change
