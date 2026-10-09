@@ -293,9 +293,9 @@ After a run, change the status line at the top of this section to the result and
 **Status: NOT RUN on any surface.** `tests/test_setup_pages.py` proves what the pages and the `vault_start` prompt contain; it cannot
 show that a host follows them. Only a person with a clean account on the host can run the procedure below (`docs/onboarding.md`,
 "As built", lists what is still unverified). Whoever runs it fills one record per surface in the issue of its host (#153 Claude, #154
-ChatGPT, #155 Codex, #156 GitHub Copilot) and copies the verdict here; an assistant must not fill a row it did not see happen.
+ChatGPT, #155 Codex, #156 GitHub Copilot, #362 Perplexity) and copies the verdict here; an assistant must not fill a row it did not see happen.
 
-### Procedure (per surface: Claude Code, claude.ai, Claude Desktop, ChatGPT web, ChatGPT desktop app, Codex CLI, Codex IDE extension, Codex cloud, Copilot CLI, VS Code, Copilot desktop app)
+### Procedure (per surface: Claude Code, claude.ai, Claude Desktop, ChatGPT web, ChatGPT desktop app, Codex CLI, Codex IDE extension, Codex cloud, Copilot CLI, VS Code, Copilot desktop app, Perplexity web, Comet)
 
 1. **Start clean.** A Vault account with a small collection imported and no decks (a new account), on a host account that has never seen
    The Vault. In the Vault: Account, Connected apps has nothing; on the host: no connector, server or plugin called vault or The Vault. Start a

@@ -3,9 +3,12 @@
 - a generated page per host at /setup/<host>.md (scripts/build_plugin.py), with the fixed layout, production address only,
   every step tagged ASSISTANT or PERSON, no secret in chat, nothing installed that is not named;
 - the MCP prompt `vault_start` (vault/api/mcp_catalog.py): listed, read-only, names only real read tools;
-- the Connect page's Copy setup prompt, and llms.txt, link to every page.
+- the Connect page's Copy setup prompt, and llms.txt, link to every page;
+- Perplexity (#362): the page, its Connect page card and its llms.txt steps carry the wording seen in the real run, say "not verified yet"
+  for Comet, and ask for no secret in chat.
 """
 
+import html
 import json
 import re
 import sys
@@ -23,10 +26,10 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import build_plugin as bp  # noqa: E402
 
-HOSTS = ["claude", "chatgpt", "codex", "copilot"]
+HOSTS = ["claude", "chatgpt", "codex", "copilot", "perplexity"]
 HEADINGS = ["What this does", "Before you start", "Do this", "Check it worked", "If it fails", "Then", "Never"]
 # the surfaces named in #153 (Claude Code, claude.ai and Desktop), #154 (ChatGPT web and desktop), #155 (Codex CLI, IDE, cloud)
-# and #156 (GitHub Copilot desktop app, VS Code, CLI): the page each lives on, and the words of its row in the design's host table
+# #156 (GitHub Copilot desktop app, VS Code, CLI) and #362 (Perplexity web, Comet): the page each lives on, and the words of its row in the design's host table
 ISSUE_SURFACES = {
     "Claude Code": ("claude", "Claude Code"),
     "claude.ai and Claude Desktop": ("claude", "claude.ai, Claude Desktop"),
@@ -38,9 +41,11 @@ ISSUE_SURFACES = {
     "GitHub Copilot desktop app": ("copilot", "GitHub Copilot desktop app"),
     "GitHub Copilot CLI": ("copilot", "GitHub Copilot CLI"),
     "VS Code (GitHub Copilot)": ("copilot", "VS Code (GitHub Copilot)"),
+    "Perplexity (web)": ("perplexity", "Perplexity (web)"),
+    "Comet (Perplexity's browser)": ("perplexity", "Comet (Perplexity's browser)"),
 }
 DOC_HOSTS = {"claude.ai", "code.claude.com", "support.claude.com", "claude.com", "learn.chatgpt.com", "help.openai.com",
-             "docs.github.com", "code.visualstudio.com", "github.com"}
+             "docs.github.com", "code.visualstudio.com", "github.com", "www.perplexity.ai"}
 # the only things a page may tell anyone to install: the Vault's plugin and skills, from this repository
 ALLOWED_INSTALLS = {"claude plugin marketplace add colombod-personal/the-vault", "claude plugin install the-vault@the-vault",
                     "npx skills add colombod-personal/the-vault"}
@@ -69,7 +74,7 @@ def outside_never(text: str) -> str:
 # ---- the host table and the pages -----------------------------------------------------------------------------------
 
 
-def test_the_host_table_has_a_row_for_every_surface_the_four_issues_name():
+def test_the_host_table_has_a_row_for_every_surface_the_issues_name():
     doc = (ROOT / "docs" / "onboarding.md").read_text(encoding="utf-8")
     table = doc.split("## What each host can do", 1)[1].split("**Deep links", 1)[0]
     rows = [l for l in table.splitlines() if l.startswith("| ") and not l.startswith("| Host") and not l.startswith("|---")]
@@ -183,6 +188,10 @@ def test_what_the_design_table_calls_unverified_is_said_to_be_unverified_on_the_
     assert "not verified yet" in claude.split("### claude.ai and Claude Desktop", 1)[1]  # the prefilled link has not run on a real account
     for host in HOSTS:
         assert "not run in" in page(host)  # the page says it was written from the host's documentation and has not been run there yet
+    perplexity = page("perplexity")
+    assert perplexity.count("not verified yet") >= 4  # plans, tool permission defaults, other modes, Comet
+    assert "not verified yet" in perplexity.split("### Comet (Perplexity's browser)", 1)[1].split("\n## ", 1)[0]
+    assert "Where this page comes from" in perplexity and "2026-10-09" in perplexity and "#362" in perplexity  # a real run, not documentation
 
 
 def test_the_commands_on_the_pages_are_the_ones_the_connect_page_is_generated_from():
@@ -305,6 +314,64 @@ def test_the_claude_card_has_the_prefilled_add_connector_link():
     assert bp.claude_connector_link().replace("&", "&amp;") in card
     vscode = connect.split('id="vscode"', 1)[1].split("</div>", 1)[0]
     assert bp.vscode_install_link().replace("&", "&amp;") in vscode
+
+
+# ---- Perplexity (#362): the wording seen in the real run of 2026-10-09 ---------------------------------------------------
+
+PERPLEXITY_SEEN = [
+    "https://www.perplexity.ai/computer/connectors", "Custom connector (Remote)", "Add MCP connector", "MCP server URL",
+    f"{bp.HOST}/api/mcp", "you understand custom connectors can introduce risks",
+    "Add connector", "Connect Perplexity (www.perplexity.ai) to your Vault?", "Allow", "Connected", "Disable, Always ask or Allow",
+    "Computer mode", "list_external_tools", "describe_external_tools", "call_external_tool", "generic plug icon",
+]
+
+
+def test_the_perplexity_page_carries_what_perplexity_showed_in_the_real_run():
+    text = page("perplexity")
+    for seen in PERPLEXITY_SEEN:
+        assert seen in text, seen
+    assert "Pro" in text and "name the Vault" in text
+    assert "no icon field" in text  # the plug icon is Perplexity's limit, said in the page and in the failure table
+    assert "plug icon" in sections(text)["If it fails"]
+
+
+def test_the_perplexity_page_leaves_comet_unverified_and_cites_no_documentation_it_did_not_read():
+    text = page("perplexity")
+    comet = text.split("### Comet (Perplexity's browser)", 1)[1].split("\n## ", 1)[0]
+    assert "not verified yet" in comet and "Do not try to work around it" in comet
+    assert "Documentation this page follows" not in text  # no documentation page was read: the page says its source is the run
+    urls = set(re.findall(r"https?://[^\s)`>\"'|]+", text))
+    assert {u.rstrip(".,;:") for u in urls} <= {"https://www.perplexity.ai/computer/connectors", bp.HOST, f"{bp.HOST}/api/mcp"}
+
+
+def test_perplexity_connect_page_card_and_llms_txt_give_the_same_steps_and_the_connector_url():
+    connect = (ROOT / "public" / "connect.html").read_text(encoding="utf-8")
+    llms = (ROOT / "public" / "llms.txt").read_text(encoding="utf-8")
+    card = connect.split('id="perplexity"', 1)[1].split('id="use-it"', 1)[0]
+    assert f"<code>{bp.HOST}/api/mcp</code>" in card and "Copy" in card  # the address, with a copy button
+    llms_part = llms.split("- Perplexity (custom remote connector", 1)[1].split("\n- ", 1)[0]
+    assert f"`{bp.HOST}/api/mcp`" in llms_part
+    for step in bp.PERPLEXITY_HOW:
+        assert html.escape(step) in card, step[:60]
+        assert step in llms_part, step[:60]
+    for seen in ("Custom connector (Remote)", "Add MCP connector", "Add connector", "Computer mode", "call_external_tool", "Comet: not verified yet"):
+        assert seen in card and seen in llms_part, seen
+    assert 'id="setup-perplexity"' in connect and "/setup/perplexity.md" in llms  # beside the other one-prompt setups
+
+
+def test_perplexity_asks_for_nothing_secret_and_the_failure_table_has_its_rows():
+    text = page("perplexity")
+    assert "Bearer" not in text and "vault_pat_" not in text
+    table = sections(text)["If it fails"].lower()
+    for needle in ("custom connector (remote) is not found", "plug icon", "computer mode", "list_external_tools", "always ask"):
+        assert needle in table, needle
+    assert "Allow" in sections(text)["Do this"]  # the sign-in and Allow are the Vault's own page in the browser, never the chat
+
+
+def test_without_oauth_perplexity_says_coming_soon_and_offers_no_other_route(monkeypatch):
+    monkeypatch.setattr(bp, "OAUTH_READY", False)
+    text = bp.setup_page("perplexity")
+    assert "Coming soon" in text and not steps(sections(text)["Do this"])
 
 
 # ---- the MCP prompt vault_start -------------------------------------------------------------------------------------
