@@ -1308,7 +1308,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         elif unavailable:
             raise HTTPException(503, "Scryfall didn't answer. Try again shortly.", headers={"Retry-After": "30"})
         after = analytics.refresh_state(db, user.id, today, cursor, body.force, limit=0)
-        version = hashlib.sha256(view_version(db, user).encode()).hexdigest()[:16]
+        version = hashlib.sha256((view_version(db, user) + f".{card_tags.stamp(db, user)}").encode()).hexdigest()[:16]  # as the summary's (tags move it too)
         prices_as_of = db.scalar(select(func.max(PriceSnapshot.day)))
         return {"done": after["total"] - after["remaining"], "total": after["total"], "remaining": after["remaining"],
                 "processed": processed, "not_found": not_found, "unmatched_rows": after["unmatched"],
