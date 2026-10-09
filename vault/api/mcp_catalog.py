@@ -147,7 +147,7 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
         Tool("simulate_draws", "How a deck's mana curve plays: a few sample games of the first turns (opening hand, draws, land "
              "drops, what gets cast) and the odds over many games: land drops made, mana by turn, cards in hand, the chance of "
              "discarding to hand size, 'five mana by turn 5'. Says when discarding or a big hand is the deck's plan, and lists "
-             "what the simulation does not model. Explain the numbers in plain words; they are a hint, not a promise." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
+             "what the simulation does not model. `margin_points` is how far a percentage can be off at that many games. Explain the numbers in plain words; they are a hint, not a promise." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
              {"text": deck, "deck_id": DECK_ID, "format": fmt,
               "on_the_play": {"type": "boolean", "default": True, "description": "Going first"},
               "turns": {"type": "integer", "minimum": 1, "maximum": 10, "default": 6},

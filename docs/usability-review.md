@@ -70,6 +70,7 @@ Measured with `scripts/measure_phone.js` at 390 x 844, signed in, on a local Vau
 | Decks (library) | 15 | 0 | 39 | 0 | no |
 | A saved deck, tab Cards | 33 | 0 | 118 | 0 | no |
 | the deck's Stats, Legality, Upgrades, Combos, Buy list, History tabs | 20 to 24 each | 0 | 0 small | 0 | no |
+| the deck's Opening turns tab (#138, 2026-10-09; a Commander deck, first game open) | 33 | 0 | 450 | 0 | no |
 | Lab | 24 | 0 | 158 | 0 | no |
 | Graph | 37 | 0 | 71 | 0 | no |
 | Value | 18 | 0 | 256 | 0 | no |
