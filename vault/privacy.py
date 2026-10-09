@@ -88,9 +88,13 @@ def _last_reset(db: Session, user: User) -> dict | None:
     snap = db.get(ResetSnapshot, user.id)
     if snap is None:
         return None
-    payload = collection_reset._load(snap)
+    try:
+        payload = collection_reset._load(snap)
+    except collection_reset.SnapshotUnreadable as exc:  # corrupt or of a format this code does not know: say so, never fail the export
+        return {"reset_at": snap.created_at, "can_be_undone_until": snap.expires_at, "what": snap.summary, "readable": False,
+                "note": str(exc)}
     columns = payload["entry_columns"]
-    return {"reset_at": snap.created_at, "can_be_undone_until": snap.expires_at, "what": snap.summary,
+    return {"reset_at": snap.created_at, "can_be_undone_until": snap.expires_at, "what": snap.summary, "readable": True,
             "removed_rows": [dict(zip(columns, row)) for row in payload["entries"]],
             "removed_tags": [dict(zip(payload.get("tag_columns", []), row)) for row in payload.get("tags", [])],
             "removed_notes": [dict(zip(payload.get("note_columns", []), row)) for row in payload.get("notes", [])]}

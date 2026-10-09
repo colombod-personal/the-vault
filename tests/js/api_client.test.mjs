@@ -357,9 +357,9 @@ test('the web app resets in two steps: a preview with no key and no confirmation
   assert.deepEqual(await api.resetPreview(options), seen);
   assert.deepEqual(calls[0], { url: '/api/v1/collection/reset', method: 'POST', body: options });
   assert.equal(headers[0]['Idempotency-Key'], undefined);  // a preview writes nothing
-  await api.resetApply(options, 'tok-123456');
-  await api.resetApply(options, 'tok-123456');
-  assert.deepEqual(calls[1].body, { ...options, confirmation: 'tok-123456' });
+  await api.resetApply(options, 'tok-123456', 'RESET');
+  await api.resetApply(options, 'tok-123456', 'RESET');
+  assert.deepEqual(calls[1].body, { ...options, confirmation: 'tok-123456', typed: 'RESET' });  // the word the person typed goes with it
   assert.deepEqual([headers[1]['Idempotency-Key'], headers[2]['Idempotency-Key']], ['uuid-1', 'uuid-2']);  // each confirm is its own request
 });
 

@@ -446,15 +446,23 @@ What stops an assistant resetting without the person:
   expiry (15 minutes); apply recomputes the preview and refuses (409) anything that differs, so a changed collection, other options or
   another scope are stale. An assistant that previews and confirms in one go is still a write-scope app doing what it was allowed: the
   protection against that is the one every write tool has (the host's approval of a destructive tool, the server instructions and the
-  skill that say to show the numbers and the export link and to wait for the person's exact yes). **On the web** the person must also
-  type `RESET`, as account deletion asks for `DELETE`.
-- **It is not final.** For 7 days the latest reset keeps a snapshot (`reset_snapshots`) and `undo_collection_reset` restores the same
-  rows, buckets, folders and baselines, as long as nothing else changed the collection (an import, an edit or a move ends the undo:
-  it is refused rather than guessed). `no_undo` keeps none; the preview offers the export of the scope as a download first. The reset
-  is recorded in the import history under the app's name (`imports.kind = reset`).
+  skill that say to show the numbers and the export link and to wait for the person's exact yes). **The person's own session** (the
+  web or a native app: the `account` scope, which no OAuth app or token has) must also send `typed: "RESET"` exactly with the
+  confirmation, and the server refuses (422) without it, as account deletion asks for `DELETE`.
+- **What an app cannot choose** (review of 2026-10-09: a prompt-injected assistant with write scope could preview, take the token and
+  apply in one turn). An OAuth app or a personal token is refused (422, preview and apply) when it asks for `no_undo`, `keep_tags: false`
+  or `keep_history: false`, and the MCP tool does not offer them: making a reset permanent, or wiping the person's tags, notes and
+  history, is the person's choice in the Account panel. Tests: `tests/test_collection_reset.py`.
+- **The undo is best-effort, not a guarantee.** For 7 days the latest reset keeps a snapshot (`reset_snapshots`) and
+  `undo_collection_reset` restores the same rows, buckets, folders and baselines, **but only while nothing else has changed the
+  collection**: any later write that moves the collection version (an import, an edit, a move) ends the undo, which is then refused
+  rather than guessed. A hostile assistant that resets and then writes once more has therefore made the reset permanent as far as the
+  undo goes; the export the preview links, and the person's own app file, are the real backup. The answer says so in one sentence. The
+  reset is recorded in the import history under the app's name (`imports.kind = reset`).
 - **Tenancy.** The scope is the caller's: another person's `bucket_id` is a 404, as is another person's snapshot (the snapshot is
   keyed by the caller's id, there is no id to guess). Rate limit 10 a minute per person; `Idempotency-Key` honoured.
 
-Residual: a connected app with write scope can reset after a confirm, as it can already import a file with `replace_everything`; what the
-person can still do is undo it for 7 days, or import the export. The snapshot holds the same personal data as the copies it removed, so
+Residual: a connected app with write scope can reset the copies after a confirm, as it can already import a file with
+`replace_everything`; a hostile one can also follow it with another write and so end the undo (above), leaving the export and the
+person's own app file as the way back. It cannot clear tags, notes or history, nor drop the snapshot. The snapshot holds the same personal data as the copies it removed, so
 it is in the data map, the export (`last_reset.json`), erasure and the daily retention job (`docs/gdpr.md`).

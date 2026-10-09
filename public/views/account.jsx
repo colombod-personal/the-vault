@@ -736,7 +736,7 @@ function ResetSection({ onCollectionChanged }) {
   };
   const ask = () => run(async () => { setNote(null); setPreview(await api.resetPreview(body)); setTyped(''); });
   const doReset = () => run(async () => {
-    const res = await api.resetApply(body, preview.confirmation);
+    const res = await api.resetApply(body, preview.confirmation, typed);
     setPreview(null); setTyped('');
     setNote(`Reset: ${rsPlural(res.removed.copies, 'copy', 'copies')} removed from ${res.scope.bucket ? res.scope.bucket.name : 'the whole inventory'}. ` +
             (res.undo.available ? `You can undo it until ${new Date(res.undo.until).toLocaleDateString()}.` : 'It cannot be undone.'));

@@ -261,6 +261,14 @@ owner: each is reversible by a later change and changes nothing agreed; say so o
   assistant edit or move since ends the undo), the scope must still be empty, and every bucket the copies lived in must still exist
   (deleting an emptied bucket ends the undo). Anything else would mean guessing where copies go, so it is refused (409) with the reason
   (`GET /collection/reset` says `can_undo` and `why_not`). The snapshot is used up by the undo.
+- **What an app may choose (review of 2026-10-09).** `no_undo`, `keep_tags: false` and `keep_history: false` are the person's, from the
+  web app only: an OAuth app or token is refused (422) and the MCP tool does not offer them. The person's session must also send
+  `typed: "RESET"` (422 without). The undo is best-effort: any later write ends it. Reading the snapshot (`GET`, 30 a minute) never opens
+  the payload (the summary keeps the bucket ids); a corrupt or unknown-format snapshot (`v`) is reported (`undo` 409 "cannot be read",
+  the export lists it as unreadable) and is replaced by the next reset or the retention job. Known, accepted: with `keep_tags: false`
+  the snapshot reads the tags and the delete removes them in one transaction but without a lock on them, so a tag another request
+  writes in those milliseconds is cleared without being in the snapshot; the confirmation's digest of the tags and the person's own
+  typed step make that a window of one request.
 - **Scopes and limits.** Write scope for the preview too (the preview is step one of a destructive action; it is not in `READ_ONLY_POSTS`),
   10 a minute per person (429), `Idempotency-Key` honoured, no account power: a connected app with write scope can reset after a confirm,
   as it can already import with `replace_everything` (`docs/mcp-oauth-threat-model.md`, "Resetting the collection").

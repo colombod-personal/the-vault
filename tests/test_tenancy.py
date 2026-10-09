@@ -371,11 +371,11 @@ def test_reset_answers_404_for_another_persons_bucket_and_snapshot(client):
     client.post("/api/v1/imports", files={"file": ("c.csv", csv, "text/csv")})
     bucket = client.get("/api/v1/collection/buckets").json()["items"][0]["id"]
     seen = client.post("/api/v1/collection/reset", json={"bucket_id": bucket}).json()
-    assert client.post("/api/v1/collection/reset", json={"bucket_id": bucket, "confirmation": seen["confirmation"]}).status_code == 200
+    assert client.post("/api/v1/collection/reset", json={"bucket_id": bucket, "typed": "RESET", "confirmation": seen["confirmation"]}).status_code == 200
     sign_in("other@localhost")
     client.post("/api/v1/imports", files={"file": ("c.csv", csv, "text/csv")})
     assert client.post("/api/v1/collection/reset", json={"bucket_id": bucket}).status_code == 404
-    assert client.post("/api/v1/collection/reset", json={"bucket_id": bucket, "confirmation": seen["confirmation"]}).status_code == 404
+    assert client.post("/api/v1/collection/reset", json={"bucket_id": bucket, "typed": "RESET", "confirmation": seen["confirmation"]}).status_code == 404
     assert client.get("/api/v1/collection/reset").status_code == 404
     assert client.post("/api/v1/collection/reset/undo", json={"confirm": True}).status_code == 404
     assert client.get("/api/v1/collection").json()["copies"] == 3  # their own copies were never touched

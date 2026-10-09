@@ -48,6 +48,9 @@ TAG_COLUMNS = ("oracle_id", "tag", "source", "source_detail", "vault_metadata", 
 NOTE_COLUMNS = ("oracle_id", "source", "source_detail", "vault_metadata", "created_at", "updated_at")
 
 
+FORMAT = 1  # the snapshot payload's ``v``; a reader refuses any other
+
+
 class ResetError(ValueError):
     """The reset (or its undo) cannot be done as asked. ``status`` is the HTTP status the API answers with."""
 
@@ -163,8 +166,7 @@ def _assess(db: Session, user: User, options: ResetOptions, secret: str, now: fl
                            "snapshot for the undo."},
         "undo": {"available": not options.no_undo and refusal is None, "days": SNAPSHOT_DAYS, "snapshot_bytes": snapshot_bytes,
                  "snapshot_json_bytes": raw_bytes, "limit_bytes": MAX_SNAPSHOT_BYTES,
-                 "note": (f"The reset can be undone for {SNAPSHOT_DAYS} days, as long as nothing else changes the collection."
-                          if not options.no_undo else "no_undo: nothing is kept, the reset cannot be undone."),
+                 "note": (UNDO_WORTH if not options.no_undo else "no_undo: nothing is kept, the reset cannot be undone."),
                  "replaces_earlier_snapshot": {"scope": current.summary.get("scope"), "created_at": _iso(current.created_at)}
                  if current is not None and not options.no_undo else None},
         "collection_version": version,
@@ -181,6 +183,10 @@ def _assess(db: Session, user: User, options: ResetOptions, secret: str, now: fl
         out["confirmation"] = _token(secret, user, options, version, state, expires)
         out["expires_in_seconds"] = TOKEN_SECONDS
     return out, prep, rows, state
+
+
+UNDO_WORTH = (f"It can be undone for {SNAPSHOT_DAYS} days, but only until anything else changes the collection (an import, an edit "
+              "or a move), so keep the export too: the undo is best-effort, not a guarantee.")
 
 
 def _export_link(bucket_id: int | None) -> str:
@@ -213,7 +219,7 @@ def _capture(db: Session, user: User, scope: Bucket | None, rows: list[Entry], o
     """Everything the reset removes or replaces, as a JSON-ready dict (see ``restore``)."""
     bucket_id = scope.id if scope else None
     payload: dict = {
-        "v": 1, "bucket_id": bucket_id,
+        "v": FORMAT, "bucket_id": bucket_id,
         "entry_columns": list(ENTRY_COLUMNS), "entries": [_row(r, ENTRY_COLUMNS) for r in rows],
         "collection_baseline": None, "bucket_baselines": [],
     }
@@ -284,6 +290,7 @@ def apply(db: Session, user: User, options: ResetOptions, confirmation: str, sec
         history_removed = db.execute(delete(Import).where(Import.user_id == user.id, Import.id != imp.id)
                                      .execution_options(synchronize_session=False)).rowcount or 0
     summary = {"scope": scope.name if scope else "the whole inventory", "bucket_id": scope.id if scope else None,
+               "bucket_ids": sorted({r.bucket_id for r in rows} | ({scope.id} if scope else set())),  # so reading never opens the payload
                "rows": removed["rows"], "copies": removed["copies"], "printings": removed["printings"],
                "market_value_usd": removed["market_value_usd"], "tags_removed": tags_removed, "notes_removed": notes_removed,
                "history_entries_removed": history_removed, "keep_tags": options.keep_tags, "keep_history": options.keep_history}
@@ -298,7 +305,7 @@ def apply(db: Session, user: User, options: ResetOptions, confirmation: str, sec
     db.flush()
     return {"applied": True, "reset": imp.id, "scope": seen["scope"], "removed": summary,
             "undo": ({"available": True, "until": _iso(snapshot.expires_at), "days": SNAPSHOT_DAYS,
-                      "note": "POST /collection/reset/undo restores it, as long as nothing else changes the collection."}
+                      "note": "POST /collection/reset/undo restores it. " + UNDO_WORTH}
                      if snapshot else {"available": False, "note": "No snapshot was kept (no_undo)."}),
             "backup": seen["backup"], "_links": {"import": {"href": f"{V1}/imports/{imp.id}"}}}
 
@@ -311,8 +318,20 @@ def current(db: Session, user: User) -> ResetSnapshot | None:
     return snap if snap is not None and snap.expires_at > _now() else None
 
 
+class SnapshotUnreadable(ResetError):
+    """The stored snapshot is corrupt or of a format this code does not know: reported, never a 500; it stays deletable (the next
+    reset or the retention job replaces it)."""
+
+
 def _load(snap: ResetSnapshot) -> dict:
-    return json.loads(zlib.decompress(snap.payload))
+    try:
+        payload = json.loads(zlib.decompress(snap.payload))
+        if not isinstance(payload, dict) or payload.get("v") != FORMAT or not isinstance(payload.get("entries"), list):
+            raise ValueError("unknown format")
+        return payload
+    except (zlib.error, ValueError, TypeError, MemoryError, RecursionError):
+        raise SnapshotUnreadable(f"This snapshot cannot be read, so the reset cannot be undone from it; it will expire on "
+                                 f"{snap.expires_at.date().isoformat()}. Import the export you downloaded instead.") from None
 
 
 def blocker(db: Session, user: User, snap: ResetSnapshot, payload: dict | None = None) -> str | None:
@@ -323,11 +342,12 @@ def blocker(db: Session, user: User, snap: ResetSnapshot, payload: dict | None =
     if version != snap.version_after:
         return ("The collection changed since the reset (an import, an edit made through an assistant, or a move of copies), so "
                 "restoring the removed copies would be ambiguous. Import the export you downloaded instead.")
-    payload = payload or _load(snap)
-    bucket_id = payload["bucket_id"]
+    bucket_id = snap.bucket_id
     if db.scalar(select(func.count()).select_from(Entry).where(*_scope_filter(user, bucket_id))):
         return "There are copies in the reset scope now, so the removed ones cannot be put back without mixing them."
-    wanted = {row[ENTRY_COLUMNS.index("bucket_id")] for row in payload["entries"]} | ({bucket_id} if bucket_id else set())
+    wanted = set((snap.summary or {}).get("bucket_ids") or [])  # from the summary: reading must not open a 20 MB payload
+    if not wanted and payload is not None:
+        wanted = {row[ENTRY_COLUMNS.index("bucket_id")] for row in payload["entries"]} | ({bucket_id} if bucket_id else set())
     have = set(db.scalars(select(Bucket.id).where(Bucket.user_id == user.id, Bucket.id.in_(wanted)))) if wanted else set()
     if wanted - have:
         return "A bucket the copies lived in has been deleted since the reset, so they cannot be put back where they were."

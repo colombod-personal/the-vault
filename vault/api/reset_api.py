@@ -33,6 +33,8 @@ class ResetIn(BaseModel):
                           f"{collection_reset.MAX_SNAPSHOT_BYTES // 1048576} MB")
     confirmation: str | None = Field(None, min_length=8, max_length=600, description="From the preview the person agreed to; "
                                      "without it the call only previews")
+    typed: str | None = Field(None, max_length=20, description="The word RESET, typed by the person: required, exactly, with the "
+                              "confirmation when the caller is the person's own web or native session; apps and tokens have no typed step")
 
 
 class UndoIn(BaseModel):
@@ -44,6 +46,10 @@ def build_router(get_db, current_user, settings: Settings) -> APIRouter:
 
     def options_of(body: ResetIn) -> collection_reset.ResetOptions:
         return collection_reset.ResetOptions(body.bucket_id, body.keep_tags, body.keep_history, body.no_undo)
+
+    def person(request: Request) -> bool:
+        """The person's own session (web or native app): it carries the account scope. An OAuth app or a personal token never does."""
+        return "account" in request.state.scopes
 
     def failing(exc: Exception) -> HTTPException:
         if isinstance(exc, NoSuchBucket):
@@ -57,6 +63,13 @@ def build_router(get_db, current_user, settings: Settings) -> APIRouter:
     def reset(request: Request, body: ResetIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
         per_user(request, "reset", user.id, 10, db)
         options = options_of(body)
+        if not person(request) and (body.no_undo or not body.keep_tags or not body.keep_history):
+            # a prompt-injected assistant must not be able to make a reset permanent or wipe the person's own work: those
+            # three choices are the person's, made in the Account panel of the web app
+            raise HTTPException(422, "An app or token cannot reset without an undo, or clear tags, notes or the import history: "
+                                     "the person does that in the web app (Account, Reset collection).")
+        if body.confirmation and person(request) and body.typed != "RESET":
+            raise HTTPException(422, "Type RESET (exactly) to confirm: send it as `typed` with the confirmation.")
         if not body.confirmation:
             try:
                 return collection_reset.preview(db, user, options, settings.session_secret)
@@ -73,7 +86,8 @@ def build_router(get_db, current_user, settings: Settings) -> APIRouter:
         return idempotent(request, db, user, 200, run)
 
     @router.get("", summary="The reset that can be undone: what it removed, when the undo ends, and whether it can be done now (404 if none)")
-    def get_reset(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    def get_reset(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        per_user(request, "reset read", user.id, 30, db)
         answer = collection_reset.summary_of(db, user)
         if answer is None:
             raise HTTPException(404, "There is no reset to undo (a reset can be undone for 7 days)")

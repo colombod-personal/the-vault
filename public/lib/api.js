@@ -472,7 +472,7 @@ window.VaultApi = (() => {
     // the same options (a fresh Idempotency-Key for each confirm). The undo of the latest reset is kept 7 days: resetInfo is null when
     // there is none. 404 bucket, 409 stale or changed collection, 422, 429: the server's words.
     resetPreview: (options) => call(V1 + '/collection/reset', { method: 'POST', json: options }),
-    resetApply: (options, confirmation) => create(V1 + '/collection/reset', { json: { ...options, confirmation } }),
+    resetApply: (options, confirmation, typed) => create(V1 + '/collection/reset', { json: { ...options, confirmation, typed } }),
     resetInfo: () => call(V1 + '/collection/reset').catch((e) => { if (e.status === 404) return null; throw e; }),
     resetUndo: () => create(V1 + '/collection/reset/undo', { json: { confirm: true } }),
     // buckets (#125): the places copies live in; a move writes the target's name as the copies' folder and is recorded as a change

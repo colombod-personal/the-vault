@@ -63,7 +63,8 @@ priced daily from Scryfall, plus their saved decks and what others have shared w
 - reset_collection empties the whole inventory or one bucket. Call it without a confirmation first, give the person the numbers
   (copies, market value, what was added only in the Vault, tags and notes) and the export link, and send the confirmation it
   returned only when they clearly asked for that exact reset. Never reset to make an import or an edit easier. A reset can be
-  undone for 7 days with undo_collection_reset, until anything else changes the collection.
+  undone for 7 days with undo_collection_reset, but only until anything else changes the collection: it is best-effort, so offer
+  the export first. Clearing tags, notes or history and resetting with no undo are the person's, in the web app.
 """
 
 
@@ -339,21 +340,17 @@ TOOLS = [
          {"bucket_id": ID, "confirm": CONFIRM}, ["bucket_id"],
          method=lambda a: "DELETE" if a.get("confirm") is True else "GET",
          path=lambda a: f"{V1}/collection/buckets/{int(a['bucket_id'])}", write=True, destructive=True),
-    Tool("reset_collection", "Resets the collection: empties the whole inventory, or one bucket (bucket_id). Buckets stay, empty. Tags "
-         "and notes stay (shown as not owned) unless keep_tags is false, and so does the import history unless keep_history is "
-         "false (whole inventory only). Without a confirmation it returns what would be removed (rows, copies, printings, market "
+    Tool("reset_collection", "Resets the collection: empties the whole inventory, or one bucket (bucket_id). Buckets, tags, "
+         "notes (shown as not owned) and the import history stay. Without a confirmation it returns what would be removed (rows, copies, printings, market "
          "value, how many copies were added in the Vault only, the tags and notes affected), a link to the export of that scope "
          "and a confirmation, and changes nothing. With that confirmation it resets, records it in the import history and keeps a "
-         "snapshot for 7 days (undo_collection_reset). no_undo keeps no snapshot; it is needed when the snapshot would be over 20 MB.",
+         "snapshot for 7 days (undo_collection_reset), which lasts only while nothing else changes the collection. Clearing tags, "
+         "notes or the import history, and resetting without an undo, are not offered here: the person does those in the web app.",
          {"bucket_id": {**ID, "description": "Reset this bucket only (from list_buckets); omit for the whole inventory"},
-          "keep_tags": {"type": "boolean", "default": True, "description": "false also clears the tags and notes of the cards that no "
-                        "longer exist in the inventory (all of them for a whole reset)"},
-          "keep_history": {"type": "boolean", "default": True, "description": "false also clears the import history (whole inventory only)"},
-          "no_undo": {"type": "boolean", "default": False, "description": "true keeps no snapshot: the reset cannot be undone"},
           "confirmation": {"type": "string", "minLength": 8, "maxLength": 600, "description": "From this tool's preview for the same "
                            "arguments"}}, [],
          method="POST", path=lambda a: f"{V1}/collection/reset",
-         body=lambda a: {k: a[k] for k in ("bucket_id", "keep_tags", "keep_history", "no_undo", "confirmation") if a.get(k) is not None},
+         body=lambda a: {k: a[k] for k in ("bucket_id", "confirmation") if a.get(k) is not None},
          write=True, destructive=True),
     Tool("undo_collection_reset", "Puts back what the latest reset removed (the copies with their buckets, folders and baselines, and "
          "the tags, notes and history the reset cleared), within 7 days of the reset and while nothing else has changed the "

@@ -50,7 +50,7 @@ def reset(client, body=None, **headers):
     body = body or {}
     seen = preview(client, **body)
     assert seen["ready"], seen
-    return client.post(RESET, json={**body, "confirmation": seen["confirmation"]}, headers=headers)
+    return client.post(RESET, json={**body, "typed": "RESET", "confirmation": seen["confirmation"]}, headers=headers)
 
 
 def buckets_of(client):
@@ -100,7 +100,7 @@ def test_the_preview_numbers_are_what_the_reset_removes_whole_inventory(app, sto
     assert removes["printings"] == before["printings"] and removes["market_value_usd"] == before["market_value"]
     assert removes["unmatched_rows"] == 1 and seen["backup"]["download"] == f"{V1}/collection/export.csv"
     assert dump(app)["entries"], "a preview changes nothing"
-    done = stocked.post(RESET, json={"confirmation": seen["confirmation"]}).json()
+    done = stocked.post(RESET, json={"typed": "RESET", "confirmation": seen["confirmation"]}).json()
     assert done["applied"] is True and done["removed"]["copies"] == removes["copies"] and done["removed"]["rows"] == removes["rows"]
     after = summary(stocked)
     assert after["copies"] == 0 and after["printings"] == 0 and after["market_value"] == 0
@@ -115,7 +115,7 @@ def test_the_preview_numbers_are_what_the_reset_removes_one_bucket(app, stocked)
     assert seen["scope"]["bucket"] == {"id": ids["Trade box"], "name": "Trade box"}
     assert seen["removes"]["copies"] == trade["copies"] == 5 and seen["removes"]["market_value_usd"] == trade["market_value"]
     assert seen["leaves"]["copies"] == binder["copies"] == 5 and seen["leaves"]["buckets"] >= 1  # the other buckets, as an import says
-    assert stocked.post(RESET, json={"bucket_id": ids["Trade box"], "confirmation": seen["confirmation"]}).status_code == 200
+    assert stocked.post(RESET, json={"bucket_id": ids["Trade box"], "typed": "RESET", "confirmation": seen["confirmation"]}).status_code == 200
     assert summary(stocked, bucket=ids["Trade box"])["copies"] == 0
     still = summary(stocked, bucket=ids["Binder"])  # the other bucket is as it was (but the last entry of the history is the reset)
     assert {k: v for k, v in still.items() if k not in ("source", "imported_at", "version")} ==         {k: v for k, v in binder.items() if k not in ("source", "imported_at", "version")}
@@ -127,7 +127,7 @@ def test_a_card_added_only_in_the_vault_is_removed_by_a_whole_reset_and_the_prev
     seen = preview(stocked)
     only = seen["removes"]["added_in_the_vault_only"]
     assert only["known"] is True and (only["cards"], only["copies"]) == (1, 2)
-    assert stocked.post(RESET, json={"confirmation": seen["confirmation"]}).status_code == 200
+    assert stocked.post(RESET, json={"typed": "RESET", "confirmation": seen["confirmation"]}).status_code == 200
     assert dump(app)["entries"] == []  # replace mode: a merge would have kept the card that is in neither the baseline nor the empty file
     # and from here the person's file brings everything back, with no leftovers of the Vault-only card
     assert stocked.post("/api/v1/imports", files={"file": ("c.csv", CSV, "text/csv")}).status_code == 201
@@ -270,14 +270,14 @@ def test_clearing_the_history_is_an_option_of_the_whole_reset_and_the_undo_resto
 
 def test_a_confirmation_is_for_exactly_the_preview_it_came_from(app, stocked):
     seen = preview(stocked)
-    other = stocked.post(RESET, json={"keep_tags": False, "confirmation": seen["confirmation"]})
+    other = stocked.post(RESET, json={"keep_tags": False, "typed": "RESET", "confirmation": seen["confirmation"]})
     assert other.status_code == 409 and "not the reset the person saw" in other.json()["detail"]  # other options
-    bucket = stocked.post(RESET, json={"bucket_id": buckets_of(stocked)["Binder"], "confirmation": seen["confirmation"]})
+    bucket = stocked.post(RESET, json={"bucket_id": buckets_of(stocked)["Binder"], "typed": "RESET", "confirmation": seen["confirmation"]})
     assert bucket.status_code == 409  # another scope
     vault_adds(app, "Binder")  # the collection changed after the preview
-    stale = stocked.post(RESET, json={"confirmation": seen["confirmation"]})
+    stale = stocked.post(RESET, json={"typed": "RESET", "confirmation": seen["confirmation"]})
     assert stale.status_code == 409 and dump(app)["entries"], "stale: nothing was removed"
-    garbage = stocked.post(RESET, json={"confirmation": "!!!!!!!!!!"})
+    garbage = stocked.post(RESET, json={"typed": "RESET", "confirmation": "!!!!!!!!!!"})
     assert garbage.status_code == 400
 
 
@@ -286,7 +286,7 @@ def test_a_confirmation_expires(app, stocked):
     with app.state.db.sessions() as db:
         user = me(db)
         expired = collection_reset._token(app.state.settings.session_secret, user, collection_reset.ResetOptions(), 0, {}, 1)
-    res = stocked.post(RESET, json={"confirmation": expired})
+    res = stocked.post(RESET, json={"typed": "RESET", "confirmation": expired})
     assert res.status_code == 409 and "expired" in res.json()["detail"]
     assert seen["expires_in_seconds"] == 900
 
@@ -296,7 +296,7 @@ def test_tags_changing_after_the_preview_make_a_clearing_reset_stale(app, stocke
     stocked.post(f"{TAGS}/a/cards", json={"card_ids": ids["Mountain"]})
     seen = preview(stocked, keep_tags=False)
     stocked.post(f"{TAGS}/b/cards", json={"card_ids": ids["Mountain"]})  # a tag change does not move the collection version
-    stale = stocked.post(RESET, json={"keep_tags": False, "confirmation": seen["confirmation"]})
+    stale = stocked.post(RESET, json={"keep_tags": False, "typed": "RESET", "confirmation": seen["confirmation"]})
     assert stale.status_code == 409 and dump(app)["tags"]
 
 
@@ -306,7 +306,7 @@ def test_a_read_only_token_cannot_reset_or_even_preview_but_can_read_the_snapsho
     read = make_token(agent, scopes=["read"])
     h = {"Authorization": f"Bearer {read['token']}"}
     assert bot.post(RESET, json={}, headers=h).status_code == 403  # the preview is step one of a destructive action
-    assert bot.post(RESET, json={"confirmation": "x" * 10}, headers=h).status_code == 403
+    assert bot.post(RESET, json={"typed": "RESET", "confirmation": "x" * 10}, headers=h).status_code == 403
     assert bot.post(UNDO, json={}, headers=h).status_code == 403
     assert bot.get(RESET, headers=h).status_code == 404  # reading is allowed (there is just nothing yet)
     write = make_token(agent, scopes=["read", "write"])
@@ -315,7 +315,7 @@ def test_a_read_only_token_cannot_reset_or_even_preview_but_can_read_the_snapsho
 
 def test_a_retried_reset_with_the_same_key_resets_once_and_answers_the_same(app, stocked):
     seen = preview(stocked)
-    body = {"confirmation": seen["confirmation"]}
+    body = {"typed": "RESET", "confirmation": seen["confirmation"]}
     first = stocked.post(RESET, json=body, headers={"Idempotency-Key": "reset-1"})
     again = stocked.post(RESET, json=body, headers={"Idempotency-Key": "reset-1"})
     assert first.status_code == again.status_code == 200 and again.headers.get("idempotent-replayed") == "true"
@@ -374,10 +374,10 @@ def test_a_snapshot_over_the_cap_is_refused_with_the_way_out_and_no_undo_resets_
     seen = preview(stocked)
     assert seen["ready"] is False and "confirmation" not in seen
     assert "no_undo" in seen["refused"] and "export" in seen["refused"] and seen["backup"]["download"] in seen["refused"]
-    assert stocked.post(RESET, json={"confirmation": "x" * 40}).status_code in (400, 409)
+    assert stocked.post(RESET, json={"typed": "RESET", "confirmation": "x" * 40}).status_code in (400, 409)
     free = preview(stocked, no_undo=True)
     assert free["ready"] is True and free["undo"]["available"] is False
-    done = stocked.post(RESET, json={"no_undo": True, "confirmation": free["confirmation"]}).json()
+    done = stocked.post(RESET, json={"no_undo": True, "typed": "RESET", "confirmation": free["confirmation"]}).json()
     assert done["applied"] is True and done["undo"]["available"] is False
     assert stocked.get(RESET).status_code == 404 and dump(app)["entries"] == []
 
@@ -445,3 +445,86 @@ def test_an_assistant_previews_then_resets_one_bucket_and_undoes_it(agent, bot):
     assert back["applied"] is True
     assert {b["id"]: b["copies"] for b in call_tool(bot, write, "list_buckets")["structuredContent"]["items"]}[target["id"]] == copies
     assert call_tool(bot, write, "undo_collection_reset").get("isError")  # nothing left to undo
+
+
+# -- 11. review of 2026-10-09: what a hostile assistant may do, the typed word, the cost of reading, a snapshot that cannot be read ------------
+
+def write_headers(agent):
+    return {"Authorization": f"Bearer {make_token(agent, scopes=['read', 'write'])['token']}"}
+
+
+def test_an_assistant_may_not_choose_the_irreversible_options_only_the_web_app_may(agent, bot):
+    h = write_headers(agent)
+    for body in ({"no_undo": True}, {"keep_tags": False}, {"keep_history": False}):
+        for extra in ({}, {"confirmation": "x" * 20}):  # the preview and the apply
+            res = bot.post(RESET, json={**body, **extra}, headers=h)
+            assert res.status_code == 422 and "web app" in res.json()["detail"], (body, res.text)
+    seen = bot.post(RESET, json={}, headers=h).json()
+    assert seen["ready"] is True and "until anything else changes" in seen["undo"]["note"]  # and says what the undo is worth
+    done = bot.post(RESET, json={"confirmation": seen["confirmation"]}, headers=h)  # a bearer caller has no typed step
+    assert done.status_code == 200 and done.json()["undo"]["available"] is True
+    assert "until anything else changes" in done.json()["undo"]["note"]
+
+
+def test_the_tool_does_not_offer_the_irreversible_options(agent, bot):
+    from test_agents import rpc
+
+    tools = {t["name"]: t for t in rpc(bot, "tools/list", token=make_token(agent, scopes=["read", "write"])).json()["result"]["tools"]}
+    props = tools["reset_collection"]["inputSchema"]["properties"]
+    assert set(props) == {"bucket_id", "confirmation"} and "web app" in tools["reset_collection"]["description"]
+    refused = rpc(bot, "tools/call", {"name": "reset_collection", "arguments": {"no_undo": True}}, make_token(agent, scopes=["read", "write"])).json()
+    assert "error" in refused or refused["result"].get("isError")  # an argument the tool does not have
+
+
+def test_the_web_session_must_carry_the_typed_word_and_the_server_refuses_without_it(app, stocked):
+    seen = preview(stocked)
+    for typed in ({}, {"typed": "reset"}, {"typed": "RESET "}, {"typed": "yes"}):
+        res = stocked.post(RESET, json={**typed, "confirmation": seen["confirmation"]})
+        assert res.status_code == 422 and "RESET" in res.json()["detail"], (typed, res.text)
+    assert dump(app)["entries"], "nothing was removed without the word"
+    assert stocked.post(RESET, json={"typed": "RESET", "confirmation": seen["confirmation"]}).status_code == 200
+
+
+def test_reading_the_snapshot_does_not_open_it_and_is_rate_limited(app, stocked, monkeypatch):
+    reset(stocked)
+    info = stocked.get(RESET).json()
+    assert info["removed"]["copies"] == 10 and info["can_undo"] is True
+    monkeypatch.setattr(collection_reset, "_load", lambda snap: (_ for _ in ()).throw(AssertionError("GET decompressed the snapshot")))
+    codes = [stocked.get(RESET).status_code for _ in range(32)]
+    assert codes[:29] == [200] * 29 and 429 in codes[29:]  # 30 a minute for reading (the info above was the first)
+
+
+def corrupt(app, payload=None):
+    with app.state.db.sessions() as db:
+        snap = db.get(ResetSnapshot, me(db).id)
+        snap.payload = payload if payload is not None else b"not zlib at all"
+        db.commit()
+
+
+@pytest.mark.parametrize("how", ["garbage", "future"])
+def test_a_snapshot_that_cannot_be_read_is_reported_not_a_500_and_the_next_reset_replaces_it(app, stocked, how):
+    import io
+    import json
+    import zipfile
+    import zlib
+
+    from vault.privacy import export_archive
+
+    reset(stocked)
+    corrupt(app, None if how == "garbage" else zlib.compress(json.dumps({"v": 99, "entries": []}).encode()))
+    info = stocked.get(RESET)
+    assert info.status_code == 200 and info.json()["removed"]["copies"] == 10  # the metadata is still there
+    for body in ({}, {"confirm": True}):
+        res = stocked.post(UNDO, json=body)
+        assert res.status_code == 409 and "cannot be read" in res.json()["detail"] and "expire" in res.json()["detail"], res.text
+    with app.state.db.sessions() as db:
+        archive = zipfile.ZipFile(io.BytesIO(export_archive(db, me(db))))
+        last = json.loads(archive.read("last_reset.json"))
+        assert last["readable"] is False and last["what"]["copies"] == 10 and "removed_rows" not in last
+    assert summary(stocked)["copies"] == 0
+    again = stocked.post(UNDO, json={"confirm": True})
+    assert again.status_code == 409
+    # a reset again (after the person imports their file) writes a new, readable snapshot over it
+    assert stocked.post("/api/v1/imports", files={"file": ("c.csv", CSV, "text/csv")}).status_code == 201
+    assert reset(stocked).status_code == 200
+    assert stocked.post(UNDO, json={"confirm": True}).status_code == 200
