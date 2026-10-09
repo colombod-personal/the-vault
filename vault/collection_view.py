@@ -65,6 +65,7 @@ class Group:
     quantity: int = 0
     paid: float = 0.0
     paid_quantity: int = 0  # copies with a recorded price paid; P&L counts only these
+    trade_marked: int = 0  # copies marked for trade: each imported row counts min(trade_quantity, quantity), the Lab's spare copies read it
     price: float = 0.0
     price_source: str = "file"
     low: float | None = None
@@ -147,6 +148,7 @@ class CollectionView:
             g.copies.append({"quantity": r.quantity, "folder": r.folder, "purchase_price": paid,
                              "purchase_date": day})
             g.quantity += r.quantity
+            g.trade_marked += max(0, min(r.trade_quantity or 0, r.quantity))
             g.paid += (paid or 0.0) * r.quantity
             if paid:
                 g.paid_quantity += r.quantity
@@ -334,6 +336,17 @@ def history_days(db: Session, user: User, since: date | None = None) -> list:
     if since:
         stmt = stmt.where(CollectionValue.day >= since)
     return list(db.scalars(stmt.order_by(CollectionValue.day)))
+
+
+def history_summary(rows: list) -> dict:
+    """The market value over a range of value-history days (oldest first), for ``GET /collection/history``'s ``summary``:
+    the first and last day and the market value on each. Market only, by design: history's market covers every holding while
+    cost exists only for rows with a recorded price paid, so a cost comparison here would mix two populations."""
+    if not rows:
+        return {"from": None, "to": None, "market_start": None, "market_end": None, "market_change": None}
+    start, end = (finite(rows[0].market_usd) or 0.0), (finite(rows[-1].market_usd) or 0.0)
+    return {"from": rows[0].day.isoformat(), "to": rows[-1].day.isoformat(), "market_start": start, "market_end": end,
+            "market_change": round(end - start, 2)}
 
 
 def view_version(db: Session, user: User, *, hide_costs: bool = False) -> str:

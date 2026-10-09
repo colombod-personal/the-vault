@@ -281,9 +281,13 @@ property of Wizards of the Coast. ©Wizards of the Coast LLC.
 - `GET /api/v1/collection/breakdowns`: by colour identity, main type, mana value, rarity, colour x type.
 - `GET /api/v1/collection/valuation`: value, cost and gain by purchase month, peak month, last 12 months.
 - `GET /api/v1/collection/names?sort=-value&limit=50`: the collection rolled up by card name (top N).
+- `GET /api/v1/collection/spare`: cards you own more copies of than your saved decks need (spare), dearest first, with the spare
+  printings (`/collection/spare/printings?name=` pages one card's rows). Spare means beyond your saved decks; with none saved
+  nothing is spare. `GET /api/v1/collection/pnl?side=winners|losers`: profit and loss by holding, over the copies whose price paid
+  and current price are both known (`summary` says how many copies that covers). Your own collection only.
 - `GET /api/v1/collection/sets?q=&sort=release`: each set has its colour mix.
 - `POST /api/v1/collection/refresh` (write scope): today's prices from Scryfall, 300 printings per call;
   repeat with the returned `cursor` until `remaining` is 0.
-- MCP tools: `get_collection_breakdowns`, `get_valuation`, `list_card_names`, `refresh_prices`.
+- MCP tools: `get_collection_breakdowns`, `get_valuation`, `list_card_names`, `list_spare_copies`, `get_collection_pnl`, `refresh_prices`.
 - [Connect an assistant, step by step](/connect.html)
 - [Skills and the plugin](https://github.com/colombod-personal/the-vault/blob/main/docs/skills.md)

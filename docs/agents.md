@@ -124,6 +124,7 @@ Tools (the `share_id` argument reads a collection someone shared with you):
 | `get_card` | `GET /collection/cards/{id}` |
 | `list_sets` (query, sort), `get_collection_stats` (limit), `get_value_history`, `get_acquisition_timeline` | `/collection/...` |
 | `get_collection_breakdowns`, `get_valuation` | `GET /collection/breakdowns`, `/collection/valuation` |
+| `list_spare_copies` (name, limit, cursor), `get_collection_pnl` (side, limit, cursor): the person's own collection only, no `share_id` | `GET /collection/spare` (`/collection/spare/printings` with `name`), `GET /collection/pnl` |
 | `list_card_names` (sort, colors, type, min_value, limit, cursor) | `GET /collection/names` |
 | `refresh_prices`* (cursor, force) | `POST /collection/refresh` |
 | `check_decklist`, `parse_decklist` | `POST /decks/coverage`, `/decks/parse` |

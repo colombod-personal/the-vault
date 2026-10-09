@@ -363,6 +363,23 @@ TOOLS = [
     Tool("get_value_history", "The collection's market value (and cost) day by day. Paged.",
          {"since": {"type": "string", "format": "date", "description": "YYYY-MM-DD"}, **PAGING, **SHARE},
          path=lambda a: _base(a) + "/history", query=("since", "limit", "cursor")),
+    Tool("list_spare_copies", "The cards the person owns more copies of than their saved decks need at the same time (spare "
+         "copies), dearest first, each with copies owned, needed, spare, the market value of the spare copies, how many saved decks "
+         "use it and the printings that are spare (a bounded preview, each with its price, condition, how many are marked for "
+         "trade and its Scryfall link). `summary` totals every spare card, whatever the page. Spare means beyond the saved decks, "
+         "never worthless to the person; with no saved deck nothing is spare (`status` says so). Pass `name` to page one "
+         "card's spare printings. Basic lands are left out. Only the person's own collection.",
+         {"name": {"type": "string", "minLength": 1, "maxLength": 300,
+                   "description": "A card name: list that card's spare printing rows instead of the cards"}, **PAGING},
+         path=lambda a: f"{V1}/collection/spare" + ("/printings" if a.get("name") else ""),
+         query=("name", "limit", "cursor")),
+    Tool("get_collection_pnl", "Profit and loss by holding, over the copies whose price paid and current market price are both "
+         "known: the winners (most profitable first) or the losers (biggest loss first), paged. `summary` (the same on every page) "
+         "has the biggest gain and loss, the net gain, and how many copies were counted (`covered_copies`) and how many were not "
+         "(`unknown_cost_copies`: no price paid recorded; `unpriced_market_copies`: no current price). Say how many copies the "
+         "figures cover. Only the person's own collection.",
+         {"side": {"type": "string", "enum": ["winners", "losers"], "default": "winners"}, **PAGING},
+         path=lambda a: f"{V1}/collection/pnl", query=("side", "limit", "cursor")),
     Tool("get_acquisition_timeline", "How many copies were bought each month.", dict(SHARE),
          path=lambda a: _base(a) + "/timeline"),
     Tool("check_decklist", "Which cards of a decklist the person owns, partly owns or is missing. Accepts "
@@ -557,6 +574,7 @@ INSTRUCTIONS += "\n" + GROUNDING
 SCRYFALL_DATA = {"list_decks",  # the commanders' colour identity is Scryfall's Oracle data
                  "get_collection_summary", "search_cards", "get_card", "list_sets", "get_collection_stats",
                  "get_collection_breakdowns", "get_valuation", "get_value_history", "list_card_names", "refresh_prices",
+                 "list_spare_copies", "get_collection_pnl",
                  "check_decklist", "lookup_cards", "get_deck", "get_shared_deck",
                  "update_owned_cards", "show_owned_printings"}  # these carry Scryfall's card images
 OWN_DATA_ONLY = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucket", "move_cards",

@@ -31,11 +31,11 @@ from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .. import analytics, deck_text, oauth_server, outbound, tags as card_tags, tokens
+from .. import analytics, deck_text, lab, oauth_server, outbound, tags as card_tags, tokens
 from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
 from ..deck_tools import loose_name
-from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, import_days, view_version
+from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, history_summary, import_days, view_version
 from .. import archidekt_cache, deck_import, deck_match, deck_overview, deck_refresh, deck_versions, experts, owned_changes
 from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, ImportOptions, export_collection, import_collection,
                         preview_import as preview_collection_import, user_entries)
@@ -525,7 +525,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 items = [{"day": v.day.isoformat(), "market": finite(v.market_usd) or 0.0,
                           "cost": None if ctx.hide_costs else finite(v.cost_usd), "copies": v.copies,
                           "priced": v.priced_copies, "imported": v.day in imported} for v in page]
-                return page_body(request, items, nxt, len(rows), since=since and since.isoformat(), limit=limit)
+                return {**page_body(request, items, nxt, len(rows), since=since and since.isoformat(), limit=limit),
+                        "summary": history_summary(rows)}  # over the whole range, not the page; market only (no cost)
 
             return etag_response(request, view.version, body)
 
@@ -633,6 +634,94 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     def export_csv(ctx: Ctx = Depends(own_ctx), bucket: int | None = Query(None, ge=1, le=S.MAX_ID,
                    description="Only the copies in this bucket")) -> Response:
         return _download(ctx, "dragonshield", bucket)
+
+    # -- the Lab: spare copies and profit and loss (docs/lab-design.md, #164) ----------------------------------
+    # The person's own account only: they are derived from the saved decks, or from what the person paid, and neither is part
+    # of a shared collection. They are registered on the own router alone, so `/shared/{id}/collection/spare` and `/pnl` do
+    # not exist (404), whatever `show_costs` says.
+    def lab_card(ctx: Ctx, row: dict, uris: dict) -> dict:
+        return {**row, "scryfall_link": uris.get(row["scryfall_id"]),
+                "_links": {"self": link(f"{ctx.base}/cards/{row['id']}")}}
+
+    @own.get("/spare", response_model=S.SparePage,
+             summary="Cards you own more copies of than your saved decks need (spare), dearest first, with the copies that are spare")
+    def spare_copies(request: Request, cursor: str | None = None, limit: int | None = None, ctx: Ctx = Depends(own_ctx)):
+        per_user(request, "lab", ctx.owner.id, settings.lab_limit, ctx.db)
+        view = ctx.view()
+
+        def body():
+            report = lab.spare_report(view, lab.deck_needs(ctx.db, ctx.owner.id))
+            page, nxt = paginate(report.names, lambda n: (-n["market_value_of_spare"], n["key"]), lambda n: n["key"],
+                                 cursor=cursor, limit=limit)
+            uris = lab.scryfall_links(ctx.db, {r["scryfall_id"] for n in page for r in n["rows"][:lab.PREVIEW_ROWS]})
+            items = []
+            for n in page:
+                front = urlencode({"name": n["name"].split(" // ")[0]})
+                items.append({**{k: v for k, v in n.items() if k not in ("key", "rows")},
+                              "printings": [lab_card(ctx, r, uris) for r in n["rows"][:lab.PREVIEW_ROWS]],
+                              "_links": {"cards": link(f"{ctx.base}/cards?{front}"),
+                                         "printings": link(f"{ctx.base}/spare/printings?{front}")}})
+            out = page_body(request, items, nxt, len(report.names), limit=limit)
+            out["_links"] |= {"export": link(f"{ctx.base}/export.csv", title="Your collection as a CSV (keeps the trade quantity)"),
+                              "pnl": link(f"{ctx.base}/pnl"), "decks": link(f"{V1}/decks")}
+            return {**out, "status": report.status, "note": report.note, "summary": report.summary,
+                    "decks_analysed": report.needs.analysed, "decks_skipped": report.needs.skipped,
+                    "prices_as_of": view.prices_as_of.isoformat() if view.prices_as_of else None}
+
+        return etag_response(request, f"{view.version}.{lab.decks_stamp(ctx.db, ctx.owner.id)}", body)
+
+    @own.get("/spare/printings", response_model=S.SparePrintingPage,
+             summary="The spare printing rows of one card name, cheapest first (the allocation order), paged")
+    def spare_printings(request: Request, name: str = Query(..., min_length=1, max_length=300, description="The card's name"),
+                        cursor: str | None = None, limit: int | None = None, ctx: Ctx = Depends(own_ctx)):
+        per_user(request, "lab", ctx.owner.id, settings.lab_limit, ctx.db)
+        view = ctx.view()
+        key = lab.card_key(name)
+        groups = [g for g in view.groups if lab.card_key(g.name) == key]
+        if not groups:
+            raise HTTPException(404, "That card is not in your collection")
+
+        def body():
+            needs = lab.deck_needs(ctx.db, ctx.owner.id)
+            found = lab.spare_name(groups, key, needs) if needs.analysed and key not in lab.BASICS else None
+            rows = found["rows"] if found else []
+            page, nxt = paginate(rows, lambda r: (r["unit_price"] or 0.0,), lambda r: r["id"], cursor=cursor, limit=limit)
+            uris = lab.scryfall_links(ctx.db, {r["scryfall_id"] for r in page})
+            return {**page_body(request, [lab_card(ctx, r, uris) for r in page], nxt, len(rows), name=name, limit=limit),
+                    "name": found["name"] if found else max(groups, key=lambda g: (g.quantity, g.name)).name,
+                    "status": "ok" if needs.analysed else "no_decks",
+                    "have": sum(g.quantity for g in groups), "needed": needs.copies.get(key, 0),
+                    "spare": found["spare"] if found else 0,
+                    "market_value_of_spare": found["market_value_of_spare"] if found else 0.0,
+                    "prices_as_of": view.prices_as_of.isoformat() if view.prices_as_of else None}
+
+        return etag_response(request, f"{view.version}.{lab.decks_stamp(ctx.db, ctx.owner.id)}", body)
+
+    @own.get("/pnl", response_model=S.PnlPage,
+             summary="Profit and loss by holding: the winners or the losers among the copies whose price paid and current price are known")
+    def pnl_holdings(request: Request, side: Literal["winners", "losers"] = "winners", cursor: str | None = None,
+                     limit: int | None = None, ctx: Ctx = Depends(own_ctx)):
+        per_user(request, "lab", ctx.owner.id, settings.lab_limit, ctx.db)
+        view = ctx.view()
+
+        def body():
+            report = lab.pnl_report(view)
+            chosen = report.winners if side == "winners" else report.losers
+            sign = -1 if side == "winners" else 1
+            page, nxt = paginate(chosen, lambda p: (sign * p[0], p[1].name.lower()), lambda p: p[1].id, cursor=cursor, limit=limit)
+            tops = [report.winners[0] if report.winners else None, report.losers[0] if report.losers else None]
+            uris = lab.scryfall_links(ctx.db, {p[1].scryfall_id for p in [*page, *filter(None, tops)]})
+
+            def render(pair) -> dict:
+                return lab_card(ctx, lab.pnl_item(pair[1], pair[0]), uris)
+
+            summary = {"biggest_gain": render(tops[0]) if tops[0] else None, "biggest_loss": render(tops[1]) if tops[1] else None,
+                       "net_gain": report.net_gain, **report.counts, "reason": lab.pnl_reason(report.counts)}
+            return {**page_body(request, [render(p) for p in page], nxt, len(chosen), side=side, limit=limit),
+                    "side": side, "summary": summary,
+                    "prices_as_of": view.prices_as_of.isoformat() if view.prices_as_of else None}
+
+        return etag_response(request, view.version, body)
 
     router.include_router(own, prefix="/collection")
     router.include_router(collection_routes(shared_ctx), prefix="/shared/{share_id}/collection")
