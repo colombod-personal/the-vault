@@ -9,6 +9,8 @@ function monthLabel(ym) {
 const fmtFull = (v) => '$' + Math.round(v).toLocaleString();
 const fmtAxis = (v) => v >= 1000 ? '$' + (v / 1000).toFixed(v >= 10000 ? 0 : 1) + 'K' : '$' + Math.round(v);
 
+const LEDGER_PHONE_PAGE = 12;
+
 function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, refreshProgress, refreshError }) {
   const m = data.meta;
   const api = data.api;
@@ -47,6 +49,7 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
   // Ledger filtering / sorting so the table never runs off the page.
   const [ledgerQuery, setLedgerQuery] = useStateVal('');
   const [ledgerSort, setLedgerSort] = useStateVal('recent');
+  const [ledgerShown, setLedgerShown] = useStateVal(LEDGER_PHONE_PAGE);  // the phone's list shows this many months, then asks
   const ledgerRows = useMemoVal(() => {
     const q = ledgerQuery.trim().toLowerCase();
     let rows = q ? full.filter((r) => r.label.toLowerCase().includes(q) || r.ym.includes(q)) : full.slice();
@@ -63,13 +66,13 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
 
   return (
     <div data-screen-label="Valuation">
-      <div className="page-head" style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', marginBottom: 28 }}>
+      <div className="page-head val-head" style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', marginBottom: 28 }}>
         <div>
           <button className="btn ghost sm" onClick={onBack} style={{ marginBottom: 14 }}>← Back to vault</button>
           <p className="eyebrow">The Vault — valuation</p>
           <h1 className="h1" style={{ marginTop: 6 }}>Collection value over time.</h1>
         </div>
-        <div style={{ textAlign: 'right' }}>
+        <div className="val-calc" style={{ textAlign: 'right' }}>
           <p className="label-mono">Calculated</p>
           <div className={`freshness ${fresh.tone}`} style={{ justifyContent: 'flex-end', marginTop: 6 }} title={`Prices calculated ${fresh.abs}`}>
             <span className="dot"></span>
@@ -187,13 +190,13 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
             <p className="eyebrow">Ledger</p>
             <h2 className="h2" style={{ marginTop: 4, fontSize: 22 }}>Value added by month</h2>
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div className="ledger-tools" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input
               className="input"
               type="text"
               value={ledgerQuery}
               onChange={(e) => setLedgerQuery(e.target.value)}
-              placeholder="Filter month — e.g. 2024, Jan"
+              placeholder="Filter, e.g. 2024"
               style={{ width: 200, fontSize: 12 }}
             />
             <select className="select" value={ledgerSort} onChange={(e) => setLedgerSort(e.target.value)} style={{ fontSize: 12 }}>
@@ -206,6 +209,30 @@ function Valuation({ data, onBack, openCard, onRefresh, onBulkSync, refreshing, 
           </div>
         </div>
         <div className="panel panel-flush">
+          {/* On a phone the months are a list (month and value added on top, the rest beneath); the table is for wider screens. */}
+          <ul className="ledger-list" aria-label="Value added by month">
+            {ledgerRows.slice(0, ledgerShown).map((r) =>
+            <li key={r.ym} className="ledger-item">
+                <span className="ledger-month">{r.label}</span>
+                <span className="ledger-added">+${Math.round(r.marketAdd).toLocaleString()}</span>
+                <span className="ledger-sub">
+                  {r.cardsAdd.toLocaleString()} {r.cardsAdd === 1 ? 'card' : 'cards'} added
+                  {!m.costsHidden && <> · ${Math.round(r.costAdd).toLocaleString()} spent</>}
+                  {' · '}${Math.round(r.marketCum).toLocaleString()} cumulative
+                </span>
+              </li>
+            )}
+            {ledgerRows.length === 0 &&
+            <li className="ledger-item ledger-none">No months match “{ledgerQuery}”.</li>
+            }
+          </ul>
+          {ledgerRows.length > ledgerShown &&
+          <div className="ledger-more">
+            <button type="button" className="btn sm" onClick={() => setLedgerShown(ledgerShown + LEDGER_PHONE_PAGE)}>
+              Show {Math.min(LEDGER_PHONE_PAGE, ledgerRows.length - ledgerShown)} more months
+            </button>
+          </div>
+          }
           <div className="ledger-scroll">
             <table className="tbl ledger-tbl">
               <thead>

@@ -193,3 +193,27 @@ def test_the_phone_pass_keeps_text_at_12_px_and_labels_at_11_px():
     sizes = [float(m) for m in re.findall(r"font-size:\s*([\d.]+)px(?:\s*!important)?\s*[;}]", block)]
     assert sizes and min(sizes) >= 11, sorted(set(sizes))
     assert "min-height: 44px" in block
+
+
+def test_the_value_ledger_is_a_list_on_a_phone_and_a_table_elsewhere():
+    """#95: "Lab and Valuation lead with a summary, and their tables become lists on a phone". The Lab is lists throughout (#164);
+    the Value view's ledger of months was a table that scrolled sideways on a phone. It now renders both: a list for phones and
+    the table for wider screens, one of them `display: none` at each width."""
+    jsx = (PUBLIC / "views" / "valuation.jsx").read_text(encoding="utf-8")
+    assert 'className="ledger-list"' in jsx and 'className="ledger-scroll"' in jsx
+    css = _strip((PUBLIC / "layout.css").read_text(encoding="utf-8"))
+    assert re.search(r"\.ledger-list,\s*\.ledger-more\s*\{\s*display:\s*none", css), "the list is hidden on wide screens"
+    phone = {s: d for _, s, d in rules(PUBLIC / "layout.css")}
+    assert phone[".ledger-scroll"]["display"] == "none", "the table is hidden on a phone"
+    assert phone[".ledger-list"]["display"] == "block"
+    sizes = [float(px) for s in (".ledger-month", ".ledger-added", ".ledger-sub", ".ledger-none") for px in re.findall(r"([\d.]+)px", phone[s]["font-size"])]
+    assert sizes and min(sizes) >= 12, sizes
+    assert 'className="btn sm" onClick={() => setLedgerShown' in jsx  # "Show more months" is a .btn.sm: 44 px (checked above)
+
+
+def test_the_value_view_leads_with_its_figures_on_a_phone():
+    """The price date and the refresh buttons sit under the title in a row, so the four figures start on the first screen."""
+    jsx = (PUBLIC / "views" / "valuation.jsx").read_text(encoding="utf-8")
+    phone = {s: d for _, s, d in rules(PUBLIC / "layout.css")}
+    assert "val-head" in jsx and "val-calc" in jsx
+    assert phone[".val-head"]["display"].startswith("block") and phone[".val-calc"]["text-align"].startswith("left")
