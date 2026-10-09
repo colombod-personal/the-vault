@@ -318,3 +318,33 @@ test('an import into a bucket shows the server\'s own words for a bad file, a mi
     await assert.rejects(api.importInto(file, 3), (e) => e.status === status && e.message === detail);
   }
 });
+
+test('a scoped client passes the bucket and tag on every analytics call and keeps the whole inventory unscoped (#130)', async () => {
+  const { api, calls } = load((url) => {
+    if (url === '/api/v1/collection') return json(200, summary);
+    if (url.startsWith('/api/v1/collection?bucket')) return json(200, { ...summary, version: 'vb', copies: 2, market_value: 4 });
+    if (url.startsWith('/api/v1/collection')) return json(200, url.includes('/sets') || url.includes('/cards') || url.includes('/history') || url.includes('/names')
+      ? { items: [], count: 0, total: 0, _links: {} } : url.includes('/timeline') ? { months: [] } : {});
+    return json(200, summary);
+  });
+  const whole = await api.collection();
+  assert.equal(JSON.stringify(whole.scope), '{}');
+  await whole.api.sets();
+  assert.equal(calls.at(-1).url, '/api/v1/collection/sets?limit=500', 'no scope: the same calls as before');
+  const picked = await whole.api.scoped({ bucket: 3, tag: 'trade' });
+  assert.equal(calls.at(-1).url, '/api/v1/collection?bucket=3&tag=trade', 'the summary is that of the selection');
+  assert.deepEqual([JSON.stringify(picked.scope), picked.meta.totalQty, picked.meta.totalMarket, picked.meta.version], ['{"bucket":3,"tag":"trade"}', 2, 4, 'vb']);
+  const scope = 'bucket=3&tag=trade';
+  const asked = async (fn) => { await fn(); return calls.at(-1).url; };
+  assert.equal(await asked(() => picked.api.sets({ sort: 'code' })), `/api/v1/collection/sets?sort=code&limit=500&${scope}`);
+  assert.equal(await asked(() => picked.api.cards({ sort: '-value', limit: 12 })), `/api/v1/collection/cards?sort=-value&limit=12&${scope}`);
+  assert.equal(await asked(() => picked.api.timeline()), `/api/v1/collection/timeline?${scope}`);
+  assert.equal(await asked(() => picked.api.valuation()), `/api/v1/collection/valuation?${scope}`);
+  assert.equal(await asked(() => picked.api.breakdowns()), `/api/v1/collection/breakdowns?${scope}`);
+  assert.equal(await asked(() => picked.api.history()), `/api/v1/collection/history?limit=500&${scope}`);
+  assert.equal(await asked(() => picked.api.stats(5)), `/api/v1/collection/stats?limit=5&${scope}`);
+  assert.equal(await asked(() => picked.api.names({}, 10)), `/api/v1/collection/names?limit=10&${scope}`);
+  const bucketOnly = await whole.api.scoped({ bucket: 3 });
+  assert.equal(await asked(() => bucketOnly.api.valuation()), '/api/v1/collection/valuation?bucket=3');
+  assert.equal(await asked(() => whole.api.valuation()), '/api/v1/collection/valuation', 'the inventory client is unchanged');
+});

@@ -196,6 +196,18 @@ card's tags in the drawer with an assistant's tag marked "AI" and its app's name
 same tag) or removed, and the card's notes (`vault_metadata`) read only, one block per writer. A shared collection shows none of it. The
 server gave each card `tags_detail` (who wrote each tag) for this, and the summary `version` now moves with the tags.
 
+Built since (#130, the app): the scope of the analytics (`public/views/scope.jsx`). One choice of bucket and/or tag, kept in the address
+(`#/dashboard?bucket=3&tag=trade`, the same query as `#/browse?bucket=&tag=`), drives the Vault overview, Sets (and a set's page), Value and
+Browse. **The rule: the scope is global to the app until cleared.** Choosing it on any of those four keeps it on the other three and in the links
+between them (the tabs, "Browse all", a set's tile); the Lab, Graph and Decks read the whole inventory, say so while a scope is set, and the
+choice is kept for the way back. A shared collection has no scope (buckets and tags are the owner's own). Every request of those pages
+carries the scope (`VaultApi` `collection().api.scoped({bucket, tag})`: summary, cards, sets, timeline, history, valuation, stats, breakdowns,
+names), so every figure is the server's for that selection and nothing is added up in the browser; a stored answer's key holds the selection and
+its freshness is the selection's own summary `version`. The bar says what is shown ("Showing: Trade box, tag trade, 12 cards, $332.23 market
+value", from the summary), says once that distinct counts do not add up across buckets (decision 5), and an empty selection is a plain "No
+cards in this selection" with a way back, not a page of zeros. The daily value history of a selection prices the copies held now
+(decision 5's note on `/history`), and the page says so and drops the import markers. Evidence: `docs/screenshots/scope-*`.
+
 Built since (#122, the web part of import into one bucket): in Browse, "Manage buckets", each bucket has "Import file...": the file goes to
 `POST /imports/preview?bucket_id=` first, and the dialog says, from the answer alone (the browser adds nothing up), the bucket it goes into and
 what that bucket holds now, the server's own sentence on how the file is applied (`merge.how`), the cards new, gone, with more and with fewer
@@ -206,5 +218,3 @@ with a fresh `Idempotency-Key`, then reloads the collection and the bucket list 
 unreadable file (400), a missing bucket (404), a changed collection (409) and the limit (429) show in the dialog as the server words them. The
 top bar's "Import CSV" is unchanged (the whole collection, no preview). Tests: `tests/js/api_client.test.mjs` (`importPreview`, `importInto`),
 phone measure and screenshots in the pull request.
-
-Not built yet: the web part of #130 (analytics that follow the selected bucket or tag).

@@ -120,7 +120,7 @@ function BucketBar({ buckets, value, onChange, onManage, totalCopies, disabled }
         <option value="">All inventory ({bkPlural(totalCopies, 'copy', 'copies')})</option>
         {buckets.map((b) => <option key={b.id} value={b.id}>{b.name} ({bkPlural(b.copies, 'copy', 'copies')})</option>)}
       </select>
-      <button type="button" className="btn xs" onClick={onManage}>Manage buckets</button>
+      {onManage && <button type="button" className="btn xs" onClick={onManage}>Manage buckets</button>}
     </div>
   );
 }
