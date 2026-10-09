@@ -921,3 +921,159 @@ class PnlPage(Page):
     side: Literal["winners", "losers"]
     summary: PnlSummary = Field(description="The same on every page and on both sides")
     prices_as_of: str | None = None
+
+
+# -- deck independence (#165, docs/deck-independence.md) ------------------------------------------------------
+
+class OverlapDeckRef(BaseModel):
+    id: int
+    name: str
+
+
+class OverlapHold(BaseModel):
+    card: str
+    quantity: int = Field(description="Copies of this contested card the deck is given (`gets`): another deck wants them too")
+    also_wanted_by: list[str] = Field(description="Names of the other decks that use the card (at most 10; `also_wanted_by_total` counts them)")
+    also_wanted_by_total: int
+
+
+class OverlapLack(BaseModel):
+    card: str
+    quantity: int = Field(description="Copies this deck lacks under the allocation: `not_owned` + `held_by_other_deck`")
+    not_owned: int = Field(description="Copies the collection could not supply even if this deck took every owned copy: buy them whatever the other decks do")
+    held_by_other_deck: int = Field(description="Copies that exist in the collection but were given to another deck: available by moving")
+    unit_price: float | None = Field(None, description="The cheapest known USD price of one copy (Scryfall's); null when unknown")
+    price_date: str | None = Field(None, description="The day `unit_price` is from")
+    cost: float | None = Field(None, description="`unit_price` times `quantity`; null when unpriced")
+
+
+class OverlapDeck(Hal):
+    id: int
+    name: str
+    order: int = Field(description="Position in the allocation order (1 takes contested copies first); skipped decks come last")
+    status: Literal["analysed", "skipped"]
+    reason: str | None = Field(None, description="Why a deck was skipped (its saved list could not be read)")
+    need: int | None = Field(None, description="Copies the deck needs, basic lands left out")
+    free: int | None = Field(None, description="Of those, copies of cards that are not contested")
+    holds: list[OverlapHold] = Field(default_factory=list, description="Contested cards the deck is given (at most 100 listed)")
+    holds_total: int | None = None
+    lacking: list[OverlapLack] = Field(default_factory=list, description="Cards the deck lacks under the allocation (at most 100 listed)")
+    lacking_total: int | None = None
+    stands_alone: bool | None = Field(None, description="True when the deck lacks nothing under the allocation (complete)")
+    independent: bool | None = Field(None, description="True when it also holds no contested card, so no other deck's completeness depends on it")
+    independence: float | None = Field(None, description="`free` / `need`, for sorting only; 1.0 for a deck with nothing to count")
+    cost_to_complete: float | None = Field(None, description="What the lacking copies cost at the cheapest known prices, the other decks keeping theirs")
+    cost_unpriced: int | None = Field(None, description="Lacking cards with no known price (not in `cost_to_complete`)")
+
+
+class OverlapOption(BaseModel):
+    kind: Literal["move", "buy"]
+    effect: str = Field(description="What the option does, in words")
+    quantity: int
+    from_deck: OverlapDeckRef | None = Field(None, description="move: the deck that gives up a copy")
+    to_deck: OverlapDeckRef | None = Field(None, description="move: the deck that gets it")
+    unit_price: float | None = None
+    cost: float | None = Field(None, description="buy: the cost to finish every deck for this card, counted once")
+    price_status: Literal["priced", "unpriced"] | None = None
+    price_date: str | None = None
+
+
+class OverlapContestedDeck(BaseModel):
+    deck_id: int
+    deck: str
+    need: int
+    gets: int
+    lacking: int
+
+
+class OverlapContested(BaseModel):
+    card: str
+    have: int
+    need_for_all: int
+    global_deficit: int = Field(description="`need_for_all` - `have`: the decks' lacking copies add up to exactly this, whatever the order")
+    decks: list[OverlapContestedDeck] = Field(description="The decks that use the card, in allocation order (at most 25)")
+    decks_total: int
+    options: list[OverlapOption] = Field(description="`move` (only when a deck lacks a copy another deck holds) and `buy`")
+
+
+class OverlapPurchase(BaseModel):
+    card: str
+    have: int
+    need_for_all: int
+    global_deficit: int
+    unit_price: float | None = None
+    cost: float | None = Field(None, description="`global_deficit` times `unit_price`; null when unpriced")
+    price_status: Literal["priced", "unpriced"]
+    price_date: str | None = None
+    contested: bool = Field(description="True when some copies are owned but short")
+    move: OverlapOption | None = Field(None, description="For a contested card: the move that would give a lacking deck a copy")
+
+
+class OverlapAllocation(BaseModel):
+    rule: Literal["closest_to_complete", "priority"]
+    priority_applied: bool
+    description: str
+    limits: str
+
+
+class OverlapSummary(BaseModel):
+    decks_analysed: int
+    decks_needing_purchase: int = Field(description="Analysed decks that do not stand alone under the allocation")
+    finish_all_cost: float = Field(description="What it costs to finish every deck, each card counted once (priced cards only)")
+    unpriced: int = Field(description="Cards to buy with no known price (not in `finish_all_cost`)")
+    contested_cards: int
+    cards_to_buy: int
+
+
+class OverlapDeckLine(BaseModel):
+    deck_id: int
+    deck: str
+    quantity: int
+
+
+class OverlapCard(BaseModel):
+    name: str
+    decks: list[OverlapDeckLine] = Field(description="Up to 10 of the decks that use the card; `decks_total` counts them")
+    decks_total: int
+    need_for_all: int
+    have: int
+    short: int
+
+
+class DeckOverlap(Hal):
+    decks_checked: int = Field(description="Saved decks, readable or not")
+    shared_cards: int
+    short_cards: int
+    cards: list[OverlapCard] = Field(description="Cards in more than one deck (the first 200), the copies short first")
+    note: str
+    decks_analysed: int
+    decks_skipped_count: int
+    summary: OverlapSummary
+    allocation: OverlapAllocation
+    prices_date: str | None = Field(None, description="The day of the newest price used (Scryfall's, not a shop's today)")
+    decks: list[OverlapDeck] = Field(description="The first page of decks; `_links.next` pages the rest")
+
+
+class OverlapDeckPage(Page):
+    items: list[OverlapDeck]
+    allocation: OverlapAllocation
+    prices_date: str | None = None
+
+
+class OverlapContestedPage(Page):
+    items: list[OverlapContested]
+    allocation: OverlapAllocation
+    prices_date: str | None = None
+
+
+class OverlapPurchasePage(Page):
+    items: list[OverlapPurchase]
+    allocation: OverlapAllocation
+    prices_date: str | None = None
+
+
+class OverlapPurchaseText(Page):
+    format: Literal["text"]
+    text: str = Field(description="One page of the paste-ready list: `<copies> <card>` per line; join the pages")
+    allocation: OverlapAllocation
+    prices_date: str | None = None

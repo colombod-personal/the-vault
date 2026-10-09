@@ -421,9 +421,27 @@ TOOLS = [
          "lists near names. People name their decks; use this before asking for a link or an id.",
          {**PAGING, "query": {"type": "string", "maxLength": 200, "description": "Words from the deck's name"}},
          path=lambda a: f"{V1}/decks?brief=true", query=("limit", "cursor", "q")),  # no card text: get_deck has it
-    Tool("get_deck_overlap", "Cards that are in more than one of the person's saved decks, how many copies building "
-         "every deck at once needs, how many they own, and how many they are short. Basic lands are left out.",
-         path=lambda a: f"{V1}/decks/overlap"),
+    Tool("get_deck_overlap", "Whether the person's saved decks can all be built at the same time from the copies they own, and "
+         "what to buy or move if not. Counts copies by card name (any printing owned counts; basic lands are left out). `cards`: cards "
+         "in more than one deck with `need_for_all`, `have` and `short`. `decks`: per deck what it `need`s, the contested cards "
+         "it `holds` and `lacking` (each missing copy is `not_owned`, so it must be bought, or `held_by_other_deck`, so it can be "
+         "moved), `stands_alone` (complete under the allocation), `independent` (also holds no contested card) and "
+         "`cost_to_complete`. A card is contested when two or more decks use it and the person owns some copies, but fewer than the "
+         "decks need together; a card owned zero times is not contested (every deck that needs it lacks it). Contested copies go to "
+         "the decks in the `allocation` order (the deck closest to complete first, or `priority`, deck ids in order): say which rule "
+         "was used. `summary` has the decks needing a purchase and the cost to finish every deck, each card counted once. `list` "
+         "pages the full lists instead of the overview: `decks`, `contested` (each card with its `move` and `buy` options) or "
+         "`purchases` (cheapest first; `format` text is the paste-ready list, one page per call: join the pages). Prices are "
+         "Scryfall's cheapest, dated `prices_date`.",
+         {"priority": {"type": "array", "maxItems": 200, "items": ID,
+                       "description": "Deck ids (from list_decks), in the order they take contested copies; the others follow"},
+          "list": {"type": "string", "enum": ["decks", "contested", "purchases"],
+                   "description": "Page one full list (use next_cursor as cursor) instead of the overview"},
+          "format": {"type": "string", "enum": ["json", "text"], "default": "json",
+                     "description": "text: the purchases as a paste-ready list ('2 The World Tree' per line), one page per call"},
+          **PAGING},
+         path=lambda a: f"{V1}/decks/overlap" + (f"/{a['list']}" if a.get("list") else "/purchases" if a.get("format") == "text" else ""),
+         query=("priority", "limit", "cursor", "format")),
     Tool("get_deck", "A saved deck: its name, `overview` (format, commander(s), card count, colour identity), a `summary` "
          "of how much of it the person owns (copies needed, owned, missing, cost to finish), the cards not fully owned "
          "(the dearest 40, each with its Scryfall unit price and the `price_date` that price is from: the cheapest priced paper printing of the card, or the printing the list names, "
@@ -589,6 +607,7 @@ SCRYFALL_DATA = {"list_decks",  # the commanders' colour identity is Scryfall's 
                  "get_collection_breakdowns", "get_valuation", "get_value_history", "list_card_names", "refresh_prices",
                  "list_spare_copies", "get_collection_pnl",
                  "check_decklist", "lookup_cards", "get_deck", "get_shared_deck",
+                 "get_deck_overlap",  # prices (#165): Scryfall's cheapest, dated
                  "update_owned_cards", "show_owned_printings"}  # these carry Scryfall's card images
 OWN_DATA_ONLY = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucket", "move_cards",
                  "list_tags", "tag_cards", "untag_cards", "rename_tag", "delete_tag",
@@ -596,7 +615,7 @@ OWN_DATA_ONLY = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucke
                  "get_acquisition_timeline", "parse_decklist", "save_deck", "update_deck", "list_imports",
                  "import_collection_csv", "list_export_formats", "list_shared_with_me", "get_import", "delete_deck",
                  "list_my_shares", "accept_share", "stop_sharing", "start_collection_upload",
-                 "get_staged_upload", "confirm_staged_upload", "get_deck_overlap", "council_brief", "expert_brief",
+                 "get_staged_upload", "confirm_staged_upload", "council_brief", "expert_brief",
                  "confirm_owned_cards_update", "undo_owned_cards_update"}
 DECK_ANALYSIS = {"deck_stats", "simulate_draws", "deck_legality", "find_upgrades", "validate_deck_changes", "find_combos",
                  "shopping_list"}
