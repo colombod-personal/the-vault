@@ -187,7 +187,7 @@ def test_the_page_reads_its_numbers_from_these_calls_and_nothing_else():
     assert "const text = useMemoD(() => (deck ? deckListText(deck.cards) : ''), [deck]);" in jsx
     assert "window.VaultApi.deckStats(text)" in jsx and "window.VaultApi.deckLegality(text, format)" in jsx
     assert "window.VaultApi.deckShopping(text)" in jsx and "window.VaultApi.deckCoverage(deckListText(merged))" in jsx
-    assert "<DeckStats text={text} />" in jsx and "<DeckLegality text={text} format={format} setFormat={setFormat} />" in jsx
+    assert "<DeckStats text={text} onOpening={() => setTab('opening')} />" in jsx and "<DeckOpening text={text} title={deck.title}" in jsx and "<DeckLegality text={text} format={format} setFormat={setFormat} />" in jsx
     assert "<DeckBuyList text={text} />" in jsx
     # the page's Owned / Missing / To finish line, added up from the coverage lines as the test above adds them up
     assert "ownedQty += Math.min(r.owned, r.qty); missingQty += r.need;" in jsx
