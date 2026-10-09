@@ -1,6 +1,6 @@
 # The Graph and the Lab: what they are for (review for #159)
 
-Status: owner decisions of 2026-10-05 are applied. The designs that follow are #161 (deck ideas lab) and #162 (Lab). The browser pass at 1400 and 390 px was done on 2026-10-07 and its screenshots are saved next to this file (`docs/screenshots/`).
+Status: owner decisions of 2026-10-05 are applied. The designs that follow are #161 (deck ideas lab) and #162 (Lab). **The Graph is removed** (#163, tasks 2 and 3): all seven modes, `public/views/graph.jsx`, the cytoscape script and the Graph tab are gone, `#/graph` goes to `#/ideas`, and the Ideas view (`public/views/ideas.jsx`) replaced it; this review is kept as the record of why. #160 (the Deck map cannot be reset) and #89 are superseded by the Ideas view, whose Clear, Esc and Back always return. The browser pass at 1400 and 390 px was done on 2026-10-07 and its screenshots are saved next to this file (`docs/screenshots/`).
 
 ## The test applied to every view
 

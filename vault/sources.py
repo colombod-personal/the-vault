@@ -104,7 +104,7 @@ SOURCES: tuple[Source, ...] = (
            "Do Not Track or Global Privacy Control. The code is public under the MIT licence.",
            "Hosting and code: Vercel, Neon, GitHub."),
     Source("Open source software", "https://mtgvault.cards/credits.html", "community",
-           "The libraries the Vault is built on, including mtg-toolkits, FastAPI, SQLAlchemy, React and Cytoscape.js.",
+           "The libraries the Vault is built on, including mtg-toolkits, FastAPI, SQLAlchemy and React.",
            "Used as libraries under their own licences, listed on the credits page and in THIRD_PARTY_NOTICES.md.",
            "Built on open source: see the credits page."),
 )

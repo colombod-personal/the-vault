@@ -44,10 +44,11 @@ const HELP_SECTIONS = [
     ],
   },
   {
-    id: 'graph', title: 'Graph', views: ['graph'],
+    id: 'ideas', title: 'Ideas', views: ['ideas'],
     body: [
-      'The Graph draws your collection as a map of cards in several ways, chosen with Mode: “Color galaxy”, “Type roster”, “Set clusters”, “Hierarchy”, “Affinity web” and “Mana / price”, plus “Deck map” once you overlay one of your saved decks. “Price tier” and “Depth” narrow which cards are drawn.',
-      'The Graph shows numbers the Vault already holds as pictures; it does not say what to buy or build. A deck ideas view, which would show what a deck is missing and what you own that could stand in, is planned to replace it. It is not built yet, so for now the Graph stays as it is.',
+      'Ideas shows, for one of your saved decks, what your collection covers, what is missing and what another deck is holding. Pick a deck on the start page (Ideas explores saved decks only, so save one on the Decks page first). The header gives the deck\'s format, commander and colours and says how many cards are covered, missing and borrowed. The cards sit in lanes by job (ramp, draw, removal, sweepers, counterspells, tutors, recursion, sacrifice outlets, other and lands), each card in one lane. On a phone, “Missing”, “Borrowed” and “All” choose which cards to list first, and a lane opens when you tap it.',
+      'Pick a card to see which cards you own that do the same job in the deck\'s colours and format, with why they match. A card another deck holds is marked borrowed. “Swap into the deck” opens the deck page with that swap proposed, “Move” explains how to take a card from the deck that holds it, and Buy opens the card on Scryfall with its cheapest known price and the day of that price; your buy list across all decks is in the Lab. Ideas changes nothing: a swap is applied only when you confirm it on the deck page. “Show combos you already own” asks Commander Spellbook, with the deck\'s card names, only when you press it.',
+      '“Clear” steps back out to the list of decks, and so do Esc and the browser\'s Back button, one step at a time: from a card to the deck, then to the list. The roles are the Vault\'s eight coarse ones, so a match is a hint, not proof that two cards play alike. Every number is computed by the server and prices are Scryfall\'s, dated. A shared collection has no Ideas.',
     ],
   },
   {
@@ -78,7 +79,7 @@ const HELP_SECTIONS = [
 // The section a view's "?" opens (a view with no section of its own maps to its nearest one).
 const HELP_FOR_VIEW = {
   dashboard: 'import', browse: 'collection', setdetail: 'sets', sets: 'sets', decks: 'decks',
-  lab: 'lab', graph: 'graph', valuation: 'collection',
+  lab: 'lab', ideas: 'ideas', valuation: 'collection',
 };
 
 const helpHashFor = (id) => '#/help' + (id ? '/' + encodeURIComponent(id) : '');

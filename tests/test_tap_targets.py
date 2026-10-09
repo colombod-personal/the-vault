@@ -134,7 +134,6 @@ CONTROLS = {
     "select": ("select", "select"),
     "the logo (the way home)": ("button", "brand"),
     "bottom tab bar buttons": ("button",),  # checked through .nav button below
-    "colour filter pip (a button)": ("button", "pip", "W"),
     "a row's name that opens a card": ("button", "row-link"),
     "help hint (?)": ("a", "help-hint"),
     "close buttons": ("button", "btn", "xs", "close-x"),
@@ -193,4 +192,4 @@ def test_the_phone_pass_keeps_text_at_12_px_and_labels_at_11_px():
     block = _strip(css[css.index("Phone-first pass (#95)"):])
     sizes = [float(m) for m in re.findall(r"font-size:\s*([\d.]+)px(?:\s*!important)?\s*[;}]", block)]
     assert sizes and min(sizes) >= 11, sorted(set(sizes))
-    assert "min-height: 44px" in block and "button.pip { min-width: 44px; min-height: 44px; }" in block
+    assert "min-height: 44px" in block
