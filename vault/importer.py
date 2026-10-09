@@ -16,11 +16,15 @@ from sqlalchemy import delete, func, select, tuple_, update
 from sqlalchemy.orm import Session
 
 from . import buckets, merge
+from .csv_safe import neutralise_csv, restore_csv
 from .models import Bucket, BucketBaseline, Card, CollectionBaseline, Entry, Import, TagAssignment, User, utcnow
 from .prices import MAX_PRICE, compute_values
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 EXACT = ("set_number", "id")
+# The CSV formats other apps import: a cell that starts like a formula is written with a leading single quote, and
+# removed again when the Vault reads such a file back (vault/csv_safe.py, #351). Dragon Shield is neither.
+SAFE_CSV = ("moxfield", "archidekt", "csv")
 MAX_QUANTITY = 1_000_000  # copies of one row
 MAX_COPIES = 2**31 - 1  # the collection's total, stored in INTEGER columns
 # Column sizes (vault.models.Entry). Free text is clipped to fit; the printing's identity is
@@ -170,7 +174,10 @@ def read_file(content: bytes):
     except UnicodeDecodeError as exc:
         raise ImportError_("File is not UTF-8 text") from exc
     try:
-        source, entries = formats.parse(text)
+        source = formats.detect(text)
+        if source in SAFE_CSV:  # the marker our own export put in front of a formula-shaped cell (#351)
+            text = restore_csv(text)
+        source, entries = formats.parse(text, source)
     except (ValueError, TypeError, AttributeError, OverflowError, csv.Error) as exc:  # whatever the library raises
         raise ImportError_(f"No cards found. {exc}") from exc
     if not entries:
@@ -398,7 +405,10 @@ def export_entries(db: Session, user: User, fmt: str, bucket_id: int | None = No
 
 
 def export_collection(db: Session, user: User, fmt: str, bucket_id: int | None = None) -> str:
-    return formats.FORMATS[fmt].dumps(export_entries(db, user, fmt, bucket_id))
+    text = formats.FORMATS[fmt].dumps(export_entries(db, user, fmt, bucket_id))
+    # The files other apps import are opened in a spreadsheet: a cell that starts like a formula gets a leading
+    # single quote (vault/csv_safe.py). Dragon Shield stays byte for byte what was imported; the text list is not a spreadsheet.
+    return neutralise_csv(text) if fmt in SAFE_CSV else text
 
 
 def export_dragonshield(db: Session, user: User) -> str:

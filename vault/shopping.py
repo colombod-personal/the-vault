@@ -18,6 +18,8 @@ import csv
 import io
 from dataclasses import dataclass
 
+from .csv_safe import neutralise_cell
+
 FINISHES = ("nonfoil", "foil", "etched")
 CONDITIONS = ("NM", "LP", "MP", "HP", "DMG")
 FORMATS = ("plain", "cardkingdom", "tcgplayer", "cardmarket", "csv")
@@ -134,11 +136,6 @@ def printing_dict(p, finish: str) -> dict:
 
 # -- the store formats -------------------------------------------------------------------------------
 
-def _csv_cell(value) -> str:
-    text = "" if value is None else str(value)
-    return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
-
-
 def render(lines: list[dict], fmt: str) -> str:
     """The list in one store's paste syntax. A line that has no printing chosen (none qualified) is not written."""
     todo = [l for l in lines if not l.get("no_qualifying_printing")]
@@ -149,7 +146,7 @@ def render(lines: list[dict], fmt: str) -> str:
         writer.writerow(["quantity", "name", "set", "collector_number", "finish", "language", "unit_price_usd", "price_date"])
         for l in todo:
             p = l.get("printing") or {}
-            writer.writerow([l["quantity"], _csv_cell(l["name"]), p.get("set", ""), _csv_cell(p.get("collector_number", "")),
+            writer.writerow([l["quantity"], neutralise_cell(l["name"]), p.get("set", ""), neutralise_cell(p.get("collector_number", "")),
                              p.get("finish", ""), p.get("language", ""), "" if l["unit_price_usd"] is None else l["unit_price_usd"],
                              l.get("price_date") or ""])
         return buf.getvalue().rstrip("\n")
