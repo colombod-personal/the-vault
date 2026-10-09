@@ -127,18 +127,33 @@ def test_the_last_sign_in_method_is_never_removed(signed_in):
     res = veteran.delete(f"{V1}/me/identities/{only['id']}")
     assert res.status_code == 409 and "only way to sign in" in res.json()["detail"]
 
-    google = add_provider(veteran, me, "google", hours_ago=1)
-    assert all(m["removable"] for m in methods(veteran)["items"])
-    assert veteran.delete(f"{V1}/me/identities/{google}").status_code == 200   # one of two goes
-    assert veteran.delete(f"{V1}/me/identities/{only['id']}").status_code == 409  # the other stays
+    add_provider(veteran, me, "google", hours_ago=1)
+    assert veteran.delete(f"{V1}/me/identities/{only['id']}").status_code == 409  # two new methods: nothing is unlinked yet (below)
+
+
+def test_a_young_account_cannot_unlink_anything_a_copied_session_could_have_swapped(signed_in):
+    """Signed up this morning with one sign-in; a copied session adds its own passkey and would unlink the owner's only provider.
+    With every method new, nothing tells whose is whose, so the unlink is refused until a method older than the window remains."""
+    me = signed_in.get(f"{V1}/me").json()["id"]
+    [owner] = methods(signed_in)["items"]
+    add_passkey(signed_in, me, "Attacker phone", hours_ago=1)
+    listed = methods(signed_in)["items"]
+    assert not any(m["removable"] for m in listed if m["kind"] == "provider")
+    res = signed_in.delete(f"{V1}/me/identities/{owner['id']}")
+    assert res.status_code == 409 and "older than 24 hours" in res.json()["detail"]
+    with sessions(signed_in) as db:
+        assert db.scalar(select(Identity.id).where(Identity.id == owner["id"])) == owner["id"]
+    # the attacker's passkey itself is removable, as before, and signing out everywhere still works
+    [phone] = [m for m in listed if m["kind"] == "passkey"]
+    assert signed_in.delete(f"{V1}/me/passkeys/{phone['id']}").status_code == 200
 
 
 def test_a_passkey_counts_as_a_way_to_sign_in_when_a_provider_is_removed(signed_in):
     veteran = signed_in
     me = veteran.get(f"{V1}/me").json()["id"]
     [dev] = methods(veteran)["items"]
-    add_passkey(veteran, me, "Phone", hours_ago=1)
-    assert veteran.delete(f"{V1}/me/identities/{dev['id']}").status_code == 200  # the passkey remains
+    add_passkey(veteran, me, "Phone", hours_ago=48)
+    assert veteran.delete(f"{V1}/me/identities/{dev['id']}").status_code == 200  # the older passkey remains
     [phone] = methods(veteran)["items"]
     assert phone["kind"] == "passkey" and phone["removable"] is False
     assert veteran.delete(f"{V1}/me/passkeys/{phone['id']}").status_code == 409

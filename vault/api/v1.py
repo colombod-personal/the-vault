@@ -319,13 +319,14 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                              limit: int | None = None, user: User = Depends(account_user),
                              db: Session = Depends(get_db)) -> dict:
         methods = account_sign_in_methods(db, user.id)
+        established = any(not m["recently_added"] for m in methods)  # unlinking needs an older method to remain
         shown = [m for m in methods if m["recently_added"]] if recent_only else methods
         page, nxt = paginate(shown, lambda m: (-m["created_at"].timestamp(), m["kind"]), lambda m: m["id"],
                              cursor=cursor, limit=limit)
         items = [{"id": m["id"], "kind": m["kind"], "provider": m["provider"], "name": m["name"],
                   "created_at": _iso(m["created_at"]), "last_used_at": _iso(m["last_used_at"]),
                   "recently_added": m["recently_added"], "added_minutes_ago": m["added_minutes_ago"],
-                  "removable": len(methods) > 1 and (m["kind"] == "passkey" or m["recently_added"]),
+                  "removable": len(methods) > 1 and (m["kind"] == "passkey" or (m["recently_added"] and established)),
                   "_links": {"self": link(f"{V1}/me/passkeys/{m['id']}" if m["kind"] == "passkey"
                                           else f"{V1}/me/identities/{m['id']}")}} for m in page]
         body = page_body(request, items, nxt, len(shown), **({"recent_only": "true"} if recent_only else {}))

@@ -237,7 +237,12 @@ def _claim_identity(db: Session, identity: Identity, current: User) -> None:
     # Both accounts locked (in id order, so two links the other way round can't deadlock): an
     # import into the other account waits, and then sees it gone or no longer owning this sign-in.
     db.execute(select(User.id).where(User.id.in_([other_id, current.id])).order_by(User.id).with_for_update())
-    db.refresh(identity)
+    identity_id = identity.id
+    db.expire(identity)
+    identity = db.get(Identity, identity_id, populate_existing=True)
+    if identity is None:  # removed meanwhile (an unlink holding the other account's lock): nothing to move
+        db.rollback()
+        raise IdentityInUse()
     if identity.user_id == current.id:  # a concurrent link already moved it
         return
     if identity.user_id != other_id or not account_is_empty(db, identity.user_id):
@@ -297,8 +302,10 @@ def remove_identity(db: Session, user_id: int, identity_id: int) -> None:
 
     Only a recent one, on purpose (#347): this route exists for "Sign out everywhere", to remove what a copied session
     linked. Unlinking any provider would let that same copied session (while the owner has no recent-sign-in check yet)
-    link its own sign-in and then unlink every one the owner uses, which is a takeover, not a nuisance. Widening it is part
-    of the owner's decision on a recent sign-in for account-level actions (docs/mcp-oauth-threat-model.md).
+    link its own sign-in and then unlink every one the owner uses, which is a takeover, not a nuisance. For the same reason
+    a method used for longer than that window must remain after the removal (409 otherwise): in an account whose methods
+    are all new, a copied session could add a passkey and unlink the owner's only provider, and nothing tells whose is whose.
+    Widening it is part of the owner's decision on a recent sign-in for account-level actions (docs/mcp-oauth-threat-model.md).
 
     Same shape as :func:`vault.passkeys.remove_passkey`: the account row is locked, so two removals take turns,
     and the "another way to sign in is left" check is part of the DELETE itself. The caller commits."""
@@ -316,13 +323,21 @@ def remove_identity(db: Session, user_id: int, identity_id: int) -> None:
     passkeys = select(func.count(Passkey.id)).where(Passkey.user_id == user_id).scalar_subquery()
     providers = select(func.count(Identity.id)).where(
         Identity.user_id == user_id, Identity.provider != PASSKEY_IDENTITY).scalar_subquery()
+    established = (select(func.count(Identity.id)).where(
+        Identity.user_id == user_id, Identity.provider != PASSKEY_IDENTITY, Identity.id != identity_id,
+        Identity.created_at < since).scalar_subquery()
+        + select(func.count(Passkey.id)).where(Passkey.user_id == user_id, Passkey.created_at < since).scalar_subquery())
     removed = db.execute(
         delete(Identity).where(Identity.id == identity_id, Identity.user_id == user_id,
                                Identity.provider != PASSKEY_IDENTITY, Identity.created_at >= since,
-                               passkeys + providers > 1)
+                               passkeys + providers > 1, established > 0)
         .execution_options(synchronize_session=False)).rowcount
     if not removed:
-        raise HTTPException(409, "This is your only way to sign in. Add a passkey or link another sign-in first.")
+        if db.scalar(select(passkeys + providers)) <= 1:
+            raise HTTPException(409, "This is your only way to sign in. Add a passkey or link another sign-in first.")
+        raise HTTPException(409, f"This account has no sign-in method older than {RECENT_SIGN_IN_METHOD_HOURS} hours besides "
+                                 "the new ones, so nothing can be unlinked yet: it could not be told whose is whose. "
+                                 "Sign out everywhere still works.")
     db.flush()
 
 

@@ -505,7 +505,10 @@ four criteria; only the third is built, because the others wait for a decision f
 - **Unlinking a provider is limited to one linked in the last 24 hours (409 otherwise), on purpose.** Today a copied session can add a
   passkey, but the owner's linked providers survive it. If any provider could be unlinked, the same session could add its own passkey
   and then unlink every provider the owner uses: a takeover and a lock-out, not a nuisance. So the new route removes only what this
-  feature is for. Removing a passkey was already possible without a time limit and is unchanged. Widening unlinking belongs to the
+  feature is for, and only while a method older than 24 hours remains: in an account whose methods are all new (signed up with Google
+  this morning), a copied session could add a passkey and unlink the owner's Google, and nothing tells whose is whose, so nothing can be
+  unlinked there yet (409; "Sign out everywhere" still works). A read-only security review of this change found that case (2026-10-09,
+  before the merge). Removing a passkey was already possible without a time limit and is unchanged. Widening unlinking belongs to the
   owner's decision below.
 - **Tests:** `tests/test_recent_sign_in_methods.py`: a method added 2 hours ago is listed and removable; one added 3 days ago is not
   highlighted; the last method is refused; another person's methods are never listed or removable; a token is refused; the 24-hour edge;

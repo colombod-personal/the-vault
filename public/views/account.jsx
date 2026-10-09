@@ -921,7 +921,7 @@ function SignOutEverywhere({ onCancel, onRemoved }) {
               <li key={m.kind + m.id} className="signout-method">
                 <span className="label-mono">
                   <strong>{m.kind === 'passkey' ? `Passkey: ${m.name}` : m.name}</strong>
-                  {' '}· {m.kind === 'passkey' ? 'added' : 'linked'} {addedAgo(m.added_minutes_ago)}
+                  {' '}· {m.kind === 'passkey' ? 'added' : 'linked'} {addedAgo(m.added_minutes_ago)} ({new Date(m.created_at).toLocaleString()})
                 </span>
                 {m.removable
                   ? <button className="btn xs" disabled={removing !== null} onClick={() => remove(m)}
@@ -933,6 +933,11 @@ function SignOutEverywhere({ onCancel, onRemoved }) {
             ))}
           </ul>
         </>
+      )}
+      {found && found._links && found._links.next && (
+        <p className="label-mono" role="alert" style={{ color: 'var(--danger)' }}>
+          More than {items.length} were added: only the newest are shown. Remove the ones you don't recognise, then open this again.
+        </p>
       )}
       {error && <p role="alert" style={{ color: 'var(--danger)' }}>{error}</p>}
       <div className="signout-actions">

@@ -675,7 +675,7 @@ class SignInMethodItem(Hal):
     last_used_at: str | None = Field(None, description="Passkeys only")
     recently_added: bool = Field(description="Added in the last `recent_hours` hours")
     added_minutes_ago: int
-    removable: bool = Field(description="False when removing it would be refused (409): it is the only way to sign in, or a provider linked more than `recent_hours` ago")
+    removable: bool = Field(description="False when removing it would be refused (409): it is the only way to sign in, or a provider linked more than `recent_hours` ago, or the account has no method older than that")
 
 
 class SignInMethodPage(Page):
