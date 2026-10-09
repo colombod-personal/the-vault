@@ -245,6 +245,131 @@ html, body { max-width: 100%; overflow-x: clip; }
   .bucket-edit .input { min-height: 44px; }
 }
 
+/* ---- The Lab (#164, docs/lab-design.md): buy, sell or keep ---- */
+.lab { display: grid; gap: 28px; min-width: 0; }
+.lab > * { min-width: 0; }
+.lab-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.lab [tabindex="-1"]:focus { outline: none; }
+.lab [tabindex="-1"]:focus-visible { outline: 1px solid var(--gold); outline-offset: 4px; }
+.lab-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; }
+.lab-head .h1 { margin-top: 6px; }
+.lab-lede { margin: 6px 0 0; color: var(--text-2); font-size: 15px; }
+.lab-head-side { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px 14px; }
+.lab-prices { margin: 0; color: var(--text-2); }
+.lab-prices.stale { color: var(--gold); }
+
+/* The decision strip: three counters, each scrolls to its section. */
+.lab-counters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.lab-counter {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 88px; padding: 16px 18px;
+  text-align: left; color: inherit; font: inherit; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); transition: border-color .15s;
+}
+.lab-counter:hover { border-color: var(--gold); }
+.lab-counter:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.lab-counter.quiet { background: var(--bg-2); }
+.lab-counter-text { display: grid; gap: 6px; min-width: 0; }
+.lab-counter-head { font-family: var(--display); font-size: 24px; font-weight: 600; line-height: 1.1; overflow-wrap: anywhere; }
+.lab-counter-detail { font-family: var(--mono); font-size: 12px; color: var(--text-2); overflow-wrap: anywhere; }
+.lab-counter.quiet .lab-counter-head { color: var(--text-2); }
+.lab-counter-go { flex: none; font-size: 24px; color: var(--gold); }
+
+/* Buy on the left, Sell or hold on the right; one column below 1000px. */
+.lab-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 32px; align-items: start; }
+.lab-block, .lab-sub-block { min-width: 0; scroll-margin-top: 72px; }
+.lab-sub { margin: 4px 0 14px; color: var(--text-2); }
+.lab-sub-block { margin-top: 22px; padding-top: 4px; border-top: 1px solid var(--border); }
+.lab-h3 { margin: 20px 0 6px; font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); }
+.lab-h3.big { margin-top: 14px; font-family: var(--display); font-size: 22px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text); }
+.lab-h3-note { margin-left: 8px; font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--text-2); letter-spacing: 0.02em; }
+.lab-line { margin: 8px 0; line-height: 1.55; }
+.lab-line.muted { color: var(--text-2); font-size: 13px; }
+.lab-line.warn { color: var(--gold); }
+.lab-fine { max-width: 760px; margin: 12px 0 0; color: var(--text-2); font-size: 12px; line-height: 1.6; }
+.lab .good { color: var(--good); }
+.lab .bad { color: var(--danger); }
+.lab .gold { color: var(--gold); }
+.lab-note { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0; }
+.lab-note p { flex: 1 1 260px; margin: 0; line-height: 1.55; }
+.lab-empty { display: grid; justify-items: start; gap: 14px; max-width: 560px; padding: 24px; }
+.lab-empty p { margin: 0; line-height: 1.55; }
+.lab-empty .lab-empty-text { font-family: var(--display); font-size: 26px; font-weight: 600; line-height: 1.2; }
+.lab-fail { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0; padding: 10px 12px; font-size: 13px;
+  border: 1px solid var(--danger); border-radius: var(--radius); background: oklch(0.66 0.18 25 / 0.1); }
+.lab-loading { display: flex; align-items: center; gap: 8px; margin: 10px 0; color: var(--text-2); font-size: 13px; }
+.lab-inline-error { color: var(--danger); font-family: var(--mono); font-size: 12px; }
+.lab-more { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+
+/* Lists: one row per card, deck or holding. */
+.lab-list { list-style: none; margin: 8px 0 0; padding: 0; border-top: 1px solid var(--border); }
+.lab-item { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.lab-item-main { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.lab-name { text-align: left; overflow-wrap: anywhere; }
+.lab-badge { padding: 2px 8px; font-family: var(--mono); font-size: 11px; white-space: nowrap; color: var(--gold); border: 1px solid var(--gold); border-radius: 999px; }
+.lab-item-sub { margin: 2px 0 0; color: var(--text-2); font-family: var(--mono); font-size: 12px; }
+.lab-item-note { margin: 6px 0 0; color: var(--text-2); font-size: 12px; line-height: 1.5; }
+.lab-opts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.lab-opt { padding: 6px 10px; font-family: var(--mono); font-size: 12px; color: var(--text-2); background: var(--bg-2); border: 1px solid var(--border-2); border-radius: var(--radius); }
+.lab-opt.buy { color: var(--gold); border-color: var(--gold); }
+.lab-copy { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 14px; }
+.lab-copy-note { color: var(--good); font-size: 13px; }
+.lab-manual { display: grid; gap: 6px; margin-top: 10px; font-size: 13px; }
+.lab-manual textarea { width: 100%; font-family: var(--mono); font-size: 16px; }
+.lab-deck-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.lab-deck-row .lab-name { flex: 1 1 160px; font-weight: 600; }
+.lab-status { font-family: var(--mono); font-size: 12px; color: var(--text-2); }
+.lab-status.ok { color: var(--good); }
+.lab-status.lacks { color: var(--gold); }
+.lab-status.skipped { color: var(--danger); }
+.lab-deck-detail { margin-top: 8px; padding: 10px 12px; font-size: 13px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); }
+.lab-deck-detail ul { margin: 4px 0 8px; padding-left: 18px; }
+.lab-mini { margin: 4px 0 0; font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-2); }
+
+/* Spare copies and profit and loss: columns on a wide screen, wrapped lines on a phone. */
+.lab-colhead { display: grid; grid-template-columns: minmax(0, 1fr) 64px 150px 100px; gap: 4px 12px; margin-top: 10px; padding: 0 0 6px;
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-2); }
+.lab-colhead.pnl { grid-template-columns: minmax(0, 1fr) 96px 96px 150px 96px; }
+.lab-spare-row { display: grid; grid-template-columns: minmax(0, 1fr) 64px 150px 100px; align-items: center; gap: 4px 12px; }
+.lab-pnl-row { display: grid; grid-template-columns: minmax(0, 1fr) 96px 96px 150px 96px; align-items: center; gap: 4px 12px; }
+.lab-pnl-main { display: grid; min-width: 0; }
+.lab-fig { font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; }
+.lab-fig.strong { font-weight: 700; }
+.lab-fig.muted { color: var(--text-2); }
+.lab-fig-l { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.lab-pct { font-weight: 400; font-size: 12px; }
+.lab-link { font-family: var(--mono); font-size: 12px; color: var(--gold); text-decoration: underline; white-space: nowrap; }
+.lab-toggle { margin-top: 8px; }
+.lab-printings { margin-top: 8px; padding: 6px 12px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); }
+.lab-printings ul { list-style: none; margin: 0; padding: 0; }
+.lab-printings li { display: grid; grid-template-columns: minmax(0, 1.5fr) 72px minmax(0, 1.4fr) minmax(0, 1fr) auto; align-items: center; gap: 4px 12px;
+  padding: 6px 0; font-size: 13px; border-bottom: 1px solid var(--border); }
+.lab-printings li:last-child { border-bottom: 0; }
+.lab-tabs { display: flex; gap: 6px; margin: 12px 0 4px; }
+.lab-value-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
+.lab-value-head .lab-line { flex: 1 1 280px; margin: 0; }
+.lab-chart { margin-top: 12px; padding: 16px; }
+
+@media (max-width: 1000px) {
+  .lab-cols { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+}
+@media (max-width: 760px) {
+  .lab { gap: 22px; }
+  .lab-head-side { justify-content: flex-start; }
+  .lab-counters { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .lab-counter { min-height: 64px; padding: 12px 14px; }
+  .lab-counter-head { font-size: 20px; }
+  .lab-colhead { display: none; }
+  .lab-spare-row, .lab-pnl-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; }
+  .lab-spare-row .lab-name, .lab-pnl-main { flex: 1 1 100%; }
+  .lab-fig-l { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; clip-path: none; color: var(--text-2); font-weight: 400; }
+  .lab-link { display: inline-flex; align-items: center; min-height: 44px; }
+  .lab-printings li { display: flex; flex-wrap: wrap; gap: 2px 12px; }
+  .lab-printings li .lab-printing-name { flex: 1 1 100%; }
+  .lab-h3-note { display: block; margin: 2px 0 0; }
+  .lab-empty { padding: 14px; }
+  .lab-chart { padding: 8px; }
+}
+
 /* ---- Tags in the app (#128): chips on the rows, the filter, the bulk bar, the card drawer's tags and notes ---- */
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .tag-bar .tag-note { flex: 1 1 100%; margin: 0; font-size: 12px; }
@@ -303,7 +428,7 @@ p.tag-note { margin: 0 0 14px; font-size: 12px; }
   .brand .mark { width: 24px; height: 24px; font-size: 15px; }
   .nav {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
-    display: grid; grid-template-columns: repeat(6, 1fr); gap: 0;
+    display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 0;  /* five tabs on a shared collection (no Lab), six otherwise */
     margin: 0; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
     background: oklch(0.18 0.013 65 / 0.94); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
     border-top: 1px solid var(--border);
@@ -320,12 +445,12 @@ p.tag-note { margin: 0 0 14px; font-size: 12px; }
     content: ''; width: 22px; height: 22px; background: currentColor;
     -webkit-mask: center / contain no-repeat; mask: center / contain no-repeat;
   }
-  .nav button:nth-child(1)::before { -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='16' rx='2'/><circle cx='12' cy='12' r='4'/><path d='M12 8v1M12 15v1M8 12h1M15 12h1M6 20v1.5M18 20v1.5'/></svg>"); mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='16' rx='2'/><circle cx='12' cy='12' r='4'/><path d='M12 8v1M12 15v1M8 12h1M15 12h1M6 20v1.5M18 20v1.5'/></svg>"); } /* Vault (a vault door) */
-  .nav button:nth-child(2)::before { -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><circle cx='10.5' cy='10.5' r='6'/><path d='M15 15l5.5 5.5'/></svg>"); mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><circle cx='10.5' cy='10.5' r='6'/><path d='M15 15l5.5 5.5'/></svg>"); } /* Browse (search) */
-  .nav button:nth-child(3)::before { -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3l9 4.5-9 4.5-9-4.5z'/><path d='M3 12l9 4.5 9-4.5'/><path d='M3 16.5l9 4.5 9-4.5'/></svg>"); mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3l9 4.5-9 4.5-9-4.5z'/><path d='M3 12l9 4.5 9-4.5'/><path d='M3 16.5l9 4.5 9-4.5'/></svg>"); } /* Sets (stacked set layers) */
-  .nav button:nth-child(4)::before { -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><rect x='3.5' y='6' width='10' height='14' rx='1.5' transform='rotate%28-10 8.5 13%29'/><rect x='10' y='4' width='10' height='14' rx='1.5' transform='rotate%288 15 11%29'/></svg>"); mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><rect x='3.5' y='6' width='10' height='14' rx='1.5' transform='rotate%28-10 8.5 13%29'/><rect x='10' y='4' width='10' height='14' rx='1.5' transform='rotate%288 15 11%29'/></svg>"); } /* Decks (two fanned cards) */
-  .nav button:nth-child(5)::before { -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M9 3h6M10 3v6l-5.5 9.5A1.5 1.5 0 0 0 5.8 21h12.4a1.5 1.5 0 0 0 1.3-2.5L14 9V3'/><path d='M7.5 15h9'/></svg>"); mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M9 3h6M10 3v6l-5.5 9.5A1.5 1.5 0 0 0 5.8 21h12.4a1.5 1.5 0 0 0 1.3-2.5L14 9V3'/><path d='M7.5 15h9'/></svg>"); } /* Lab (flask) */
-  .nav button:nth-child(6)::before { -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><circle cx='6' cy='6' r='2.5'/><circle cx='18' cy='8' r='2.5'/><circle cx='10' cy='18' r='2.5'/><path d='M8.3 7l7.3.6M7 8.3l2 7.3M16.4 10l-4.6 6'/></svg>"); mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><circle cx='6' cy='6' r='2.5'/><circle cx='18' cy='8' r='2.5'/><circle cx='10' cy='18' r='2.5'/><path d='M8.3 7l7.3.6M7 8.3l2 7.3M16.4 10l-4.6 6'/></svg>"); } /* Graph (linked nodes) */
+  .nav button[data-nav="vault"]::before { -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='16' rx='2'/><circle cx='12' cy='12' r='4'/><path d='M12 8v1M12 15v1M8 12h1M15 12h1M6 20v1.5M18 20v1.5'/></svg>"); mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='16' rx='2'/><circle cx='12' cy='12' r='4'/><path d='M12 8v1M12 15v1M8 12h1M15 12h1M6 20v1.5M18 20v1.5'/></svg>"); } /* Vault (a vault door) */
+  .nav button[data-nav="browse"]::before { -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><circle cx='10.5' cy='10.5' r='6'/><path d='M15 15l5.5 5.5'/></svg>"); mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><circle cx='10.5' cy='10.5' r='6'/><path d='M15 15l5.5 5.5'/></svg>"); } /* Browse (search) */
+  .nav button[data-nav="sets"]::before { -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3l9 4.5-9 4.5-9-4.5z'/><path d='M3 12l9 4.5 9-4.5'/><path d='M3 16.5l9 4.5 9-4.5'/></svg>"); mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3l9 4.5-9 4.5-9-4.5z'/><path d='M3 12l9 4.5 9-4.5'/><path d='M3 16.5l9 4.5 9-4.5'/></svg>"); } /* Sets (stacked set layers) */
+  .nav button[data-nav="decks"]::before { -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><rect x='3.5' y='6' width='10' height='14' rx='1.5' transform='rotate%28-10 8.5 13%29'/><rect x='10' y='4' width='10' height='14' rx='1.5' transform='rotate%288 15 11%29'/></svg>"); mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><rect x='3.5' y='6' width='10' height='14' rx='1.5' transform='rotate%28-10 8.5 13%29'/><rect x='10' y='4' width='10' height='14' rx='1.5' transform='rotate%288 15 11%29'/></svg>"); } /* Decks (two fanned cards) */
+  .nav button[data-nav="lab"]::before { -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M9 3h6M10 3v6l-5.5 9.5A1.5 1.5 0 0 0 5.8 21h12.4a1.5 1.5 0 0 0 1.3-2.5L14 9V3'/><path d='M7.5 15h9'/></svg>"); mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M9 3h6M10 3v6l-5.5 9.5A1.5 1.5 0 0 0 5.8 21h12.4a1.5 1.5 0 0 0 1.3-2.5L14 9V3'/><path d='M7.5 15h9'/></svg>"); } /* Lab (flask) */
+  .nav button[data-nav="graph"]::before { -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><circle cx='6' cy='6' r='2.5'/><circle cx='18' cy='8' r='2.5'/><circle cx='10' cy='18' r='2.5'/><path d='M8.3 7l7.3.6M7 8.3l2 7.3M16.4 10l-4.6 6'/></svg>"); mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><circle cx='6' cy='6' r='2.5'/><circle cx='18' cy='8' r='2.5'/><circle cx='10' cy='18' r='2.5'/><path d='M8.3 7l7.3.6M7 8.3l2 7.3M16.4 10l-4.6 6'/></svg>"); } /* Graph (linked nodes) */
   .nav button.active { color: var(--gold); border-top-color: var(--gold); background: oklch(0.78 0.13 80 / 0.06); }
   main { padding: 14px max(12px, env(safe-area-inset-right)) 24px max(12px, env(safe-area-inset-left)); }
   /* Room for the tab bar after the last thing on the page (the footer). */

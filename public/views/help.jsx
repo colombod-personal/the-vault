@@ -39,7 +39,8 @@ const HELP_SECTIONS = [
   {
     id: 'lab', title: 'Lab', views: ['lab'],
     body: [
-      'The Lab shows what your numbers say: the “Profit & loss” of your cards against what you paid, your “Biggest stockpiles” (the cards you hold the most copies of), “Acquisition spend by month”, and your collection by colour, type and mana value. All numbers are computed by the server.',
+      'The Lab helps you decide what to buy, sell or keep. Three counters at the top say how many decks need a purchase, how many cards you could sell and your biggest known loss and gain; each one takes you to its section.',
+      '“Buy” says whether your saved decks can all be built at the same time from the copies you own, which cards to buy (cheapest first), which of them could be moved from another deck instead, and what each deck lacks. “Copy shopping list” copies the cards to buy as text you can paste into a shop\'s own list tool: the Vault does not contact shops. “Spare copies” lists the copies beyond what your saved decks need, with what they are worth and which copies they are; it does not know decks you have not saved, so spare never means worthless to you. “Profit and loss” lists your “Winners” and “Losers” against what you paid (only copies with a price paid and a current price count), and “Value over time” shows what your collection was worth each day. A shared collection has no Lab. Every number is computed by the server, and prices are Scryfall\'s, dated.',
     ],
   },
   {

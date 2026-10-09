@@ -293,6 +293,15 @@ window.VaultApi = (() => {
       valuation: () => cachedGet(base, base + '/valuation'),
       timeline: () => cachedGet(base, base + '/timeline').then((t) => t.months),
       history: () => upTo(plainPage(base + '/history' + query({ limit: 500 })), Infinity).then((p) => p.items),
+      // The Lab (docs/lab-design.md). Own account only: a shared collection has no such routes (404). Not kept in the local copy:
+      // spare copies depend on the saved decks as well as on the collection's version, and the server's ETag already makes a
+      // repeated read cheap. `spare`/`pnl` give the first page (`limit` items), `history` the days since `since`, with the
+      // server's market-only `summary`; `follow` reads a `next` link; `card` opens one printing in the card drawer's shape.
+      spare: (limit) => call(base + '/spare' + query({ limit })),
+      pnl: (side, limit) => call(base + '/pnl' + query({ side, limit })),
+      historySince: (since) => call(base + '/history' + query({ since, limit: 500 })),
+      follow: (href) => call(href),
+      card: (href) => cachedGet(base, href).then(cardItem),
     };
   }
 
@@ -498,6 +507,22 @@ window.VaultApi = (() => {
     deckUpgrades: (text, format, budget_usd, roles) => call(V1 + '/decks/upgrades', { method: 'POST', json: { text, format, budget_usd, use_collection: true, ...(roles ? { roles } : {}) } }),
     deckCombos: (text) => call(V1 + '/decks/combos', { method: 'POST', json: { text } }),
     deckShopping: (text) => call(V1 + '/decks/shopping-list', { method: 'POST', json: { text } }),
+    // can the saved decks all be built at once (the Lab's Buy section, docs/deck-independence.md): the root (summary, counts,
+    // the first page of decks), the purchases (cheapest first, paged; follow `_links.next` with `follow`), and the paste-ready
+    // shopping list, whose pages are joined here until the server has no `next`
+    overlap: () => call(V1 + '/decks/overlap'),
+    overlapPurchases: (limit) => call(V1 + '/decks/overlap/purchases' + query({ limit })),
+    follow: (href) => call(href),
+    overlapText: async () => {
+      const chunks = [], seen = new Set();
+      for (let url = V1 + '/decks/overlap/purchases?format=text&limit=500'; url && !seen.has(url); ) {
+        seen.add(url);
+        const page = await call(url);
+        if (page.text) chunks.push(page.text);
+        url = page._links && page._links.next ? page._links.next.href : null;
+      }
+      return chunks.join('\n');
+    },
 
     // sharing
     shares: () => all(V1 + '/shares'),
