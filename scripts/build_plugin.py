@@ -578,6 +578,10 @@ def setup_page(host_id: str) -> str:
             "No Perplexity documentation page is cited, so anything that run did not show is marked \"not verified yet\".",
             f"- Status: the connection steps were done once in a real {title} account; this page itself is not run in a real {title} account as a one-prompt setup yet. Comet was not looked at.",
         ]
+    if host_id == "codex":
+        before[4] = ("- Status: the Codex CLI steps were run once in a real Codex (codex-cli 0.154.0, 2026-10-09, a demo Vault account): adding the server "
+                     "started OAuth with a client metadata document, the Vault's consent page appeared, and a Vault question was answered in 18 seconds. "
+                     "The IDE extension and Codex cloud were not run in a real account yet. Anything marked \"not verified yet\" is something only a real run can settle.")
     do = "\n\n".join(f"### {name}\n\n{body}" for name, body in sections)
     if len(sections) == 1 and not OAUTH_READY and host_id != "claude":
         do = sections[0][1]
