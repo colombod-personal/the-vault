@@ -146,8 +146,8 @@ is stored). Over the limit they answer `429` (problem+json) with `Retry-After` i
 | `GET\|POST /oauth/authorize`, `POST /oauth/token`, `POST /oauth/revoke` | 120 | `OAUTH_RATE_LIMIT` |
 | `POST /oauth/register` | 20 | `OAUTH_REGISTER_RATE_LIMIT` |
 
-At most 10,000 passkey ceremonies may be pending at once (`PASSKEY_CHALLENGE_CAP`); beyond that
-`…/options` answers `429` until some expire. On Vercel the client IP is the first
+A passkey ceremony's challenge lives in the signed session cookie (nothing is written until someone tries to finish it), so
+there is no cap on pending ceremonies for a flood to fill: only the per-IP limit above applies to `…/options`. On Vercel the client IP is the first
 `x-forwarded-for` entry (or `x-real-ip`), which Vercel's edge sets; elsewhere those headers are
 ignored and the connection's address is used.
 

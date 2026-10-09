@@ -4,11 +4,11 @@ This needs no third-party console or account. Creating a passkey is also how som
 Vault account without Google, Microsoft, Apple or Facebook.
 
 Each flow is two steps: ``…/options`` returns the WebAuthn options, and ``…/verify`` checks the
-browser's answer with py_webauthn. The challenge is kept on the server (``passkey_challenges``,
-valid for five minutes) and the session cookie only names it. Verifying claims it with a
-conditional DELETE, so it is used once, even by a replayed cookie or two racing requests.
-User verification (a PIN or biometric) is required: a passkey can be an account's only factor.
-At most PASSKEY_CHALLENGE_CAP ceremonies may be pending; past that, new ones get 429.
+browser's answer with py_webauthn. The challenge lives in the signed session cookie (with its expiry, five
+minutes): ``options`` writes nothing to the database, so a flood of them can't block anyone else's sign-in (#346). Verifying
+spends it by inserting the ceremony's id into ``passkey_challenges`` (the primary key decides), so it is used once, even by a
+replayed cookie or two racing requests. User verification (a PIN or biometric) is required: a passkey can be an account's
+only factor.
 
 - ``signup``: new account, identified only by the passkey
 - ``register``: add a passkey to the signed-in account
@@ -29,6 +29,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, exists, func, select, update
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from webauthn import (
@@ -80,35 +81,30 @@ class Verify(BaseModel):
     name: str | None = Field(None, max_length=80, description="A label for this passkey, e.g. 'MacBook'")
 
 
-def _stash(request: Request, db: Session, cap: int, kind: str, challenge: bytes, **extra) -> None:
-    now = time.time()
-    db.execute(delete(PasskeyChallenge).where(PasskeyChallenge.expires < now))  # tidy up old ones
-    if db.scalar(select(func.count()).select_from(PasskeyChallenge)) >= cap:  # a flood from many IPs
-        db.commit()
-        raise HTTPException(429, "Too many passkey requests in progress. Try again in a minute.",
-                            headers={"Retry-After": "60"})
-    ceremony = secrets.token_urlsafe(32)
-    db.add(PasskeyChallenge(id=ceremony, kind=kind, challenge=bytes_to_base64url(challenge), expires=now + CHALLENGE_TTL))
-    db.commit()
-    request.session[SESSION_KEY] = {"id": ceremony, "kind": kind, **extra}
+def _stash(request: Request, kind: str, challenge: bytes, **extra) -> None:
+    """Start a ceremony. The challenge lives in the signed session cookie (with its expiry) and nothing is written to the
+    database: a flood of unauthenticated ``options`` calls costs the server no rows and can't block anyone else's sign-in (#346;
+    it used to fill one global table and answer 429 to everybody at its cap)."""
+    request.session[SESSION_KEY] = {"id": secrets.token_urlsafe(32), "kind": kind, "challenge": bytes_to_base64url(challenge),
+                                    "exp": time.time() + CHALLENGE_TTL, **extra}
 
 
 def _take(request: Request, db: Session, kind: str) -> dict:
-    """The pending ceremony, claimed once: of two requests with the same cookie, one wins."""
+    """The pending ceremony, spent once: a row is written only now, when someone tries to finish one, and its primary key
+    makes the second of two requests with the same cookie lose (the first to insert wins)."""
     expired = HTTPException(400, "No passkey request in progress, or it expired. Start again.")
     pending = request.session.pop(SESSION_KEY, None)
-    if not pending or pending.get("kind") != kind or not pending.get("id"):
+    now = time.time()  # one reading for the expiry check and the clean-up below
+    if (not isinstance(pending, dict) or pending.get("kind") != kind or not pending.get("id") or not pending.get("challenge")
+            or not isinstance(pending.get("exp"), (int, float)) or pending["exp"] < now):
         raise expired
-    row = db.get(PasskeyChallenge, pending["id"])
-    if row is None:
-        raise expired
-    challenge = row.challenge
-    claimed = db.execute(delete(PasskeyChallenge).where(
-        PasskeyChallenge.id == pending["id"], PasskeyChallenge.kind == kind, PasskeyChallenge.expires >= time.time()))
+    db.execute(delete(PasskeyChallenge).where(PasskeyChallenge.expires < now))  # tidy up spent ones that can no longer matter
+    claimed = db.scalar(postgresql.insert(PasskeyChallenge).values(id=pending["id"], kind=kind, challenge="spent", expires=pending["exp"])
+                        .on_conflict_do_nothing().returning(PasskeyChallenge.id))  # no row back: it was already spent
     db.commit()
-    if claimed.rowcount != 1:
+    if claimed is None:
         raise expired
-    return {**pending, "challenge": challenge}
+    return dict(pending)
 
 
 def _label(credential: dict, given: str | None) -> str:
@@ -133,7 +129,7 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
                 resident_key=ResidentKeyRequirement.REQUIRED, user_verification=UserVerificationRequirement.REQUIRED),
             exclude_credentials=[PublicKeyCredentialDescriptor(id=base64url_to_bytes(p.credential_id)) for p in exclude],
         )
-        _stash(request, db, settings.passkey_challenge_cap, kind, options.challenge, handle=bytes_to_base64url(handle), **extra)
+        _stash(request, kind, options.challenge, handle=bytes_to_base64url(handle), **extra)
         return json.loads(options_to_json(options))
 
     def save_credential(db: Session, user: User, pending: dict, body: Verify) -> Passkey:
@@ -221,7 +217,7 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
     def login_options(request: Request, db: Session = Depends(get_db)) -> dict:
         require_enabled()
         options = generate_authentication_options(rp_id=rp_id, user_verification=UserVerificationRequirement.REQUIRED)
-        _stash(request, db, settings.passkey_challenge_cap, "login", options.challenge)
+        _stash(request, "login", options.challenge)
         return json.loads(options_to_json(options))
 
     @router.post("/login/verify", dependencies=limited("passkey-login-verify", verify=True),
