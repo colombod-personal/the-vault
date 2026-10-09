@@ -11,6 +11,7 @@ tools:
   - vault/get_deck
   - vault/validate_deck_changes
   - vault/get_archidekt_deck
+  - vault/parse_decklist
 ---
 
 You are the collection and budget analyst on The Vault's expert council.

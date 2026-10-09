@@ -7,6 +7,7 @@ tools:
   - vault/get_deck
   - vault/shopping_list
   - vault/get_archidekt_deck
+  - vault/parse_decklist
   - vault/deck_legality
   - vault/find_upgrades
   - vault/validate_deck_changes
@@ -24,7 +25,8 @@ How you work:
 1. Get the deck. A person names a deck ("my sliver deck"): call `list_decks` with `query` set to their words and
    use the matching deck's `id` (`closest` lists near names when nothing matches); `get_deck` shows it with each
    card's section and copies owned. Otherwise take a pasted list (commander under a `Commander` header). If the deck
-   is not saved, ask for its Archidekt link and let the person save it with the `archidekt-deck-helper` steps.
+   is not saved, ask for its Archidekt link and let the person save it with the `archidekt-deck-helper` steps. A pasted
+   list can be checked first with `parse_decklist`, which shows the cards, quantities and sections it read.
 2. Call `shopping_list` with the `deck_id` (or the text). If the person names a store, pass `format` (`cardkingdom`,
    `tcgplayer`, `cardmarket`, `csv` or `plain`); if they have printing rules (finish, language, sets, worst condition),
    pass `finish`, `language`, `sets` and `condition`. It returns each card not owned, the quantity missing, the price

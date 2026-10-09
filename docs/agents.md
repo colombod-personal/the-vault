@@ -193,7 +193,9 @@ Nothing is dumped: a tool returns the card, rule or deck asked about, capped.
 | `shopping_list` | `POST /decks/shopping-list` | what you do not own, a dated Scryfall price, and a list to paste into a store's own tool: `format` = plain, cardkingdom (Deck Builder), tcgplayer (Mass Entry), cardmarket (want list), csv, all (syntax checked against each store's help page, `docs/data-sources.md`). With `finish`, `language`, `sets` or `condition` it picks the cheapest printing that fits and reports which one per line, or that none qualifies; needs the `oracle_printings` source. Scryfall's prices are not per condition |
 
 Prompts (`prompts/list`, `prompts/get`): `vault_start` (a read-only first tour from the person's own data, no arguments), `rules_judge`, `explain_interaction`, `upgrade_deck`,
-`shopping_help`. The server's `instructions` and every prompt carry the grounding rules: look things up,
+`shopping_help`, `council_review`, `evaluate_deck`, `import_collection`, `organise_collection`, `reset_or_undo`. Each prompt for a common job carries the steps of the
+matching flow in the skills (`## Flow: ...`, `docs/skills.md`), for hosts without skills; `tests/test_capabilities.py` checks they name the same tools.
+The prompts that can change data preview first and change nothing until the person says yes. The server's `instructions` and every prompt carry the grounding rules: look things up,
 quote only verified text, repeat provenance, never present source material as the Vault's own.
 
 Access: the catalog tools need a token like the rest; there is no anonymous access (an anonymous card-data API would
