@@ -215,9 +215,11 @@ be revoked (Account → Connected apps for OAuth).
   - what a saved deck needs, and what could stand in for a card? `get_deck_ideas`: the deck's cards in role lanes (ramp, draw, removal,
     sweeper, counterspell, tutor, recursion, sacrifice outlet, other, lands), what is missing (`not_owned`, buy) and what another deck holds
     (`held_by_other_deck`, move), counted by the same allocation as `get_deck_overlap`; each lane pages on its own. `get_card_alternatives`:
-    owned cards sharing a core role with a card, inside the deck's colours, legal in `format` and under the copy limit, with `move` only
-    when another deck holds a copy and Scryfall's dated price for a copy to buy. The roles are the eight coarse ones, a community's opinion;
-    say so. Read-only; changing a deck is `validate_deck_changes` then `update_deck`
+    owned cards that do the same job as a card (`tier` `same_job`) or a similar one with the difference said (`similar`), inside the deck's
+    colours, legal in `format` and under the copy limit, with `lacks` (jobs of the card it does not do), both Oracle texts, `move` only when
+    another deck holds a copy and Scryfall's dated price for a copy to buy; `filtered_note` counts the owned cards set aside. The jobs are the
+    Vault's own 22 roles found by rules over the Oracle text, not Scryfall's tags; say so, and never call a candidate "the same card"; `no_role`
+    means the Vault does not know the card, not that nothing like it is owned. Read-only; changing a deck is `validate_deck_changes` then `update_deck`
   - any card, owned or not: `lookup_cards`
   - edit the cards owned (bought, sold, traded): `update_owned_cards` (preview; asks which printing),
     `confirm_owned_cards_update` (after the person says yes), `undo_owned_cards_update`; pictures of the

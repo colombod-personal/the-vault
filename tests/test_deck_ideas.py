@@ -3,7 +3,8 @@ what the collection covers, what is missing and what another deck holds) and `GE
 can stand in for a card), and the tools `get_deck_ideas` and `get_card_alternatives`.
 
 The tests follow the design's list: the lanes (every copy in exactly one, Other and Lands so nothing is dropped, header counts equal
-the sum whatever the page size, lanes page on their own), a missing card with a shared core role lists the owned card, nothing
+the sum whatever the page size, lanes page on their own), a missing card with a shared core role lists the owned card (the roles of
+the alternatives are the Vault's own, #166: tests/test_equivalents.py and tests/test_equivalents_api.py), nothing
 outside the colour identity or the format appears, a card another deck holds is borrowed with that deck's name and `move` needs a
 donor copy, the mixed shortage, copy limits (an owned Sol Ring is never offered for ramp in a Commander deck that runs one), own
 account only, provenance with dated prices, and the performance of the first page on a 100-card deck (a query counter)."""
@@ -42,7 +43,24 @@ CATALOG = [
     (14, "Chaos Warp", "Instant", ["R"], 3),
     (15, "Blasphemous Act", "Sorcery", ["R"], 9),
     (16, "Commander Only Rock", "Artifact", [], 2),  # legal in commander, not in modern
+    (17, "Rampant Growth", "Sorcery", ["G"], 2),  # land ramp, like Cultivate
 ]
+# The Oracle text the Vault's rules read (the alternatives do not read tags): the short texts of the real cards, or a stand-in for the invented ones.
+TEXTS = {
+    3: "{T}: Add {C}{C}.",
+    4: "{T}: Add {C}.\n{1}, {T}, Sacrifice Mind Stone: Draw a card.",
+    5: "{T}: Add one mana of any color in your commander's color identity.",
+    6: "Search your library for up to two basic land cards, reveal those cards, put one onto the battlefield tapped and the other into your hand, then shuffle.",
+    7: "{T}: Add {U}.",
+    8: "{T}: Add {C}.",
+    9: "Whenever Weak Ramp attacks, draw a card.\nWhen Weak Ramp enters the battlefield, create a Treasure token.",  # a Treasure on the side of a draw engine
+    10: "{T}: Add {C}.\nAt the beginning of your upkeep, draw a card.\n{2}, {T}: Search your library for a card, put it into your hand, then shuffle.",
+    11: "Draw two cards.",
+    14: "The owner of target permanent shuffles it into their library, then reveals the top card of their library. If it's a permanent card, they put it onto the battlefield.",
+    15: "This spell costs {1} less to cast for each creature on the battlefield.\nBlasphemous Act deals 13 damage to each creature.",
+    16: "{T}: Add {C}.",
+    17: "Search your library for a basic land card, put that card onto the battlefield tapped, then shuffle.",
+}
 LEGALITIES = {8: {"commander": "banned", "modern": "banned"}, 16: {"commander": "legal", "modern": "not_legal"}}
 TAGGED = {  # role tag -> [(n, weight)]
     "ramp": [(3, "strong"), (4, "strong"), (5, "median"), (6, "strong"), (7, "strong"), (8, "strong"), (9, "weak"), (10, "strong"),
@@ -58,7 +76,7 @@ IMAGE = "https://cards.scryfall.io/normal/front/{}.jpg"
 
 def seed(app, extra_cards=(), extra_tags=None, prices=None):
     """The catalog the tests read: cards, role tags, prices (dated DAY) and the sources that say they are loaded."""
-    cards = [card(n, name, tl, colors, cmc, rank=n, legalities=LEGALITIES.get(n, {"commander": "legal", "modern": "legal"}),
+    cards = [card(n, name, tl, colors, cmc, rank=n, legalities=LEGALITIES.get(n, {"commander": "legal", "modern": "legal"}), text=TEXTS.get(n, ""),
                   image_uris={"normal": IMAGE.format(n)}, artist=f"Artist {n}", scryfall_uri=f"https://scryfall.com/card/{n}")
              for n, name, tl, colors, cmc in CATALOG] + list(extra_cards)
     tagged = {**TAGGED, **(extra_tags or {})}
@@ -276,39 +294,57 @@ def test_an_alternative_another_deck_holds_is_borrowed_with_its_name_and_a_price
 # -- alternatives ---------------------------------------------------------------------------------------------------------
 
 def test_a_missing_card_with_a_shared_core_role_lists_the_owned_card(lab, app):
-    own(app, OWNED)
+    own(app, {**OWNED, "Rampant Growth": 1})
     deck = save(lab, "Ramp Deck", DECK)
     body = alternatives(lab, deck, "Cultivate")
-    assert body["card"]["card"] == "Cultivate" and body["card"]["status"] == "missing" and body["card"]["core_roles"] == ["ramp"]
+    assert body["card"]["card"] == "Cultivate" and body["card"]["status"] == "missing" and body["card"]["core_roles"] == ["land-ramp"]
+    assert [r["role"] for r in body["card"]["roles"]] == ["land-ramp"] and body["card"]["roles"][0]["basis"] == "computed"
+    assert body["card"]["roles"][0]["rule"] == "land-ramp-fetch" and body["card"]["primary_role"] == "land-ramp"
     assert body["card"]["buy"] == {"quantity": 1, "unit_price": 0.4, "price_date": "2026-10-04", "cost": 0.4, "price_status": "priced"}
     assert body["card"]["image"] == {"normal": IMAGE.format(6), "artist": "Artist 6"} and body["card"]["not_owned"] == 1
     rows = {r["card"]: r for r in body["items"]}
-    assert set(rows) == {"Mind Stone", "Arcane Signet"}  # owned, share the ramp core role, in the colours, legal, not already at the limit
+    # owned, in the colours, legal, not already at the limit: one does the same job (land ramp), two are rocks (a neighbouring job)
+    assert set(rows) == {"Rampant Growth", "Mind Stone", "Arcane Signet"}
+    assert [r["card"] for r in body["items"]] == ["Rampant Growth", "Arcane Signet", "Mind Stone"]  # same job first, then the similar ones
+    assert body["tiers"] == {"same_job": 1, "similar": 2}
+    growth = rows["Rampant Growth"]
+    assert growth["tier"] == "same_job" and growth["shared_roles"][0]["role"] == "land-ramp" and growth["lacks"] == [] and growth["extra"] == []
+    assert growth["why"].startswith("same job: land ramp (core, Vault rule land-ramp-fetch)") and "costs 1 less than Cultivate" in growth["why"]
+    assert growth["oracle_text"].startswith("Search your library for a basic land") and body["card"]["oracle_text"].startswith("Search your library for up to two")
     stone = rows["Mind Stone"]
-    assert stone["copies_owned"] == 1 and stone["mana_value"] == 2.0 and stone["mana_value_difference"] == 1.0
-    assert stone["shared_roles"] == [{"role": "ramp", "target": "core", "candidate": "core"}]
-    assert "ramp" in stone["why"] and "core" in stone["why"] and "mana value 2 vs 3" in stone["why"]
+    assert stone["tier"] == "similar" and stone["copies_owned"] == 1 and stone["mana_value"] == 2.0 and stone["mana_value_difference"] == 1.0
+    assert stone["shared_roles"] == [] and stone["lacks"] == [{"role": "land-ramp", "name": "Land ramp"}]
+    assert stone["different"] == [{"kind": "neighbour", "target": {"role": "land-ramp", "name": "Land ramp"},
+                                   "candidate": {"role": "mana-rock", "name": "Mana rock"}}]
+    assert stone["why"].startswith("similar, with a difference: mana rock, where Cultivate is land ramp") and stone["mana_value_change"] == -1.0
+    assert {r["role"]: r["strength"] for r in stone["roles"]} == {"mana-rock": "core", "draw-once": "incidental"}  # its side draw is not a job
+    assert stone["type_note"] == {"target": "Sorcery", "candidate": "Artifact"}  # a spell offered for a permanent
     assert stone["legal"] is True and stone["in_colours"] is True and stone["remaining_allowance"] == 1
     assert stone["image"]["artist"] == "Artist 4" and stone["_links"]["scryfall"]["href"] == "https://scryfall.com/card/4"
     assert body["format"] == "commander" and body["format_from"] == "default" and body["color_identity"] == ["R", "G"]
-    assert body["reason"] is None and body["total"] == 2 and "coarse" in body["roles_note"]
-    assert body["deck"]["name"] == "Ramp Deck"
+    assert body["reason"] is None and body["total"] == 3 and "not Scryfall's community tags" in body["roles_note"]
+    assert body["roles_version"] and body["deck"]["name"] == "Ramp Deck"
 
 
 def test_nothing_outside_the_colour_identity_or_the_format_or_without_a_core_role_is_offered(lab, app):
     own(app, {**OWNED, "Commander Only Rock": 1})
     deck = save(lab, "Ramp Deck", DECK)
-    names = {r["card"] for r in alternatives(lab, deck, "Cultivate")["items"]}
+    body = alternatives(lab, deck, "Cultivate")
+    names = {r["card"] for r in body["items"]}
     assert "Sapphire Medallion" not in names  # blue, in a red-green deck
     assert "Banned Rock" not in names  # banned in commander
-    assert "Weak Ramp" not in names  # a weak tag is incidental, not core
-    assert "Dull Bear" not in names and "Divination" not in names  # no shared role
+    assert "Weak Ramp" not in names  # its Treasure is on the side of a draw engine: incidental, not a core job
+    assert "Dull Bear" not in names and "Divination" not in names  # no shared job
     assert "Cultivate" not in names  # never itself
     assert "Commander Only Rock" in names
+    # nothing is filtered out silently: the answer counts what the colour, format and copy filters removed
+    assert body["filtered_out"] == {"colour_identity": 1, "format": 1, "in_deck": 2}  # Sapphire Medallion; Banned Rock; Sol Ring and Multi Tool are in the deck
+    assert "1 outside this deck's colour identity (RG)" in body["filtered_note"] and "1 not legal in commander" in body["filtered_note"]
     modern = alternatives(lab, deck, "Cultivate", format="modern")
-    # not legal in modern, banned, blue and weak-tagged cards stay out; Sol Ring is allowed more than one copy there
+    # not legal in modern, banned, blue and incidental cards stay out; Sol Ring is allowed more than one copy there
     assert {r["card"] for r in modern["items"]} == {"Mind Stone", "Arcane Signet", "Sol Ring"}
     assert modern["format"] == "modern" and modern["format_from"] == "request"
+    assert modern["filtered_out"]["format"] == 2 and modern["filtered_out"]["colour_identity"] == 1  # Banned Rock and Commander Only Rock are not legal in modern
 
 
 def test_an_owned_sol_ring_is_never_offered_when_the_commander_deck_already_runs_it(lab, app):
@@ -338,8 +374,9 @@ def test_a_card_with_no_alternative_says_why(lab, app):
     none = alternatives(lab, deck, "Blasphemous Act")  # a sweeper, and no other sweeper is owned
     assert none["items"] == [] and none["total"] == 0 and none["reason"] == "none_found"
     assert "own nothing else" in none["message"] and none["card"]["core_roles"] == ["sweeper"]
-    plain = alternatives(lab, deck, "Dull Bear")  # a card with no coarse role
-    assert plain["items"] == [] and plain["reason"] == "no_role" and "no coarse role" in plain["message"]
+    plain = alternatives(lab, deck, "Dull Bear")  # a card the Vault knows no role for
+    assert plain["items"] == [] and plain["reason"] == "no_role" and "knows no role for this card" in plain["message"]
+    assert "not the same as" in plain["message"] and plain["tiers"] == {"same_job": 0, "similar": 0}
     assert lab.get(f"{V1}/decks/{deck}/ideas/alternatives", params={"card": "No Such Cardd"}).status_code == 404
 
 
@@ -370,8 +407,10 @@ def test_the_format_is_validated_and_the_decks_own_format_is_the_default(lab, ap
 def test_a_card_not_in_the_deck_can_still_be_asked_about(lab, app):
     own(app, OWNED)
     deck = save(lab, "Ramp Deck", DECK)
-    body = alternatives(lab, deck, "Chaos Warp")
+    body = alternatives(lab, deck, "Blasphemous Act")
     assert body["card"]["in_deck"] == 0 and body["card"]["status"] is None and body["items"] == [] and body["reason"] == "none_found"
+    warp = alternatives(lab, deck, "Chaos Warp")  # its text is not one the rules read: no role is known, which is not the same as no alternative
+    assert warp["reason"] == "no_role" and warp["card"]["roles"] == [] and warp["card"]["oracle_text"].startswith("The owner of target permanent")
 
 
 # -- own account only -----------------------------------------------------------------------------------------------------
@@ -443,8 +482,11 @@ def test_both_answers_carry_provenance_and_prices_carry_their_date(lab, app):
     for body in (ideas(lab, deck), alternatives(lab, deck, "Cultivate")):
         [block] = body["provenance"]
         assert block["kind"] == "computed" and block["source"] == "The Vault" and block["notice"]
-        assert {"Scryfall", "Scryfall Tagger"} <= {i["source"] for i in block["inputs"]}
+        sources = {i["source"] for i in block["inputs"]}
+        assert "Scryfall" in sources
+        assert ("Scryfall Tagger" in sources) == ("lanes" in body)  # the lanes read Tagger tags; the alternatives are the Vault's own rules
         assert body["prices_date"] == "2026-10-04"
+    assert "version" in alternatives(lab, deck, "Cultivate")["provenance"][0]["origin"]
 
 
 def test_the_tools_are_listed_classified_as_scryfall_data_and_read_only(lab):
@@ -484,7 +526,8 @@ def test_get_card_alternatives_carries_scryfall_provenance_and_dated_prices(lab,
     answer = call_tool(bot, read, "get_card_alternatives", deck_id=deck, card="Cultivate", format="commander")
     assert not answer["isError"], answer
     body = answer["structuredContent"]
-    assert body["prices_date"] == "2026-10-04" and {"Scryfall", "Scryfall Tagger"} <= {i["source"] for i in body["provenance"][0]["inputs"]}
+    assert body["prices_date"] == "2026-10-04" and {i["source"] for i in body["provenance"][0]["inputs"]} == {"Scryfall"}
+    assert body["tiers"] == {"same_job": 0, "similar": 2} and body["items"][0]["tier"] == "similar" and body["items"][0]["oracle_text"]
     assert body["provenance"][0]["notice"]  # the Fan Content notice
     priced = [r for r in body["items"] if r["buy"]]
     assert priced and all(r["buy"]["price_date"] == "2026-10-04" for r in priced) and body["card"]["buy"]["price_date"] == "2026-10-04"
@@ -534,7 +577,8 @@ def hundred_card_deck():
     roles = list(tags)
     for i in range(63):
         n = 200 + i
-        extra.append(card(n, f"Perf Card {i}", "Artifact" if i % 2 else "Sorcery", ["G"], 1 + i % 5, rank=n))
+        extra.append(card(n, f"Perf Card {i}", "Artifact" if i % 2 else "Sorcery", ["G"], 1 + i % 5, rank=n,
+                          text="{T}: Add {C}." if i % 2 else "Draw two cards."))
         tags[roles[i % 5]].append((n, "strong"))
         if i % 7 == 0:
             tags[roles[(i + 2) % 5]].append((n, "median"))  # a second role
