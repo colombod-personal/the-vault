@@ -62,7 +62,7 @@ def test_every_mcp_tool_is_listed_and_simulate_draws_is_in_the_decks_table():
     assert named == [], f"tools missing from docs/ai-parity.md: {named}"
     simulate = [r for r in rows("## Decks") if "`simulate_draws`" in r[3]]
     assert len(simulate) == 1 and "`POST /decks/simulate`" in simulate[0][2]
-    assert simulate[0][1].startswith("none yet")  # the web app has no place for it (#138): said, not hidden
+    assert "“Opening turns” tab" in simulate[0][1]  # the web app has a place for it (#138): the deck page's tab
 
 
 def test_the_web_apps_buy_list_tab_exists_where_the_table_says():

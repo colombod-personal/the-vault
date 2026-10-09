@@ -32,6 +32,13 @@ Rules, cards and prices - how to answer:
   is not power. Prices are dated and come from Scryfall; they are not a store's price today.
 - Budgets and legality are enforced by the Vault: before you present a list of changes, call
   validate_deck_changes and only present it if valid is true. The Vault never fills a store cart.
+- Limited statistics (get_limited_card_stats) are 17Lands' data from Magic Arena games and drafts, shared under CC BY 4.0, not
+  the Vault's and not paper Magic. Ask which set and format first; say "According to data from 17Lands (set, format, date)" in the
+  first sentence that uses a number and repeat the answer's `attribution`; give the number of games beside every rate; say a rate is
+  computed by the Vault and can differ from 17lands.com. Follow each card's `sample`: below 200 games in hand never rank, recommend or
+  compare the card; compare two cards only when both are at the `ok` level and their 95% ranges do not overlap, otherwise say the data
+  does not settle it. Never turn a rate into a grade, a tier or a "best pick", and never say a win rate shows the card causes wins.
+  17Lands does not endorse the Vault.
 - Shops: you have no shop's price, stock or shipping. Never say which shop is cheapest, never call a
   price "current", never say anything goes into a cart. Give the dated Scryfall price and let the person
   compare shops themselves (a shop's own search link is fine). Never place or fill an order for the person, and
@@ -82,6 +89,27 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              {"name": {"type": "string", "minLength": 1, "maxLength": 300, "description": "Exact card name"},
               "oracle_id": {"type": "string", "minLength": 36, "maxLength": 36}},
              path=lambda a: f"{V1}/catalog/cards", query=("name", "oracle_id"), provenance=("catalog",), ui="card"),
+        Tool("get_limited_card_stats", "Win rates and pick positions for the cards of one Limited set, from 17Lands' public data (Magic Arena, "
+             "CC BY 4.0): games in hand, win rate in hand with its 95% range and the set's baseline, games drawn, where the card is last seen and "
+             "taken, each with its sample size and the exact warning when the sample is small. Cards are given by name (`cards`, either face of "
+             "a double-faced card), or the best sorted by one metric (`sort`); a sorted list leaves out the cards under 200 of the sort's own "
+             "sample: games in hand for win_rate_in_hand and games_in_hand, packs seen for avg_last_seen_pick, picks for avg_taken_at. "
+             "Computed by the Vault from 17Lands' per-card counts, so figures can differ from 17lands.com; `attribution` is the credit to repeat. "
+             "`not_found` lists names not in the data; a set that is not loaded answers with what is.",
+             {"set": {"type": "string", "minLength": 2, "maxLength": 10, "pattern": "^[A-Za-z0-9]+$",
+                      "description": "17Lands' set code, such as HOB (case does not matter)"},
+              "format": {"type": "string", "enum": ["PremierDraft", "TradDraft"], "default": "PremierDraft",
+                         "description": "PremierDraft (best of one) or TradDraft (best of three)"},
+              "cards": {"type": "array", "maxItems": 40, "items": {"type": "string", "minLength": 1, "maxLength": 300},
+                        "description": "Card names to look up; leave out to list the best by `sort`"},
+              "sort": {"type": "string", "enum": ["win_rate_in_hand", "games_in_hand", "avg_last_seen_pick", "avg_taken_at"],
+                       "default": "win_rate_in_hand", "description": "Used when `cards` is empty. win_rate_in_hand and games_in_hand: highest first, only cards with 200 or "
+                       "more games in hand. avg_last_seen_pick: earliest first, only cards seen in 200 or more packs. avg_taken_at: earliest "
+                       "first, only cards picked 200 or more times"},
+              "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20},
+              "cursor": PAGING["cursor"]}, ["set"],
+             path=lambda a: f"{V1}/catalog/limited/{quote(a['set'], safe='')}", query=("format", "cards", "sort", "limit", "cursor"),
+             provenance=("catalog",), title="Limited card statistics (17Lands)"),
         Tool("get_rulings", "A card's rulings (Wizards' text via Scryfall), newest first, at most 25 a page. More "
              "remain when `next_offset` is not null: pass it back as `offset` to read the next page.",
              {"oracle_id": {"type": "string", "minLength": 36, "maxLength": 36, "description": "From get_card_oracle"},
@@ -147,7 +175,7 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
         Tool("simulate_draws", "How a deck's mana curve plays: a few sample games of the first turns (opening hand, draws, land "
              "drops, what gets cast) and the odds over many games: land drops made, mana by turn, cards in hand, the chance of "
              "discarding to hand size, 'five mana by turn 5'. Says when discarding or a big hand is the deck's plan, and lists "
-             "what the simulation does not model. Explain the numbers in plain words; they are a hint, not a promise." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
+             "what the simulation does not model. `margin_points` is how far a percentage can be off at that many games. Explain the numbers in plain words; they are a hint, not a promise." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
              {"text": deck, "deck_id": DECK_ID, "format": fmt,
               "on_the_play": {"type": "boolean", "default": True, "description": "Going first"},
               "turns": {"type": "integer", "minimum": 1, "maximum": 10, "default": 6},

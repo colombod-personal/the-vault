@@ -440,3 +440,11 @@ def test_the_checked_text_of_someone_elses_deck_is_not_given_and_a_read_token_ca
         assert checked.status_code == 200 and "deck_text" in checked.json()["result"]  # checking is a read
         assert bot.put(f"/api/v1/decks/{mine['id']}", json={"name": "Mine", "text": "1 Test Rock"}, headers=read).status_code == 403  # saving is a write
     assert loaded.get(f"/api/v1/decks/{mine['id']}").json()["text"] == SAVED
+
+
+def test_simulate_says_how_far_a_percentage_can_be_off(loaded):
+    """#138: `margin_points` follows the number of games asked for, so the page never prints a fixed margin."""
+    text = "Commander\n1 Test Commander\nDeck\n37 Test Mountain\n30 Dull Bear\n31 Cheap Ramp"
+    margins = {g: loaded.post(f"{V1}/simulate", json={"text": text, "format": "commander", "games": g, "samples": 0}).json()["result"]["margin_points"]
+               for g in (200, 1000)}
+    assert margins == {200: 6.9, 1000: 3.1}

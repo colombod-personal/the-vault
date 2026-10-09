@@ -89,6 +89,17 @@ SOURCES: tuple[Source, ...] = (
            "Only the popularity rank that Scryfall includes with each card is shown. The Vault does not contact EDHREC. Popularity "
            "is not power and is never presented as it.",
            "Popularity rank: EDHREC, via Scryfall."),
+    Source("17Lands", "https://www.17lands.com/public_datasets", "data",
+           "Per-card Limited statistics for recent sets: win rates, how often a card is seen and taken, and where in a pack, from the "
+           "Magic Arena games and drafts of people who use the 17Lands tracker.",
+           "A weekly job downloads 17Lands' public data sets (CC BY 4.0) from their file host, one file at a time and only when a "
+           "new version exists, reads each file as a stream, keeps only per-card counts and throws the file away; nothing about you "
+           "is sent. The percentages, ranges and sample-size warnings are computed by the Vault from those counts, so they can differ "
+           "from 17lands.com, and every answer says the set, the format, the dates and how many games are behind each figure. The data "
+           "is from Arena, not paper Magic.",
+           "Limited statistics: data from 17Lands, licensed under CC BY 4.0 (changed by the Vault: reduced to per-card counts and "
+           "recomputed).",
+           "The Vault is not produced or endorsed by 17Lands."),
     Source("Card illustrators", "https://scryfall.com", "community",
            "Every card image is an illustrator's work.",
            "Images are shown whole, with the artist credited next to the image wherever the Vault shows one.",

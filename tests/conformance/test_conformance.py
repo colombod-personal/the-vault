@@ -453,6 +453,30 @@ def test_wizards_rules_text_is_plain_text_the_vault_can_parse_and_the_twin_answe
     assert parsed.effective_date >= date(int(named[:4]), int(named[4:6]), int(named[6:])), "effective before the date in its own file name"
 
 
+# -- 17Lands: the public data files on S3 (twins/seventeenlands.py, jobs/sync_limited.py, #178) ------------------------------------
+# One HEAD request each (a file that exists, a file that does not): nothing is downloaded, and nothing here ever reads a file.
+
+LANDS_HOST = "https://17lands-public.s3.amazonaws.com/analysis_data"
+
+
+def test_17lands_files_answer_head_with_a_version_and_a_missing_file_with_403_and_the_twin_does_alike(real, twin):
+    """The job tells "published" from "not published" by a HEAD per set code and file, and reads a file's version from its ETag and
+    Last-Modified. S3 answers 403 (not 404) for a file that is not there, and 200 with Content-Length, Last-Modified, a quoted ETag and
+    Accept-Ranges for one that is. If this fails, the job's reading of the host is wrong: fix the twin first."""
+    import re
+
+    present = "/game_data/game_data_public.HOB.PremierDraft.csv.gz"  # listed on 17lands.com/public_datasets on 2026-10-09
+    absent = "/game_data/game_data_public.ZZZ.PremierDraft.csv.gz"
+    twin.universe.seventeenlands.publish("game", "HOB", "PremierDraft", "expansion,won\nHOB,True\n")
+    for who, client in (("real", real), ("twin", twin)):
+        head = client.head(LANDS_HOST + present, headers={"User-Agent": HEADERS["User-Agent"], "Accept": "*/*"})
+        assert head.status_code == 200, who
+        assert head.headers["content-length"].isdigit() and head.headers["accept-ranges"] == "bytes", who
+        assert re.fullmatch(r'"[0-9a-f]{32}(-\d+)?"', head.headers["etag"]), f"{who}: {head.headers['etag']!r}"
+        assert head.headers["last-modified"].endswith("GMT"), who
+        assert head.headers["content-type"].startswith("text/csv"), who  # the body is gzip: S3 is not told otherwise
+        missing = client.head(LANDS_HOST + absent, headers={"User-Agent": HEADERS["User-Agent"], "Accept": "*/*"})
+        assert missing.status_code == 403, f"{who}: a file that is not there answers {missing.status_code}, not 403"
 def test_wizards_cdn_keeps_earlier_editions_under_their_dated_names_and_answers_404_for_any_other(real, twin):
     """vault.rules_live.LiveRules.compare (#107) finds the previous edition by asking HEAD for the file dated each day before the
     current file's date: 200 for an edition that was published, 404 for a name that never was. The page links only the current
