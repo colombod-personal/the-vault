@@ -133,12 +133,42 @@ def test_a_flood_of_passkey_options_writes_nothing_and_never_blocks_another_pers
             assert s.scalar(select(func.count()).select_from(PasskeyChallenge)) == 1
 
 
-def test_a_challenge_cookie_that_has_expired_or_is_for_another_ceremony_is_refused(settings):  # #346
+def test_a_sign_up_challenge_cannot_finish_a_sign_in(settings):  # #346
     with limited_client(settings, auth_rate_limit=1000) as c:
         options = c.post("/api/auth/passkey/signup/options", json={}).json()
         credential = SoftAuthenticator().create(options, "http://localhost")
         wrong_kind = c.post("/api/auth/passkey/login/verify", json={"credential": credential})
-        assert wrong_kind.status_code == 400  # a sign-up challenge can't finish a sign-in
+        assert wrong_kind.status_code == 400
+
+
+def session_cookie(settings, data: dict) -> str:
+    """A session cookie signed the way the app signs it (a test of what the app does with cookies of other shapes)."""
+    import json
+    from base64 import b64encode
+
+    from itsdangerous import TimestampSigner
+
+    return TimestampSigner(settings.session_secret).sign(b64encode(json.dumps(data).encode("utf-8"))).decode("utf-8")
+
+
+def test_a_challenge_cookie_that_is_expired_incomplete_or_from_before_the_change_is_refused(settings):  # #346
+    import time
+
+    with limited_client(settings, auth_rate_limit=1000, auth_verify_rate_limit=1000) as c:
+        options = c.post("/api/auth/passkey/signup/options", json={}).json()
+        credential = SoftAuthenticator().create(options, "http://localhost")
+        fresh = {"id": "x" * 43, "kind": "signup", "challenge": options["challenge"], "exp": time.time() + 300,
+                 "handle": "aGFuZGxl", "name": None}
+        shapes = {"expired": {**fresh, "exp": time.time() - 1}, "no challenge": {k: v for k, v in fresh.items() if k != "challenge"},
+                  "no expiry": {k: v for k, v in fresh.items() if k != "exp"}, "expiry not a number": {**fresh, "exp": "soon"},
+                  "no id": {**fresh, "id": ""}, "before the change": {"id": "x" * 43, "kind": "signup", "handle": "aGFuZGxl"},
+                  "not an object": ["signup"]}
+        for why, data in shapes.items():
+            c.cookies.set("vault_session", session_cookie(settings, {"passkey": data}))
+            res = c.post("/api/auth/passkey/signup/verify", json={"credential": credential})
+            assert res.status_code == 400, why
+        with c.app.state.db.sessions() as s:
+            assert s.scalar(select(func.count()).select_from(PasskeyChallenge)) == 0  # refused before anything was written
 
 
 def test_each_provider_has_its_own_counter_but_made_up_ones_share_one(settings):

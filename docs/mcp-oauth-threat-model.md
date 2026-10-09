@@ -410,3 +410,14 @@ every reviewer session at once, including the OAuth consent step. A provider sig
 instead of linking to the demo account. Tests: `tests/test_reviewer.py` (the 2026-10-08 cases). Residual: a demo session cookie
 made before this change has no `rv` and is not restricted until it expires (30 days at most); the demo account can be reset with
 `jobs/seed_reviewer.py`.
+
+## Passkey challenges (#346, 2026-10-09)
+
+The WebAuthn challenge of a passkey ceremony used to be a row in one global table with a cap, so anyone could fill the cap with
+unauthenticated `…/options` calls and make passkey sign-in answer 429 to everybody. It now lives in the signed session cookie (kind,
+random id, challenge, expiry) and `options` writes nothing. Finishing a ceremony spends it: `_take` refuses a cookie that is expired,
+of another kind or incomplete, then inserts the ceremony's id into `passkey_challenges` (primary key) with `ON CONFLICT DO NOTHING
+RETURNING id`, so a replayed cookie or two racing requests succeed once; a failed verification still burns the ceremony. The cookie is
+signed, not encrypted: a challenge is public to the browser anyway, and the signature stops a client changing the expiry, kind or
+id. A read-only review of the change (2026-10-09, before the merge) found no replay, cross-ceremony or race problem; its two timing
+notes (one clock reading for the expiry and the clean-up) are applied.

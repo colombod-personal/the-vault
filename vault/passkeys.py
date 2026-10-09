@@ -94,10 +94,10 @@ def _take(request: Request, db: Session, kind: str) -> dict:
     makes the second of two requests with the same cookie lose (the first to insert wins)."""
     expired = HTTPException(400, "No passkey request in progress, or it expired. Start again.")
     pending = request.session.pop(SESSION_KEY, None)
+    now = time.time()  # one reading for the expiry check and the clean-up below
     if (not isinstance(pending, dict) or pending.get("kind") != kind or not pending.get("id") or not pending.get("challenge")
-            or not isinstance(pending.get("exp"), (int, float)) or pending["exp"] < time.time()):
+            or not isinstance(pending.get("exp"), (int, float)) or pending["exp"] < now):
         raise expired
-    now = time.time()
     db.execute(delete(PasskeyChallenge).where(PasskeyChallenge.expires < now))  # tidy up spent ones that can no longer matter
     claimed = db.scalar(postgresql.insert(PasskeyChallenge).values(id=pending["id"], kind=kind, challenge="spent", expires=pending["exp"])
                         .on_conflict_do_nothing().returning(PasskeyChallenge.id))  # no row back: it was already spent
