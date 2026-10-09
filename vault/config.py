@@ -79,6 +79,7 @@ class Settings:
     lookup_refresh_limit: int = field(default_factory=lambda: int(_env("LOOKUP_REFRESH_LIMIT", "20")))
     archidekt_limit: int = field(default_factory=lambda: int(_env("ARCHIDEKT_LIMIT", "30")))
     import_limit: int = field(default_factory=lambda: int(_env("IMPORT_LIMIT", "10")))
+    lab_limit: int = field(default_factory=lambda: int(_env("LAB_LIMIT", "120")))  # GET /collection/spare, /spare/printings and /pnl: each reads the whole collection
     archidekt_interval: float = field(default_factory=lambda: float(_env("ARCHIDEKT_INTERVAL", "1.0")))
     max_decks: int = field(default_factory=lambda: int(_env("MAX_DECKS", "200")))
     # Behind Vercel's edge, which sets the client's address in x-forwarded-for / x-real-ip.
