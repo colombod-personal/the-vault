@@ -90,6 +90,8 @@ Limits that matter on the free plan (source: Neon's FAQ above):
 | Restore history | 6 hours, capped at 1 GB of change data | Daily jobs that rewrite whole tables create a lot of change data. **Unverified:** whether this counts toward storage; treat as a risk | Prefer upserts that touch only changed rows; check after the first real run |
 | Branches / projects | 10 branches, 100 projects | Not a constraint today | Nothing |
 
+Neon's history (point-in-time restore) is a separate billing meter, not part of the 1 GB storage line: on the free plan the window is 6 hours, capped at 1 GB-month of change history, and the plans page does not say that history counts toward the storage cap (read 2026-10-09, [Neon plans](https://neon.com/docs/introduction/plans)). Whether a catalog load makes the console's storage figure jump by the history is not measured; the monthly console read (the owner's, read only) covers it.
+
 Guardrails, built (#64) in `jobs/db_budget.py`, `jobs/neon_usage.py` and `jobs/budget_alert.py`, with the workflows that call them:
 
 - Log database size and the 8 largest tables on every run (first and last check of every job).
