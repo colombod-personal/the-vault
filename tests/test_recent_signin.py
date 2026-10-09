@@ -876,3 +876,107 @@ def test_the_routes_and_settings_are_documented():
     for needle in ("/me/recent-sign-in", "/api/auth/recent/email/start", "/api/auth/recent/email/confirm", "/api/auth/recent/email/link",
                    "recent_sign_in_required", "RECENT_SIGNIN_SECONDS", "RESEND_API_KEY"):
         assert needle in api, f"docs/api.md does not mention {needle}"
+
+
+# -- guessing odds, Apple's relay, bounded locks (review of #429) -----------------------------------------------
+
+def test_an_account_has_a_budget_of_failed_tries_an_hour_and_then_only_the_other_paths_remain(client, universe, go_stale):
+    """Five tries a code, three codes an hour would be 15 guesses an hour at a six-digit code from a stale cookie: the account
+    gets 10 an hour over all its codes (about 0.7 percent over a cookie's 30 days even at the maximum, before the daily limit)."""
+    web_account(client, universe)
+    go_stale()
+    for _ in range(2):
+        client.post(START)
+        code, _link = last_mail(universe)
+        wrong = "000000" if code != "000000" else "111111"
+        for _ in range(5):
+            assert client.post(CONFIRM, json={"code": wrong}).json()["code"] in ("wrong_code",)
+    client.post(START)  # (a third code is mailed: ten tries are spent, the budget is what stops the guessing)
+    res = client.post(CONFIRM, json={"code": "123456"})
+    assert res.status_code == 429 and res.json()["code"] == "email_attempts_exhausted" and int(res.headers["retry-after"]) > 0
+    again = client.post(START)
+    assert again.status_code == 429 and again.json()["code"] == "email_attempts_exhausted"
+    code, _ = last_mail(universe)
+    assert client.post(CONFIRM, json={"code": code}).status_code == 429  # not even the right one
+    assert status(client)["fresh"] is False
+    sign_in(client, universe.google, "g-ann")  # the passkey and provider paths remain
+    assert status(client)["fresh"] is True
+    with client.app.state.db.sessions() as db:  # an hour later the budget is whole again
+        db.execute(text("UPDATE email_codes SET created_at = now() - interval '61 minutes'"))
+        db.commit()
+    go_stale()
+    assert client.post(START).status_code == 200
+
+
+def test_an_account_may_ask_for_ten_codes_a_day(client, universe, go_stale):
+    uid = web_account(client, universe)
+    go_stale()
+    with client.app.state.db.sessions() as db:
+        for n in range(8):  # eight earlier today, outside the hour
+            db.add(EmailCode(user_id=uid, session_digest="d", code_hash="c", link_hash=f"old-{n}", asked_from="x",
+                             created_at=utcnow() - timedelta(hours=2), expires_at=utcnow() - timedelta(hours=2), used_at=utcnow()))
+        db.commit()
+    assert client.post(START).status_code == 200 and client.post(START).status_code == 200
+    res = client.post(START)
+    assert res.status_code == 429 and res.json()["code"] == "email_account_daily_limit" and res.headers["retry-after"]
+    assert len(sent(universe)) == 2
+
+
+def relay_account(client, universe):
+    uid = web_account(client, universe)
+    with client.app.state.db.sessions() as db:
+        db.execute(text("UPDATE identities SET email = 'abc123@privaterelay.appleid.com' WHERE provider = 'google'"))
+        db.commit()
+    return uid
+
+
+def test_an_apple_private_relay_address_is_not_mailed_until_the_sender_is_registered(client, universe):
+    relay_account(client, universe)
+    assert status(client)["email"] == {"available": False, "to": None, "reason": "relay_unregistered"}
+    res = client.post(START)
+    assert res.status_code == 409 and res.json()["code"] == "email_relay_unregistered" and "Nothing was sent" in res.json()["detail"]
+    assert not sent(universe)
+    with client.app.state.db.sessions() as db:
+        assert db.scalar(select(func.count()).select_from(EmailCode)) == 0  # and it counted for nothing
+
+
+def test_an_apple_private_relay_address_is_mailed_once_the_owner_registered_the_sender(make_app, universe):
+    app = make_app(apple_relay_registered=True)
+    with browser(app) as c:
+        relay_account(c, universe)
+        assert status(c)["email"]["available"] is True
+        assert c.post(START).status_code == 200
+        assert sent(universe)[-1]["to"] == ["abc123@privaterelay.appleid.com"]
+
+
+def test_a_held_account_lock_makes_start_answer_503_and_does_not_hang(client, universe, monkeypatch):
+    import time
+
+    from vault import locks
+
+    uid = web_account(client, universe)
+    monkeypatch.setattr(locks, "LOCK_TIMEOUT", "300ms")
+    with client.app.state.db.sessions() as other:
+        locks.lock_account(other, uid)  # another request of this person holds the account lock
+        began = time.monotonic()
+        res = client.post(START)
+        assert res.status_code == 503 and "Retry-After" in res.headers and time.monotonic() - began < 4
+        other.rollback()
+    assert client.post(START).status_code == 200
+    assert len(sent(universe)) == 1
+
+
+def test_a_held_vault_wide_cap_lock_does_not_stall_an_ask_for_ever(client, universe, monkeypatch):
+    import time
+
+    from vault import locks
+
+    web_account(client, universe)
+    monkeypatch.setattr(locks, "LOCK_TIMEOUT", "300ms")
+    with client.app.state.db.sessions() as other:
+        other.execute(select(func.pg_advisory_xact_lock(recent_signin.CAP_LOCK)))
+        began = time.monotonic()
+        res = client.post(START)
+        assert res.status_code == 503 and time.monotonic() - began < 4
+        other.rollback()
+    assert client.post(START).status_code == 200

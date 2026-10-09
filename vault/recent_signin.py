@@ -40,12 +40,13 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 
 from . import tokens
 from .config import Settings
 from .email import EmailError, EmailMessage, mask_address, usable_address
+from . import locks
 from .models import ApiSession, EmailCode, Identity, User, utcnow
 from .ratelimit import limited
 
@@ -55,6 +56,9 @@ CODE = "recent_sign_in_required"
 CODE_SECONDS = 600  # how long an e-mailed code or link works
 MAX_TRIES = 5
 SENDS_PER_HOUR = 3  # per account
+SENDS_PER_DAY = 10  # per account, beside the Vault-wide EMAIL_DAILY_CAP
+FAILED_TRIES_PER_HOUR = 10  # per account, summed over its codes: past this only the passkey and provider paths remain
+RELAY_SUFFIX = "@privaterelay.appleid.com"
 CAP_LOCK = 347_000_347  # pg_advisory_xact_lock key that makes the send caps exact when two accounts ask at once
 
 
@@ -128,11 +132,31 @@ def mail_address(db: Session, user_id: int) -> str | None:
     return None
 
 
+def unregistered_relay(address: str, settings: Settings) -> bool:
+    """An Apple private-relay address while the Vault's sender is not registered with Apple (APPLE_RELAY_REGISTERED): Apple would drop the
+    mail, so it is not sent and the person is not told it was."""
+    return address.lower().endswith(RELAY_SUFFIX) and not settings.apple_relay_registered
+
+
+def failed_tries(db: Session, user_id: int, now) -> int:
+    """Tries made at this account's codes in the last hour (every attempt counts, the one that worked too)."""
+    return db.scalar(select(func.coalesce(func.sum(EmailCode.tries), 0)).where(
+        EmailCode.user_id == user_id, EmailCode.created_at > now - timedelta(hours=1))) or 0
+
+
+def attempts_exhausted() -> CodedError:
+    return CodedError(429, "email_attempts_exhausted", "Too many wrong codes for this account in the last hour. Confirm with a passkey or "
+                                                      "a sign-in method you have linked, or try again later.",
+                      headers={"Retry-After": "3600"}, retry_after_seconds=3600)
+
+
 def status(db: Session, request: Request, user: User, settings: Settings) -> dict:
     sender = getattr(request.app.state, "email_sender", None)
     by_app = getattr(request.state, "bearer", None) is not None
     address = mail_address(db, user.id) if sender is not None and not by_app else None
     reason = None if address else "app" if by_app else "no_sender" if sender is None else "no_address"
+    if address and unregistered_relay(address, settings):
+        address, reason = None, "relay_unregistered"
     return {"fresh": is_fresh(db, request, settings), "seconds_left": seconds_left(db, request, settings),
             "window_seconds": settings.recent_signin_seconds,
             "email": {"available": address is not None, "to": mask_address(address) if address else None, "reason": reason}}
@@ -237,14 +261,28 @@ def build_router(settings: Settings, get_db, account_user) -> APIRouter:
             raise CodedError(409, "no_email_on_account", "This account has no e-mail address a sign-in provider vouches for that has been "
                                                           "on it for a day, so a code cannot be sent. Confirm with a passkey or a sign-in "
                                                           "method you have linked.")
+        if unregistered_relay(address, settings):
+            raise CodedError(409, "email_relay_unregistered", "This account's address is an Apple private-relay address, and Apple only "
+                                                              "forwards mail from senders registered with it, which the Vault's is not yet. "
+                                                              "Nothing was sent. Confirm with a passkey or a sign-in method you have linked.")
         session_key = user.session_key
         now = utcnow()
-        # The caps are counted under locks (the Vault-wide one first, then the account's), so two requests at once cannot both pass.
+        # The caps are counted under locks (the Vault-wide one first, then the account's), so two requests at once cannot both pass. Both
+        # waits are bounded (vault.locks: 5 s, then the usual 503 with Retry-After): a lock held for long by one request cannot stall every
+        # account's ask, and the account lock is the shared one (FOR NO KEY UPDATE) every other account-level route takes.
+        db.execute(text(f"SET LOCAL lock_timeout = '{locks.LOCK_TIMEOUT}'"))
         db.execute(select(func.pg_advisory_xact_lock(CAP_LOCK)))
-        db.execute(select(User.id).where(User.id == user.id).with_for_update())
-        if session_key != db.scalar(select(User.session_key).where(User.id == user.id)):
+        if session_key != locks.lock_account(db, user.id):
             db.rollback()
             raise HTTPException(401, "Your session ended. Sign in again.")
+        if failed_tries(db, user.id, now) >= FAILED_TRIES_PER_HOUR:
+            db.rollback()
+            raise attempts_exhausted()
+        if db.scalar(select(func.count()).where(EmailCode.user_id == user.id, EmailCode.created_at > now - timedelta(days=1))) >= SENDS_PER_DAY:
+            db.rollback()
+            raise CodedError(429, "email_account_daily_limit", f"You asked for {SENDS_PER_DAY} codes in the last day. Confirm with a passkey "
+                                                              "or a sign-in method you have linked, or try again tomorrow.",
+                             headers={"Retry-After": "3600"}, retry_after_seconds=3600)
         hour = db.execute(select(func.count(), func.min(EmailCode.created_at)).where(
             EmailCode.user_id == user.id, EmailCode.created_at > now - timedelta(hours=1))).one()
         if hour[0] >= SENDS_PER_HOUR:
@@ -297,6 +335,8 @@ def build_router(settings: Settings, get_db, account_user) -> APIRouter:
         row = pending(db, user, digest) if digest else None
         if row is None:
             raise CodedError(400, "no_code", "No code is waiting for this browser, or it expired. Ask for a new one.")
+        if failed_tries(db, user.id, utcnow()) >= FAILED_TRIES_PER_HOUR:  # the account's budget, over all its codes and sessions
+            raise attempts_exhausted()
         # The try is counted first and in the UPDATE itself: five guesses at once still make five.
         tries = db.execute(update(EmailCode).where(EmailCode.id == row.id, EmailCode.used_at.is_(None), EmailCode.tries < MAX_TRIES,
                                                    EmailCode.expires_at > utcnow()).values(tries=EmailCode.tries + 1)

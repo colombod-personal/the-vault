@@ -95,12 +95,13 @@ own window, as for any deletion (see the checklist below). **Erasure** (`DELETE 
   sign-in method can't be removed, and neither can a method while no OTHER method older than 24 hours would remain: a **change in what
   the person can erase**, made so that a copied session cannot replace the owner's methods with its own. It means an account whose only
   old method is one passkey, or an account whose methods were all added today, cannot remove it yet (the response says why); deleting
-  the whole account (`DELETE /api/v1/me`) is unchanged and erases every method. An account holds at most 20 passkeys. **Decided, built in the next pull request (#347):** the serious account actions (deleting the account, exporting
-  everything, adding or removing a passkey, linking a provider, creating a personal access token) will need a sign-in within the last 10 minutes;
-  a person without one confirms with a one-time code and link e-mailed to the address on the account (the code lasts 10 minutes, works once, is
-  rate limited, and only a short-lived hash of it is kept), or with a passkey or provider sign-in when the account has no address. Resend will send
-  the mail and is named here, in `public/privacy.html` and `public/credits.html` as a processor of the address and the code when that change lands;
-  nothing is sent or stored by this pull request. Design: `docs/mcp-oauth-threat-model.md`. Step 1 of Sign out everywhere also deletes the account's app sessions (`api_sessions`, with their retired refresh tokens) and
+  the whole account (`DELETE /api/v1/me`) is unchanged and erases every method. An account holds at most 20 passkeys. **Built (#347):** the serious account actions (deleting the account, exporting
+  everything, creating a personal access token, connecting an AI app, adding a passkey, removing a passkey older than 24 hours, linking a provider)
+  need a sign-in within the last 10 minutes; a person without one confirms with a one-time code and link e-mailed to a verified address of a provider
+  linked for a day (the code lasts 10 minutes, works once, is limited to 3 a hour and 10 a day for an account, and only a keyed hash of it is kept in
+  `email_codes`), or with a passkey or provider sign-in when the account has no such address. Resend sends the mail and is named here, in
+  `public/privacy.html` and `public/credits.html` as a processor of the address and the code; nothing is sent unless `RESEND_API_KEY` is set and the
+  person asks. Design and attacks: `docs/mcp-oauth-threat-model.md`. Step 1 of Sign out everywhere also deletes the account's app sessions (`api_sessions`, with their retired refresh tokens) and
   unused hand-over codes, and the personal access tokens and connected-app grants made in the last 24 hours (rows the person can already delete one by one); nothing new is stored. Only the
   person's own methods are read or removed, and another person's id is a 404 (`tests/test_recent_sign_in_methods.py`). #347.
 

@@ -685,7 +685,23 @@ device) and its **Approve** button pressed; either confirms the browser that ask
 - *Guessing.* Six digits from `secrets.randbelow`, stored only as an HMAC keyed with `SESSION_SECRET` (a leaked table cannot be tried
   offline without the key), ten minutes, single use (the `used_at` update is the gate), at most 5 tries counted in the same `UPDATE` that
   reads them (parallel guesses cannot exceed five), a new code replaces the old one only after it was sent, compared with
-  `hmac.compare_digest`, and the per-IP sign-in limit (`AUTH_VERIFY_RATE_LIMIT`) on top.
+  `hmac.compare_digest`, and the per-IP sign-in limit (`AUTH_VERIFY_RATE_LIMIT`) on top. **The odds, written down (found by review):** a
+  stale cookie can ask for a code and guess at it. Per code that is 5 tries at one in a million. With only the limits above (3 codes an
+  hour, 5 tries each) that is 15 guesses an hour, 10,800 over a cookie's 30 days, about 1 percent. So the account also has a **budget of
+  10 failed tries an hour summed over all its codes** (`FAILED_TRIES_PER_HOUR`; past it `confirm` and `start` answer 429
+  `email_attempts_exhausted` and only the passkey and provider paths remain) and **10 codes a day** (`SENDS_PER_DAY`, 429
+  `email_account_daily_limit`): at most 50 guesses a day, 1,500 over 30 days, **about 0.15 percent** at the very most for an attacker who never
+  stops, and the owner sees a mail for every code. Tests: `test_an_account_has_a_budget_of_failed_tries_an_hour_and_then_only_the_other_paths_remain`,
+  `test_an_account_may_ask_for_ten_codes_a_day`.
+- *Locks.* `start` counts the caps under the Vault-wide advisory lock and the account lock from `vault/locks.py` (`lock_account`,
+  `FOR NO KEY UPDATE`, the 5 s timeout set with `SET LOCAL` before the advisory lock is asked for), so a lock held long by one request
+  answers 503 with Retry-After for that ask instead of stalling every account's ask. Tests: `test_a_held_account_lock_makes_start_answer_503_and_does_not_hang`,
+  `test_a_held_vault_wide_cap_lock_does_not_stall_an_ask_for_ever`.
+- *Apple's private relay.* Apple forwards mail sent to a `privaterelay.appleid.com` address only from senders registered in the developer
+  account's "Sign in with Apple for Email Communication" settings. Until the owner registers the sending domain (and sets
+  `APPLE_RELAY_REGISTERED=1`), `start` answers 409 `email_relay_unregistered` ("Nothing was sent"), `GET /me/recent-sign-in` says
+  `reason: relay_unregistered`, and the page offers the passkey and provider paths, so nobody is told "sent" for a mail Apple will drop.
+  Tests: `test_an_apple_private_relay_address_is_not_mailed_until_the_sender_is_registered`, `..._once_the_owner_registered_the_sender`.
 - *Mail flooding and cost.* At most 3 sends an hour per account (under a lock, so two requests cannot both pass) and `EMAIL_DAILY_CAP`
   (default 90, Resend's free plan is 100) a day for the whole Vault, then a clean 429 (`email_hourly_limit`, `email_daily_cap`) that points
   to the passkey or provider. A failed send deletes its row so it does not count. **Residual (found by review):** a stale copy of the
@@ -777,4 +793,7 @@ fixed), the tests above fail.
 
 **Owner steps, after the merge** (nothing is sent until the key exists): create a Resend account, add and verify the domain
 `mtgvault.cards` (DNS records at Vercel), create an API key and save it as `RESEND_API_KEY` in the Vercel project; sign Resend's DPA
-(`docs/gdpr.md`); run `tests/conformance/test_resend_live.py` once and fix the twin where it differs.
+(`docs/gdpr.md`); run `tests/conformance/test_resend_live.py` once and fix the twin where it differs; **for Apple private-relay
+addresses, register the sending domain (the domain of `EMAIL_FROM`) in the Apple developer account under Certificates, Identifiers & Profiles,
+Services, "Sign in with Apple for Email Communication", and then set `APPLE_RELAY_REGISTERED=1`**; until then those addresses are told "not
+sent" and use a passkey or provider.

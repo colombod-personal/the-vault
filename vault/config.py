@@ -100,6 +100,10 @@ class Settings:
     email_from: str = field(default_factory=lambda: _env("EMAIL_FROM", "The Vault <login@mtgvault.cards>"))
     # Mails the Vault sends in one day, all accounts together (Resend's free plan allows 100 a day; the default leaves room).
     email_daily_cap: int = field(default_factory=lambda: int(_env("EMAIL_DAILY_CAP", "90")))
+    # Apple forwards mail to a private-relay address (privaterelay.appleid.com) only from senders registered in the developer account's
+    # "Sign in with Apple for Email Communication" settings. Until the owner has registered the sending domain and sets this, a code
+    # for such an address is not sent (the person is told, and uses a passkey or provider).
+    apple_relay_registered: bool = field(default_factory=lambda: _env("APPLE_RELAY_REGISTERED").lower() in ("1", "true", "yes"))
 
     @property
     def secure_cookies(self) -> bool:

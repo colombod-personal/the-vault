@@ -349,6 +349,9 @@ function ConfirmItsYou({ me, what, onDone, onCancel }) {
       {step === 'choose' && mail && !mail.available && mail.reason === 'no_address' && (
         <p className="label-mono">This account has no e-mail address that a sign-in provider vouches for and that is a day old, so a code can't be e-mailed.</p>
       )}
+      {step === 'choose' && mail && !mail.available && mail.reason === 'relay_unregistered' && (
+        <p className="label-mono">Your address is an Apple private-relay address, which can't receive the Vault's mail yet. Use your passkey or a linked sign-in.</p>
+      )}
       {step === 'choose' && mail && !mail.available && mail.reason === 'no_sender' && (
         <p className="label-mono">E-mailed codes are not set up on this Vault yet.</p>
       )}

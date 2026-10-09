@@ -248,7 +248,7 @@ class Me(Hal):
 class RecentSignInEmail(BaseModel):
     available: bool = Field(description="A code can be e-mailed: the Vault has a mail sender, the account has an address, and the caller is a browser session")
     to: str | None = Field(None, description="The address a code would go to, masked (***@e***.com); null when not available")
-    reason: Literal["app", "no_sender", "no_address"] | None = Field(
+    reason: Literal["app", "no_sender", "no_address", "relay_unregistered"] | None = Field(
         None, description="Why not: the caller is an app (it signs in again instead); the Vault has no mail sender configured "
                           "(RESEND_API_KEY); the account has no address a provider vouches for that has been on it for 24 hours")
 
