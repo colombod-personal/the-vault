@@ -96,3 +96,13 @@ def test_export_never_contains_someone_elses_email(client, settings):
         login(me)
         shares = zipfile.ZipFile(io.BytesIO(client.get("/api/v1/me/export").content)).read("shares.json").decode()
         assert other not in shares, shares
+
+
+def test_every_per_person_table_is_in_the_data_map_of_docs_gdpr():  # #352: staged_uploads was missing for weeks
+    from pathlib import Path
+
+    from vault.privacy import personal_data
+
+    text = (Path(__file__).parent.parent / "docs" / "gdpr.md").read_text(encoding="utf-8")
+    missing = [name for name in personal_data(0) if f"`{name}`" not in text]
+    assert not missing, f"docs/gdpr.md's data map does not list: {missing}"
