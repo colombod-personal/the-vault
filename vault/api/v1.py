@@ -26,7 +26,7 @@ from mtg_toolkits import decklist, delta, normalize_set_code
 from mtg_toolkits.formats import FORMATS
 from mtg_toolkits.archidekt import ArchidektClient
 from mtg_toolkits.normalize import SET_ALIAS_PREFIXES, set_alias_map
-from mtg_toolkits.http import ApiError
+from mtg_toolkits.http import ApiError, Throttle
 from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -638,6 +638,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                          "Vault (conflicts keep the Vault's edit unless answered); records what changed")
     async def create_import(request: Request, file: UploadFile, user: User = Depends(current_user),
                             db: Session = Depends(get_db), options: ImportOptions = Depends(import_options)):
+        per_user(request, "import", user.id, settings.import_limit, db)  # up to 20 MB of parsing and matching (#353)
         content = await file.read(MAX_UPLOAD_BYTES + 1)  # enough to reject an oversized file, no more
 
         def run():
@@ -652,8 +653,9 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     @router.post("/imports/preview", tags=["imports"],
                  summary="What uploading this collection file would change, without changing anything")
-    async def preview_import(file: UploadFile, user: User = Depends(current_user), db: Session = Depends(get_db),
+    async def preview_import(request: Request, file: UploadFile, user: User = Depends(current_user), db: Session = Depends(get_db),
                              options: ImportOptions = Depends(import_options)) -> dict:
+        per_user(request, "import", user.id, settings.import_limit, db)
         content = await file.read(MAX_UPLOAD_BYTES + 1)
         try:
             return preview_collection_import(db, user, content, options)
@@ -828,12 +830,18 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             body["closest"] = closest
         return body
 
+    def _room_for_a_deck(db: Session, user: User) -> None:
+        """At most ``max_decks`` saved decks a person: ``/decks/overlap`` parses all of them, and nothing else bounds the count (#353)."""
+        if db.scalar(select(func.count()).select_from(Deck).where(Deck.user_id == user.id)) >= settings.max_decks:
+            raise HTTPException(409, f"You have {settings.max_decks} saved decks, the most the Vault keeps. Delete one first.")
+
     @router.post("/decks", tags=["decks"], response_model=S.Deck, status_code=201)
     def create_deck(request: Request, body: S.DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
         if not _parse(body.text).lines:
             raise HTTPException(400, "No cards found in the decklist")
 
         def run():
+            _room_for_a_deck(db, user)
             deck = Deck(user_id=user.id, name=body.name.strip()[:200] or "Untitled deck", text=body.text,
                         source_url=body.source_url, source_author=body.source_author, format=body.format,
                         source_fetched_at=datetime.now(timezone.utc) if body.source_url else None)
@@ -973,12 +981,13 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     @router.get("/archidekt/decks/{deck_id}", tags=["decks"],
                 summary="A public Archidekt deck, read for you (fetched server-side; repeat reads within 10 minutes come from a cache)")
-    def archidekt_deck(deck_id: Id, refresh: bool = False,
+    def archidekt_deck(request: Request, deck_id: Id, refresh: bool = False,
                        detail: Literal["summary", "cards"] = Query(default="summary", description="cards adds every card with its printing (the web app); summary stays small (assistants)"),
                        user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         """The deck as the Vault saves it: name, author, format, commander(s), counts and the list with its sections, and
         Archidekt's own bracket tag. Archidekt's raw answer is 300 KB for 100 cards, mostly other shops' prices per card
         (Card Kingdom, Cardmarket, ...), which the Vault does not pass on: it quotes only Scryfall's dated prices (#219)."""
+        per_user(request, "archidekt", user.id, settings.archidekt_limit, db)  # #353
         raw = archidekt_cache.read(db, deck_id, fetch_archidekt, refresh=refresh)
         parsed = deck_import.to_decklist(raw)
         known = deck_overview.identities(db, deck_overview.read(parsed["text"])["commanders"])
@@ -995,9 +1004,13 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 "note": "Archidekt's per-card shop prices are not passed on: the Vault quotes only Scryfall's dated prices.",
                 "vault_cache": raw.get("vault_cache")}
 
+    archidekt_turns = Throttle(settings.archidekt_interval)  # one for the whole process: a client is built per read, so its own
+    # interval never applied, and a walk over deck ids could have called Archidekt faster than docs/compliance.md promises (#353)
+
     def fetch_archidekt(deck: int) -> dict:
         """One read of a public deck. Bounded, because the function has a time limit and a thread and a person's request are
         held while it runs: the shared client would wait 30 s after a 429 and try three more times (more than a minute)."""
+        archidekt_turns.wait()
         try:
             with ArchidektClient(client=httpx.Client(transport=transport, timeout=httpx.Timeout(10, connect=5),
                                                      follow_redirects=True)) as client:
@@ -1021,6 +1034,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             raise HTTPException(400, "Only Archidekt deck links can be fetched (archidekt.com/decks/<number>). For another site, "
                                      "export the list as text and save it with save_deck.")
         deck_id = _deck_number(found)
+        per_user(request, "archidekt", user.id, settings.archidekt_limit, db)  # #353
 
         def run():
             parsed = deck_import.to_decklist(archidekt_cache.read(db, deck_id, fetch_archidekt,
@@ -1047,6 +1061,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 db.flush()
                 deck_versions.record(db, same, "refreshed")
                 return {"created": False, "updated": True, "deck": _deck(same), "counts": parsed["counts"]}
+            _room_for_a_deck(db, user)
             deck = Deck(user_id=user.id, name=(body.name or parsed["name"] or "Archidekt deck").strip()[:200], text=parsed["text"],
                         source_url=url, source_author=parsed["author"], format=parsed["format"],
                         source_fetched_at=datetime.now(timezone.utc))
@@ -1077,6 +1092,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             raise HTTPException(400, "Only Archidekt links can be read by the Vault. For Moxfield and other sites (their terms do "
                                      "not allow automated reading), export the current list there and paste it to update the deck.")
         # the preview asks Archidekt again (unless the copy is under a minute old); the confirm uses that same copy
+        per_user(request, "archidekt", user.id, settings.archidekt_limit, db)  # #353
         parsed = deck_import.to_decklist(archidekt_cache.read(db, _deck_number(found), fetch_archidekt, refresh=not body.confirm))
         if not parsed["text"] or not _parse(parsed["text"]).lines:
             raise HTTPException(400, "The deck on Archidekt has no cards now: nothing was changed")
@@ -1206,7 +1222,9 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     @router.post("/cards/lookup", tags=["cards"], response_model=S.CardLookup, response_model_by_alias=True,
                  summary="Card data, images and prices for up to 75 printings (Scryfall's collection lookup, via the Vault)")
-    def lookup_cards(body: S.CardLookupIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    def lookup_cards(request: Request, body: S.CardLookupIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        if body.refresh:  # a call to Scryfall for up to 75 printings, and a write to cards (#353)
+            per_user(request, "lookup refresh", user.id, settings.lookup_refresh_limit, db)
         idents = [i.model_dump(exclude_none=True) for i in body.identifiers]  # each complete (CardIdentifier)
         return {**catalog.lookup(db, idents, refresh=body.refresh), "_links": {"self": link(f"{V1}/cards/lookup")}}
 

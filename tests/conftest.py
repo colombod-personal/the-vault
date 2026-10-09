@@ -12,6 +12,7 @@ from vault.db import normalise_url
 # The Vault runs on Postgres only, and so do the tests: VAULT_TEST_DATABASE_URL names a Postgres
 # database the tests may wipe. Each test that needs one gets it with an empty schema.
 TEST_DATABASE_URL = os.environ.get("VAULT_TEST_DATABASE_URL")
+os.environ.setdefault("ARCHIDEKT_INTERVAL", "0")  # the shared interval between Archidekt reads (#353): tests would only wait
 
 
 def _empty_postgres(url: str) -> None:

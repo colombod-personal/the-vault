@@ -75,6 +75,13 @@ class Settings:
     # Calls per minute per user to POST /api/v1/collection/refresh (each fetches up to 300
     # printings from Scryfall, so a whole collection takes a few calls).
     refresh_rate_limit: int = field(default_factory=lambda: int(_env("REFRESH_RATE_LIMIT", "20")))
+    # Per person per minute (#353): routes that call Scryfall or Archidekt, or parse a big file, and the longest an Archidekt read waits for
+    # its turn (the shared interval between calls, seconds; tests set 0)
+    lookup_refresh_limit: int = field(default_factory=lambda: int(_env("LOOKUP_REFRESH_LIMIT", "20")))
+    archidekt_limit: int = field(default_factory=lambda: int(_env("ARCHIDEKT_LIMIT", "30")))
+    import_limit: int = field(default_factory=lambda: int(_env("IMPORT_LIMIT", "10")))
+    archidekt_interval: float = field(default_factory=lambda: float(_env("ARCHIDEKT_INTERVAL", "1.0")))
+    max_decks: int = field(default_factory=lambda: int(_env("MAX_DECKS", "200")))
     # Behind Vercel's edge, which sets the client's address in x-forwarded-for / x-real-ip.
     on_vercel: bool = field(default_factory=lambda: bool(os.environ.get("VERCEL")))
 
