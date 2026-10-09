@@ -1,7 +1,9 @@
 # The Deck page shows how the deck plays: mana curve and simulated opening turns (design for #138)
 
-Status: **proposed, waiting for the owner's agreement** (acceptance criterion 3 of #138: "The design (charts, phone layout) is agreed
-before implementation and linked here"). No product code changes in the pull request that adds this page. The mockup is static HTML
+Status: **agreed and built** (acceptance criterion 3 of #138: "The design (charts, phone layout) is agreed before implementation and linked
+here"). The owner approved the recommended defaults of section 11 on 2026-10-09 ("take the recommendations"); the tab is built as written, both
+steps of section 10 in one pull request, with `margin_points` and #392's seed range (closed). It is in `public/views/deck_opening.jsx`, its words in
+`public/lib/deck_sim.js`, its tests in `tests/test_deck_sim_page.py` and `tests/js/deck_sim.test.mjs`. The rest of this page is the design as it was approved. The mockup is static HTML
 with invented figures: [`docs/mockups/deck-simulation.html`](mockups/deck-simulation.html), photographed at 1400 px and 390 px:
 [desktop](screenshots/deck-simulation-mockup-1400.jpg), [phone](screenshots/deck-simulation-mockup-390.jpg) (every sample game is
 opened in those two images; in the app only the first is).
@@ -236,8 +238,7 @@ Each is its own pull request with `Refs #138` and a `Left open:` line; the issue
 
 ## 11. Agreement
 
-The owner agrees by commenting on #138 ("agreed" or the changes). Until then #138 stays `status:needs-refinement` and nothing is
-implemented. The choices I recommend, so the owner can answer in one line each:
+The owner agreed on 2026-10-09 ("take the recommendations"): every default below was taken. The choices as recommended, so the owner can answer in one line each:
 
 | Choice | Recommended | If the owner prefers otherwise |
 |---|---|---|
@@ -247,3 +248,26 @@ implemented. The choices I recommend, so the owner can answer in one line each:
 | Games and turns | 1,000 games; turns 4, 6, 8 or 10 | let the person choose games (up to 5,000: slower, needs a progress state) |
 | Brawl | two-player (as the server does today) | add `brawl` to the server's multiplayer formats |
 | Figures' wording | "of simulated games", `margin_points` printed | no margin sentence |
+
+## 12. As built: where the tab differs from this page
+
+Everything in sections 2 to 10 is built. The differences, each small, so the page and the code can be compared:
+
+- **Asked too often (429):** the alert holds the title and "The Vault allows 30 a minute for each person." (the number is `DECK_LIMIT`, a test keeps them equal);
+  the countdown is on the button ("Play again in 41 s") and not in the alert, so a screen reader is not interrupted every second. The controls are disabled
+  during the countdown. Figures already on screen stay, dimmed, with "The figures below are from the last run that worked."
+- **Failed run (network, 5xx):** the same: the last figures that worked stay dimmed under the alert; only "too few cards" removes them (the answer for those
+  settings does not exist).
+- **Phone turn blocks** keep the table semantics with explicit ARIA roles (`role="table"`, `row`, `cell`, `rowheader`, `columnheader`), so a screen reader
+  still reads a table when the CSS draws blocks. Not checked with a real screen reader, as section 8 said.
+- **Discard bars** are neutral when the deck has a plan, and use the danger colour when it has none.
+- **The commander sentence** under the curve comes from the stats answer (`by_section.commander`), so the curve does not wait for the games.
+- **Not built (section 10, item 3, "later, only if wanted"):** a land marker in the opening hand, more than 1,000 games, a line in `ASSUMPTIONS` about the
+  commander tax.
+
+Screenshots of the real app (headless Chromium, `docs/screenshots/deck-opening-turns-*`, each at 1400 and 390 px): the tab loaded
+(`deck-opening-turns-`, and `-games-open-` with every sample game open), playing again (`-busy-`), the first load (`-loading-`), a failed call
+(`-error-`: the network call was refused by the test page), the server's own 429 (`-limit-`: 40 analyses sent first), too few cards
+(`-toofew-`, the server's 400), three or more colours (`-colours-`), cards the catalog does not know (`-unknown-`), a 60-card list (`-sixty-`), the
+Stats tab with its link (`-stats-link-`), and phone close-ups of a sample game and the discard panel (`-closeup-390`). They were taken on a local
+Vault whose catalog holds **invented cards** ("Demo Forest", "Demo Tower", ...), not Scryfall's data, so the figures are those of invented decks.

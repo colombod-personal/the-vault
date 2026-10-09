@@ -11,6 +11,7 @@ come in as ``SimCard`` (built from the catalog by ``from_oracle``), so tests nee
 
 from __future__ import annotations
 
+import math
 import random
 import re
 from dataclasses import dataclass, field
@@ -217,9 +218,16 @@ def simulate(deck: list[SimCard], *, commander: SimCard | None = None, multiplay
         headline["missed_a_land_drop_by_turn_4"] = _pct(sum(1 for r in results if not all(x["land"] for x in r["turns"][:4])), games)
     plan = sorted({f"{c.name}: {why}" for c in deck + ([commander] if commander else []) for why in c.plan})
     return {"games": games, "turns": turns, "on_the_play": on_the_play, "multiplayer": multiplayer, "seed": seed,
+            "margin_points": margin_points(games),
             "headline": headline, "per_turn": per_turn, "samples": results[:samples],
             "discard_may_be_the_plan": plan,
             "assumptions": ASSUMPTIONS}
+
+
+def margin_points(games: int) -> float:
+    """The most a percentage can be off at this many games, in points, at 95% confidence (worst case, a true share of 50%):
+    1.96 * sqrt(0.25 / games). About 3.1 at 1,000 games. Figures that are averages (mana, cards in hand) are not covered by it."""
+    return round(100 * 1.96 * math.sqrt(0.25 / games), 1)
 
 
 def _pct(n: int, total: int) -> float:
