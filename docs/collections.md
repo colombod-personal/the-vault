@@ -116,14 +116,25 @@ are the person; an OAuth app or a personal access token is an assistant, recorde
 tagging or untagging is shown first and applied only with confirm. `/collection/cards` takes `tag` and lists each card's `tags` (own
 collection only; the ETag includes the person's tags so a change shows). Tests: `tests/test_tags_api.py`, `tests/test_tag_tools.py`.
 
-Built since (#130, backend and MCP): `bucket` and `tag` on `/collection` (summary and P&L), `/stats`, `/sets`, `/timeline`, `/history`,
-`/breakdowns`, `/valuation` and `/names`, and on the MCP tools `get_collection_summary`, `get_collection_stats`, `list_sets`,
-`get_collection_breakdowns`, `get_valuation`, `list_card_names`, `get_value_history` and `get_acquisition_timeline`. Computed in
-`vault/analytics.py` (one `scope` clause on the same CTE) and `CollectionView(bucket_id, tag)`; own collection only (404 on a share and
-for another person's bucket, 400 for a malformed tag, an empty answer for an unknown tag). The view cache key and the ETag carry the
-bucket and, for a tag, the person's tags stamp, so a tag change never serves a stale answer. Additive figures add up across buckets,
-distinct counts do not (the section 5 rule; `tests/test_analytics_filters.py`). The daily value history is recorded for the whole
-inventory only, so a filtered `/history` prices the copies held now in the selection at each recorded day's prices.
+Example of one card's notes (what `GET /collection/cards/{id}/metadata` shows after the person, Claude and the Vault each wrote theirs):
+
+```json
+{
+  "version": 1,
+  "namespaces": {
+    "user": {"note": "keep for the Sliver deck", "pinned": true},
+    "ai.claude.ai": {"roles": ["ramp", "mana rock"], "why": "adds two colourless at mana value one", "model": "claude"},
+    "system": {"imported_from": "demo-collection-v2.csv"}
+  },
+  "written": {
+    "user": {"at": "2026-10-09T09:10:00+00:00", "by": "the person"},
+    "ai.claude.ai": {"at": "2026-10-09T09:12:41+00:00", "by": "claude.ai"}
+  },
+  "you_write": "user"
+}
+```
+
+A bucket's notes have the same shape. A change of shape bumps `version` and adds one upgrader (`metadata.UPGRADERS[n]`) that turns a version n document into n + 1; a stored document is upgraded on read, and `tests/test_metadata.py::test_an_older_version_is_upgraded_on_read_and_a_newer_one_is_refused` shows it with a made-up version 3.
 
 Built since (#127, metadata; this settles #119): `GET`, `PUT` and `DELETE /collection/cards/{id}/metadata` and `/collection/buckets/{id}/metadata`
 and the tools `get_card_metadata`, `set_card_metadata`, `get_bucket_metadata`, `set_bucket_metadata`. The document is
@@ -134,5 +145,14 @@ caller's. Limits refuse instead of truncating: 8 KB for the whole document (also
 older than the code's is upgraded on read by one upgrader per step (`metadata.UPGRADERS`), a newer one is refused (409). Tag
 assignments carry the same column but have no route yet (nothing needs it: a tag is a label, the notes live on the card).
 Tests: `tests/test_metadata.py`.
+
+Built since (#130, backend and MCP): `bucket` and `tag` on `/collection` (summary and P&L), `/stats`, `/sets`, `/timeline`, `/history`,
+`/breakdowns`, `/valuation` and `/names`, and on the MCP tools `get_collection_summary`, `get_collection_stats`, `list_sets`,
+`get_collection_breakdowns`, `get_valuation`, `list_card_names`, `get_value_history` and `get_acquisition_timeline`. Computed in
+`vault/analytics.py` (one `scope` clause on the same CTE) and `CollectionView(bucket_id, tag)`; own collection only (404 on a share and
+for another person's bucket, 400 for a malformed tag, an empty answer for an unknown tag). The view cache key and the ETag carry the
+bucket and, for a tag, the person's tags stamp, so a tag change never serves a stale answer. Additive figures add up across buckets,
+distinct counts do not (the section 5 rule; `tests/test_analytics_filters.py`). The daily value history is recorded for the whole
+inventory only, so a filtered `/history` prices the copies held now in the selection at each recorded day's prices.
 
 Not built yet: importing into one bucket (#124), the tags view of the app (#128) and the web part of #130 (analytics that follow the selected bucket or tag).

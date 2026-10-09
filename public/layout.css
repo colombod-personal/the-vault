@@ -216,6 +216,35 @@ html, body { max-width: 100%; overflow-x: clip; }
 .welcome a { display: inline-flex; align-items: center; min-height: 44px; }
 .welcome .btn { min-height: 44px; }
 
+/* ---- Buckets in the app (#125): the switcher above Browse, the manager, moving copies ---- */
+.bucket-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin-bottom: 14px; }
+.bucket-bar .select { flex: 1 1 240px; max-width: 420px; }
+.bucket-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--border); }
+.bucket-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.bucket-name { flex: 1 1 160px; font-weight: 600; overflow-wrap: anywhere; }
+.bucket-count { font-family: var(--mono); font-size: 12px; }
+.bucket-actions { display: flex; gap: 4px; }
+.bucket-edit { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }
+.bucket-edit .input { flex: 1 1 220px; min-width: 0; }
+.bucket-delete { margin-top: 14px; background: var(--bg-2); border-color: var(--gold); }
+.bucket-holds { list-style: none; margin: 0 0 12px; padding: 0; }
+.bucket-holds li { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; font-size: 13px; border-bottom: 1px solid var(--border); }
+.bucket-move { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
+.bucket-move label { display: grid; gap: 4px; }
+.bucket-move .input { width: 84px; }
+.bulk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; padding: 10px 14px;
+  background: var(--bg-2); border: 1px solid var(--gold); border-radius: 6px; font-family: var(--mono); font-size: 12px; }
+.bulk-bar .select { min-width: 180px; max-width: 320px; }
+.tick { display: grid; place-items: center; cursor: pointer; }
+.tick input { width: 18px; height: 18px; accent-color: var(--gold); }
+@media (max-width: 760px) {
+  .bucket-bar .select, .bulk-bar .select, .bucket-move .select { flex: 1 1 100%; max-width: none; min-height: 44px; }
+  .bucket-actions .btn { min-width: 44px; }
+  .tick { min-width: 44px; min-height: 44px; margin: -8px; }
+  .bucket-move .input { width: 100%; min-height: 44px; }
+  .bucket-edit .input { min-height: 44px; }
+}
+
 /* ==== Phone layout (up to 760px wide) ====
    Everything from here to the end of the file is inside phone-width media queries (only .m-only,
    phone-only elements, is hidden outside them), so wider screens render exactly as before; a test

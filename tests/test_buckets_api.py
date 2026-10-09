@@ -150,3 +150,19 @@ def test_a_bucket_filter_for_someone_elses_bucket_or_on_a_shared_collection_is_4
     assert client.get("/api/v1/collection/cards", params={"bucket": 0}).status_code == 422
     mine = client.post(B, json={"name": "Mine"}).json()
     assert client.get("/api/v1/collection/cards", params={"bucket": mine["id"]}).json()["total"] == 0  # an empty bucket is empty, not 404
+
+
+def test_a_cards_detail_names_the_bucket_of_each_copy_row_and_a_share_hides_it(client):  # #125
+    from tests.test_analytics import upload
+
+    sign_in_as(client, "alice@example.com")
+    assert client.post("/api/v1/imports", files={"file": ("two.csv", TWO_FOLDERS, "text/csv")}).status_code in (200, 201)
+    buckets = by_name(client)
+    sol = next(c for c in client.get("/api/v1/collection/cards", params={"name": "Sol Ring"}).json()["items"] if c["set"]["code"].lower() == "c21")
+    detail = client.get(f"/api/v1/collection/cards/{sol['id']}").json()
+    assert {row["bucket_id"] for row in detail["copies"]} == {buckets["Binder"]["id"]}
+    token = client.post("/api/v1/shares", json={"kind": "collection"}).json()["url"].split("invite=")[1]
+    sign_in_as(client, "bob@example.com")
+    share_id = client.post("/api/v1/shares/accept", json={"token": token}).json()["id"]
+    shared = client.get(f"/api/v1/shared/{share_id}/collection/cards/{sol['id']}").json()
+    assert shared["copies"] and all(row["bucket_id"] is None for row in shared["copies"])

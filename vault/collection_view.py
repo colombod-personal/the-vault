@@ -145,7 +145,7 @@ class CollectionView:
                     condition=r.condition, language=r.language, price=price,
                     price_source="scryfall" if from_scryfall else "file",
                 )
-            g.copies.append({"quantity": r.quantity, "folder": r.folder, "purchase_price": paid,
+            g.copies.append({"quantity": r.quantity, "folder": r.folder, "bucket_id": r.bucket_id, "purchase_price": paid,
                              "purchase_date": day})
             g.quantity += r.quantity
             g.paid += (paid or 0.0) * r.quantity
