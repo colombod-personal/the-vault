@@ -90,15 +90,16 @@ _LOCK = threading.Lock()
 
 
 class CollectionView:
-    def __init__(self, db: Session, user: User, *, hide_costs: bool = False, bucket_id: int | None = None):
-        self.db, self.user, self.hide_costs, self.bucket_id = db, user, hide_costs, bucket_id  # bucket_id: only that bucket's copies (#123)
+    def __init__(self, db: Session, user: User, *, hide_costs: bool = False, bucket_id: int | None = None, tag: str | None = None):
+        # bucket_id: only that bucket's copies (#123); tag: only the copies of cards the person tagged so (#130)
+        self.db, self.user, self.hide_costs, self.bucket_id, self.tag = db, user, hide_costs, bucket_id, tag
         last_import = db.execute(select(func.count(Import.id), func.max(Import.id), func.max(Import.created_at))
                                  .where(Import.user_id == user.id)).one()
         self.prices_as_of = db.scalar(select(func.max(PriceSnapshot.day)))
         cards_updated = db.scalar(select(func.max(Card.updated_at)))
         # ids alone can be reused (deleted rows, other databases), so timestamps are in the version and the engine in the key
         self.version = (f"{user.id}.{user.created_at}.{'.'.join(map(str, last_import))}."
-                        f"{self.prices_as_of or '-'}.{cards_updated or '-'}.{int(hide_costs)}" + (f".b{bucket_id}" if bucket_id else ""))
+                        f"{self.prices_as_of or '-'}.{cards_updated or '-'}.{int(hide_costs)}" + scope_suffix(db, user, bucket_id, tag))
         key = (id(db.get_bind()), self.version)
         with _LOCK:
             cached = _CACHE.get(key)
@@ -115,7 +116,7 @@ class CollectionView:
 
     def _build(self) -> tuple:
         db, user = self.db, self.user
-        rows = user_entries(db, user, self.bucket_id)
+        rows = user_entries(db, user, self.bucket_id, self.tag)
         ids = {r.scryfall_id for r in rows if r.scryfall_id}
         prices = latest_prices(db, ids)
         # Files without set names (Moxfield) get Scryfall's, once the printing is matched.
@@ -336,7 +337,17 @@ def history_days(db: Session, user: User, since: date | None = None) -> list:
     return list(db.scalars(stmt.order_by(CollectionValue.day)))
 
 
-def view_version(db: Session, user: User, *, hide_costs: bool = False) -> str:
+def scope_suffix(db: Session, user: User, bucket_id: int | None, tag: str | None) -> str:
+    """The part of a version (and so of the cache key and the ETag) that names the bucket and the tag an answer is limited to.
+    A tag's part carries the person's tags stamp, so tagging, untagging or renaming never leaves a stale view or ETag (#130)."""
+    out = f".b{bucket_id}" if bucket_id else ""
+    if tag is not None:
+        from . import tags  # tags imports this module
+        out += f".g{tag}.{tags.stamp(db, user)}"
+    return out
+
+
+def view_version(db: Session, user: User, *, hide_costs: bool = False, bucket_id: int | None = None, tag: str | None = None) -> str:
     """The version a :class:`CollectionView` of ``user`` would have, without building the view:
     for endpoints answered by SQL aggregates (vault.analytics) that still need an ETag and must
     change whenever the collection or its prices do. Same parts as ``CollectionView.version``."""
@@ -345,7 +356,7 @@ def view_version(db: Session, user: User, *, hide_costs: bool = False) -> str:
     prices_as_of = db.scalar(select(func.max(PriceSnapshot.day)))
     cards_updated = db.scalar(select(func.max(Card.updated_at)))
     return (f"{user.id}.{user.created_at}.{'.'.join(map(str, last_import))}."
-            f"{prices_as_of or '-'}.{cards_updated or '-'}.{int(hide_costs)}")
+            f"{prices_as_of or '-'}.{cards_updated or '-'}.{int(hide_costs)}" + scope_suffix(db, user, bucket_id, tag))
 
 
 # Sorts added for the analytics clients: oldest purchase first, and names Z to A. A descending
