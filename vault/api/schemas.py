@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..deck_tools import FORMATS
+from ..provenance import Provenance
 
 
 MAX_ID = 2**31 - 1  # ids are INTEGER columns: 32 bits on Postgres
@@ -1086,3 +1087,173 @@ class OverlapPurchaseText(Page):
     text: str = Field(description="One page of the paste-ready list: `<copies> <card>` per line; join the pages")
     allocation: OverlapAllocation
     prices_date: str | None = None
+
+
+# -- the deck ideas lab (#163, docs/deck-ideas-lab-design.md) ---------------------------------------------------------------
+
+class IdeasBuy(BaseModel):
+    quantity: int = Field(description="Copies to buy")
+    unit_price: float | None = Field(None, description="Scryfall's cheapest known price, not a shop's price today")
+    price_date: str | None = Field(None, description="The day that price is from")
+    cost: float | None = None
+    price_status: Literal["priced", "unpriced"]
+
+
+class IdeasMove(BaseModel):
+    kind: Literal["move"]
+    from_deck: OverlapDeckRef = Field(description="The deck that holds a copy (the last in the allocation order that does)")
+    quantity: int
+
+
+class IdeasRole(BaseModel):
+    role: str
+    strength: Literal["core", "incidental"]
+    basis: Literal["scryfall_tagger", "computed"] = Field(description="A Scryfall Tagger tag, or a rule over the Oracle text (the Vault's, always marked)")
+
+
+class IdeasCard(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    card: str
+    oracle_id: str | None = Field(None, description="Null when the catalog does not know the name")
+    known: bool
+    section: str
+    lane: str
+    need: int = Field(description="Copies the deck lists")
+    have: int = Field(description="Copies owned (any printing), whatever the other decks hold")
+    gets: int = Field(description="Copies this deck holds when every saved deck takes what it needs (the allocation of get_deck_overlap)")
+    not_owned: int = Field(description="Lacking copies the collection cannot supply: to buy")
+    held_by_other_deck: int = Field(description="Lacking copies that exist and another deck holds: to move")
+    status: Literal["owned", "partial", "missing"] = Field(description="owned: nothing lacking; missing: the deck holds none; partial: some")
+    basic: bool = Field(description="A basic land: never short")
+    borrowed: bool = Field(description="True when this deck lacks a copy another deck holds, or holds a copy another deck also wants")
+    borrowed_from: str | None = Field(None, description="The deck holding the copy this deck lacks (when `held_by_other_deck` is above 0)")
+    borrowed_from_deck_id: int | None = None
+    also_wanted_by: list[str] = Field(default_factory=list, description="Decks that also want a copy this deck holds (at most 10)")
+    type_line: str | None = None
+    mana_cost: str | None = None
+    mana_value: float | None = None
+    roles: list[IdeasRole]
+    tags: list[str] = Field(description="The card's roles other than its lane: it is counted once, in one lane")
+    move: IdeasMove | None = Field(None, description="Offered only when a donor copy exists (`held_by_other_deck` above 0)")
+    buy: IdeasBuy | None = Field(None, description="Offered only when copies must be bought (`not_owned` above 0)")
+    links: dict[str, Link] = Field(default_factory=dict, alias="_links")
+
+
+class IdeasLane(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    lane: str
+    label: str
+    kind: str
+    copies: int = Field(description="Copies in the lane: the lanes add up to the deck's card count")
+    cards: int
+    covered: int
+    missing: int = Field(description="Cards in the lane with `not_owned` above 0")
+    borrowed: int = Field(description="Cards in the lane with `held_by_other_deck` above 0")
+    items: list[IdeasCard] = Field(description="One page of the lane: cards that need a decision first, then by name")
+    count: int
+    total: int = Field(description="Cards in the lane")
+    next_cursor: str | None = Field(None, description="The cursor of this lane's next page (the same as in `_links.next`), null on the last")
+    links: dict[str, Link] = Field(default_factory=dict, alias="_links")
+
+
+class IdeasSummary(BaseModel):
+    copies: int = Field(description="Cards in the deck, every copy (the sum over all lanes)")
+    covered: int = Field(description="Copies the deck holds under the allocation")
+    lacking: int
+    cards: int = Field(description="Distinct cards")
+    missing: int = Field(description="Cards with `not_owned` above 0")
+    borrowed: int = Field(description="Cards with `held_by_other_deck` above 0 (a card can be both missing and borrowed)")
+    partial: int
+    complete: bool
+    unknown_cards: int = Field(description="Cards the catalog does not know (they are in Other)")
+
+
+class IdeasCombo(BaseModel):
+    cards: list[str]
+    owned: bool = Field(description="Every card of the combo is fully held by this deck")
+    url: str
+    produces: list[str]
+    source: str
+
+
+class IdeasCombos(BaseModel):
+    checked: bool
+    reason: str | None = None
+    total: int | None = None
+    combos: list[IdeasCombo] = Field(default_factory=list)
+
+
+class DeckIdeas(Hal):
+    deck: dict = Field(description="Which deck this is about: id, name and overview (format, commander(s), card count, colour identity)")
+    summary: IdeasSummary
+    allocation: OverlapAllocation
+    roles_note: str
+    lanes_note: str
+    borrow_note: str
+    lanes: list[IdeasLane] = Field(description="Every lane, or the one asked for with `lane`; each pages on its own (`_links.next`)")
+    combos: IdeasCombos | None = Field(None, description="Only with include_combos=true")
+    prices_date: str | None = None
+    provenance: list[Provenance]
+
+
+class IdeasAlternative(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    card: str
+    oracle_id: str
+    type_line: str | None = None
+    mana_cost: str | None = None
+    mana_value: float
+    image: dict | None = Field(None, description="Scryfall's image link and the artist to credit")
+    scryfall_uri: str | None = None
+    copies_owned: int
+    copies_free: int = Field(description="Owned copies no saved deck needs")
+    borrowed: bool = Field(description="Every owned copy is another deck's: using it takes it from that deck")
+    borrowed_from: str | None = None
+    borrowed_from_deck_id: int | None = None
+    shared_roles: list[dict] = Field(description="[{role, target, candidate}]: the core roles both cards have")
+    why: str
+    mana_value_difference: float
+    legal: bool = Field(description="Always true: cards illegal in the format are filtered out before ranking")
+    in_colours: bool = Field(description="Always true: cards outside the colour identity are filtered out before ranking")
+    in_deck: int = Field(description="Copies of it the deck already lists")
+    remaining_allowance: int | None = Field(None, description="Copies the format still allows in this deck; null for any number")
+    move: IdeasMove | None = Field(None, description="Offered only when a donor copy exists")
+    buy: IdeasBuy | None = Field(None, description="For a borrowed card: what a copy would cost")
+    links: dict[str, Link] = Field(default_factory=dict, alias="_links")
+
+
+class IdeasTarget(BaseModel):
+    card: str
+    oracle_id: str
+    in_deck: int = Field(description="Copies the deck lists (0 when the card is not in it)")
+    status: Literal["owned", "partial", "missing"] | None = Field(None, description="As in the ideas answer; null when the card is not in the deck")
+    need: int | None = None
+    gets: int | None = None
+    not_owned: int | None = None
+    held_by_other_deck: int | None = None
+    borrowed_from: str | None = None
+    roles: list[IdeasRole]
+    core_roles: list[str]
+    type_line: str | None = None
+    mana_cost: str | None = None
+    mana_value: float | None = None
+    image: dict | None = None
+    scryfall_uri: str | None = None
+    buy: IdeasBuy = Field(description="One copy at Scryfall's cheapest known price, dated")
+
+
+class DeckAlternatives(Page):
+    deck: dict
+    card: IdeasTarget
+    format: str
+    format_from: Literal["request", "deck", "default"] = Field(description="Where the format came from: the request, the format set on the deck, or the default (commander)")
+    color_identity: list[str] = Field(description="The colours alternatives must stay within")
+    reason: Literal["no_role", "none_found"] | None = Field(None, description="Why the list is empty: no coarse role for the card, or nothing owned fits")
+    message: str | None = None
+    roles_note: str
+    items: list[IdeasAlternative]
+    prices_date: str | None = None
+    provenance: list[Provenance]

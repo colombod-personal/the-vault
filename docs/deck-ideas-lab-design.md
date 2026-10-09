@@ -1,6 +1,6 @@
 # The deck ideas lab: what can I build, what is missing, what can stand in (design for #161, epic #158)
 
-Status: agreed by the owner on 2026-10-08 (#287: decisions 5 to 9, all as recommended). Nothing here is built yet; implementation is #163.
+Status: agreed by the owner on 2026-10-08 (#287: decisions 5 to 9, all as recommended). Implementation is #163. Built so far: the server side of task 1 (`vault/deck_ideas.py`, `vault/api/ideas_api.py`, the tools `get_deck_ideas` and `get_card_alternatives`; "As built" below); the web view, the deck page change flow, removing the Graph and the links are still to do.
 
 Owner direction (2026-10-05, `docs/graph-and-lab-review.md`): the Graph's seven modes are cut. The Graph becomes a **deck ideas lab**: how a deck could be built from the collection, what is missing, and for each missing card which owned card could stand in or deliver the same dynamic.
 
@@ -159,6 +159,21 @@ All seven Graph modes and `public/views/graph.jsx`, the `cytoscape` script tag i
 - Performance: the budget above is a test with a recorded result, run on a 100-card deck.
 - `#/graph` redirects to `#/ideas`; the removed code is gone.
 
+## As built (server, #163)
+
+Where the code settles a point the design left open (tests: `tests/test_deck_ideas.py`):
+
+- **The shape of `ideas`.** `GET /decks/{id}/ideas` answers `deck` (name first), `summary`, `allocation`, the three notes, `lanes`, `prices_date` and `provenance`. `lane` narrows it to one lane, which pages with `cursor` (`next_cursor`, `_links.next`); without `lane` every lane shows its first `limit` cards (default 25, at most 100). A cursor without a lane is a 400. The header counts are computed over the whole deck before any page is cut.
+- **Lanes.** The fixed priority is ramp, draw, removal, sweeper, counterspell, tutor, recursion, sacrifice outlet. **Every land goes to Lands**, even one with a ramp role (its roles stay as `tags`), so the mana base stays together; a card the catalog does not know goes to Other with `known: false`. Inside a lane the cards that need a decision (`missing`, then `partial`) come first, then by name.
+- **Status and borrowing.** `status` is `owned` when nothing is lacking, `missing` when the deck holds none of the copies it needs under the allocation (`gets` is 0), `partial` otherwise. `borrowed` is true when `held_by_other_deck > 0` or the deck holds a copy another deck also wants. `borrowed_from` names the deck holding the copy this deck **lacks**; for the deck that holds a contested copy, `also_wanted_by` names the decks that want it. The header `missing` and `borrowed` count cards with `not_owned > 0` and `held_by_other_deck > 0`, as designed. Basic lands are not allocated (as in deck independence), so they are never short.
+- **The allocation.** The default rule of #165 (the deck closest to complete first); `ideas` takes no `priority`. `move` is the donor `deck_independence` picks (the last deck in the order that holds a copy), offered only when `held_by_other_deck > 0`; `buy` only when `not_owned > 0`, priced as `shopping_list` prices (the cheapest known price, dated).
+- **Combos.** `include_combos=true` asks Commander Spellbook (the deck's card names are sent only then) and returns the combos of the deck as `combos`, each with `owned` (every card fully held by this deck); a failing upstream is `checked: false` and the rest of the answer stands. They are off by default because they call an outside service.
+- **The equivalence decision.** `deck_ideas.equivalence(target_roles, candidate_roles)` is the one function #166's `equivalents` will replace: two cards are equivalent when they share a **core** role (`role_strength`: a Tagger tag weighted weak is `incidental`, any other weight and every role found by a text rule is `core`). Candidates are found through Tagger tags only, among the cards the person owns; the target's own roles include the text rules.
+- **Alternatives.** Filters before ranking: Tagger tag for a shared core role, `digital` and token layouts out, legal (or restricted) in `format`, inside the colour identity (the commander's in a Commander-style format with a commander, else the colours of the deck's cards, as `find_upgrades` does), basic lands out, and copies left under the format's limit (`remaining_allowance`; one in a singleton format, four otherwise, any number for cards that say so). A card whose every owned copy is already this deck's own is not offered. Ranking: a free copy (no saved deck needs it) first, then a card another deck holds (`borrowed_from`, `move`, and `buy` for a copy), then the number of shared core roles, the mana value difference, the name. `legal` and `in_colours` are always true on a row (filtered, not flagged). The asked-for card need not be in the deck (`in_deck` says); an unknown name is a 404 with near names.
+- **The format.** `format` is validated against the Vault's formats. The design said a saved deck stores no format; it now can, so the default is the format set on the deck, else `commander` (`format_from` says which).
+- **Rate limit.** 120 reads a minute per person across both routes (each lane page recomputes the allocation).
+- **Measured** (`test_the_first_ideas_page_of_a_100_card_deck_makes_a_small_constant_number_of_queries`, a 100-card deck beside 12 other saved decks, local Postgres): the first `ideas` page makes 11 queries and `alternatives` 16, and the query count does not grow with the deck.
+
 ## Decisions for the owner
 
 1. **A separate view named "Ideas", not part of the Lab.** Recommendation: yes. Alternative: a Lab section (shorter navigation, but the Lab is for decisions and this is for exploring).
@@ -170,7 +185,7 @@ All seven Graph modes and `public/views/graph.jsx`, the `cytoscape` script tag i
 ## Tasks that follow (under #163)
 
 0. Web (deck page): the cut and add change flow with `validate_deck_changes` and a confirmation before `update_deck` (needed by Swap into the deck; it does not exist today).
-1. Server: `GET /decks/{id}/ideas` and `/ideas/alternatives` (with the validated `format` input), tools `get_deck_ideas` and `get_card_alternatives`, tests above (alternatives use `equivalents` from #166; on the coarse roles for phase 1).
+1. ~~Server: `GET /decks/{id}/ideas` and `/ideas/alternatives` (with the validated `format` input), tools `get_deck_ideas` and `get_card_alternatives`, tests above~~ Done ("As built"); alternatives run on the coarse roles behind `deck_ideas.equivalence`, which #166's `equivalents` replaces.
 2. Web: the Ideas view with the five states, Clear, Esc and Back, lazy images and windowed lanes, the performance test.
 3. Remove the Graph modes, `graph.jsx`, the cytoscape script and the dead styles; redirect `#/graph`.
 4. Links: Lab Buy rows and deck-page missing rows to Ideas.

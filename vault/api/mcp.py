@@ -28,7 +28,7 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 
-from .. import analytics, experts, observability
+from .. import analytics, deck_ideas, experts, observability
 from ..deck_tools import FORMATS
 from ..models import User
 from . import mcp_session, mcp_ui
@@ -442,6 +442,35 @@ TOOLS = [
           **PAGING},
          path=lambda a: f"{V1}/decks/overlap" + (f"/{a['list']}" if a.get("list") else "/purchases" if a.get("format") == "text" else ""),
          query=("priority", "limit", "cursor", "format")),
+    Tool("get_deck_ideas", "The deck ideas lab for one saved deck: what the person's collection covers of it, what is missing, what "
+         "another deck holds. `deck` names the deck first; `summary` counts every copy (`covered` of `copies`; `missing` cards need "
+         "`not_owned` copies bought, `borrowed` cards have `held_by_other_deck` copies another deck holds). `lanes` group the "
+         "deck's cards by role (ramp, draw, removal, sweeper, counterspell, tutor, recursion, sacrifice_outlet, then other and "
+         "lands): every copy is in exactly one lane, a card's other roles are its `tags`, and the lanes add up to the deck's "
+         "card count. Each card has `have`, `need`, `gets`, `not_owned`, `held_by_other_deck`, a `status` (owned, partial, missing) "
+         "and `borrowed` with `borrowed_from` (the deck holding the copy it lacks); `move` appears only when a donor copy exists "
+         "and `buy` (Scryfall's cheapest price, dated) only for copies to buy. Counts follow the allocation of get_deck_overlap. "
+         "Roles are the eight coarse roles, a community's opinion: say so. Each lane pages on its own (`lane`, `cursor`); "
+         "`include_combos` adds the deck's combos from Commander Spellbook (the deck's card names are sent to them). Read-only; "
+         "only the person's own decks.",
+         {"deck_id": ID, "lane": {"type": "string", "enum": list(deck_ideas.LANES),
+                                  "description": "Only this lane; use next_cursor as cursor to page it"},
+          "include_combos": {"type": "boolean", "default": False,
+                             "description": "Also ask Commander Spellbook for the deck's combos (sends the deck's card names to them)"},
+          **PAGING}, ["deck_id"],
+         path=lambda a: f"{V1}/decks/{int(a['deck_id'])}/ideas", query=("lane", "include_combos", "limit", "cursor")),
+    Tool("get_card_alternatives", "Cards the person owns that could stand in for a card in one of their saved decks, best first: "
+         "they share a core role with it (one of the eight coarse roles, a community's opinion: say so), are inside the deck's colour "
+         "identity, legal in the format, and have copies left under the format's copy limit (an owned Sol Ring is not offered for a "
+         "Commander deck that already runs one). Cards the person has a free copy of come first, then those another deck holds "
+         "(`borrowed_from`, with a `move` option only when a donor copy exists, and the `buy` price of a copy, dated), then by "
+         "mana value difference; each says `why` it matches. `card` names the card the answer is about, with its `status` in the "
+         "deck, its roles and its own `buy` price. `format` defaults to the format set on the deck, else commander. With no "
+         "alternative, `reason` and `message` say why. Read-only; changing the deck is validate_deck_changes then update_deck.",
+         {"deck_id": ID, "card": {"type": "string", "minLength": 1, "maxLength": 300, "description": "The card to find a stand-in for"},
+          "format": {"type": "string", "enum": list(FORMATS), "description": "The format whose legality and copy limit apply"},
+          **PAGING}, ["deck_id", "card"],
+         path=lambda a: f"{V1}/decks/{int(a['deck_id'])}/ideas/alternatives", query=("card", "format", "limit", "cursor")),
     Tool("get_deck", "A saved deck: its name, `overview` (format, commander(s), card count, colour identity), a `summary` "
          "of how much of it the person owns (copies needed, owned, missing, cost to finish), the cards not fully owned "
          "(the dearest 40, each with its Scryfall unit price and the `price_date` that price is from: the cheapest priced paper printing of the card, or the printing the list names, "
@@ -608,6 +637,7 @@ SCRYFALL_DATA = {"list_decks",  # the commanders' colour identity is Scryfall's 
                  "list_spare_copies", "get_collection_pnl",
                  "check_decklist", "lookup_cards", "get_deck", "get_shared_deck",
                  "get_deck_overlap",  # prices (#165): Scryfall's cheapest, dated
+                 "get_deck_ideas", "get_card_alternatives",  # roles, colour identity and prices (#163): Scryfall's, dated
                  "update_owned_cards", "show_owned_printings"}  # these carry Scryfall's card images
 OWN_DATA_ONLY = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucket", "move_cards",
                  "list_tags", "tag_cards", "untag_cards", "rename_tag", "delete_tag",

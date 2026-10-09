@@ -345,3 +345,15 @@ def test_deck_overlap_priority_answers_404_for_another_persons_deck(client):
         assert missing.status_code == 404 and missing.text == res.text
     body = client.get("/api/v1/decks/overlap").json()
     assert body["decks_checked"] == 1 and [d["name"] for d in body["decks"]] == ["B's deck"]  # nothing of Alice's
+
+
+def test_deck_ideas_answer_404_for_another_persons_deck(client):
+    """#163: the ideas lab takes a deck id; another person's deck and a missing one are the same 404 on both routes, and there is no
+    route for a shared deck or collection."""
+    login(client, "alice@example.com")
+    deck_id = client.post("/api/v1/decks", json={"name": "A's deck", "text": "1 Sol Ring"}).json()["id"]
+    login(client, "bob@example.com")
+    for path in ("ideas", "ideas/alternatives?card=Sol%20Ring"):
+        res = client.get(f"/api/v1/decks/{deck_id}/{path}")
+        missing = client.get(f"/api/v1/decks/999999/{path}")
+        assert res.status_code == 404 and missing.status_code == 404 and missing.text == res.text, path
