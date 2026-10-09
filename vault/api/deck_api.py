@@ -217,7 +217,8 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
                 commander = card  # in the command zone: castable once there is the mana
             else:
                 cards.extend([card] * e.line.quantity)
-        seed = body.seed if body.seed is not None else int(hashlib.sha256(text_of(db, user, body).encode()).hexdigest()[:8], 16)
+        # The default is taken modulo the range the endpoint accepts, so the seed an answer reports can always be sent back (#392).
+        seed = body.seed if body.seed is not None else int(hashlib.sha256(text_of(db, user, body).encode()).hexdigest()[:8], 16) % 2**31
         try:
             result = simulate.simulate(cards, commander=commander, multiplayer=fmt in MULTIPLAYER, on_the_play=body.on_the_play,
                                        turns=body.turns, games=body.games, samples=body.samples, seed=seed)
