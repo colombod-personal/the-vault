@@ -631,6 +631,31 @@ p.tag-note { margin: 0 0 14px; font-size: 12px; }
 .signout-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .signout-actions .btn { min-height: 44px; }
 
+/* ---- Value (#95): the ledger of months is a list on a phone, the summary leads ----
+   The table (wider screens) and the list (phones) are both in the page; one of them is display: none. */
+.ledger-list, .ledger-more { display: none; }
+@media (max-width: 760px) {
+  .ledger-scroll { display: none; }
+  .ledger-list { display: block; list-style: none; margin: 0; padding: 0; }
+  .ledger-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: baseline; padding: 12px 14px; border-top: 1px solid var(--border); }
+  .ledger-item:first-child { border-top: 0; }
+  .ledger-month { font-size: 15px; font-weight: 600; }
+  .ledger-added { font-family: var(--mono); font-size: 14px; color: var(--gold); text-align: right; }
+  .ledger-sub { grid-column: 1 / -1; font-size: 12px; color: var(--text-2); line-height: 1.5; }
+  .ledger-none { display: block; text-align: center; color: var(--text-2); font-size: 13px; padding: 24px 14px; }
+  .ledger-more { display: block; padding: 12px 14px; border-top: 1px solid var(--border); }
+  .ledger-more .btn { width: 100%; }
+  .ledger-tools { width: 100%; }
+  .ledger-tools .input { flex: 1 1 0; min-width: 0; width: auto !important; }
+  .ledger-tools .select { flex: 0 0 auto; max-width: 48%; }
+  /* The title, then the figures; the price date and the refresh buttons come under the title in a row, not a column to the right. */
+  .val-head { display: block !important; margin-bottom: 18px !important; }
+  .val-calc { text-align: left !important; margin-top: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+  .val-calc > * { margin: 0 !important; }
+  .val-calc .freshness { justify-content: flex-start !important; }
+  .val-calc > div { flex-direction: row !important; align-items: center !important; flex-wrap: wrap; gap: 8px; }
+}
+
 /* ==== Phone layout (up to 760px wide) ====
    Everything from here to the end of the file is inside phone-width media queries (only .m-only,
    phone-only elements, is hidden outside them), so wider screens render exactly as before; a test
