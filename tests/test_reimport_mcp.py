@@ -101,7 +101,7 @@ def test_the_assistant_flow_end_to_end_through_the_mcp_tools(app, chatgpt):
     assert [c["keeps"] for c in answered] == ["app"]
     shown = ok("confirm_staged_upload", upload_id=started["id"], use_app_value=[killer["id"]])  # no confirm: the preview
     assert shown["merge"]["conflicts"]["cards"][0]["keeps"] == "app" and copies_of(app, "A Killer Among Us") == 3
-    done = ok("confirm_staged_upload", upload_id=started["id"], confirm=True, use_app_value=[killer["id"]])
+    done = ok("confirm_staged_upload", upload_id=started["id"], confirm=True, use_app_value=[killer["id"]], content_hash=shown["content_hash"])
     assert done["merge"]["conflicts"]["cards"][0]["keeps"] == "app"
     assert copies_of(app, "A Killer Among Us") == 5 and copies_of(app, "Sol Ring", "cmr") == 2
     assert copies_of(app, "Sol Ring", "c21") == 0  # the app sold the one it had bought again: untouched here, so it goes

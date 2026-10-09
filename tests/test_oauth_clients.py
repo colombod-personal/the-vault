@@ -85,7 +85,9 @@ def test_only_public_addresses_are_public(address, public):
     "http://app.example/c.json", "ftp://app.example/c.json", "https://1.2.3.4/c.json", "https://[::1]/c.json",
     "https://app.example:8443/c.json", "https://app.example:22/c.json", "https://user@app.example/c.json",
     "https://user:pw@app.example/c.json", "https://app.example", "https://app.example/", "https://app.example/c.json#f",
-    "https://app.example/a/../b", "https://app.example/./b", "https://localhost/c.json", "https://intranet/c.json",
+    "https://app.example/a/../b", "https://app.example/./b", "https://app.example/a/.", "https://app.example/a/..",
+    "https://app.example/a/%2e%2e/b", "https://app.example/a/%2E/b", "https://app.example/a/.%2e/b", "https://app.example/a/%2e./b",
+    "https://app.example/a/%252e%252e/b", "https://localhost/c.json", "https://intranet/c.json",
     "https://box.local/c.json", "https://svc.internal/c.json", "https://app.example/ c.json", "https://app.example/c\\x.json",
     "https://" + "a" * 600 + ".example/c.json", "", "https://",
 ])
@@ -96,6 +98,8 @@ def test_client_id_urls_that_could_aim_the_fetch_are_refused(url):
 
 def test_a_good_client_id_url_is_accepted():
     assert oc.check_client_id_url("https://app.example/oauth/client.json") == "app.example"
+    assert oc.check_client_id_url("https://www.perplexity.ai/.well-known/mcp-client.json") == "www.perplexity.ai"  # #363
+    assert oc.check_client_id_url("https://app.example/.hidden/x.json") == "app.example"  # a dot in front of a name is not a dot segment
     assert oc.check_client_id_url("https://app.example:443/oauth/client.json?v=2") == "app.example"
 
 
@@ -125,6 +129,23 @@ def test_a_client_is_fetched_once_and_cached(app, universe, browser):
     assert len(contacted(universe, GOOD_HOST)) == 1
     [row] = clients_of(app)
     assert row.kind == "cimd" and row.name == "Twin Agent" and row.redirect_uris == ["https://app.example/callback"]
+
+
+PERPLEXITY_REDIRECTS = tuple(f"https://{host}/rest/connections/oauth_callback" for host in (
+    "www.perplexity.ai", "www.perplexity.com", "enterprise.perplexity.ai", "enterprise.perplexity.com",
+    "staging.perplexity.ai", "staging.perplexity.com", "testing.perplexity.ai", "testing.perplexity.com"))
+
+
+def test_perplexity_connects_with_its_well_known_client_metadata_document(app, universe, browser):  # #363
+    url = universe.client_hosts.publish("www.perplexity.ai", "/.well-known/mcp-client.json", name="Perplexity",
+                                        redirect_uris=PERPLEXITY_REDIRECTS, token_endpoint_auth_method="none")
+    assert url == "https://www.perplexity.ai/.well-known/mcp-client.json"
+    c, page = start(browser, url, redirect=PERPLEXITY_REDIRECTS[0])
+    assert page.status_code == 200 and "Connect Perplexity (www.perplexity.ai) to your Vault?" in page.text
+    [row] = clients_of(app)
+    assert row.kind == "cimd" and row.name == "Perplexity" and list(row.redirect_uris) == list(PERPLEXITY_REDIRECTS)
+    other = start(browser, url, redirect="https://evil.example/rest/connections/oauth_callback")[1]
+    assert "Connect Perplexity" not in other.text  # an address the document does not list is still refused
 
 
 def test_the_cache_expires_and_a_changed_document_is_read_again(app, universe, browser):

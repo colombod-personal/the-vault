@@ -30,7 +30,7 @@ import time
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import httpx
 from sqlalchemy import delete, func, select
@@ -190,13 +190,19 @@ def is_metadata_client_id(client_id: str) -> bool:
     return client_id.startswith("https://")
 
 
+def _has_dot_segment(path: str) -> bool:
+    """A path segment that is ``.`` or ``..``, however it is written (percent-encoded once or twice). A name that merely starts
+    with a dot is not one: ``/.well-known/mcp-client.json`` is the standard place for a client metadata document (#363)."""
+    return any(unquote(unquote(segment)) in (".", "..") for segment in path.split("/"))
+
+
 def check_client_id_url(url: str) -> str:
     """The host of a client_id URL that is safe to fetch, or ClientError."""
     parts = _parts(url)
     bad = ClientError("invalid_client", "client_id is not an acceptable https URL")
     if (parts is None or len(url) > MAX_URL or re.search(r"[\x00-\x20\x7f\\]", url) or parts.scheme != "https"
             or not parts.hostname or parts.username or parts.password or parts.fragment
-            or parts.path in ("", "/") or "/." in parts.path):
+            or parts.path in ("", "/") or _has_dot_segment(parts.path)):
         raise bad
     try:
         port = parts.port

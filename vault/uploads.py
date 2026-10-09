@@ -4,21 +4,26 @@ plain page, the file waits (staged, not imported), the assistant shows the previ
 - ``POST /api/v1/uploads`` (write): a ticket and the link to give the person. Only the ticket's hash is stored.
 - ``GET /upload?ticket=`` and ``POST /upload``: the page. The ticket is the only credential; it works for one hour,
   for this person only, and a new file replaces the staged one (to upload a fixed file).
-- ``GET /api/v1/uploads/{id}`` (read): waiting, or the same preview as an import (changes, unmatched rows).
-- ``POST /api/v1/uploads/{id}/apply`` (write): imports the staged file and deletes it. Like every import it applies
-  only what changed in the person's app and keeps edits made in the Vault (``vault.merge``).
+- ``GET /api/v1/uploads/{id}`` (read): waiting, or the same preview as an import (changes, unmatched rows) with the
+  ``content_hash`` of the file previewed.
+- ``POST /api/v1/uploads/{id}/apply?content_hash=`` (write): imports the staged file and deletes it, but only if it is the
+  file that was previewed (#352: the link can be used again until it expires, so what is stored when apply runs may not be
+  what the person was shown). Like every import it applies only what changed in the person's app and keeps edits made in
+  the Vault (``vault.merge``).
+- At most 5 open links per person and 10 started a minute; expired files are deleted by the daily job (``vault.retention``).
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Request, UploadFile
-from sqlalchemy import delete, select
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, Request, UploadFile
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from .api.idempotency import idempotent
@@ -27,13 +32,21 @@ from .api.schemas import MAX_ID
 from .importer import MAX_UPLOAD_BYTES, ImportConflict, ImportError_, ImportOptions, import_collection, preview_import
 from .models import Import, StagedUpload, User
 from .oauth_routes import esc, page
+from .ratelimit import per_user
 
 V1 = "/api/v1"
 LIFETIME = timedelta(hours=1)
+MAX_OPEN = 5  # links a person can have open at once
+STARTS_PER_MINUTE = 10
 
 
 def _hash(ticket: str) -> str:
     return hashlib.sha256(ticket.encode()).hexdigest()
+
+
+def content_hash(content: bytes) -> str:
+    """The file's identity in a preview and in the apply that must match it."""
+    return hashlib.sha256(content).hexdigest()
 
 
 def _now() -> datetime:
@@ -82,8 +95,14 @@ def build_router(get_db, current_user, settings) -> APIRouter:
 
     @router.post(f"{V1}/uploads", tags=["imports"], status_code=201,
                  summary="A one-time link for the person to upload a collection file (staged, not imported)")
-    def start_upload(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    def start_upload(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        per_user(request, "upload start", user.id, STARTS_PER_MINUTE, db)
         db.execute(delete(StagedUpload).where(StagedUpload.expires_at <= _now()))
+        open_links = db.scalar(select(func.count()).select_from(StagedUpload).where(StagedUpload.user_id == user.id))
+        if open_links >= MAX_OPEN:
+            db.commit()
+            raise HTTPException(409, f"You already have {MAX_OPEN} open upload links (each works for one hour). Use one of them "
+                                "or wait for one to expire.")
         ticket = secrets.token_urlsafe(32)
         staged = StagedUpload(user_id=user.id, ticket_hash=_hash(ticket), expires_at=_now() + LIFETIME)
         db.add(staged)
@@ -108,17 +127,23 @@ def build_router(get_db, current_user, settings) -> APIRouter:
             preview = preview_import(db, user, staged.content, options)
         except ImportError_ as exc:
             return {"id": staged.id, "status": "unreadable", "filename": staged.filename, "detail": str(exc)}
-        return {"id": staged.id, "status": "uploaded", "filename": staged.filename, **preview}
+        return {"id": staged.id, "status": "uploaded", "filename": staged.filename, "content_hash": content_hash(staged.content),
+                **preview}
 
     @router.post(f"{V1}/uploads/{{upload_id}}/apply", tags=["imports"], status_code=201,
                  summary="Import a staged upload (applies what changed in the person's app, keeps edits made in the Vault), "
                          "then delete the staged file")
     def apply_upload(request: Request, upload_id: UploadId, user: User = Depends(current_user),
-                     db: Session = Depends(get_db), options: ImportOptions = Depends(import_options)):
+                     db: Session = Depends(get_db), options: ImportOptions = Depends(import_options),
+                     hash: str = Query(..., alias="content_hash", pattern=r"^[0-9a-f]{64}$",
+                                       description="The content_hash of the preview: only that file is imported")):
         def run():
             staged = owned(db, user, upload_id)
             if staged.content is None:
                 raise HTTPException(409, "Nothing uploaded yet")
+            if not hmac.compare_digest(content_hash(staged.content), hash):
+                raise HTTPException(409, "The file was uploaded again after the preview: preview it again, and import only what "
+                                    "the person has seen")
             try:
                 imp: Import = import_collection(db, user, staged.filename or "upload.csv", staged.content, options)
             except ImportConflict as exc:

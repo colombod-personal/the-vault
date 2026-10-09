@@ -38,7 +38,7 @@ HOSTS = {  # host -> the addresses its name resolves to
     "internal.example": ["10.0.0.5"], "metadata.example": ["169.254.169.254"], "loopback.example": ["127.0.0.1"],
     "mixed.example": [PUBLIC, "10.0.0.8"], "mapped.example": ["::ffff:127.0.0.1"],
     "аpple.example": [PUBLIC], "shared.example": ["100.64.0.9"],  # (a Cyrillic "a": looks like apple.example)
-    "chatgpt.com": [PUBLIC],
+    "chatgpt.com": [PUBLIC], "www.perplexity.ai": [PUBLIC],
 }
 CHATGPT_REDIRECT = "https://chatgpt.com/connector_platform_oauth_redirect"
 JWT_BEARER = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
