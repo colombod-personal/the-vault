@@ -186,3 +186,12 @@ def test_the_loaded_transform_card_is_not_colourless(db):
     cs.sync_oracle_cards(db, [delver()])
     db.commit()
     assert db.get(OracleCard, DELVER).colors == ["U"]
+
+
+def test_the_sync_reports_cards_with_deck_wording_the_legality_check_cannot_read(db):
+    """#423: a card that says what a deck can hold in a way nobody wrote a reader for is seen at ingestion, not by a person whose
+    legal deck is called illegal."""
+    weird = card(BOLT, "Foo", "A deck can have no more than three cards named Foo.")
+    known = card(SOL, "Nazgûl", "A deck can have up to nine cards named Nazgûl.")
+    result = cs.sync_oracle_cards(db, [weird, known])
+    assert result["unread_deck_rules"] == ["Foo"]
