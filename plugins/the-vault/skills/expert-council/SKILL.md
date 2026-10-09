@@ -102,7 +102,7 @@ settled only by a quote checked with `verify_citation`. If the rules do not sett
   holds 17Lands' Magic Arena data (CC BY 4.0) for the sets the Vault has loaded. Ask the set and format first (a deck's format does not
   say which Arena set). Pass the answer's `attribution` on in the first sentence that uses a number, give the sample beside every rate,
   compare two cards only when both are at the `ok` level and their 95% ranges do not overlap (otherwise say the data does not settle it),
-  never rank, recommend or compare a card at the too_few level, and never turn a rate into a grade or a "best pick". It is Arena data
+  never rank, recommend or compare a card at the too_few level (a sorted list already leaves out the cards under 200 of the sort's own sample: games in hand, or packs seen for avg_last_seen_pick, or picks for avg_taken_at; its left_out says how many), and never turn a rate into a grade or a "best pick". It is Arena data
   and a correlation, not proof a card wins games; the percentages are the Vault's, computed from 17Lands' counts.
 - Popularity (EDHREC rank) is not power; roles are Scryfall Tagger tags, a community's opinion.
 - **The rules edition with every rule number**: "rule <number> (Comprehensive Rules, <version>)", the `version` a rules tool returned

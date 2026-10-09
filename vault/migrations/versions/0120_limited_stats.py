@@ -36,6 +36,8 @@ def upgrade() -> None:
             sa.Column('wins_opening', sa.Integer(), nullable=False),
             sa.Column('drawn', sa.Integer(), nullable=False),
             sa.Column('wins_drawn', sa.Integer(), nullable=False),
+            sa.Column('in_hand', sa.Integer(), nullable=False),
+            sa.Column('wins_in_hand', sa.Integer(), nullable=False),
             sa.PrimaryKeyConstraint('set_code', 'format', 'card_name'),
         )
         op.create_index(op.f('ix_limited_game_stats_oracle_id'), 'limited_game_stats', ['oracle_id'], unique=False)
@@ -74,3 +76,16 @@ def upgrade() -> None:
             sa.Column('unmatched_cards', sa.Integer(), nullable=False),
             sa.PrimaryKeyConstraint('set_code', 'format', 'kind'),
         )
+
+
+def downgrade() -> None:
+    bind = op.get_bind()
+    existing = set(sa.inspect(bind).get_table_names())
+    if 'limited_sources' in existing:
+        op.drop_table('limited_sources')
+    if 'limited_pick_stats' in existing:
+        op.drop_index(op.f('ix_limited_pick_stats_oracle_id'), table_name='limited_pick_stats')
+        op.drop_table('limited_pick_stats')
+    if 'limited_game_stats' in existing:
+        op.drop_index(op.f('ix_limited_game_stats_oracle_id'), table_name='limited_game_stats')
+        op.drop_table('limited_game_stats')

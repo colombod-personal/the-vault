@@ -157,13 +157,15 @@ class FileResult:
     notes: list[str] = field(default_factory=list)
 
 
-GAME_FIELDS = ("games_played", "wins_played", "opening", "wins_opening", "drawn", "wins_drawn")
+GAME_FIELDS = ("games_played", "wins_played", "opening", "wins_opening", "drawn", "wins_drawn", "in_hand", "wins_in_hand")
 PICK_FIELDS = ("seen", "last_seen_sum", "picked", "picked_sum")
 
 
 class GameCounter:
-    """Reads a game file row by row. Per card it keeps six sums (copies in the deck, in the opening hand, drawn later, each also over
-    won games). A game with inconsistent data (more copies in hand than in the deck and sideboard together) is left out of every
+    """Reads a game file row by row. Per card it keeps eight counts of GAMES, never of copies (17Lands' definitions: a game counts
+    once for a card however many copies it has): games with the card in the deck (#GP), in the kept opening hand (#OH), drawn later
+    (#GD), and in hand at least once, in the opener or drawn later (#GIH, the union: a game with a copy in each counts once), each
+    also over won games. A game with inconsistent data (more copies in hand than in the deck and sideboard together) is left out of every
     count and counted as skipped, as 17Lands does. Tutored copies are not counted as drawn."""
 
     def __init__(self, header: list[str], expected_set: str):
@@ -187,7 +189,7 @@ class GameCounter:
         self.i_won, self.i_expansion = index["won"], index["expansion"]
         self.i_time = index.get("game_time", index.get("draft_time", -1))
         self.width = len(header)
-        self.counts = {n: [0, 0, 0, 0, 0, 0] for n in self.names}
+        self.counts = {n: [0] * len(GAME_FIELDS) for n in self.names}
         self.records = self.skipped = self.wins = 0
         self.expansions: set[str] = set()
         self.first = self.last = ""
@@ -221,13 +223,10 @@ class GameCounter:
         self.wins += won
         for name, d, o, r in touched:
             c = self.counts[name]
-            c[0] += d
-            c[2] += o
-            c[4] += r
-            if won:
-                c[1] += d
-                c[3] += o
-                c[5] += r
+            for i, present in ((0, d > 0), (2, o > 0), (4, r > 0), (6, o > 0 or r > 0)):
+                if present:
+                    c[i] += 1
+                    c[i + 1] += won
         if self.i_time >= 0:
             when = row[self.i_time]
             if when:
@@ -239,7 +238,7 @@ class GameCounter:
     def result(self) -> FileResult:
         if self.expansions != {self.expected}:
             raise FileError(f"the file is for expansion(s) {sorted(self.expansions)[:5]}, not {self.expected}")
-        cards = {n: c for n, c in self.counts.items() if c[0] or c[2] or c[4]}
+        cards = {n: c for n, c in self.counts.items() if c[0] or c[6]}
         return FileResult("game", cards, self.records, self.skipped, self.wins, _time(self.first), _time(self.last))
 
 

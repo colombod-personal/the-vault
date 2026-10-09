@@ -774,7 +774,7 @@ class OraclePrinting(Base):
 
 
 class LimitedGameStat(Base):
-    """Per-card counts from 17Lands' public game data, one row per set, format and card (#178, docs/limited-data-design.md).
+    """Per-card game counts (games, never copies) from 17Lands' public game data, one row per set, format and card (#178, docs/limited-data-design.md).
 
     Third-party data (17Lands, CC BY 4.0), reduced by the Vault to counts: no game, deck, player or time of a game is kept, and
     the table has no user. Rates, intervals and sample warnings are worked out when read (``vault.limited_stats``), never stored."""
@@ -785,12 +785,14 @@ class LimitedGameStat(Base):
     format: Mapped[str] = mapped_column(String(20), primary_key=True)  # PremierDraft or TradDraft
     card_name: Mapped[str] = mapped_column(String(200), primary_key=True)  # as 17Lands names the card
     oracle_id: Mapped[str | None] = mapped_column(String(36), index=True)  # the catalog's card, matched by name; null when none matches
-    games_played: Mapped[int] = mapped_column(Integer, default=0)  # copies in the main deck, summed over games (#GP)
+    games_played: Mapped[int] = mapped_column(Integer, default=0)  # games with the card in the main deck (#GP)
     wins_played: Mapped[int] = mapped_column(Integer, default=0)
-    opening: Mapped[int] = mapped_column(Integer, default=0)  # copies in the kept opening hand (#OH)
+    opening: Mapped[int] = mapped_column(Integer, default=0)  # games with the card in the kept opening hand (#OH)
     wins_opening: Mapped[int] = mapped_column(Integer, default=0)
-    drawn: Mapped[int] = mapped_column(Integer, default=0)  # copies drawn later, not tutored (#GD)
+    drawn: Mapped[int] = mapped_column(Integer, default=0)  # games with the card drawn later, not tutored (#GD)
     wins_drawn: Mapped[int] = mapped_column(Integer, default=0)
+    in_hand: Mapped[int] = mapped_column(Integer, default=0)  # games with the card in hand at least once, opener or draw (#GIH): a union
+    wins_in_hand: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class LimitedPickStat(Base):

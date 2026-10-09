@@ -40,7 +40,8 @@ def put_game(app, name, n_hand, wins_hand, *, opening=None, set_code="TST", fmt=
     won_open = wins_hand // 2
     with app.state.db.sessions() as db:
         db.add(LimitedGameStat(set_code=set_code, format=fmt, card_name=name, oracle_id=None, games_played=played or n_hand, wins_played=wins_hand,
-                               opening=opening, wins_opening=won_open, drawn=n_hand - opening, wins_drawn=wins_hand - won_open))
+                               opening=opening, wins_opening=won_open, drawn=n_hand - opening, wins_drawn=wins_hand - won_open,
+                               in_hand=n_hand, wins_in_hand=wins_hand))
         db.commit()
 
 
@@ -102,7 +103,7 @@ def test_the_data_is_global_every_signed_in_person_gets_the_same_answer(sized, a
 def test_the_tables_hold_counts_only(app):
     """No row, draft id, game time, rank or deck is stored (design section 3): the columns are the aggregates and nothing else."""
     columns = {t.name: {c.name for c in t.columns} for t in (LimitedGameStat.__table__, LimitedPickStat.__table__, LimitedSource.__table__)}
-    assert columns["limited_game_stats"] == {"set_code", "format", "card_name", "oracle_id", "games_played", "wins_played", "opening",
+    assert columns["limited_game_stats"] == {"set_code", "format", "card_name", "oracle_id", "games_played", "wins_played", "opening", "in_hand", "wins_in_hand",
                                              "wins_opening", "drawn", "wins_drawn"}
     assert columns["limited_pick_stats"] == {"set_code", "format", "card_name", "oracle_id", "seen", "last_seen_sum", "picked", "picked_sum"}
     assert not any(c.endswith("user_id") or "draft_id" in c or "deck" in c or c == "rank" for cols in columns.values() for c in cols)
@@ -198,8 +199,10 @@ def test_cards_are_found_by_name_or_by_either_face_and_the_rest_are_listed(signe
     assert [c["name"] for c in body["cards"]] == ["Test Bear", "Front Face // Back Face"]  # asked order; a repeat or both faces once
     assert body["not_found"] == ["Nonexistent Card"] and body["sort"] is None and body["left_out"]["count"] == 0
     bear = body["cards"][0]
-    assert bear["games_in_hand"] == 7 and bear["win_rate_in_hand"] == pytest.approx(5 / 7, abs=1e-4)  # 4 opening + 3 drawn; 4 + 1 won
-    assert bear["sample"]["level"] == "too_few" and bear["sample"]["warning"].startswith("Only 7 games in hand for Test Bear in TST PremierDraft")
+    # 5 games with a copy in hand (3 with one in the opener, 3 with one drawn, one game with both counted once), 3 of them won
+    assert bear["games_in_hand"] == 5 and bear["win_rate_in_hand"] == pytest.approx(3 / 5, abs=1e-4)
+    assert bear["games_in_opening_hand"] == 3 and bear["games_drawn"] == 3 and bear["games_played"] == 6
+    assert bear["sample"]["level"] == "too_few" and bear["sample"]["warning"].startswith("Only 5 games in hand for Test Bear in TST PremierDraft")
 
 
 def test_the_sorted_list_is_paged_with_a_cursor_and_links(sized):
@@ -306,3 +309,54 @@ def test_whoami_lists_the_loaded_sets_with_the_17lands_notice(signed_in, app, bo
     assert block["licence"]["name"] == "CC BY 4.0" and block["notice"].startswith("Data from 17Lands") and block["changes"]
     assert "Not produced or endorsed by 17Lands." in block["notice"]
     json.dumps(data)
+
+
+# -- review of #418: the cursor, the descriptions ----------------------------------------------------------------------------------
+
+def test_a_refresh_between_two_pages_neither_skips_nor_repeats_a_card(sized, app):
+    """The cursor is a keyset (the metric's value and the card's name): after page one (Higher Ok, Ok Card) the weekly refresh adds a card
+    that ranks first and changes a card that is still to come. An item offset would now repeat Ok Card on page two."""
+    first = get(sized, limit=2).json()
+    assert [c["name"] for c in first["cards"]] == ["Higher Ok", "Ok Card"]
+    put_game(app, "Fresh Top", 3000, 2400)  # 80%: ranks before everything on page one
+    with app.state.db.sessions() as db:
+        row = db.get(LimitedGameStat, ("TST", "PremierDraft", "Almost Ok"))
+        row.opening, row.drawn, row.in_hand, row.wins_in_hand = 500, 499, 999, 540  # still last, changed
+        db.commit()
+    second = sized.get(first["_links"]["next"]["href"]).json()
+    assert [c["name"] for c in second["cards"]] == ["Floor Card", "Almost Ok"]  # no repeat of page one, none of the rest skipped
+    assert second["cards"][1]["games_in_hand"] == 999 and second["next_cursor"] is None
+
+
+def test_the_cursor_is_the_metric_and_the_name_not_an_offset(sized):
+    from vault.api.hal import decode_cursor
+    cursor = get(sized, limit=1).json()["next_cursor"]
+    assert decode_cursor(cursor) == [-0.65, "Higher Ok"]
+    by_games = get(sized, limit=1, sort="games_in_hand").json()["next_cursor"]
+    assert decode_cursor(by_games) == [-4000, "Higher Ok"]
+
+
+def test_the_description_and_the_sort_input_say_which_sample_each_sort_uses(sized, bot):
+    read = make_token(sized)
+    tool = {t["name"]: t for t in rpc(bot, "tools/list", token=read).json()["result"]["tools"]}["get_limited_card_stats"]
+    text = " ".join(tool["description"].split())
+    assert "games in hand for win_rate_in_hand and games_in_hand, packs seen for avg_last_seen_pick, picks for avg_taken_at" in text
+    assert "a card under 200 games in hand is left out of a sorted list" not in text  # the old, wrong sentence
+    sort = " ".join(tool["inputSchema"]["properties"]["sort"]["description"].split())
+    assert "only cards with 200 or more games in hand" in sort and "seen in 200 or more packs" in sort and "picked 200 or more times" in sort
+    from pathlib import Path
+    api = " ".join((Path(__file__).parent.parent / "docs" / "api.md").read_text(encoding="utf-8").split())
+    assert "packs seen (`times_seen`) for `avg_last_seen_pick`, picks (`times_picked`) for `avg_taken_at`" in api
+
+
+def test_games_in_hand_is_the_union_stored_not_opening_plus_drawn(signed_in, app):
+    """A card in hand in 6 games (2 opened, 3 drawn, 1 both): in_hand is 6 where opening + drawn would say 7."""
+    put_source(app, "game")
+    put_game(app, "Union Card", 6, 4, opening=3)
+    with app.state.db.sessions() as db:
+        row = db.get(LimitedGameStat, ("TST", "PremierDraft", "Union Card"))
+        row.opening, row.drawn = 3, 4  # 7 together
+        db.commit()
+    card = get(signed_in, cards="Union Card").json()["cards"][0]
+    assert card["games_in_hand"] == 6 and card["games_in_opening_hand"] == 3 and card["games_drawn"] == 4
+    assert card["win_rate_in_hand"] == pytest.approx(4 / 6, abs=1e-4)

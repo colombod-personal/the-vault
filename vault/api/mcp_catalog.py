@@ -92,7 +92,8 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
         Tool("get_limited_card_stats", "Win rates and pick positions for the cards of one Limited set, from 17Lands' public data (Magic Arena, "
              "CC BY 4.0): games in hand, win rate in hand with its 95% range and the set's baseline, games drawn, where the card is last seen and "
              "taken, each with its sample size and the exact warning when the sample is small. Cards are given by name (`cards`, either face of "
-             "a double-faced card), or the best sorted by one metric (`sort`; a card under 200 games in hand is left out of a sorted list). "
+             "a double-faced card), or the best sorted by one metric (`sort`); a sorted list leaves out the cards under 200 of the sort's own "
+             "sample: games in hand for win_rate_in_hand and games_in_hand, packs seen for avg_last_seen_pick, picks for avg_taken_at. "
              "Computed by the Vault from 17Lands' per-card counts, so figures can differ from 17lands.com; `attribution` is the credit to repeat. "
              "`not_found` lists names not in the data; a set that is not loaded answers with what is.",
              {"set": {"type": "string", "minLength": 2, "maxLength": 10, "pattern": "^[A-Za-z0-9]+$",
@@ -102,8 +103,9 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
               "cards": {"type": "array", "maxItems": 40, "items": {"type": "string", "minLength": 1, "maxLength": 300},
                         "description": "Card names to look up; leave out to list the best by `sort`"},
               "sort": {"type": "string", "enum": ["win_rate_in_hand", "games_in_hand", "avg_last_seen_pick", "avg_taken_at"],
-                       "default": "win_rate_in_hand", "description": "Used when `cards` is empty: win rate in hand and games in hand are "
-                       "highest first; the two position averages are earliest first"},
+                       "default": "win_rate_in_hand", "description": "Used when `cards` is empty. win_rate_in_hand and games_in_hand: highest first, only cards with 200 or "
+                       "more games in hand. avg_last_seen_pick: earliest first, only cards seen in 200 or more packs. avg_taken_at: earliest "
+                       "first, only cards picked 200 or more times"},
               "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20},
               "cursor": PAGING["cursor"]}, ["set"],
              path=lambda a: f"{V1}/catalog/limited/{quote(a['set'], safe='')}", query=("format", "cards", "sort", "limit", "cursor"),

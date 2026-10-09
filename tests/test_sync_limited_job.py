@@ -134,7 +134,8 @@ def test_a_load_keeps_the_counts_the_catalog_match_and_the_version_of_each_file(
     games = {g.card_name: g for g in rows(env, LimitedGameStat)}
     assert set(games) == {"Test Bear", "Test Bolt", "Test Elf", "Front Face // Back Face"}
     bear = games["Test Bear"]
-    assert (bear.games_played, bear.wins_played, bear.opening, bear.wins_opening, bear.drawn, bear.wins_drawn) == (12, 8, 4, 4, 3, 1)
+    assert (bear.games_played, bear.wins_played, bear.opening, bear.wins_opening, bear.drawn, bear.wins_drawn) == (6, 4, 3, 3, 3, 1)
+    assert (bear.in_hand, bear.wins_in_hand) == (5, 3)  # not opening + drawn (6): game 1 had a copy in each and counts once
     assert bear.oracle_id == BEAR and games["Front Face // Back Face"].oracle_id == DFC  # matched by name
     assert games["Test Bolt"].oracle_id is None  # not in the catalog: stays unmatched, still kept
     picks = {p.card_name: p for p in rows(env, LimitedPickStat)}
@@ -204,7 +205,7 @@ def test_a_new_version_of_a_file_replaces_its_rows_and_only_its_rows(env, univer
     report = run(universe)
     assert states(report) == {("PremierDraft", "game"): "loaded", ("PremierDraft", "draft"): "skipped"}
     bear = next(g for g in rows(env, LimitedGameStat) if g.card_name == "Test Bear")
-    assert (bear.games_played, bear.wins_played, bear.wins_opening, bear.wins_drawn) == (12, 6, 3, 0)  # game 1: 2 copies, 1 opening, 1 drawn
+    assert (bear.games_played, bear.wins_played, bear.wins_opening, bear.wins_drawn, bear.wins_in_hand) == (6, 3, 2, 0, 2)  # game 1 is a loss
     assert len(rows(env, LimitedPickStat)) == 4  # the draft rows were not touched
 
 
@@ -402,7 +403,7 @@ def test_a_connection_that_breaks_while_a_file_streams_is_read_again_from_the_st
     report = sync_limited.main(ARGS, transport=breaking_transport(universe, 2))
     assert set(states(report).values()) == {"loaded"} and napping == [2, 8]
     games = {g.card_name: g for g in rows(env, LimitedGameStat)}
-    assert games["Test Bear"].games_played == 12  # counted once, not once per attempt
+    assert games["Test Bear"].games_played == 6  # counted once, not once per attempt
     db = database(env)
     with db.sessions() as s:
         assert s.get(LimitedSource, ("TST", "PremierDraft", "game")).records == 6
@@ -415,3 +416,51 @@ def test_a_connection_that_keeps_breaking_fails_that_file_and_nothing_is_written
         sync_limited.main(ARGS, transport=breaking_transport(universe, 10))
     assert napping == [2, 8, 30] and "ReadError" in str(error.value) and "after 3 retries" in str(error.value)
     assert rows(env, LimitedGameStat) == [] and len(rows(env, LimitedPickStat)) == 4  # the draft file was still read
+
+
+# -- the run's byte cap counts every byte that was delivered (review of #418) ----------------------------------------------------
+
+def sized_transport(universe, fn):
+    """The twin, with ``fn(request, response)`` free to change the answer of a GET of a game file."""
+    def handle(request):
+        response = universe.handle(request)
+        if request.method == "GET" and "game_data" in request.url.path and response.status_code == 200:
+            return fn(response)
+        return response
+
+    return httpx.MockTransport(handle)
+
+
+def test_bytes_of_a_broken_and_read_again_stream_count_against_the_run_cap(env, universe, small_files, napping, monkeypatch):
+    """Cap = draft + game + 1 byte is enough for a clean run. Two reads of the game file break half way and are read again: the bytes
+    they delivered are spent, so the third read stops at the cap and the file waits for the next run, nothing written for it."""
+    publish(universe)
+    files = universe.seventeenlands.files
+    draft, game = (len(files[universe.seventeenlands.path(k, "TST", "PremierDraft")]["body"]) for k in ("draft", "game"))
+    monkeypatch.setattr(sync_limited, "MAX_RUN_BYTES", draft + game + 1)
+    report = sync_limited.main(ARGS, transport=breaking_transport(universe, 2))
+    assert states(report) == {("PremierDraft", "draft"): "loaded", ("PremierDraft", "game"): "deferred"}
+    assert rows(env, LimitedGameStat) == [] and len(rows(env, LimitedPickStat)) == 4
+    note = next(f["note"] for f in report["files"] if f["kind"] == "game")
+    assert "cap was reached while reading" in note
+
+
+@pytest.mark.parametrize("how", ["header", "no header"])
+def test_a_get_larger_than_the_head_advertised_is_refused_and_a_read_stops_at_the_advertised_size(env, universe, small_files, how):
+    """The object was replaced between HEAD and GET: a bigger Content-Length is refused before a byte is read; with no header the read
+    stops at the first byte past the HEAD's size (here HEAD says 20 bytes less than the body has)."""
+    publish(universe)
+    path = universe.seventeenlands.path("game", "TST", "PremierDraft")
+    universe.seventeenlands.files[path]["length"] = len(universe.seventeenlands.files[path]["body"]) - 20
+
+    def change(response):
+        headers = {k: v for k, v in response.headers.items() if k != "content-length"}
+        if how == "header":
+            headers["content-length"] = str(len(response.content))
+        return httpx.Response(200, headers=headers, content=response.content)
+
+    with pytest.raises(SystemExit) as error:
+        sync_limited.main(ARGS, transport=sized_transport(universe, change))
+    message = str(error.value)
+    assert ("larger than the" in message if how == "header" else "more than the") and "HEAD advertised" in message
+    assert rows(env, LimitedGameStat) == [] and len(rows(env, LimitedPickStat)) == 4

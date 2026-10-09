@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from . import limited_stats as ls
 from . import provenance as prov
-from .api.hal import decode_cursor, encode_cursor
+from .api.hal import paginate
 from .catalog_queries import card_priority
 from .catalog_sync import record_source
 from .models import LimitedGameStat, LimitedPickStat, LimitedSource, OracleCard
@@ -131,8 +131,8 @@ def _shown(value: float | None, n: int) -> float | None:
 
 
 def card_record(name: str, g: LimitedGameStat | None, p: LimitedPickStat | None, set_code: str, fmt: str, baseline: float | None) -> dict:
-    gih = (g.opening + g.drawn) if g else 0
-    wih = (g.wins_opening + g.wins_drawn) if g else 0
+    gih = g.in_hand if g else 0  # games with a copy in hand at least once: not opening + drawn, which counts a game with both twice
+    wih = g.wins_in_hand if g else 0
     rate = _rate(wih, gih)
     low, high = ls.wilson(wih, gih) if gih else (None, None)
     seen, picked = (p.seen, p.picked) if p else (0, 0)
@@ -199,17 +199,11 @@ def card_stats(db: Session, set_code: str, fmt: str, *, cards: list[str] | None 
         descending, count_key, what = SORTS[sort]
         ranked = [r for r in records.values() if (r[count_key] or 0) >= ls.SHOW_FLOOR and r[sort] is not None]
         skipped = len(records) - len(ranked)  # below the floor for this metric: never in a sorted list
-        ranked.sort(key=lambda r: ((-r[sort] if descending else r[sort]), r["name"]))
         total = len(ranked)
-        start = 0
-        if cursor:
-            after = decode_cursor(cursor)
-            if not (isinstance(after, list) and len(after) == 1 and isinstance(after[0], int) and after[0] >= 0):
-                raise HTTPException(400, "Invalid cursor")
-            start = after[0]
-        page = ranked[start:start + limit]
-        if start + limit < len(ranked):
-            next_cursor = encode_cursor([start + limit])
+        # a keyset cursor (the metric's value and the card's name, as every other list of the API): a weekly refresh between two
+        # page requests cannot make a page skip or repeat a card, which an item offset would
+        page, next_cursor = paginate(ranked, key=lambda r: ((-r[sort] if descending else r[sort]),), ident=lambda r: r["name"],
+                                     cursor=cursor, limit=limit)
         if skipped:
             left_out = {"count": skipped, "reason": ls.WARN_LEFT_OUT.format(k=skipped, floor=ls.SHOW_FLOOR, what=what)}
 

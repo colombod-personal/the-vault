@@ -60,6 +60,36 @@ class FetchError(Exception):
     """A request that failed after its retries, or an answer that cannot be used."""
 
 
+class CapReached(FetchError):
+    """The run's byte budget is used up: the file waits for the next run (it is not a failure)."""
+
+
+class Budget:
+    """The bytes this run may still download (MAX_RUN_BYTES in all). Every byte a stream delivers is counted as it arrives, whether the
+    read ends well, breaks, or is read again, so a reset connection or a file that grew after its HEAD cannot go over the cap."""
+
+    def __init__(self, cap: int):
+        self.cap, self.used = cap, 0
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.cap - self.used)
+
+
+def _metered(chunks, budget: Budget, limit: int, what: str):
+    """The chunks of one stream, counted against the run's budget and against ``limit`` (the size HEAD advertised): reading stops at
+    the first byte over either."""
+    seen = 0
+    for chunk in chunks:
+        seen += len(chunk)
+        budget.used += len(chunk)
+        if seen > limit:
+            raise FetchError(f"{what}: more than the {limit} bytes HEAD advertised; the file changed or the answer is not the file")
+        if budget.used > budget.cap:
+            raise CapReached(f"{what}: the run's {budget.cap}-byte cap was reached while reading")
+        yield chunk
+
+
 def _retrying(send, what: str) -> httpx.Response:
     """Call ``send()`` until it answers with something other than 429 or 5xx; at most ``len(RETRY_WAITS)`` retries."""
     for attempt in range(len(RETRY_WAITS) + 1):
@@ -160,13 +190,13 @@ def plan(client: httpx.Client, db, sets: list[str], formats: list[str]) -> list[
     return sorted(items, key=lambda i: (i.get("length") or 0, i["set"], i["format"], i["kind"]))
 
 
-def read_file(client: httpx.Client, item: dict) -> tuple[limited_stats.FileResult, dict]:
+def read_file(client: httpx.Client, item: dict, budget: Budget) -> tuple[limited_stats.FileResult, dict]:
     """GET one file and reduce it while it streams. Returns the counts and the headers of the answer actually read. A connection
     that breaks while the file streams is a connection error like any other: the file is read again from its start (the counters
     are new each time, so nothing is counted twice), after the same waits; a corrupt or truncated file is not retried."""
     for attempt in range(len(RETRY_WAITS) + 1):
         try:
-            return _read_once(client, item)
+            return _read_once(client, item, budget)
         except httpx.TransportError as exc:
             if attempt == len(RETRY_WAITS):
                 raise FetchError(f"GET {item['url']}: {type(exc).__name__}: {exc} after {len(RETRY_WAITS)} retries") from exc
@@ -174,15 +204,21 @@ def read_file(client: httpx.Client, item: dict) -> tuple[limited_stats.FileResul
     raise AssertionError("unreachable")
 
 
-def _read_once(client: httpx.Client, item: dict) -> tuple[limited_stats.FileResult, dict]:
+def _read_once(client: httpx.Client, item: dict, budget: Budget) -> tuple[limited_stats.FileResult, dict]:
     request = client.build_request("GET", item["url"], headers={"Accept-Encoding": "identity"})
     response = _retrying(lambda: client.send(request, stream=True), f"GET {item['url']}")
     try:
         if response.status_code != 200:
             raise FetchError(f"GET answered {response.status_code}")
+        try:
+            advertised = int(response.headers["content-length"])
+        except (KeyError, ValueError):
+            advertised = None
+        if advertised is not None and advertised > item["length"]:
+            raise FetchError(f"GET {item['url']}: Content-Length {advertised} is larger than the {item['length']} bytes HEAD advertised")
         # a real answer streams its raw (still gzipped) bytes; a twin's answer is already in memory
-        chunks = response.iter_bytes(1 << 20) if response.is_stream_consumed else response.iter_raw(1 << 20)
-        result = reduce(chunks, item["kind"], item["set"])
+        chunks = response.iter_bytes() if response.is_stream_consumed else response.iter_raw()  # no re-chunking: every delivered byte is metered
+        result = reduce(_metered(chunks, budget, item["length"], f"GET {item['url']}"), item["kind"], item["set"])
         return result, {"etag": response.headers.get("etag"), "modified": _modified(response),
                         "length": int(response.headers["content-length"]) if "content-length" in response.headers else None}
     finally:
@@ -191,7 +227,7 @@ def _read_once(client: httpx.Client, item: dict) -> tuple[limited_stats.FileResu
 
 def run(client: httpx.Client, db, sets: list[str], formats: list[str], *, force: bool = False) -> list[dict]:
     items = plan(client, db, sets, formats)
-    downloaded = 0
+    budget = Budget(MAX_RUN_BYTES)
     index = None
     for item in items:
         if item["status"] != "found":
@@ -205,16 +241,18 @@ def run(client: httpx.Client, db, sets: list[str], formats: list[str], *, force:
         if item["length"] is None or item["length"] > MAX_FILE_BYTES:
             item |= {"status": "failed", "reason": f"refused: Content-Length {item['length']} is not a size seen before (limit {MAX_FILE_BYTES} bytes)"}
             continue
-        if downloaded + item["length"] > MAX_RUN_BYTES:
-            item |= {"status": "deferred", "note": f"{MAX_RUN_BYTES} bytes were read this run; the next run takes {label}"}
+        if item["length"] > budget.remaining:
+            item |= {"status": "deferred", "note": f"{budget.used} of {MAX_RUN_BYTES} bytes were read this run; the next run takes {label}"}
             continue
         print(f"reading {label} ({item['length']} bytes)", flush=True)
         try:
-            result, got = read_file(client, item)
-            downloaded += item["length"]
+            result, got = read_file(client, item, budget)
             always, unless = limited_stats.sanity_problems(result, stored)
             if always or (unless and not force):
                 raise limited_stats.FileError("refused: " + "; ".join(always + ([] if force else unless)) + ("" if always else " (--force overrides)"))
+        except CapReached as exc:
+            item |= {"status": "deferred", "note": f"{exc}; the next run takes {label}"}
+            continue
         except (limited_stats.FileError, FetchError) as exc:
             item |= {"status": "failed", "reason": str(exc)}
             continue

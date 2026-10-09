@@ -109,11 +109,21 @@ def test_the_attribution_names_the_creator_the_licence_the_changes_and_the_dates
 def test_the_game_counter_counts_copies_by_deck_opening_hand_and_draw_and_their_wins():
     result = count_games()
     assert (result.records, result.skipped, result.wins) == (6, 1, 4)  # 7 games; game 5 is inconsistent; games 1, 3, 4, 7 are won
-    # [games_played, wins_played, opening, wins_opening, drawn, wins_drawn]
-    assert result.cards["Test Bear"] == [12, 8, 4, 4, 3, 1]
-    assert result.cards["Test Bolt"] == [5, 3, 1, 0, 2, 2]
-    assert result.cards["Test Elf"] == [5, 3, 1, 1, 1, 1]
-    assert result.cards["Front Face // Back Face"] == [5, 3, 1, 1, 2, 1]
+    # GAMES, not copies: [games_played, wins_played, opening, wins_opening, drawn, wins_drawn, in_hand, wins_in_hand]
+    assert result.cards["Test Bear"] == [6, 4, 3, 3, 3, 1, 5, 3]
+    assert result.cards["Test Bolt"] == [5, 3, 1, 0, 2, 2, 3, 2]
+    assert result.cards["Test Elf"] == [5, 3, 1, 1, 1, 1, 2, 2]
+    assert result.cards["Front Face // Back Face"] == [5, 3, 1, 1, 2, 1, 3, 2]
+
+
+def test_a_game_with_a_copy_in_the_opener_and_another_drawn_counts_once_in_hand():
+    """17Lands' GIH is the games in which the card was in hand at least once. Game 1 has one Test Bear in the opening hand and one drawn
+    later, game 3 has both copies in the opener: opening + drawn would count game 1 twice (7 for the card, not 5), and copies would
+    count game 3 twice."""
+    bear = count_games().cards["Test Bear"]
+    opening, drawn, in_hand = bear[2], bear[4], bear[6]
+    assert (opening, drawn) == (3, 3) and in_hand == 5 and in_hand < opening + drawn
+    assert bear[7] == 3  # won: games 1, 3 and 7; game 1 once
 
 
 def test_a_game_with_more_copies_in_hand_than_in_the_deck_and_sideboard_is_left_out_of_every_count():
@@ -124,7 +134,7 @@ def test_a_game_with_more_copies_in_hand_than_in_the_deck_and_sideboard_is_left_
 
 
 def test_tutored_copies_are_not_counted_as_drawn():
-    """Game 6 has one Test Bear drawn and one tutored: only the drawn one counts (drawn total 3 = games 1, 2 and 6)."""
+    """Game 6 has one Test Bear drawn and one tutored: the game counts once as drawn (games 1, 2 and 6)."""
     assert count_games().cards["Test Bear"][4] == 3
 
 
@@ -226,14 +236,14 @@ def test_a_small_file_fails_the_sanity_checks_with_the_real_thresholds():
 
 
 def test_an_implausible_baseline_win_rate_is_refused():
-    result = ls.FileResult("game", {f"c{i}": [1, 1, 1, 1, 1, 1] for i in range(200)}, records=5000, wins=4500)
+    result = ls.FileResult("game", {f"c{i}": [1, 1, 1, 1, 1, 1, 1, 1] for i in range(200)}, records=5000, wins=4500)
     always, _ = ls.sanity_problems(result)
     assert any("outside 40% to 70%" in p for p in always)
     assert ls.sanity_problems(ls.FileResult("game", result.cards, records=5000, wins=2800))[0] == []
 
 
 def test_a_file_that_would_drop_the_stored_cards_or_games_is_flagged_unless_forced():
-    cards = {f"c{i}": [1, 0, 1, 0, 1, 0] for i in range(150)}
+    cards = {f"c{i}": [1, 0, 1, 0, 1, 0, 1, 0] for i in range(150)}
     result = ls.FileResult("game", cards, records=2000, wins=1100)
     always, unless = ls.sanity_problems(result, {"cards": 200, "records": 5000})
     assert always == [] and len(unless) == 2  # 150 of 200 cards is -25%, 2,000 of 5,000 games is -60%
