@@ -264,8 +264,9 @@ PROMPTS = [
      "text": "Answer this Magic: The Gathering rules question as a careful judge would: {question}\n\n" + GROUNDING +
              "\nSteps: identify the cards and the situation and look each card up with get_card_oracle and get_rulings; find the relevant rules "
              "with find_rules_term for a named game term, search_rules for the mechanic in plain words, or rules_outline to browse, and open each "
-             "with get_rule, reading its children, siblings, parent and references; verify every quote with verify_citation; then answer step by "
-             "step, citing rule numbers and the rules edition. If the sources do not settle it, say so."},
+             "with get_rule, reading its children, siblings, parent and references (rules_changes for a recent update or a rule you only know from an "
+             "older source); verify every quote with verify_citation; then answer step by "
+             "step, citing every rule number with the rules edition (version). If the sources do not settle it, say so."},
     {"name": "explain_interaction", "title": "Explain a card interaction",
      "description": "Walk through how two or more cards interact, step by step, with the rules that apply.",
      "arguments": [_arg("cards", "The cards, comma separated"), _arg("scenario", "What is on the battlefield or stack", False)],
@@ -304,7 +305,7 @@ PROMPTS = [
              "find_combos, check_decklist and get_deck_overlap. Seat only experts for this format (for commander: the Commander expert and a "
              "casual table voice), plus a rules judge and a devil's advocate, and the synergy or collection analyst if useful. Give each at most "
              "three points with evidence (read card text with get_card_oracle), then let the devil's advocate challenge them with evidence; a rules disagreement is settled "
-             "only by a quote checked with verify_citation. Answer with the plan first (checked with "
+             "only by a quote checked with verify_citation (and rules_changes when a rule a member relies on may have changed lately). Answer with the plan first (checked with "
              "validate_deck_changes, shown only if valid is true), then Agreed, Disputed and Not checked in one line each, and offer the full "
              "discussion on request. Label metagame knowledge as opinion."},
     {"name": "evaluate_deck", "title": "Check a deck from a link",
