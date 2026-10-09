@@ -1005,8 +1005,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         """The deck as the Vault saves it: name, author, format, commander(s), counts and the list with its sections, and
         Archidekt's own bracket tag. Archidekt's raw answer is 300 KB for 100 cards, mostly other shops' prices per card
         (Card Kingdom, Cardmarket, ...), which the Vault does not pass on: it quotes only Scryfall's dated prices (#219)."""
-        per_user(request, "archidekt", user.id, settings.archidekt_limit, db)  # #353
-        raw = archidekt_cache.read(db, deck_id, fetch_archidekt, refresh=refresh)
+        raw = archidekt_cache.read(db, deck_id, fetch_archidekt, refresh=refresh, budget=archidekt_budget(request, user, db))
         parsed = deck_import.to_decklist(raw)
         known = deck_overview.identities(db, deck_overview.read(parsed["text"])["commanders"])
         url = deck_import.canonical_url(deck_id)
@@ -1024,6 +1023,10 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     archidekt_turns = Throttle(settings.archidekt_interval)  # one for the whole process: a client is built per read, so its own
     # interval never applied, and a walk over deck ids could have called Archidekt faster than docs/compliance.md promises (#353)
+
+    def archidekt_budget(request: Request, user: User, db: Session):
+        """Each call to Archidekt (not a cached read) counts against the person's allowance a minute (#353)."""
+        return lambda: per_user(request, "archidekt", user.id, settings.archidekt_limit, db)
 
     def fetch_archidekt(deck: int) -> dict:
         """One read of a public deck. Bounded, because the function has a time limit and a thread and a person's request are
@@ -1052,11 +1055,10 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             raise HTTPException(400, "Only Archidekt deck links can be fetched (archidekt.com/decks/<number>). For another site, "
                                      "export the list as text and save it with save_deck.")
         deck_id = _deck_number(found)
-        per_user(request, "archidekt", user.id, settings.archidekt_limit, db)  # #353
 
         def run():
-            parsed = deck_import.to_decklist(archidekt_cache.read(db, deck_id, fetch_archidekt,
-                                                                  refresh=body.update and not body.confirm))
+            parsed = deck_import.to_decklist(archidekt_cache.read(db, deck_id, fetch_archidekt, refresh=body.update and not body.confirm,
+                                                                  budget=archidekt_budget(request, user, db)))
             if not parsed["text"] or not _parse(parsed["text"]).lines:
                 raise HTTPException(400, "That Archidekt deck has no cards")
             url = deck_import.canonical_url(deck_id)
@@ -1110,8 +1112,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             raise HTTPException(400, "Only Archidekt links can be read by the Vault. For Moxfield and other sites (their terms do "
                                      "not allow automated reading), export the current list there and paste it to update the deck.")
         # the preview asks Archidekt again (unless the copy is under a minute old); the confirm uses that same copy
-        per_user(request, "archidekt", user.id, settings.archidekt_limit, db)  # #353
-        parsed = deck_import.to_decklist(archidekt_cache.read(db, _deck_number(found), fetch_archidekt, refresh=not body.confirm))
+        parsed = deck_import.to_decklist(archidekt_cache.read(db, _deck_number(found), fetch_archidekt, refresh=not body.confirm,
+                                                              budget=archidekt_budget(request, user, db)))
         if not parsed["text"] or not _parse(parsed["text"]).lines:
             raise HTTPException(400, "The deck on Archidekt has no cards now: nothing was changed")
         if not body.confirm:

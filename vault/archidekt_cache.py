@@ -14,6 +14,7 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
+from fastapi import HTTPException
 from sqlalchemy import delete
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
@@ -73,13 +74,17 @@ def _fresh(db: Session, deck_id: int, refresh: bool, now: datetime) -> Archidekt
 
 
 def read(db: Session, deck_id: int, fetch: Callable[[int], dict], *, refresh: bool = False,
-         now: datetime | None = None) -> dict:
+         now: datetime | None = None, budget: Callable[[], None] | None = None) -> dict:
     """The deck's JSON plus ``vault_cache``: where it came from and how old it is.
 
     The call to Archidekt can take seconds, so no database connection is held while it runs (the transaction that read the
     cache is ended first; under parallel use the held connections were what starved the pool, #169). And one instance
     asks Archidekt once for a deck however many agents want it at the same moment: the others wait for that answer and read it
-    from the cache, as a polite client should."""
+    from the cache, as a polite client should.
+
+    ``budget`` is called only when a call to Archidekt is about to be made (a hit costs Archidekt nothing, so it is never
+    limited): it raises an HTTPException (429) past the person's allowance. Then the copy we hold is served, however old, and
+    only a deck we hold no copy of is refused (#353)."""
     now = now or datetime.now(timezone.utc)
     row = _fresh(db, deck_id, refresh, now)
     if row is None:
@@ -88,6 +93,15 @@ def read(db: Session, deck_id: int, fetch: Callable[[int], dict], *, refresh: bo
             row = _fresh(db, deck_id, refresh, now)
             if row is None:
                 db.commit()
+                if budget is not None:
+                    try:
+                        budget()
+                    except HTTPException:
+                        held = db.get(ArchidektDeckCache, deck_id, populate_existing=True)
+                        if held is None:
+                            raise
+                        log.info("archidekt deck cache=hit(over budget) %s", _counts(RATE.note("hit")))
+                        return _answer(held.data, held.fetched_at, now, from_cache=True)
                 log.info("archidekt deck cache=miss %s", _counts(RATE.note("miss")))  # one request to archidekt.com
                 data = fetch(deck_id)
                 stamp = now

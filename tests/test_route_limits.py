@@ -65,18 +65,34 @@ def test_a_lookup_with_refresh_is_limited_and_one_without_is_not(make):
     assert client.post(f"{V1}/cards/lookup", json=body).status_code != 429  # the Vault's own copy: free
 
 
-def test_archidekt_reads_import_link_and_refresh_share_a_per_person_limit(make, universe):
+def age_cache(app, seconds=120):
+    from datetime import timedelta
+
+    from sqlalchemy import update
+
+    from vault.models import ArchidektDeckCache
+    with app.state.db.sessions() as db:
+        db.execute(update(ArchidektDeckCache).values(fetched_at=ArchidektDeckCache.fetched_at - timedelta(seconds=seconds)))
+        db.commit()
+
+
+def test_only_calls_to_archidekt_count_and_over_the_limit_a_held_copy_is_served(make, universe):
     ids = deck(universe, 4)
-    client = make(archidekt_limit=3)
-    assert client.get(f"{V1}/archidekt/decks/{ids[0]}").status_code == 200
+    client = make(archidekt_limit=2)
+    assert client.get(f"{V1}/archidekt/decks/{ids[0]}").status_code == 200  # a call to Archidekt (1 of 2)
+    for _ in range(5):  # cached reads cost Archidekt nothing: never limited
+        assert client.get(f"{V1}/archidekt/decks/{ids[0]}").json()["vault_cache"]["from_cache"] is True
     saved = client.post(f"{V1}/decks/import-link", json={"url": f"https://archidekt.com/decks/{ids[1]}"})
-    assert saved.status_code == 201
-    assert client.post(f"{V1}/decks/{saved.json()['deck']['id']}/refresh", json={}).status_code == 200
-    for call in (lambda: client.get(f"{V1}/archidekt/decks/{ids[2]}"),
-                 lambda: client.post(f"{V1}/decks/import-link", json={"url": f"https://archidekt.com/decks/{ids[3]}"}),
-                 lambda: client.post(f"{V1}/decks/{saved.json()['deck']['id']}/refresh", json={})):
+    assert saved.status_code == 201  # the second call to Archidekt (2 of 2)
+    for call in (lambda: client.get(f"{V1}/archidekt/decks/{ids[2]}"),  # a deck we hold no copy of: refused
+                 lambda: client.post(f"{V1}/decks/import-link", json={"url": f"https://archidekt.com/decks/{ids[3]}"})):
         res = call()
         assert res.status_code == 429 and res.headers["retry-after"]
+    age_cache(client.app)  # an older copy of a deck we hold: asked to refresh, over the limit: the copy is served, not a 429
+    again = client.get(f"{V1}/archidekt/decks/{ids[0]}", params={"refresh": "true"})
+    assert again.status_code == 200 and again.json()["vault_cache"]["from_cache"] is True
+    refreshed = client.post(f"{V1}/decks/{saved.json()['deck']['id']}/refresh", json={})
+    assert refreshed.status_code == 200 and refreshed.json()["unchanged"] is True
 
 
 def test_reads_of_different_decks_are_spaced_by_the_shared_interval(make, universe):
