@@ -306,8 +306,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return page_body(request, [_passkey(p) for p in page], nxt, len(rows), limit=limit)
 
     @router.delete("/me/passkeys/{passkey_id}", tags=["account"], summary="Remove a passkey")
-    def delete_passkey(passkey_id: Id, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
-        remove_passkey(db, user.id, passkey_id)
+    def delete_passkey(passkey_id: Id, request: Request, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+        remove_passkey(db, user.id, passkey_id, request)
         db.commit()
         return {"deleted": True}
 
@@ -334,16 +334,16 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     @router.delete("/me/sign-in-methods/recent", tags=["account"],
                    summary="Remove every sign-in method added in the last 24 hours (never the last way to sign in: "
                            "a method older than 24 hours must remain)")
-    def delete_recent_sign_in_methods(user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
-        removed = remove_recent_methods(db, user.id)
+    def delete_recent_sign_in_methods(request: Request, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+        removed = remove_recent_methods(db, user.id, request)
         db.commit()
         return {"deleted": removed}
 
     @router.delete("/me/identities/{identity_id}", tags=["account"],
                    summary="Unlink a provider (Google, Microsoft, Apple, Facebook) linked in the last 24 hours; "
                            "your last way to sign in can't be removed")
-    def delete_identity(identity_id: Id, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
-        remove_identity(db, user.id, identity_id)
+    def delete_identity(identity_id: Id, request: Request, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+        remove_identity(db, user.id, identity_id, request)
         db.commit()
         return {"deleted": True}
 

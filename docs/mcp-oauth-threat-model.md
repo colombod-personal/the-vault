@@ -484,12 +484,17 @@ four criteria; only the third is built, because the others wait for a decision f
 
 ### Built: "Sign out everywhere" ends the other sessions, then shows and removes sign-in methods (criterion 3)
 
-Two read-only agent reviews of this change (2026-10-09, before any merge; no human review yet) found the problems recorded
+Three read-only agent reviews of this change (2026-10-09, before any merge; no human review yet) found the problems recorded
 below as "found by review"; each is fixed and tested. The first version listed only what was added in the last 24 hours and signed out last.
 
 - **What the person sees, in this order on purpose.** Account, Sign-in methods, "Sign out everywhere" opens a panel.
   *Step 1*, "Sign out the other browsers": `POST /api/auth/sign-out-others` replaces the account's `session_key` and re-issues this
-  browser's cookie with the new one, so a copied cookie is dead from this moment and this browser stays signed in. *Step 2*: the panel
+  browser's cookie with the new one, so a copied cookie is dead from this moment and this browser stays signed in. Because a copied
+  cookie can also mint more than a browser session (sign in with the attacker's own Google and hand over to an app, or create a
+  personal access token or consent to a connected app), step 1 also signs out **every app session** (`api_sessions` with their retired
+  refresh tokens, and unused hand-over codes; the Vault app asks the person to sign in again) and removes the **personal access tokens
+  and connected apps created in the last 24 hours**; older ones are the person's own doing and stay (they are listed under Agents &
+  API and Connected apps). The page says exactly this before the button and counts what went afterwards. *Step 2*: the panel
   lists **all** the sign-in methods with their dates (the ones added in the last 24 hours first, marked "new"), each with Remove where the
   server says it can be removed, and the reason where it cannot. Then "Done", or "Also sign out of this browser".
   *Found by review:* the first version removed methods first and signed out last, so a live holder of the copied cookie could add a way
@@ -502,6 +507,17 @@ below as "found by review"; each is fixed and tested. The first version listed o
   added in the last 24 hours, in one request, after the page's confirmation), `POST /api/auth/sign-out-others` (new) and the existing
   `DELETE /api/v1/me/passkeys/{id}`. The window is the server's constant `RECENT_SIGN_IN_METHOD_HOURS` (`vault/auth.py`); the page only
   renders it. No migration: `identities` and `passkeys` already had `created_at`.
+- **Every removal ends the sessions that could have signed in through the method.** Sessions share the account's key, so a session an
+  attacker started *through* a planted passkey or provider after step 1 would outlive its removal. `remove_passkey`, `remove_identity`
+  and `remove_recent_methods` therefore replace the key again whenever they delete something and re-issue the caller's cookie (the owner
+  stays signed in; their other browsers sign in again). Removing nothing ends nothing. *Found by the second review* (the "Done" of the
+  first version never rotated again). Test: the attacker signs in through the planted passkey, the owner removes it, the attacker's new
+  cookie is 401 (`tests/test_passkeys.py`).
+- **A request already past authentication cannot add a method after the session ended.** `register_verify` re-reads `users.session_key`
+  under the account's `FOR UPDATE` lock and compares it with the cookie's (401 on a mismatch; a bearer-token caller is not checked
+  this way); the provider link does the same under the lock it takes (`find_or_create(..., expect_key=)`, for a new identity and for
+  moving one over; `SessionEnded` sends the person back to `/` with `session_ended`). Tests: the key is replaced between authentication
+  and the write; no passkey or identity is added.
 - **The one rule for every removal: a method older than 24 hours must remain afterwards.** `established_methods` (`vault/auth.py`) counts
   the OTHER providers and passkeys older than the window, and each removal (`remove_identity`, `remove_passkey`,
   `remove_recent_methods`) has it inside its own `DELETE` statement after locking the account row, so two removals at once take turns
@@ -539,6 +555,21 @@ below as "found by review"; each is fixed and tested. The first version listed o
   end a copied native access token, a personal access token or a connected app's grant (they are listed and revoked under the
   Account panel's apps and tokens). A method an attacker added more than 24 hours ago is listed with its date but may not be
   removable yet (the reason is shown). The proposal below is what would stop the adding.
+
+**Residual risks of what is built, found by review and NOT fixed here.** Each one is resolved by the owner's decision on a recent
+sign-in (criteria 1 and 2 below), which is why they are listed and not worked around:
+- *The 24-hour rule delays a takeover, it does not prevent one by a patient attacker.* With a copied session the attacker registers their own
+  passkey at time 0 and keeps hold of the account; if the owner does not open "Sign out everywhere" within a day, that passkey is older than
+  24 hours, counts as an "older method", and the attacker can then remove the owner's passkeys. A recent-sign-in check, which the attacker
+  cannot pass, stops the registration at time 0.
+- *A provider an attacker linked more than 24 hours ago cannot be unlinked by the owner.* The attacker links their own Google with the
+  copied session; the owner notices on day three; the page lists it with its date but unlinking is refused (`provider_too_old`), so the
+  attacker can keep signing in until the account is deleted. With a recent sign-in, unlinking any provider would be allowed for a fresh session.
+- *An account younger than 24 hours removes nothing.* Signed up this morning, the owner and a copied session cannot be told apart (every method
+  is new), so no removal is allowed and an attacker's method added today stays until tomorrow. Sign out the other browsers still ends the copied
+  cookie, but not a method the attacker already planted.
+- *Step 1 ends every app session, but a personal access token or connected app made more than 24 hours ago is
+  not ended,* because it is the person's own doing; if a copied session made one and the owner waited a day, it must be revoked by hand.
 
 ### Proposed, waiting for the owner: a recent sign-in for account-level actions (criteria 1, 2 and 4)
 

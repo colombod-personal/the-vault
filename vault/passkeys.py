@@ -48,7 +48,7 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
 )
 
-from .auth import RECENT_SIGN_IN_METHOD_HOURS, Profile, established_methods
+from .auth import RECENT_SIGN_IN_METHOD_HOURS, Profile, established_methods, rotate_session_key, session_key_matches
 from .config import Settings
 from .models import Identity, Passkey, PasskeyChallenge, User, utcnow
 from .ratelimit import limited
@@ -210,7 +210,10 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         # The account has one WebAuthn user handle. If another device added the first passkey
         # while this request was open, its handle won: a passkey made with ours could never sign
         # in, so start again (the account row is locked so two of these can't both decide).
-        db.execute(select(User.id).where(User.id == user.id).with_for_update())
+        live = db.scalar(select(User.session_key).where(User.id == user.id).with_for_update())
+        if getattr(request.state, "bearer", None) is None and not session_key_matches(live, request.session.get("sk")):
+            # the session was ended (sign out everywhere, a removal) while this request ran: it may not add a method (#347)
+            raise HTTPException(401, "Your session ended. Sign in again.")
         if db.scalar(select(func.count(Passkey.id)).where(Passkey.user_id == user.id)) >= MAX_PASSKEYS:  # under the lock
             raise too_many()
         identity = db.scalar(select(Identity).where(Identity.user_id == user.id, Identity.provider == PROVIDER))
@@ -266,7 +269,7 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
     return router
 
 
-def remove_passkey(db: Session, user_id: int, passkey_id: int) -> None:
+def remove_passkey(db: Session, user_id: int, passkey_id: int, request: Request | None = None) -> None:
     """Delete one of the account's passkeys, unless it is the last way to sign in (409), or unless no OTHER sign-in method
     older than :data:`vault.auth.RECENT_SIGN_IN_METHOD_HOURS` would remain (409; #347).
 
@@ -300,6 +303,7 @@ def remove_passkey(db: Session, user_id: int, passkey_id: int) -> None:
         raise HTTPException(409, f"This account has no other sign-in method older than {RECENT_SIGN_IN_METHOD_HOURS} hours, so "
                                  "this one can't be removed yet: if someone else had added the others, they could not be told "
                                  "from yours. Sign out other browsers, and try again when another method is a day old.")
+    rotate_session_key(db, user_id, request)  # a session that signed in through the removed passkey ends too (#347)
     # No passkeys left: the passkey identity goes too. Checked in the DELETE itself, so a passkey
     # registered at the same moment keeps the identity it needs to sign in.
     db.execute(delete(Identity).where(Identity.user_id == user_id, Identity.provider == PROVIDER,

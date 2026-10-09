@@ -189,6 +189,48 @@ PKCE_CHALLENGE = re.compile(r"[A-Za-z0-9_-]{43,128}")
 CANCELLED = {"user_cancelled_authorize": "access_denied", "user_denied": "access_denied"}
 
 
+class SessionEnded(Exception):
+    """The browser's session was ended (its account's session key was replaced) while a request that was already past
+    authentication was still running: it must not add a sign-in method (#347)."""
+
+
+def session_key_matches(live: str | None, expected) -> bool:
+    return bool(live) and isinstance(expected, str) and hmac.compare_digest(live, expected)
+
+
+def rotate_session_key(db: Session, user_id: int, request: Request | None = None) -> None:
+    """Replace the account's session key and re-issue the caller's cookie with the new one: every other session ends, the
+    caller's stays. Used wherever something that could have been added by a copied session is removed (#347): a session that
+    signed in *through* the removed method shares the account's key, so removing the method alone would not end it. The
+    caller's transaction commits; the account row is already locked by the removal."""
+    user = db.get(User, user_id)
+    user.session_key = new_session_key()
+    if request is not None and "sk" in request.session:
+        request.session["sk"] = user.session_key
+
+
+def end_other_sessions(db: Session, user: User, request: Request) -> dict:
+    """Step 1 of "Sign out everywhere" (#347). Ends every browser session but this one (new session key, this cookie re-issued)
+    and, because a copied cookie can mint more than a browser session, also: every app sign-in made with the Vault app
+    (``api_sessions`` with their retired refresh tokens, and unused hand-over codes), and the personal access tokens and
+    connected apps created in the last :data:`RECENT_SIGN_IN_METHOD_HOURS`. Older tokens and connected apps are the person's
+    own doing and stay; the answer counts what went so the page can say so. The caller commits."""
+    from .models import AccessToken, ApiSession, AuthCode, OAuthGrant
+
+    since = utcnow() - timedelta(hours=RECENT_SIGN_IN_METHOD_HOURS)
+    gone = {
+        "apps_signed_out": db.execute(delete(ApiSession).where(ApiSession.user_id == user.id)).rowcount or 0,
+        "tokens_removed": db.execute(delete(AccessToken).where(
+            AccessToken.user_id == user.id, AccessToken.created_at >= since)).rowcount or 0,
+        "connected_apps_removed": db.execute(delete(OAuthGrant).where(
+            OAuthGrant.user_id == user.id, OAuthGrant.created_at >= since)).rowcount or 0,
+    }
+    db.execute(delete(AuthCode).where(AuthCode.user_id == user.id))
+    user.session_key = new_session_key()
+    request.session["sk"] = user.session_key
+    return gone
+
+
 class IdentityInUse(Exception):
     """Linking a sign-in that already belongs to another Vault account that holds data."""
 
@@ -223,7 +265,7 @@ def account_is_empty(db: Session, user_id: int) -> bool:
     return not any(db.scalar(q.limit(1)) is not None for q in held)
 
 
-def _claim_identity(db: Session, identity: Identity, current: User) -> None:
+def _claim_identity(db: Session, identity: Identity, current: User, expect_key: str | None = None) -> None:
     """Move ``identity`` from the (empty) account that owns it to ``current``, in the caller's
     transaction. Raises IdentityInUse, with nothing changed, when that account holds data.
 
@@ -237,6 +279,9 @@ def _claim_identity(db: Session, identity: Identity, current: User) -> None:
     # Both accounts locked (in id order, so two links the other way round can't deadlock): an
     # import into the other account waits, and then sees it gone or no longer owning this sign-in.
     db.execute(select(User.id).where(User.id.in_([other_id, current.id])).order_by(User.id).with_for_update())
+    if expect_key is not None and not session_key_matches(db.scalar(select(User.session_key).where(User.id == current.id)), expect_key):
+        db.rollback()  # the browser's session was ended while this request ran: it may not take a sign-in method (#347)
+        raise SessionEnded()
     identity_id = identity.id
     db.expire(identity)
     identity = db.get(Identity, identity_id, populate_existing=True)
@@ -327,7 +372,7 @@ def why_not_removable(method: dict, methods: list[dict]) -> str | None:
     return None
 
 
-def remove_recent_methods(db: Session, user_id: int) -> int:
+def remove_recent_methods(db: Session, user_id: int, request: Request | None = None) -> int:
     """Remove every sign-in method added in the last :data:`RECENT_SIGN_IN_METHOD_HOURS` (providers and passkeys), for the
     person who finds a flood of them after "Sign out everywhere" (#347). 409 unless a method older than the window stays, so
     the account is never left with none and a young account (all methods new) removes nothing. Returns how many went. The
@@ -348,11 +393,13 @@ def remove_recent_methods(db: Session, user_id: int) -> int:
     db.execute(delete(Identity).where(Identity.user_id == user_id, Identity.provider == PASSKEY_IDENTITY,
                                       ~exists().where(Passkey.user_id == user_id))
                .execution_options(synchronize_session=False))
+    if gone:
+        rotate_session_key(db, user_id, request)  # a session that signed in through a removed method ends too
     db.flush()
     return gone
 
 
-def remove_identity(db: Session, user_id: int, identity_id: int) -> None:
+def remove_identity(db: Session, user_id: int, identity_id: int, request: Request | None = None) -> None:
     """Unlink one of the account's providers (Google, Microsoft, Apple, Facebook) that was added in the last
     :data:`RECENT_SIGN_IN_METHOD_HOURS` (409 for an older one), unless it is the last way to sign in (409). Another
     person's identity, a passkey's handle and an unknown id are all a 404.
@@ -392,10 +439,11 @@ def remove_identity(db: Session, user_id: int, identity_id: int) -> None:
         raise HTTPException(409, f"This account has no sign-in method older than {RECENT_SIGN_IN_METHOD_HOURS} hours besides "
                                  "the new ones, so nothing can be unlinked yet: it could not be told whose is whose. "
                                  "Sign out everywhere still works.")
+    rotate_session_key(db, user_id, request)  # a session that signed in through the removed provider ends too (#347)
     db.flush()
 
 
-def find_or_create(db: Session, profile: Profile, current: User | None = None) -> User:
+def find_or_create(db: Session, profile: Profile, current: User | None = None, expect_key: str | None = None) -> User:
     """The user owning ``profile``'s identity. A new identity is linked to ``current`` when
     someone is already signed in; otherwise it gets a new account. Never merged by e-mail.
 
@@ -408,26 +456,31 @@ def find_or_create(db: Session, profile: Profile, current: User | None = None) -
     if profile.email and len(profile.email) > 320:  # no real address is this long (users.email is String(320))
         profile = Profile(profile.provider, profile.subject, None, profile.name)
     try:
-        return _find_or_create(db, profile, current)
+        return _find_or_create(db, profile, current, expect_key)
     except IntegrityError:
         db.rollback()
-        return _find_or_create(db, profile, current)
+        return _find_or_create(db, profile, current, expect_key)
 
 
-def _find_or_create(db: Session, profile: Profile, current: User | None) -> User:
+def _find_or_create(db: Session, profile: Profile, current: User | None, expect_key: str | None = None) -> User:
     name = (profile.name or "")[:200] or None  # users.name is String(200), whatever the provider sent
     identity = db.scalar(
         select(Identity).where(Identity.provider == profile.provider, Identity.subject == profile.subject)
     )
     if identity:
         if current is not None and identity.user_id != current.id:
-            _claim_identity(db, identity, current)
+            _claim_identity(db, identity, current, expect_key)
         user = identity.user
         identity.email = profile.email or identity.email
     else:
         user = current or User(email=profile.email, name=name)
         if current is None:
             db.add(user)
+        elif expect_key is not None:  # a new identity joins the account: only while this browser's session is still live
+            live = db.scalar(select(User.session_key).where(User.id == current.id).with_for_update())
+            if not session_key_matches(live, expect_key):
+                db.rollback()
+                raise SessionEnded()
         user.identities.append(Identity(provider=profile.provider, subject=profile.subject, email=profile.email))
     if name and not user.name:
         user.name = name
@@ -444,7 +497,7 @@ def sign_in(db: Session, request: Request, profile: Profile, link: bool = True) 
     Without it (passkey sign-in and sign-up, dev login) the browser simply switches accounts."""
     # A reviewer's demo session never takes a sign-in method of its own (#345): signing in with a provider switches accounts.
     current = session_user(db, request) if link and "rv" not in request.session else None
-    user = find_or_create(db, profile, current)
+    user = find_or_create(db, profile, current, request.session.get("sk") if current is not None else None)
     if not user.session_key:
         user.session_key = new_session_key()
         db.commit()
@@ -552,6 +605,9 @@ def build_router(auth: Auth, get_db) -> APIRouter:
             Identity.provider == profile.provider, Identity.subject == profile.subject)) if current else None
         try:
             user = sign_in(db, request, profile)
+        except SessionEnded:
+            request.session.pop("app_flow", None)
+            return RedirectResponse(f"/?{urlencode({'signin_error': 'session_ended', 'provider': provider})}", status_code=303)
         except IdentityInUse:
             if app_flow:
                 request.session.pop("app_flow", None)
@@ -613,19 +669,19 @@ def build_router(auth: Auth, get_db) -> APIRouter:
 
     @router.post("/sign-out-others")
     def sign_out_others(request: Request, db: Session = Depends(get_db)) -> dict:
-        """End every other browser's session and keep this one (#347): the first step of Account, Sign out everywhere. The
-        account's session key is replaced and this browser's cookie is re-issued with the new one, so a copied cookie is dead
-        from now on and the person can then look at, and remove, the sign-in methods in a session nobody else holds. Apps
-        signed in with a token are ended under /me/sessions. A reviewer's demo session may not (the demo account is shared)."""
+        """End every other session and keep this one (#347): the first step of Account, Sign out everywhere. The account's session
+        key is replaced and this browser's cookie is re-issued, so a copied cookie is dead from now on; every app signed in with
+        the Vault app is signed out (a copied cookie can mint one); personal access tokens and connected apps created in the last
+        24 hours are removed (older ones are the person's own doing: they are listed under Account). The answer counts each.
+        A reviewer's demo session may not (the demo account is shared)."""
         user = session_user(db, request)
         if user is None:
             raise HTTPException(401, "Sign in required")
         if "rv" in request.session:
             raise HTTPException(403, "The demo account's sessions can't be ended from here")
-        user.session_key = new_session_key()
+        gone = end_other_sessions(db, user, request)
         db.commit()
-        request.session["sk"] = user.session_key
-        return {"ok": True}
+        return {"ok": True, **gone}
 
     @router.post("/dev-login")
     def dev_login(request: Request, db: Session = Depends(get_db),

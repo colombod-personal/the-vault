@@ -26,6 +26,8 @@ function signInProblem(code, provider) {
   switch (code) {
     case 'access_denied': return `You cancelled signing in with ${who}. Nothing was shared with the Vault.`;
     case 'temporarily_unavailable': return `${who} isn't answering right now. Try again in a minute, or use another way to sign in.`;
+    case 'session_ended':
+      return 'Your session was ended while you were signing in, so nothing was linked. Sign in again.';
     case 'mismatching_state':
       return 'That sign-in expired or was started in another tab. Please start again from here.';
     case 'consent_required': case 'interaction_required': return `${who} needs you to confirm access. Please try again.`;
@@ -893,6 +895,7 @@ const WHY_NOT = {
 function SignOutEverywhere({ onCancel, onRemoved }) {
   const api = window.VaultApi;
   const [step, setStep] = useStateAcc('start'); // start | ending | review
+  const [ended, setEnded] = useStateAcc(null); // what step 1 ended, as the server counted it
   const [found, setFound] = useStateAcc(null); // review: null while loading, false if it failed, else the server's page
   const [error, setError] = useStateAcc(null);
   const [busy, setBusy] = useStateAcc(null);
@@ -901,7 +904,7 @@ function SignOutEverywhere({ onCancel, onRemoved }) {
   const load = () => api.signInMethods.all().then(setFound).catch(() => setFound(false));
   const endOthers = async () => {
     setError(null); setStep('ending');
-    try { await api.signInMethods.signOutOthers(); setStep('review'); setFound(null); load(); }
+    try { setEnded(await api.signInMethods.signOutOthers()); setStep('review'); setFound(null); load(); }
     catch (e) { setError(e.message); setStep('start'); }
   };
   const remove = async (m) => {
@@ -930,8 +933,11 @@ function SignOutEverywhere({ onCancel, onRemoved }) {
       {step !== 'review' && (
         <>
           <p className="label-mono">
-            Step 1 of 2. This ends every other browser signed in to your account and keeps this one signed in. Anyone who
-            copied your session stops there. Then you check your sign-in methods, because they could have added a way back in.
+            Step 1 of 2. This ends every other browser signed in to your account, signs out every app you signed in to with
+            the Vault app (they will ask you to sign in again), and removes the personal access tokens and connected apps made in
+            the last 24 hours. This browser stays signed in. Older tokens and connected apps are not touched: check them under
+            Agents &amp; API and Connected apps. Anyone who copied your session stops here. Then you check your sign-in methods,
+            because they could have added a way back in.
           </p>
           {error && <p role="alert" style={{ color: 'var(--danger)' }}>{error}</p>}
           <div className="signout-actions">
@@ -944,7 +950,13 @@ function SignOutEverywhere({ onCancel, onRemoved }) {
       )}
       {step === 'review' && (
         <>
-          <p className="label-mono" role="status">Every other browser is signed out. This one stays signed in. Step 2 of 2: check every sign-in method is yours.</p>
+          <p className="label-mono" role="status">
+            Every other browser is signed out. This one stays signed in.
+            {ended && ended.apps_signed_out > 0 && ` ${ended.apps_signed_out} app sign-in${ended.apps_signed_out === 1 ? '' : 's'} ended.`}
+            {ended && ended.tokens_removed > 0 && ` ${ended.tokens_removed} personal access token${ended.tokens_removed === 1 ? '' : 's'} made in the last 24 hours removed.`}
+            {ended && ended.connected_apps_removed > 0 && ` ${ended.connected_apps_removed} connected app${ended.connected_apps_removed === 1 ? '' : 's'} made in the last 24 hours removed.`}
+            {' '}Step 2 of 2: check every sign-in method is yours. Removing one signs the other browsers out again.
+          </p>
           {found === null && <p className="label-mono" role="status">Loading your sign-in methods…</p>}
           {found === false && (
             <p className="label-mono" role="alert" style={{ color: 'var(--danger)' }}>

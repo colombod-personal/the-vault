@@ -94,7 +94,8 @@ own window, as for any deletion (see the checklist below). **Erasure** (`DELETE 
   sign-in method can't be removed, and neither can a method while no OTHER method older than 24 hours would remain: a **change in what
   the person can erase**, made so that a copied session cannot replace the owner's methods with its own. It means an account whose only
   old method is one passkey, or an account whose methods were all added today, cannot remove it yet (the response says why); deleting
-  the whole account (`DELETE /api/v1/me`) is unchanged and erases every method. An account holds at most 20 passkeys. Only the
+  the whole account (`DELETE /api/v1/me`) is unchanged and erases every method. An account holds at most 20 passkeys. Step 1 of Sign out everywhere also deletes the account's app sessions (`api_sessions`, with their retired refresh tokens) and
+  unused hand-over codes, and the personal access tokens and connected-app grants made in the last 24 hours (rows the person can already delete one by one); nothing new is stored. Only the
   person's own methods are read or removed, and another person's id is a 404 (`tests/test_recent_sign_in_methods.py`). #347.
 
 - OAuth grants are listed (grouped by app) and revoked by their owner only (`/api/v1/me/apps`, 404 otherwise) and, like personal access

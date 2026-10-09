@@ -384,7 +384,7 @@ def test_signing_out_the_other_browsers_ends_a_copied_cookie_and_keeps_this_one(
     assert attacker.get(f"{V1}/me").status_code == 200  # the copy works
     planted = add_passkey(client, me, "Attacker", hours_ago=0)
 
-    assert client.post("/api/auth/sign-out-others").json() == {"ok": True}
+    assert client.post("/api/auth/sign-out-others").json()["ok"] is True
     assert attacker.get(f"{V1}/me").status_code == 401  # dead from step one
     assert attacker.delete(f"{V1}/me/passkeys/{planted}").status_code == 401
     assert attacker.post("/api/auth/passkey/register/options").status_code in (401, 404)  # (404: passkeys are off on http)
@@ -432,32 +432,39 @@ def make_user(client, methods_):
         return user.id, ids
 
 
-def test_two_unlinks_at_once_never_leave_the_account_without_a_method(client):
+def test_removals_at_once_never_leave_only_new_methods(client):
+    """One old passkey and two new providers; the two providers are unlinked and, at the same moment, the old passkey is
+    removed. The old passkey must stay whatever the order (without the 24-hour rule it would go whenever it ran while two
+    others still existed, leaving the new ones): the answer to its removal is always 409, and the providers both go."""
     uid, (old_key, g1, g2) = make_user(client, [("passkey", 24 * 5), ("google", 1), ("microsoft", 1)])
     db = client.app.state.db
-    results = []
+    results = {}
 
-    def unlink(identity_id):
+    def run(name, fn, *args):
         with db.sessions() as s:
             try:
-                remove_identity(s, uid, identity_id)
+                fn(s, uid, *args)
                 s.commit()
-                results.append("deleted")
+                results[name] = "deleted"
             except HTTPException as exc:
-                results.append(exc.status_code)
+                results[name] = exc.status_code
 
-    threads = [threading.Thread(target=unlink, args=(i,)) for i in (g1, g2)]
+    threads = [threading.Thread(target=run, args=("g1", remove_identity, g1)),
+               threading.Thread(target=run, args=("g2", remove_identity, g2)),
+               threading.Thread(target=run, args=("old", remove_passkey, old_key))]
     [t.start() for t in threads]
-    [t.join(20) for t in threads]
-    assert results == ["deleted", "deleted"]  # both recent ones may go: the old passkey stays
+    [t.join(30) for t in threads]
+    assert results == {"g1": "deleted", "g2": "deleted", "old": 409}
     with db.sessions() as s:
         assert s.scalar(select(Passkey.id).where(Passkey.id == old_key)) == old_key
+        assert s.scalar(select(func.count(Identity.id)).where(Identity.user_id == uid, Identity.provider != "passkey")) == 0
 
 
-def test_two_removals_of_the_only_two_old_methods_at_once_leave_one(client):
-    """The old methods can each be removed only while the other stays: with the account lock and the check inside the DELETE
-    the second of two simultaneous removals is refused instead of leaving nothing."""
-    uid, (a, b) = make_user(client, [("passkey", 24 * 5), ("passkey", 24 * 6)])
+def test_the_second_of_two_removals_at_once_cannot_leave_only_a_new_method(client):
+    """Two old passkeys and one new provider. The first removal holds the account lock; the second, started meanwhile,
+    must see the first's result: with the old passkey gone, only the new provider would be left, so it is refused (the old
+    rule, 'another method remains', would let it through and leave the new method alone)."""
+    uid, (a, b, _) = make_user(client, [("passkey", 24 * 5), ("passkey", 24 * 6), ("google", 1)])
     db = client.app.state.db
     outcome = {}
 
@@ -480,7 +487,7 @@ def test_two_removals_of_the_only_two_old_methods_at_once_leave_one(client):
     racer.join(20)
     assert outcome["racer"] == 409
     with db.sessions() as s:
-        assert s.scalar(select(func.count(Passkey.id)).where(Passkey.user_id == uid)) == 1
+        assert s.scalar(select(func.count(Passkey.id)).where(Passkey.user_id == uid)) == 1  # b stays, with the old rule it would go
 
 
 def test_a_claim_racing_an_unlink_ends_cleanly(client):
@@ -510,3 +517,92 @@ def test_a_claim_racing_an_unlink_ends_cleanly(client):
     assert outcome["claim"] == "identity_in_use"  # it was gone when the claim got the lock
     with db.sessions() as s:
         assert s.scalar(select(Identity.id).where(Identity.id == g)) is None
+
+
+# -- third round: what the second independent review found (2026-10-09) ----------------------------------------------------
+
+
+def second_session(client):
+    """Another browser holding a copy of this one's cookie."""
+    other = TestClient(client.app)
+    for name, value in dict(client.cookies).items():
+        other.cookies.set(name, value)
+    return other
+
+
+def test_removing_a_method_ends_every_session_that_could_have_signed_in_through_it(client):
+    """Finding 1: the sessions share the account's key, so a session signed in through the removed method outlives the
+    removal unless the key changes. Here a second browser stands for it; the owner's own browser stays signed in."""
+    me = login(client, "ann@example.com")
+    planted = add_provider(client, me, "google", hours_ago=1)
+    attacker = second_session(client)
+    assert attacker.get(f"{V1}/me").status_code == 200
+    assert client.delete(f"{V1}/me/identities/{planted}").status_code == 200
+    assert attacker.get(f"{V1}/me").status_code == 401
+    assert client.get(f"{V1}/me").json()["id"] == me  # the cookie was re-issued with the new key
+
+    key = add_passkey(client, me, "Planted", hours_ago=1)
+    attacker = second_session(client)
+    assert client.delete(f"{V1}/me/passkeys/{key}").status_code == 200
+    assert attacker.get(f"{V1}/me").status_code == 401 and client.get(f"{V1}/me").status_code == 200
+
+    add_passkey(client, me, "Planted again", hours_ago=1)
+    add_provider(client, me, "microsoft", hours_ago=1)
+    attacker = second_session(client)
+    assert client.delete(f"{V1}/me/sign-in-methods/recent").json() == {"deleted": 2}
+    assert attacker.get(f"{V1}/me").status_code == 401 and client.get(f"{V1}/me").status_code == 200
+
+    attacker = second_session(client)  # nothing removed: nothing ended
+    assert client.delete(f"{V1}/me/sign-in-methods/recent").json() == {"deleted": 0}
+    assert attacker.get(f"{V1}/me").status_code == 200
+
+
+def test_signing_out_the_other_browsers_also_ends_app_sessions_and_new_tokens(client):
+    """Finding 2: a copied cookie can mint an app session (sign in with the attacker's own Google, hand over to an app) or
+    a personal access token. Step 1 ends every app session and the tokens and connected apps made in the last 24 hours;
+    older tokens are the person's own and stay."""
+    me = login(client, "ann@example.com")
+    with sessions(client) as db:
+        user = db.get(User, me)
+        minted = tokens.issue(db, user, client="ios", device_name="Attacker phone")["access_token"]
+        _, fresh_pat = tokens.create_pat(db, user, "made by the copy", ["read"], 30)
+        _, old_pat = tokens.create_pat(db, user, "mine, last month", ["read"], 30)
+        db.flush()
+        db.execute(text("UPDATE access_tokens SET created_at = now() - interval '30 days' WHERE name = 'mine, last month'"))
+        db.commit()
+    as_app = lambda secret: {"Authorization": f"Bearer {secret}"}
+    other = TestClient(client.app)
+    assert other.get(f"{V1}/me", headers=as_app(minted)).status_code == 200
+    assert other.get(f"{V1}/collection", headers=as_app(fresh_pat)).status_code == 200
+
+    res = client.post("/api/auth/sign-out-others")
+    assert res.json() == {"ok": True, "apps_signed_out": 1, "tokens_removed": 1, "connected_apps_removed": 0}
+    assert other.get(f"{V1}/me", headers=as_app(minted)).status_code == 401  # the minted app session is dead
+    assert other.get(f"{V1}/collection", headers=as_app(fresh_pat)).status_code == 401  # so is the token made in the last day
+    assert other.get(f"{V1}/collection", headers=as_app(old_pat)).status_code == 200  # the old one is the person's own
+    assert client.get(f"{V1}/me").json()["id"] == me
+
+
+def test_a_request_already_past_authentication_cannot_link_a_provider_after_the_session_ended(client):
+    """Finding 6, provider link: the cookie's key was replaced between authentication and the write. Both ways a link
+    changes the account (a new identity; moving one over from an empty account) re-read the key under the lock."""
+    from vault.auth import SessionEnded
+    from vault.models import new_session_key
+
+    owner = login(client, "owner@example.com")
+    donor, (_, existing) = make_user(client, [("passkey", 24 * 5), ("google", 24 * 5)])
+    with sessions(client) as db:
+        user = db.get(User, owner)
+        stale = user.session_key
+        user.session_key = new_session_key()  # a sign out everywhere committed first
+        db.commit()
+        with pytest.raises(SessionEnded):
+            find_or_create(db, Profile("google", "attacker-sub", None, None), current=user, expect_key=stale)
+        with pytest.raises(SessionEnded):
+            find_or_create(db, Profile("google", f"google-{donor}-1", None, None), current=user, expect_key=stale)
+        db.rollback()
+        assert db.scalar(select(Identity.id).where(Identity.subject == "attacker-sub")) is None
+        assert db.scalar(select(Identity.user_id).where(Identity.id == existing)) == donor  # not moved
+        # the live key is accepted
+        find_or_create(db, Profile("google", "owner-own-sub", None, None), current=db.get(User, owner), expect_key=user.session_key)
+        assert db.scalar(select(Identity.id).where(Identity.subject == "owner-own-sub")) is not None
