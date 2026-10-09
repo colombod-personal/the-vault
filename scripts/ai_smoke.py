@@ -162,7 +162,7 @@ def prompts(c: Client) -> None:
     res = c.rpc("resources/list")["result"]["resources"]
     check({r["uri"] for r in res} == {f"ui://vault/{v}" for v in VIEWS} and all(r["mimeType"] == "text/html;profile=mcp-app" for r in res),
           f"the {len(VIEWS)} MCP Apps views are served", str(sorted(r["uri"] for r in res)))
-    enforced = os.environ.get("MCP_APPS_REQUIRE_CAPABILITY", "") in ("1", "true", "yes")  # as the server under test is configured
+    enforced = os.environ.get("MCP_APPS_REQUIRE_CAPABILITY", "") not in ("0", "false", "no")  # as the server under test is configured
     for name, caps, expect in (("a host with MCP Apps", APPS, True), ("a host without", {}, not enforced)):
         out: dict = {}
         c.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": caps, "clientInfo": {"name": "ai-smoke", "version": "1"}}, headers_out=out)

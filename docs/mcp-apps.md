@@ -30,6 +30,9 @@ show the tool's normal text answer, which has the same information.
   extension gets the same tools and the same text answers, only without `_meta.ui`. `initialize` logs one line per
   connection (`MCP initialize from <client>/<version>: MCP Apps extension advertised|not advertised`: name and version only), so the
   log shows what each real host says.
+- **Enforcement is on by default** (#50, #51; `MCP_APPS_REQUIRE_CAPABILITY=0` turns it off). It was switched on once the
+  production log showed both hosts advertising the extension: claude.ai (25 initialize lines) and ChatGPT
+  (`openai-mcp/1.0.0: MCP Apps extension advertised`, 2026-10-08 20:35 UTC).
 - **Risk to watch after a deploy:** a host that renders the views but does not advertise the extension would lose them after
   reconnecting. The matrix below says which hosts were seen to render; re-check each after the release (reconnect the
   connector first: hosts keep the tool list from when they connected) and read the log line above.
