@@ -57,12 +57,12 @@ Sliver Swarm   92 of 100 covered | 8 missing | 3 borrowed        [Clear]
 RAMP            DRAW              REMOVAL           WIN CONDITIONS
 (o)(o)(o)(o)    (o)(o)(?)(o)      (o)(o)(?)         (o)(o)(?)(~)
  o owned   ? missing   ~ borrowed by another deck   --- combo you own
-Missing cards are listed first on the right: [? Cloudstone Curio] [? ...]
+Missing cards are listed first on the right: [? Parallel Lives] [? ...]
 
 390 px
 Sliver Swarm  92/100 covered   [Clear]
 Missing (8)  Borrowed (3)  All
-> Cloudstone Curio   missing
+> Parallel Lives   missing
 > Hunter Sliver      borrowed
 RAMP (4)  > ...
 DRAW (4)  > ...
@@ -72,7 +72,7 @@ DRAW (4)  > ...
 
 ```
 1400 px                                             390 px
-[? Cloudstone Curio]  role: token doubling (core)   Cloudstone Curio       [Back]
+[? Parallel Lives]  role: token doubling (core)   Parallel Lives       [Back]
 Owned alternatives                                  role: token doubling (core)
 +-----------------------------------------------+   +--------------------------+
 | (img) Anointed Procession  x2 owned           |   | (img) Anointed Procession|
@@ -81,14 +81,14 @@ Owned alternatives                                  role: token doubling (core)
 | (img) Doubling Season  x1, in Aang            |   +--------------------------+
 |  borrowed from Avatar Aang [Move] [Buy $6.60] |   | Doubling Season  borrowed|
 +-----------------------------------------------+   | [Move] [Buy $6.60]       |
-Or buy Cloudstone Curio: $1.20 (Scryfall, 6 Oct) [Open on Scryfall]
+Or buy Parallel Lives: $1.20 (Scryfall, 6 Oct) [Open on Scryfall]
 ```
 
 ### 4. A missing card with no alternative
 
 ```
 1400 px                                                   390 px
-[? Cloudstone Curio]  role: token doubling (core)         Cloudstone Curio    [Back]
+[? Parallel Lives]  role: token doubling (core)         Parallel Lives    [Back]
 You own nothing else that does this job in this           token doubling (core)
 deck's colours and format.                                You own nothing else that
 [Buy for $1.20 (Scryfall, 6 Oct)] [Open on Scryfall]      does this job here.
@@ -174,7 +174,6 @@ Where the code settles a point the design left open (tests: `tests/test_deck_ide
 - **Rate limit.** 120 reads a minute per person across both routes (each lane page recomputes the allocation).
 - **Measured** (`test_the_first_ideas_page_of_a_100_card_deck_makes_a_small_constant_number_of_queries`, a 100-card deck beside 12 other saved decks, local Postgres): the first `ideas` page makes 11 queries and `alternatives` 16, and the query count does not grow with the deck.
 
-<<<<<<< HEAD
 ## As built, the change flow (deck page, #163 task 0)
 
 A saved deck of the person's own has **Change this deck** (`public/views/deck_change.jsx`, wording in `public/lib/deck_change.js`; a pasted list, a shared deck or an unsaved deck has no flow):
@@ -186,7 +185,7 @@ A saved deck of the person's own has **Change this deck** (`public/views/deck_ch
 - **Archidekt decks:** the Vault's copy changes, Archidekt's does not, and the flow says so in one line; the page keeps reading the list from Archidekt, so it says that too and that Update saved copy would put that list back.
 - **A swap in the address:** `#/decks/<id>?swap=<url-encoded JSON {"cut":[...],"add":[...]}>` (the Ideas view's Swap into the deck) opens the flow with those cuts and adds, looks the adds up in the catalog (a name it does not know is listed and left out), checks the proposal and drops the parameter from the address. A parameter that cannot be read fills nothing and says so. The route carries it as `swap` (`vaultRouteFromHash`, `vaultHashFor` in `public/app.jsx`).
 - Phone-first (390 px: no sideways scroll, targets 44 px, text 12 px), Esc closes the flow and returns focus to its button, the heading takes focus on opening. Screenshots: `docs/screenshots/deck-change-*`.
-=======
+
 ## As built (web, #163 tasks 2 and 3)
 
 Files: `public/views/ideas.jsx` (the page), `public/lib/ideas.js` (wording, addresses, windowing: `window.VaultIdeas`), `public/lib/api.js` (`deckIdeas`, `deckAlternatives`), the styles in `public/layout.css` (`.ideas-*`). Tests: `tests/js/ideas.test.mjs`, `tests/test_ideas_page.py` (real answers through the page's own wording, and the removals); the browser run is `scripts/ideas_evidence.py`. Where the code settles a point the design left open:
@@ -202,7 +201,6 @@ Files: `public/views/ideas.jsx` (the page), `public/lib/ideas.js` (wording, addr
 - **Weight.** Lane rows carry no image. Only the selected card and its alternatives show a thumbnail (Scryfall's `small`, 146 px wide, drawn 40 by 56, `loading="lazy"`; never cropped); a larger image opens in a dialog only when the thumbnail is tapped, with the artist and Scryfall credit. Lanes show 25 cards, then "Show more" follows the lane's own cursor; a lane with more than 40 cards loaded draws only the rows in view. No physics, no animation.
 - **Removed.** All seven Graph modes, `graph.jsx`, the cytoscape script (so every page no longer loads a third-party script from unpkg), the Graph tab and its icon, the Graph help section, the "Graph default top-N" tweak, the Cytoscape credits row and notices, and the styles only the Graph used (`.graph-stage`, `.graph-legend`, `.m-matrix`, `.m-stack`, `.m-3col`, `button.pip`). `tests/test_ideas_page.py` fails if any returns or a link names a removed mode.
 - **Measured** (`python scripts/ideas_evidence.py`, headless Chromium on a local server with synthetic data: three saved Commander decks of 100 cards, a Sliver deck with 8 missing and 4 borrowed cards, a 50-card Other lane): 390 px in all five states and with a lane open: no horizontal overflow, no tap target under 44 px, no text under 12 px (11 px labels). Opening the deck on a throttled phone (4x CPU, 150 ms and 1.6 Mbit/s): lanes drawn in about 220 ms, longest main-thread task under the 200 ms budget (none over 50 ms), first `ideas` page 35.8 KB, 3.9 KB gzipped, no image requested; a selected card requests 4 images, all `small` thumbnails. A cold load of the deck's address with the cache off and the scripts from the CDN draws the lanes after about 2.1 s on the same throttled phone (React and the bundle dominate; informational, not the budget).
->>>>>>> origin/main
 
 ## Decisions for the owner
 
