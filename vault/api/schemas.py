@@ -97,6 +97,12 @@ class CardData(BaseModel):
     prices: CardPrices | None = Field(None, description="Scryfall's latest prices for every finish")
 
 
+class TagRow(BaseModel):
+    tag: str
+    source: str = Field(description="Who wrote this tag on the card: person, assistant or system")
+    source_detail: str | None = Field(None, description="For an assistant, the app that wrote it; never shown as the person's own")
+
+
 class CardItem(Hal):
     id: str
     name: str
@@ -120,6 +126,9 @@ class CardItem(Hal):
                                   "null until the printing is matched and synced")
     tags: list[str] | None = Field(None, description="Your tags on the card (GET /collection/tags); left out of a shared collection, "
                                    "where tags are private")
+    tags_detail: list[TagRow] | None = Field(None, description="The same tags with who wrote each (`source`, and the app's name in "
+                                             "`source_detail` for an assistant), so a client can mark an assistant's tag as its own; "
+                                             "left out of a shared collection")
 
 
 class PricePoint(BaseModel):

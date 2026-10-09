@@ -72,12 +72,14 @@ const VAULT_START_NOTICE = (() => {
 // buttons, refresh and bookmarks work. Opening a card or the account panel adds a history
 // entry too, so Back closes it before leaving the view.
 const VAULT_VIEWS = ['dashboard', 'browse', 'sets', 'decks', 'lab', 'graph', 'valuation', 'help'];
+const VAULT_TAG = /^[a-z0-9:-]{1,40}$/;  // a tag's shape (the server's rule): anything else in the address is ignored
 function vaultRouteFromHash(fallback) {
   const [path, search] = location.hash.replace(/^#\/?/, '').split('?');
   const [view, arg] = path.split('/').map((p) => decodeURIComponent(p || ''));
-  if (view === 'browse') {  // #/browse?bucket=3: one bucket's copies
-    const bucket = Number(new URLSearchParams(search || '').get('bucket'));
-    return Number.isInteger(bucket) && bucket > 0 ? { view, bucket } : { view };
+  if (view === 'browse') {  // #/browse?bucket=3&tag=trade: one bucket's copies, the cards with one tag, or both
+    const q = new URLSearchParams(search || '');
+    const bucket = Number(q.get('bucket')), tag = q.get('tag') || '';
+    return { view, ...(Number.isInteger(bucket) && bucket > 0 ? { bucket } : {}), ...(VAULT_TAG.test(tag) ? { tag } : {}) };
   }
   if (view === 'sets' && arg) return { view: 'setdetail', code: arg };
   if (view === 'decks' && arg) return { view: 'decks', deckId: arg };
@@ -88,7 +90,11 @@ function vaultHashFor(route) {
   if (route.view === 'setdetail') return `#/sets/${encodeURIComponent(route.code)}`;
   if (route.view === 'decks' && route.deckId) return `#/decks/${encodeURIComponent(route.deckId)}`;
   if (route.view === 'help') return helpHashFor(route.section);
-  if (route.view === 'browse' && route.bucket) return `#/browse?bucket=${encodeURIComponent(route.bucket)}`;
+  if (route.view === 'browse' && (route.bucket || route.tag)) {
+    const parts = [route.bucket ? `bucket=${encodeURIComponent(route.bucket)}` : '', route.tag && VAULT_TAG.test(route.tag) ? `tag=${route.tag}` : ''];
+    const query = parts.filter(Boolean).join('&');
+    return query ? `#/browse?${query}` : '#/browse';
+  }
   return `#/${route.view}`;
 }
 const vaultUrlFor = (route) => location.pathname + location.search + vaultHashFor(route);
@@ -148,11 +154,13 @@ function App() {
     else close();
   };
   // The bucket Browse shows lives in the address (#/browse?bucket=3) without a history entry of its own, like its other filters.
-  const setBucket = (bucket) => {
-    const next = { view: 'browse', ...(bucket ? { bucket } : {}) };
+  const setBrowseFilter = (next) => {
     setRouteState(next);
     history.replaceState({ route: next }, '', vaultUrlFor(next));
   };
+  const setBucket = (bucket) => setBrowseFilter({ view: 'browse', ...(bucket ? { bucket } : {}), ...(route.tag ? { tag: route.tag } : {}) });
+  // The tag Browse filters by lives in the address too (#/browse?tag=trade), next to the bucket if one is chosen.
+  const setTag = (tag) => setBrowseFilter({ view: 'browse', ...(route.bucket ? { bucket: route.bucket } : {}), ...(tag ? { tag } : {}) });
   // After copies moved between buckets: the collection's version changed, so ask again (without blanking the page).
   const reloadCollection = async () => {
     const j = await window.VaultApi.collection();
@@ -482,6 +490,7 @@ function App() {
           )}
           {route.view === 'browse' && (
             <Browse data={data} openCard={openCard} initialQuery={route.initialQuery} bucket={route.bucket} onBucket={setBucket}
+                    tag={route.tag} onTag={setTag}
                     onChanged={reloadCollection} readOnly={!!viewing} />
           )}
           {route.view === 'sets' && (
@@ -515,7 +524,7 @@ function App() {
         </main>
 
         <VaultFooter />
-        {drawerCard && <CardDrawer card={drawerCard} costsHidden={!!data?.meta?.costsHidden} canMove={!viewing && !!data}
+        {drawerCard && <CardDrawer card={drawerCard} costsHidden={!!data?.meta?.costsHidden} canMove={!viewing && !!data} canTag={!viewing && !!data}
                                    version={data?.meta?.version} onMoved={reloadCollection}
                                    onClose={() => closeOverlay(() => setDrawerCard(null))} />}
 
@@ -581,8 +590,9 @@ function App() {
   return <>{body}{accountPanel}</>;
 }
 
-function CardDrawer({ card, onClose, costsHidden, canMove, version, onMoved }) {
+function CardDrawer({ card, onClose, costsHidden, canMove, canTag, version, onMoved }) {
   const { buckets } = window.useBuckets(version, !!canMove);
+  const { tags } = window.useTags(version, !!canTag);
   const [scry, setScry] = useStateApp(() => card._scry || card.scry || window.Scryfall.cached(card.n, card.s, card.cn));
   useEffectApp(() => {
     if (scry) return;
@@ -692,6 +702,9 @@ function CardDrawer({ card, onClose, costsHidden, canMove, version, onMoved }) {
         )}
 
         {canMove && card.q > 0 && <window.BucketMover card={card} buckets={buckets} onMoved={onMoved} />}
+
+        {canTag && card.href && card.key && <window.CardTags card={card} tags={tags} onChanged={onMoved} />}
+        {canTag && card.href && card.key && <window.CardMetadata card={card} />}
 
         {card._ownEntries && card._ownEntries.length > 0 && (
           <div className="panel" style={{ marginBottom: 20 }}>

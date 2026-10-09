@@ -126,5 +126,12 @@ older than the code's is upgraded on read by one upgrader per step (`metadata.UP
 assignments carry the same column but have no route yet (nothing needs it: a tag is a label, the notes live on the card).
 Tests: `tests/test_metadata.py`.
 
+Built since (#128, the app): tags in Browse and the card drawer (`public/views/tags.jsx`): chips under each card's name, the tag filter
+(`#/browse?tag=`, combinable with `bucket=`), tick boxes on every list (the bucket move bar stays bucket-only) with a bulk bar to tag or
+untag the ticked cards (more than 25 waits for a button that says the count), "Manage tags" (rename, remove from every card), the
+card's tags in the drawer with an assistant's tag marked "AI" and its app's name and accepted (the person tags the same card with the
+same tag) or removed, and the card's notes (`vault_metadata`) read only, one block per writer. A shared collection shows none of it. The
+server gave each card `tags_detail` (who wrote each tag) for this, and the summary `version` now moves with the tags.
+
 Not built yet: importing into one bucket (#124), the tag and bucket filters on the
-analytics (#130), the web app (#125, #128).
+analytics (#130).
