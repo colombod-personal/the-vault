@@ -421,3 +421,10 @@ RETURNING id`, so a replayed cookie or two racing requests succeed once; a faile
 signed, not encrypted: a challenge is public to the browser anyway, and the signature stops a client changing the expiry, kind or
 id. A read-only review of the change (2026-10-09, before the merge) found no replay, cross-ceremony or race problem; its two timing
 notes (one clock reading for the expiry and the clean-up) are applied.
+
+**IPv6 rate-limit keys (decision, #346).** The per-IP limits key an IPv6 caller by its /64 (`vault/ratelimit.py`, `limit_key`), as
+now. A /64 is what one home or phone connection is given, so it is the unit an attacker can rotate through for free; a /56 or /48
+would also lump in neighbours on the same ISP delegation (a whole site's users sharing one allowance), while an attacker who rents a
+/48 can already rotate through 65,536 /64s. The /64 is kept: it stops the cheap case, and a determined attacker with a /48 is the
+same problem as one with many IPv4 addresses, which the per-IP limit never claimed to stop. With the challenge stateless, the limit
+no longer protects other people's sign-in, only the server's work.
