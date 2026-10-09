@@ -549,3 +549,4 @@ function ValueChart({ series, costsHidden }) {
 }
 
 window.Valuation = Valuation;
+window.DailyChart = DailyChart;  // the Lab's value-over-time chart (views/lab.jsx)
