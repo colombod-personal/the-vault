@@ -72,7 +72,8 @@ def test_the_claude_cli_accepts_both_manifests_when_it_is_installed():
 def test_the_connect_page_has_each_install_path_and_is_honest_about_oauth():
     page = (ROOT / "public" / "connect.html").read_text(encoding="utf-8")
     for needle in ("/plugin marketplace add colombod-personal/the-vault", "npx skills add colombod-personal/the-vault",
-                   "claude mcp add --transport http vault", "Account → Agents &amp; API", "whoami", bp.FAN_NOTICE):
+                   "claude mcp add --transport http vault", "Account → Agents &amp; API", "whoami", bp.FAN_NOTICE,
+                   "Copy setup prompt", f"{bp.HOST}/setup/claude.md", "vault_start"):  # the one-prompt setup (docs/onboarding.md; tests/test_setup_pages.py)
         assert needle in page, needle
     assert ("not switched on yet" in page) == (not bp.OAUTH_READY)
     assert 'id="claude"' in page and 'id="chatgpt"' in page and "Add custom MCP server" in page

@@ -287,3 +287,58 @@ A run **fails** if any of 3 to 6 is violated (those are the exact claims the 202
 
 After a run, change the status line at the top of this section to the result and the date, link the capture from the issue
 (#82), and tick the criterion there; the lead does that, never an agent from the repository alone.
+
+## Real-host check for the one-prompt setup (#153 to #156)
+
+**Status: NOT RUN on any surface.** `tests/test_setup_pages.py` proves what the pages and the `vault_start` prompt contain; it cannot
+show that a host follows them. Only a person with a clean account on the host can run the procedure below (`docs/onboarding.md`,
+"As built", lists what is still unverified). Whoever runs it fills one record per surface in the issue of its host (#153 Claude, #154
+ChatGPT, #155 Codex, #156 GitHub Copilot) and copies the verdict here; an assistant must not fill a row it did not see happen.
+
+### Procedure (per surface: Claude Code, claude.ai, Claude Desktop, ChatGPT web, ChatGPT desktop app, Codex CLI, Codex IDE extension, Codex cloud, Copilot CLI, VS Code, Copilot desktop app)
+
+1. **Start clean.** A Vault account with a small collection imported and no decks (a new account), on a host account that has never seen
+   The Vault. In the Vault: Account, Connected apps has nothing; on the host: no connector, server or plugin called vault or The Vault. Start a
+   timer.
+2. **Paste the line** from the Connect page's Copy setup prompt for that assistant into a new chat or session (`Set up The Vault for me. Follow
+   only this page: https://mtgvault.cards/setup/<host>.md`). Write down every step the person (not the assistant) had to do, in order.
+3. **Let it finish without helping.** Do not type anything the page did not ask for. Note any place the assistant improvised, asked for a token,
+   a password or a code in the chat, or ran a command the page does not contain: that fails the run.
+4. **Stop the timer** at the first answer that comes from the person's own data (the tour's totals). Record the time.
+5. **Capture** the whole conversation including the tool-call rows the host shows (screenshot or exported text), and the consent screen.
+
+### What to record (all of it, even when it is boring)
+
+| # | Observation | Pass when |
+|---|---|---|
+| 1 | Steps the person did | Only the ones the page marks PERSON; each of them exists on screen under the name the page gives (a menu name that differs is a defect in the page, with the real name attached) |
+| 2 | Time to first answer | recorded in minutes; no pass line, it is the number the issue asks for |
+| 3 | Sign-in method | OAuth in the browser (say which client path: Client ID Metadata Document or registration, from the Vault's log or the host); no token in chat, a command or a file |
+| 4 | Consent screen | read-only by default (Write unticked); the app name and the address shown are the Vault's |
+| 5 | `whoami` | the signed-in name, scopes `read`, and the data versions; the assistant shows them |
+| 6 | The tour | `vault_start` ran (or the quoted text was followed), used `get_collection_summary` and the person's own cards, answered one rules question with a rule number and the edition, handled no decks by offering a pasted list, and ended with three next steps; it wrote nothing |
+| 7 | Tools and views | the tool count shown; whether views render (hosts that support them) |
+| 8 | Every cell the page marks "not verified yet" | settled on the real host: the exact menu path, the plan needed, whether the host lists prompts; the page is corrected with the date |
+
+### Failure paths (run each once; the page's table must give the next step, and it must work)
+
+| Path | How to cause it | Pass when |
+|---|---|---|
+| Not signed in | stop at the sign-in, then ask `whoami` | the assistant says the sign-in is not finished and says how to finish it |
+| Wrong address | add the server with a typo in the address | the page's "Wrong address" row leads to the fix; the assistant shows the address it sees |
+| Already added | run the setup twice | no second connector or server is added; the assistant checks the first and moves on |
+| Read-only, write asked for | ask "save this decklist as a deck" | the assistant says it only has read access and points to Let it save decks and imports, and does not try another route |
+| Empty collection | a new account with no import | `get_collection_summary` reports no cards, and the assistant explains how to import and stops |
+
+### Record (one per surface; leave NOT RUN until every row above has evidence)
+
+| Field | Value |
+|---|---|
+| Surface, plan, client version | |
+| Date and who ran it | |
+| Steps the person did / time to first answer | |
+| Sign-in method and consent screen | |
+| Rows 1 to 8 | |
+| Failure paths | |
+| Defects found (each filed as an issue) | |
+| Result | NOT RUN |
