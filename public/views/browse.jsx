@@ -10,8 +10,18 @@ const BROWSE_SORTS = { value: '-value', qty: '-quantity', name: 'name', recent: 
 const BROWSE_TYPES = ['Creature', 'Land', 'Artifact', 'Enchantment', 'Instant', 'Sorcery', 'Planeswalker', 'Battle', 'Other'];
 const BROWSE_MANA = ['0', '1', '2', '3', '4', '5', '6', '7', '8+'];
 
-function Browse({ data, openCard, initialQuery }) {
+function Browse({ data, openCard, initialQuery, bucket, onBucket, onChanged, readOnly }) {
   const api = data.api;
+  // Buckets (#125): the places copies live in. Own collection only: a share shows no buckets.
+  const { buckets, reload: reloadBuckets } = window.useBuckets(data.meta.version, !readOnly);
+  const [managing, setManaging] = useStateB(false);
+  const [picked, setPicked] = useStateB(() => new Set());  // printings ticked for a bulk move (only inside one bucket)
+  const [movedNote, setMovedNote] = useStateB(null);
+  const bucketId = readOnly ? null : (bucket || null);
+  // A bucket that was deleted or is not yours: back to the whole inventory.
+  useEffectB(() => {
+    if (bucketId && buckets.length && !buckets.some((b) => b.id === bucketId)) onBucket(null);
+  }, [bucketId, buckets]);
   const [q, setQ] = useStateB(initialQuery?.search || '');
   const [query, setQuery] = useStateB(q);  // the search sent to the server, a moment after typing stops
   const [setF, setSetF] = useStateB('');
@@ -29,9 +39,10 @@ function Browse({ data, openCard, initialQuery }) {
     return () => clearTimeout(t);
   }, [q]);
 
-  const params = { q: query, set: setF, printing: printingF, type: typeF, mana_value: manaF, sort: BROWSE_SORTS[sort] || '-value' };
+  const params = { q: query, set: setF, printing: printingF, type: typeF, mana_value: manaF, bucket: bucketId, sort: BROWSE_SORTS[sort] || '-value' };
   const first = window.useVaultQuery(() => api.cards({ ...params, limit: BROWSE_PAGE }),
-    [api.base, data.meta.version, query, setF, printingF, typeF, manaF, sort]);
+    [api.base, data.meta.version, query, setF, printingF, typeF, manaF, bucketId, sort]);
+  useEffectB(() => { setPicked(new Set()); }, [bucketId, query, setF, printingF, typeF, manaF, sort, data.meta.version]);
   useEffectB(() => { if (first.data) { setShown(first.data); setError(null); } }, [first.data]);
   useEffectB(() => { if (first.error) setError(first.error.message); }, [first.error]);
 
@@ -69,6 +80,13 @@ function Browse({ data, openCard, initialQuery }) {
         <p className="eyebrow">Library</p>
         <h1 className="h1" style={{ marginTop: 6 }}>Every printing you own.</h1>
       </div>
+
+      {!readOnly && buckets.length > 0 && (
+        <window.BucketBar buckets={buckets} value={bucketId} onChange={onBucket} onManage={() => setManaging(true)}
+                          totalCopies={data.meta.totalQty} />
+      )}
+      {managing && <window.BucketManager buckets={buckets} cardsApi={api} onClose={() => setManaging(false)}
+                                         onChanged={async () => { reloadBuckets(); if (onChanged) await onChanged(); }} />}
 
       <div className="panel" style={{ marginBottom: 16, padding: 16 }}>
         <div className="filter-grid" style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr', gap: 12 }}>
@@ -118,11 +136,23 @@ function Browse({ data, openCard, initialQuery }) {
         {error && <p role="alert" style={{ marginTop: 10, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--danger)' }}>Couldn't load: {error}</p>}
       </div>
 
+      {movedNote && <p role="status" className="muted" style={{ fontSize: 12, margin: '0 0 12px' }}>{movedNote}</p>}
+      {bucketId && !readOnly && (
+        <window.BulkMoveBar bucketId={bucketId} buckets={buckets} picked={picked} items={items}
+                            onDone={async (note) => { setPicked(new Set()); setMovedNote(note); reloadBuckets(); if (onChanged) await onChanged(); }} />
+      )}
+
       {layout === 'table' ? (
         <div className="panel panel-flush">
           <table className="tbl">
             <thead>
               <tr>
+                {bucketId && !readOnly && (
+                  <th style={{ width: 28 }}>
+                    <label className="tick"><input type="checkbox" aria-label="Tick every card on this page" checked={items.length > 0 && items.every((c) => picked.has(c.key))}
+                           onChange={(e) => setPicked(e.target.checked ? new Set(items.map((c) => c.key)) : new Set())} /></label>
+                  </th>
+                )}
                 <th>Card</th>
                 <th>Set</th>
                 <th>#</th>
@@ -138,6 +168,12 @@ function Browse({ data, openCard, initialQuery }) {
               {items.map((c) => (
                 // shared without prices paid, or no price paid recorded: no fake $0 / full-value P&L
                 <tr key={c.key} onClick={() => openCard(c)} style={{ cursor: 'pointer' }}>
+                  {bucketId && !readOnly && (
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <label className="tick"><input type="checkbox" aria-label={`Tick ${c.n}`} checked={picked.has(c.key)}
+                             onChange={(e) => setPicked((p) => { const n = new Set(p); e.target.checked ? n.add(c.key) : n.delete(c.key); return n; })} /></label>
+                    </td>
+                  )}
                   <td style={{ fontWeight: 600 }}>
                     {/* the row is clickable with a mouse; this button makes it reachable by keyboard */}
                     <button type="button" className="row-link" onClick={(e) => { e.stopPropagation(); openCard(c); }}>{c.n}</button>

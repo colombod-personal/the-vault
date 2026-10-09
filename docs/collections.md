@@ -116,5 +116,35 @@ are the person; an OAuth app or a personal access token is an assistant, recorde
 tagging or untagging is shown first and applied only with confirm. `/collection/cards` takes `tag` and lists each card's `tags` (own
 collection only; the ETag includes the person's tags so a change shows). Tests: `tests/test_tags_api.py`, `tests/test_tag_tools.py`.
 
-Not built yet: the `vault_metadata` routes and tools (rest of #127), importing into one bucket (#124), the tag and bucket filters on the
+Example of one card's notes (what `GET /collection/cards/{id}/metadata` shows after the person, Claude and the Vault each wrote theirs):
+
+```json
+{
+  "version": 1,
+  "namespaces": {
+    "user": {"note": "keep for the Sliver deck", "pinned": true},
+    "ai.claude.ai": {"roles": ["ramp", "mana rock"], "why": "adds two colourless at mana value one", "model": "claude"},
+    "system": {"imported_from": "demo-collection-v2.csv"}
+  },
+  "written": {
+    "user": {"at": "2026-10-09T09:10:00+00:00", "by": "the person"},
+    "ai.claude.ai": {"at": "2026-10-09T09:12:41+00:00", "by": "claude.ai"}
+  },
+  "you_write": "user"
+}
+```
+
+A bucket's notes have the same shape. A change of shape bumps `version` and adds one upgrader (`metadata.UPGRADERS[n]`) that turns a version n document into n + 1; a stored document is upgraded on read, and `tests/test_metadata.py::test_an_older_version_is_upgraded_on_read_and_a_newer_one_is_refused` shows it with a made-up version 3.
+
+Built since (#127, metadata; this settles #119): `GET`, `PUT` and `DELETE /collection/cards/{id}/metadata` and `/collection/buckets/{id}/metadata`
+and the tools `get_card_metadata`, `set_card_metadata`, `get_bucket_metadata`, `set_bucket_metadata`. The document is
+`{"version": 1, "user": {...}, "ai.<app>": {...}, "system": {...}, "written": {namespace: {at, by}}}` (`vault/metadata.py`). A writer
+owns one namespace, decided by how it is signed in (the person: `user`; an OAuth app or personal token: `ai.` plus the app's host or
+the token's name) and replaces it as a whole; nobody writes `system` through the API; `written` is the Vault's record, not the
+caller's. Limits refuse instead of truncating: 8 KB for the whole document (also checked by the database), 6 levels deep. A version
+older than the code's is upgraded on read by one upgrader per step (`metadata.UPGRADERS`), a newer one is refused (409). Tag
+assignments carry the same column but have no route yet (nothing needs it: a tag is a label, the notes live on the card).
+Tests: `tests/test_metadata.py`.
+
+Not built yet: importing into one bucket (#124), the tag and bucket filters on the
 analytics (#130), the web app (#125, #128).

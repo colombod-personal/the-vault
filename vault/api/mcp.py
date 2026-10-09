@@ -266,6 +266,25 @@ TOOLS = [
          {"tag": TAG, "confirm": CONFIRM}, ["tag"],
          method=lambda a: "DELETE" if a.get("confirm") is True else "GET",
          path=lambda a: f"{V1}/collection/tags/{a['tag']}", write=True, destructive=True),
+    Tool("get_card_metadata", "What the person and their assistants keep on a card (free-form notes, saved searches, scores ...), by "
+         "namespace: `user` is the person's own, `ai.<app>` is each assistant's, `system` is the Vault's. `written` says who wrote each "
+         "namespace last and when; `you_write` is the one set_card_metadata changes. On the card, so every printing has the same.",
+         {"card_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$", "description": "The id from search_cards"}}, ["card_id"],
+         path=lambda a: f"{V1}/collection/cards/{a['card_id']}/metadata"),
+    Tool("set_card_metadata", "Replaces your own namespace of a card's metadata with `data` (a JSON object; {} removes it). Other writers' "
+         "namespaces and the person's are never changed. Your namespace is named after this app and shown as written by it: it is "
+         "not the person's own note. At most 8 KB in all for the card (every namespace together) and 6 levels deep; over that is refused.",
+         {"card_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$", "description": "The id from search_cards"},
+          "data": {"type": "object", "description": "Your namespace, replaced as a whole"}}, ["card_id", "data"],
+         method="PUT", path=lambda a: f"{V1}/collection/cards/{a['card_id']}/metadata", body=lambda a: {"data": a["data"]}, write=True),
+    Tool("get_bucket_metadata", "What the person and their assistants keep on a bucket, by namespace (`user`, `ai.<app>`, `system`), "
+         "with who wrote each and when.", {"bucket_id": ID}, ["bucket_id"],
+         path=lambda a: f"{V1}/collection/buckets/{int(a['bucket_id'])}/metadata"),
+    Tool("set_bucket_metadata", "Replaces your own namespace of a bucket's metadata with `data` (a JSON object; {} removes it); other "
+         "writers' namespaces are never changed. At most 8 KB in all for the bucket and 6 levels deep.",
+         {"bucket_id": ID, "data": {"type": "object", "description": "Your namespace, replaced as a whole"}}, ["bucket_id", "data"],
+         method="PUT", path=lambda a: f"{V1}/collection/buckets/{int(a['bucket_id'])}/metadata", body=lambda a: {"data": a["data"]},
+         write=True),
     Tool("list_buckets", "The places the person's copies live in: one per folder of their files (a binder, a deck box, a trade "
          "box) and 'Unsorted', plus any they made. Each has its name, kind (default, folder or made), copies and rows; the "
          "buckets' copies add up to the whole collection. Use a bucket's id as `bucket` in search_cards to see what is in it.",
@@ -561,6 +580,7 @@ SCRYFALL_DATA = {"list_decks",  # the commanders' colour identity is Scryfall's 
                  "update_owned_cards", "show_owned_printings"}  # these carry Scryfall's card images
 OWN_DATA_ONLY = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucket", "move_cards",
                  "list_tags", "tag_cards", "untag_cards", "rename_tag", "delete_tag",
+                 "get_card_metadata", "set_card_metadata", "get_bucket_metadata", "set_bucket_metadata",
                  "get_acquisition_timeline", "parse_decklist", "save_deck", "update_deck", "list_imports",
                  "import_collection_csv", "list_export_formats", "list_shared_with_me", "get_import", "delete_deck",
                  "list_my_shares", "accept_share", "stop_sharing", "start_collection_upload",

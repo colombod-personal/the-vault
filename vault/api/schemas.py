@@ -130,6 +130,7 @@ class PricePoint(BaseModel):
 class CopyRow(BaseModel):
     quantity: int
     folder: str | None = None
+    bucket_id: int | None = Field(None, description="The bucket these copies are in (GET /collection/buckets); a printing can be in several")
     purchase_price: float | None = None
     purchase_date: str | None = None
 
