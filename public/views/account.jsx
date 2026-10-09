@@ -873,12 +873,83 @@ function MoveSection() {
 }
 
 
+function addedAgo(minutes) {
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  const h = Math.floor(minutes / 60);
+  return `${h} hour${h === 1 ? '' : 's'} ago`;
+}
+
+// "Sign out everywhere" starts here (#347). It ends every browser signed in to the account, but it cannot end a way back in
+// that someone who copied a session added meanwhile (their own passkey, their own Google sign-in). So the person first sees
+// what was added in the last day, as the server counts it, and removes what is not theirs; then they sign out everywhere.
+function SignOutEverywhere({ onCancel, onRemoved }) {
+  const api = window.VaultApi;
+  const [found, setFound] = useStateAcc(null); // null while loading, false if the check failed, else the server's page
+  const [error, setError] = useStateAcc(null);
+  const [removing, setRemoving] = useStateAcc(null);
+  const box = useRefAcc(null);
+  const load = () => api.signInMethods.recent().then(setFound).catch(() => setFound(false));
+  useEffectAcc(() => { load(); if (box.current) box.current.focus(); }, []);
+  const remove = async (m) => {
+    setError(null); setRemoving(m.kind + m.id);
+    try { await api.signInMethods.remove(m); await load(); onRemoved && onRemoved(); }
+    catch (e) { setError(e.message); }
+    finally { setRemoving(null); }
+  };
+  const hours = (found && found.recent_hours) || 24;
+  const items = (found && found.items) || [];
+  return (
+    <div className="signout-all" role="group" aria-labelledby="signout-all-title" ref={box} tabIndex={-1}>
+      <p id="signout-all-title" className="signout-all-title">Sign out everywhere</p>
+      <p className="label-mono">
+        This signs out every browser signed in to your account, including this one. Anyone who copied your session could have
+        added a way back in, so check what was added in the last {hours} hours first.
+      </p>
+      {found === null && <p className="label-mono" role="status">Checking what was added in the last {hours} hours…</p>}
+      {found === false && (
+        <p className="label-mono" role="alert" style={{ color: 'var(--danger)' }}>
+          Couldn't check what was added recently. You can still sign out everywhere, then look at your sign-in methods when you sign back in.
+        </p>
+      )}
+      {found && items.length === 0 && <p className="label-mono" role="status">Nothing was added in the last {hours} hours.</p>}
+      {items.length > 0 && (
+        <>
+          <p className="label-mono">Not yours? Remove it before you sign out. Yours? Keep it.</p>
+          <ul className="signout-methods" aria-label={`Sign-in methods added in the last ${hours} hours`}>
+            {items.map((m) => (
+              <li key={m.kind + m.id} className="signout-method">
+                <span className="label-mono">
+                  <strong>{m.kind === 'passkey' ? `Passkey: ${m.name}` : m.name}</strong>
+                  {' '}· {m.kind === 'passkey' ? 'added' : 'linked'} {addedAgo(m.added_minutes_ago)}
+                </span>
+                {m.removable
+                  ? <button className="btn xs" disabled={removing !== null} onClick={() => remove(m)}
+                      aria-label={`Remove ${m.kind === 'passkey' ? 'passkey ' : ''}${m.name}, added ${addedAgo(m.added_minutes_ago)}`}>
+                      {removing === m.kind + m.id ? 'Removing…' : 'Remove'}
+                    </button>
+                  : <span className="label-mono">Your only way to sign in</span>}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {error && <p role="alert" style={{ color: 'var(--danger)' }}>{error}</p>}
+      <div className="signout-actions">
+        <button className="btn sm" disabled={removing !== null} onClick={() => signOut({ everywhere: true })}>Sign out everywhere</button>
+        <button className="btn sm ghost" onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 // Passkeys and linked providers: add a passkey to this account, remove one, link another provider.
 function SignInMethods({ me, onChanged }) {
   const api = window.VaultApi;
   const [keys, setKeys] = useStateAcc([]);
   const [info, setInfo] = useStateAcc(null);
   const [error, setError] = useStateAcc(null);
+  const [leaving, setLeaving] = useStateAcc(false); // the "Sign out everywhere" check is open
   const reload = () => { api.passkeys.list().then(setKeys).catch(() => setKeys([])); };
   useEffectAcc(() => { reload(); api.providers().then(setInfo).catch(() => {}); }, []);
   const add = async () => {
@@ -929,8 +1000,9 @@ function SignInMethods({ me, onChanged }) {
         {/* On a phone the top bar has no room for Sign out, so it is here (layout.css shows .m-only). */}
         <button className="btn sm m-only" onClick={() => signOut()}>Sign out</button>
         <button className="btn sm ghost" title="Signs out every browser signed in to this account, including this one"
-                onClick={() => signOut({ everywhere: true })}>Sign out everywhere</button>
+                aria-expanded={leaving} onClick={() => setLeaving(true)}>Sign out everywhere</button>
       </div>
+      {leaving && <SignOutEverywhere onCancel={() => setLeaving(false)} onRemoved={() => { reload(); onChanged && onChanged(); }} />}
     </Section>
   );
 }

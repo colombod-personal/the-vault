@@ -436,8 +436,14 @@ window.VaultApi = (() => {
       : (e && e.message) || String(e)),
   };
 
+  // Every way to sign in (passkeys and linked providers), for "Sign out everywhere" (#347): the server decides what counts as recent.
+  const signInMethods = {
+    recent: () => call(V1 + '/me/sign-in-methods?recent_only=true'),
+    remove: (m) => call(V1 + (m.kind === 'passkey' ? '/me/passkeys/' : '/me/identities/') + m.id, { method: 'DELETE' }),
+  };
+
   return {
-    ApiError, all, passkeys,
+    ApiError, all, passkeys, signInMethods,
     providers: () => call('/api/auth/providers'),
     me: () => call(V1 + '/me'),
     collection: () => loadCollection(V1 + '/collection'),

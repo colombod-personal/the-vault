@@ -126,6 +126,7 @@ the UV flag is refused (`400` when creating a passkey, `401` when signing in).
 | Sign in (discoverable credentials) | `POST /api/auth/passkey/login/options`, then `.../login/verify {"credential"}` |
 | Add a passkey to your account | `POST /api/auth/passkey/register/options`, then `.../register/verify {"credential", "name"}` |
 | List / remove | `GET /api/v1/me/passkeys`, `DELETE /api/v1/me/passkeys/{id}` (your last sign-in method can't be removed) |
+| Every sign-in method, with when it was added | `GET /api/v1/me/sign-in-methods` (passkeys and linked providers, newest first; `recent_only=true` keeps those added in the last 24 hours, the window "Sign out everywhere" shows), `DELETE /api/v1/me/identities/{id}` to unlink a provider linked in the last 24 hours (your last sign-in method can't be removed) |
 
 `credential` is `PublicKeyCredential.toJSON()`. The relying-party id is `BASE_URL`'s host; on
 Vercel, a deployment without `BASE_URL` uses its own address. Personal access tokens can't add

@@ -21,7 +21,7 @@ This is an engineering document, not legal advice: have the privacy notice
 | Table | Personal? | Contents | Export | Erasure |
 |---|---|---|---|---|
 | `users` | yes | display name, e-mail (from the sign-in provider) | `account.json` | `purge_user` |
-| `identities` | yes | provider, provider user id, e-mail | `account.json` | `purge_user` |
+| `identities` | yes | provider, provider user id, e-mail, and when it was linked to the account (`linked_at`) | `account.json` | `purge_user` |
 | `imports` | yes | file name, date, change summary | `imports.json` | `purge_user` |
 | `collection_baselines` | yes | the cards (copies, condition, folder, price and date paid) of the last file you imported, so the next import can tell what changed in your app from what was edited here | `last_import_cards.json` | `purge_user` |
 | `bucket_baselines` | yes | the same record as `collection_baselines`, for a file imported into one bucket (#124): the cards of the last file imported into that bucket, so a re-import of that bucket applies only what changed in your app; one per bucket, replaced by the next import into it, forgotten by the next whole-collection import | `last_import_cards.json` (`by_bucket`) | `purge_user` (before the buckets), and with its bucket (`ON DELETE CASCADE`) |
@@ -86,6 +86,11 @@ own window, as for any deletion (see the checklist below). **Erasure** (`DELETE 
   Coverage for a shared deck is computed against the *viewer's* own collection.
 - `tests/test_tenancy.py` covers the cross-tenant cases. Extend it with every new
   endpoint that takes an id.
+
+- Sign-in methods are listed with the date each was added (`GET /api/v1/me/sign-in-methods`; nothing new is stored, `created_at` was
+  already kept and exported as `linked_at`), and one added in the last 24 hours can be removed from Account, Sign out everywhere
+  (`DELETE /api/v1/me/identities/{id}`, `DELETE /api/v1/me/passkeys/{id}`; the last sign-in method can't be removed). Only the person's own
+  methods are read or removed, and another person's id is a 404 (`tests/test_recent_sign_in_methods.py`). #347.
 
 - OAuth grants are listed (grouped by app) and revoked by their owner only (`/api/v1/me/apps`, 404 otherwise) and, like personal access
   tokens, never carry account-level powers (`docs/mcp-oauth-threat-model.md`).

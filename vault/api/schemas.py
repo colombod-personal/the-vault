@@ -666,6 +666,23 @@ class PasskeyPage(Page):
     items: list[PasskeyItem]
 
 
+class SignInMethodItem(Hal):
+    id: int = Field(description="The row's id within its kind: a passkey id (DELETE /me/passkeys/{id}) or a linked provider's id (DELETE /me/identities/{id}); the two can be equal")
+    kind: Literal["passkey", "provider"]
+    provider: str = Field(description="passkey, google, microsoft, apple, facebook (or dev on a local server)")
+    name: str = Field(description="What the person sees: the passkey's name, or the provider's")
+    created_at: str = Field(description="When it was added to this account (a provider moved over from an empty account counts from the move)")
+    last_used_at: str | None = Field(None, description="Passkeys only")
+    recently_added: bool = Field(description="Added in the last `recent_hours` hours")
+    added_minutes_ago: int
+    removable: bool = Field(description="False when removing it would be refused (409): it is the only way to sign in, or a provider linked more than `recent_hours` ago")
+
+
+class SignInMethodPage(Page):
+    items: list[SignInMethodItem]
+    recent_hours: int = Field(description="The window `recently_added` and `recent_only` use")
+
+
 # -- card catalog (Scryfall data served by the Vault) ---------------------------------------------
 
 class CardIdentifier(BaseModel):

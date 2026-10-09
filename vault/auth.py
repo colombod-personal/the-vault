@@ -32,6 +32,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
+from datetime import timedelta
 from urllib.parse import urlencode
 
 import httpx
@@ -42,13 +43,13 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from joserfc import jwt
 from joserfc.jwk import ECKey
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from . import outbound
 from .config import Settings
-from .models import Identity, User, new_session_key
+from .models import Identity, User, new_session_key, utcnow
 from .ratelimit import limited
 
 log = logging.getLogger(__name__)
@@ -244,6 +245,10 @@ def _claim_identity(db: Session, identity: Identity, current: User) -> None:
         raise IdentityInUse()
     other = db.get(User, other_id)
     identity.user = current
+    # It is added to *this* account now, whenever it was made on the other one: "sign-in methods added in
+    # the last 24 hours" (#347) must show a method someone linked with a copied session, even if its
+    # own empty account is older.
+    identity.created_at = utcnow()
     db.flush()
     left = db.scalar(select(func.count(Identity.id)).where(Identity.user_id == other_id)) + db.scalar(
         select(func.count(Passkey.id)).where(Passkey.user_id == other_id))
@@ -256,6 +261,69 @@ def _claim_identity(db: Session, identity: Identity, current: User) -> None:
     # No audit table: a log line without personal data.
     log.info("linked a %s sign-in from an empty account (%s)", identity.provider,
              "kept: it has other sign-in methods" if left else "deleted")
+
+
+RECENT_SIGN_IN_METHOD_HOURS = 24  # "Sign out everywhere" lists the sign-in methods added in this window (#347)
+PASSKEY_IDENTITY = "passkey"  # the account's WebAuthn user handle: not a method of its own (each passkey is listed)
+PROVIDER_LABELS = {"google": "Google", "microsoft": "Microsoft", "apple": "Apple", "facebook": "Facebook",
+                   "dev": "Local dev sign-in"}
+
+
+def sign_in_methods(db: Session, user_id: int) -> list[dict]:
+    """Every way to sign in to this account: its linked providers and its passkeys, each with when it was added
+    (``recently_added`` is true inside the last :data:`RECENT_SIGN_IN_METHOD_HOURS`). Scoped to ``user_id``: nobody
+    else's methods are ever read. The passkey identity row is the WebAuthn handle, not a method: the passkeys
+    themselves are listed instead."""
+    from .models import Passkey
+
+    now = utcnow()
+    since = now - timedelta(hours=RECENT_SIGN_IN_METHOD_HOURS)
+    rows = [{"kind": "provider", "id": i.id, "provider": i.provider, "name": PROVIDER_LABELS.get(i.provider, i.provider),
+             "created_at": i.created_at, "last_used_at": None}
+            for i in db.scalars(select(Identity).where(Identity.user_id == user_id, Identity.provider != PASSKEY_IDENTITY))]
+    rows += [{"kind": "passkey", "id": p.id, "provider": PASSKEY_IDENTITY, "name": p.name,
+              "created_at": p.created_at, "last_used_at": p.last_used_at}
+             for p in db.scalars(select(Passkey).where(Passkey.user_id == user_id))]
+    for r in rows:
+        r["recently_added"] = r["created_at"] >= since
+        r["added_minutes_ago"] = max(0, int((now - r["created_at"]).total_seconds() // 60))
+    return rows
+
+
+def remove_identity(db: Session, user_id: int, identity_id: int) -> None:
+    """Unlink one of the account's providers (Google, Microsoft, Apple, Facebook) that was added in the last
+    :data:`RECENT_SIGN_IN_METHOD_HOURS` (409 for an older one), unless it is the last way to sign in (409). Another
+    person's identity, a passkey's handle and an unknown id are all a 404.
+
+    Only a recent one, on purpose (#347): this route exists for "Sign out everywhere", to remove what a copied session
+    linked. Unlinking any provider would let that same copied session (while the owner has no recent-sign-in check yet)
+    link its own sign-in and then unlink every one the owner uses, which is a takeover, not a nuisance. Widening it is part
+    of the owner's decision on a recent sign-in for account-level actions (docs/mcp-oauth-threat-model.md).
+
+    Same shape as :func:`vault.passkeys.remove_passkey`: the account row is locked, so two removals take turns,
+    and the "another way to sign in is left" check is part of the DELETE itself. The caller commits."""
+    from .models import Passkey
+
+    db.execute(select(User.id).where(User.id == user_id).with_for_update())
+    identity = db.get(Identity, identity_id, populate_existing=True)
+    if identity is None or identity.user_id != user_id or identity.provider == PASSKEY_IDENTITY:
+        raise HTTPException(404, "Sign-in method not found")
+    db.expunge(identity)
+    since = utcnow() - timedelta(hours=RECENT_SIGN_IN_METHOD_HOURS)
+    if identity.created_at < since:
+        raise HTTPException(409, f"Only a sign-in linked in the last {RECENT_SIGN_IN_METHOD_HOURS} hours can be unlinked here "
+                                 "(Account, Sign out everywhere).")
+    passkeys = select(func.count(Passkey.id)).where(Passkey.user_id == user_id).scalar_subquery()
+    providers = select(func.count(Identity.id)).where(
+        Identity.user_id == user_id, Identity.provider != PASSKEY_IDENTITY).scalar_subquery()
+    removed = db.execute(
+        delete(Identity).where(Identity.id == identity_id, Identity.user_id == user_id,
+                               Identity.provider != PASSKEY_IDENTITY, Identity.created_at >= since,
+                               passkeys + providers > 1)
+        .execution_options(synchronize_session=False)).rowcount
+    if not removed:
+        raise HTTPException(409, "This is your only way to sign in. Add a passkey or link another sign-in first.")
+    db.flush()
 
 
 def find_or_create(db: Session, profile: Profile, current: User | None = None) -> User:

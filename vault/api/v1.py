@@ -33,7 +33,8 @@ from sqlalchemy.orm import Session
 
 from .. import analytics, deck_text, lab, oauth_server, outbound, tags as card_tags, tokens
 from ..catalog import Catalog
-from ..auth import IdentityInUse, Profile, find_or_create
+from ..auth import (RECENT_SIGN_IN_METHOD_HOURS, IdentityInUse, Profile, find_or_create, remove_identity,
+                    sign_in_methods as account_sign_in_methods)
 from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, history_summary, import_days, view_version
 from .. import archidekt_cache, deck_import, deck_match, deck_overview, deck_refresh, deck_versions, experts, owned_changes
@@ -205,6 +206,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                        "apps": link(f"{V1}/me/apps", title="Apps connected with OAuth (ChatGPT, Claude, ...)"),
                        "tokens": link(f"{V1}/me/tokens", title="Personal access tokens for agents and scripts"),
                        "passkeys": link(f"{V1}/me/passkeys", title="Passkeys that can sign in to this account"),
+                       "sign_in_methods": link(f"{V1}/me/sign-in-methods",
+                                               title="Passkeys and linked providers, with when each was added"),
                        "export": link(f"{V1}/me/export", title="Download all my data (ZIP)"),
                        "collection": link(f"{V1}/collection")},
         }
@@ -305,6 +308,34 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     @router.delete("/me/passkeys/{passkey_id}", tags=["account"], summary="Remove a passkey")
     def delete_passkey(passkey_id: Id, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
         remove_passkey(db, user.id, passkey_id)
+        db.commit()
+        return {"deleted": True}
+
+    # -- sign-in methods: passkeys and linked providers, with when each was added (#347) -------------------
+    @router.get("/me/sign-in-methods", tags=["account"], response_model=S.SignInMethodPage,
+                summary="Every way to sign in to this account (passkeys and linked providers), newest first; "
+                        "recent_only=true keeps those added in the last 24 hours (what \"Sign out everywhere\" offers to remove)")
+    def list_sign_in_methods(request: Request, recent_only: bool = False, cursor: str | None = None,
+                             limit: int | None = None, user: User = Depends(account_user),
+                             db: Session = Depends(get_db)) -> dict:
+        methods = account_sign_in_methods(db, user.id)
+        shown = [m for m in methods if m["recently_added"]] if recent_only else methods
+        page, nxt = paginate(shown, lambda m: (-m["created_at"].timestamp(), m["kind"]), lambda m: m["id"],
+                             cursor=cursor, limit=limit)
+        items = [{"id": m["id"], "kind": m["kind"], "provider": m["provider"], "name": m["name"],
+                  "created_at": _iso(m["created_at"]), "last_used_at": _iso(m["last_used_at"]),
+                  "recently_added": m["recently_added"], "added_minutes_ago": m["added_minutes_ago"],
+                  "removable": len(methods) > 1 and (m["kind"] == "passkey" or m["recently_added"]),
+                  "_links": {"self": link(f"{V1}/me/passkeys/{m['id']}" if m["kind"] == "passkey"
+                                          else f"{V1}/me/identities/{m['id']}")}} for m in page]
+        body = page_body(request, items, nxt, len(shown), **({"recent_only": "true"} if recent_only else {}))
+        return {**body, "recent_hours": RECENT_SIGN_IN_METHOD_HOURS}
+
+    @router.delete("/me/identities/{identity_id}", tags=["account"],
+                   summary="Unlink a provider (Google, Microsoft, Apple, Facebook) linked in the last 24 hours; "
+                           "your last way to sign in can't be removed")
+    def delete_identity(identity_id: Id, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+        remove_identity(db, user.id, identity_id)
         db.commit()
         return {"deleted": True}
 
