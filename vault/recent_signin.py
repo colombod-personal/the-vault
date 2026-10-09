@@ -56,7 +56,6 @@ CODE_SECONDS = 600  # how long an e-mailed code or link works
 MAX_TRIES = 5
 SENDS_PER_HOUR = 3  # per account
 CAP_LOCK = 347_000_347  # pg_advisory_xact_lock key that makes the send caps exact when two accounts ask at once
-SAFETY_SECONDS = 20  # the web app treats "less than this left" as stale, so a click is not refused half a second later
 
 
 def now_ts() -> float:
@@ -197,7 +196,8 @@ button[value=approve]{{background:#1b1b1b;color:#fff}}a{{color:inherit}}
 
 # same-origin, not no-referrer: with no-referrer a browser sends `Origin: null` on the Approve form's POST, and the cross-site-write guard
 # (vault.app.reject_cross_site_writes) would refuse it. The token in the address still never leaves this site in a Referer.
-NO_STORE = {"Cache-Control": "no-store", "Referrer-Policy": "same-origin"}
+NO_STORE = {"Cache-Control": "no-store", "Referrer-Policy": "same-origin", "X-Frame-Options": "DENY",
+            "Content-Security-Policy": "frame-ancestors 'none'; default-src 'none'; style-src 'unsafe-inline'; form-action 'self'"}
 
 
 def _page(title: str, body: str, status_code: int = 200) -> HTMLResponse:
@@ -348,14 +348,14 @@ def build_router(settings: Settings, get_db, account_user) -> APIRouter:
         row = find_link(db, token)
         if row is None:
             return gone()
-        who = db.get(User, row.user_id)
+        address = mail_address(db, row.user_id)
         minutes = max(0, int((utcnow() - row.created_at).total_seconds() / 60))
-        body = (f"<p>Someone asked to confirm it's you on the Vault account {html.escape(mask_address(who.email) if who and who.email else '')}."
+        body = (f"<p>Someone asked to confirm it's you on the Vault account {html.escape(mask_address(address) if address else '')}."
                 f"<br>Asked from <strong>{html.escape(row.asked_from)}</strong>, {minutes} minute{'' if minutes == 1 else 's'} ago.</p>"
                 "<p>Approve only if you just asked for this. If not, press &ldquo;This wasn't me&rdquo;.</p>"
                 '<form method="post" action="/api/auth/recent/email/link">'
                 f'<input type="hidden" name="token" value="{html.escape(token)}">'
-                '<button type="submit" name="decision" value="approve" autofocus>Approve</button>'
+                '<button type="submit" name="decision" value="approve">Approve</button>'
                 "<button type=\"submit\" name=\"decision\" value=\"deny\">This wasn't me</button></form>")
         return _page("Confirm it's you", body)
 

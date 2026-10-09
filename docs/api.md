@@ -139,7 +139,7 @@ https and localhost).
 
 These need a sign-in from the last **10 minutes** (`RECENT_SIGNIN_SECONDS`, 60 to 3600): `DELETE /api/v1/me`, `GET /api/v1/me/export`,
 `POST /api/v1/me/tokens`, `POST /api/auth/passkey/register/options` and `.../register/verify`, `DELETE /api/v1/me/passkeys/{id}` for a passkey **added more than 24 hours ago**, and linking a provider (the sign-in callback, and
-`POST /api/v1/auth/native/{provider}` when the sign-in is new to the account). A stale session gets **403** with the stable code
+`POST /api/v1/auth/native/{provider}` when the sign-in is new to the account), and connecting an AI app: `/oauth/authorize` shows a stale session the sign-in page instead of the consent screen, and refuses an answer sent from a stale session (a reviewer's demo session is exempt). A stale session gets **403** with the stable code
 `recent_sign_in_required` (`"code"` in the problem document, also the `X-Error` header, plus `window_seconds`) and nothing changes.
 Not needed for: "Sign out everywhere" (`POST /api/auth/sign-out-others`), removing a method added in the last 24 hours
 (`DELETE /me/sign-in-methods/recent`, and the single removals above), and everything else. Personal access tokens, connected apps and a

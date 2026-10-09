@@ -209,7 +209,12 @@ function App() {
   const openCard = (c) => { setDrawerCard(c); openOverlay(); };
   const openAccount = () => { setAccountOpen(true); openOverlay(); };
   // Back from a provider's page after "Confirm it's you" (views/account.jsx): open Account where the person was.
-  useEffectApp(() => { try { if (sessionStorage.getItem('vault_confirm_return')) openAccount(); } catch {} }, []);
+  useEffectApp(() => {
+    try {
+      const back = JSON.parse(sessionStorage.getItem('vault_confirm_return') || 'null');
+      if (back && Date.now() - back.at < 15 * 60 * 1000) openAccount(); else sessionStorage.removeItem('vault_confirm_return');
+    } catch {}
+  }, []);
   useEffectApp(() => {
     history.replaceState({ route }, '', vaultUrlFor(route));
     const onPop = (e) => {

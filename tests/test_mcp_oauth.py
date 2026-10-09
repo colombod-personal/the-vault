@@ -250,6 +250,22 @@ def test_signed_out_people_get_a_sign_in_page_then_the_consent_screen(client):
     assert "Allow" in client.authorize().text
 
 
+def test_a_session_that_has_not_signed_in_recently_signs_in_again_before_connecting_an_app(app, client, go_stale):
+    """Connecting an app mints a 30-day credential, the same power as a personal access token, so it needs a recent sign-in (#347):
+    a stale session (a copied cookie) is shown the sign-in page, and a consent screen shown earlier cannot be answered."""
+    client.sign_in()
+    shown_while_fresh = client.authorize()
+    assert "Allow" in shown_while_fresh.text
+    go_stale()
+    stale = client.authorize()
+    assert stale.status_code == 200 and "Sign in to connect Twin Agent" in stale.text and "Allow" not in stale.text
+    answered = client.answer(shown_while_fresh)
+    assert answered.status_code == 400 and "sign-in from the last few minutes" in answered.text
+    assert grant_of(app) is None and db_do(app, lambda db: db.scalar(select(OAuthCode))) is None
+    client.sign_in()  # signing in with a method the account has makes it recent again
+    assert "Allow" in client.authorize().text
+
+
 def test_a_provider_sign_in_returns_to_the_pending_request(client, universe):
     client.authorize()  # signed out: the request waits in the session
     start = client.browser.get("/api/auth/login/google?continue=oauth", follow_redirects=False)

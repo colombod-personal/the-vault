@@ -109,7 +109,7 @@ def export_archive(db: Session, user: User) -> bytes:
     account = {
         "id": user.id, "name": user.name, "email": user.email, "created_at": user.created_at,
         "sign_in_methods": [
-            {"provider": i.provider, "subject": i.subject, "email": i.email, "linked_at": i.created_at}
+            {"provider": i.provider, "subject": i.subject, "email": i.email, "email_verified": i.email_verified, "linked_at": i.created_at}
             for i in user.identities
         ],
     }

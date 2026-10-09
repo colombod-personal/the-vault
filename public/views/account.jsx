@@ -458,8 +458,13 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged, onCo
   const [confirming, setConfirming] = useStateAcc(null); // { what, resolve } while "Confirm it's you" is open
   const [back, setBack] = useStateAcc(null); // what to say after a provider sign-in came back
   const api = window.VaultApi;
-  const askConfirm = (what) => new Promise((resolve) => { if (confirming) confirming.resolve(false); setConfirming({ what, resolve }); });
-  const closeConfirm = (ok) => { if (confirming) confirming.resolve(ok); setConfirming(null); };
+  const pendingAsk = useRefAcc(null); // the open prompt's resolver: a ref, so an older render's closure still settles the right one
+  const askConfirm = (what) => new Promise((resolve) => {
+    if (pendingAsk.current) pendingAsk.current(false);
+    pendingAsk.current = resolve;
+    setConfirming({ what });
+  });
+  const closeConfirm = (ok) => { if (pendingAsk.current) pendingAsk.current(ok); pendingAsk.current = null; setConfirming(null); };
   // Coming back from a provider's page after "Continue with Google" (ConfirmItsYou): say whether it confirmed.
   useEffectAcc(() => {
     let marker = null;
@@ -1046,7 +1051,7 @@ function addedAgo(minutes) {
 // What can be removed is the server's answer (`removable`, `removable_reason`): the page never decides.
 const WHY_NOT = {
   only_method: 'Your only way to sign in. Add your own passkey first (Add a passkey, above), then this can be removed.',
-  provider_too_old: "Linked more than 24 hours ago: it can't be unlinked here yet (docs/mcp-oauth-threat-model.md says what that needs).",
+  provider_too_old: "Linked more than 24 hours ago, so it can't be unlinked here. Only a sign-in linked in the last 24 hours can be.",
   recent_sign_in_required: 'Added more than 24 hours ago, so removing it needs a recent sign-in: confirm it\'s you first.',
   needs_older_method: "Can't be removed yet: no other sign-in is more than 24 hours old, so it can't be told from one someone else added. Try again when another is a day old.",
 };
