@@ -552,6 +552,11 @@ window.VaultApi = (() => {
       return chunks.join('\n');
     },
 
+    // the deck ideas lab (docs/deck-ideas-lab-design.md): a saved deck in role lanes (`lane`, `limit` and `cursor` page one lane;
+    // `include_combos` also asks Commander Spellbook), and the owned cards that could stand in for one card of it
+    deckIdeas: (id, params) => call(V1 + '/decks/' + encodeURIComponent(id) + '/ideas' + query(params)),
+    deckAlternatives: (id, card, params) => call(V1 + '/decks/' + encodeURIComponent(id) + '/ideas/alternatives' + query({ card, ...params })),
+
     // sharing
     shares: () => all(V1 + '/shares'),
     createShare: (kind, deck_id, show_costs) => create(V1 + '/shares', { json: { kind, deck_id, show_costs } }),
