@@ -76,11 +76,42 @@ Measured with `scripts/measure_phone.js` at 390 x 844, signed in, on a local Vau
 | Help | 9 | 0 | 63 | 0 | no |
 | A card's panel, the Account panel | 82, 103 | 0 | | 0 (after the small colour pip's letter went to 12 px) | no |
 
-Screenshots at 390 px: [Vault](screenshots/phone-dashboard-390.jpg), [Browse](screenshots/phone-browse-390.jpg), [Sets](screenshots/phone-sets-390.jpg), [a deck](screenshots/phone-deck-390.jpg), [Lab](screenshots/phone-lab-390.jpg). Decks (library), Graph, Value and Help were measured but not photographed (the browser pane stopped drawing before they were taken).
+Screenshots at 390 px: see the next section (all of them were retaken on 2026-10-09; the Lab shown here on 2026-10-08 was the one #164 replaced).
 
 What the pass changed: every control a finger taps is 44 px high (the colour filters of the Graph 44 x 44); chips, buttons and the bottom tab labels are 11 px (they were 9 to 10.5 px); text is 12 px or more (it was 10 to 11 px: table notes, quantities, deltas, the footer, card-art placeholders, the freshness line); small texts set in the markup are raised to 12 px; the stat cards let a label and its cue, and the freshness line, wrap as whole words.
 
 **Not done, and not claimed:**
 - The text drawn inside SVG charts (the Value chart's axis, the Graph's node labels) is not counted: it scales with its chart.
-- On Lab and Value, a summary leads, but the tables stay tables (four short columns that fit without scrolling, the card name pinned); they do not become lists.
 - The phone views were not checked on a real iPhone.
+
+## Lab and Value as summaries and lists, every view photographed (#95, 2026-10-09)
+
+**What the rows asked.** "Lab and Valuation lead with a summary, and their tables become lists on a phone" and "checked with a collection the size of the owner's (~22,000 cards), screenshots of every view at 390x844".
+
+**The collection.** A synthetic one, so that nothing personal is photographed: invented card names, 269 invented sets, invented prices, built to the size and shape of the owner's export (14,597 rows, **21,950 copies**, 9,169 printings, 7,136 card names, 37 purchase months, one folder), imported through `POST /api/v1/imports` into a local Postgres, with eight saved decks of 93 to 108 cards and 400 days of value history. The generator (`seed95.py`, `seed95b.py`) is not in the repository: the numbers and the screenshots are. The owner's own export was used only for #314's first measurement.
+
+**Found.**
+- The **Lab** (rebuilt in #164) already leads with three counters (what to buy, what to sell, profit and loss) and has no table: its cards to buy, decks and spare copies are lists. No change needed; measured below.
+- The **Value** view led with a summary, but the half screen above the figures was the price date and two buttons stacked in a column, and its **ledger of months was a table**: on a phone the last two of its five columns (market value added, cumulative value) were off the right edge of a scrolling box (screenshot before: the "Market" header cut at the screen's edge).
+
+**Changed.** On a phone the price date and the buttons sit in a row under the title, so the four figures start on the first screen; the ledger is a list (month and value added on the first line, cards added, spend and cumulative value on the second), 12 months at a time with a "Show 12 more months" button (44 px), filter and sort full width. The table is still what wider screens get (the list is `display: none` there). `tests/test_tap_targets.py` keeps both.
+
+**Measured** with `scripts/measure_phone.js` at 390 x 844 on that collection, after the change:
+
+| View | Controls | Under 44 px | Texts | Under 12 px (11 px for labels) | Scrolls sideways |
+|---|---|---|---|---|---|
+| Vault | 42 | 0 | 214 | 0 | no |
+| Browse | 143 | 0 | 586 | 0 | no |
+| Sets | 281 | 0 | 1,371 | 0 | no |
+| One set (269 sets, the busiest) | 71 | 0 | 366 | 0 | no |
+| Decks (library, 8 decks) | 22 | 0 | 89 | 0 | no |
+| A saved deck, tab Cards | 87 | 0 | 551 | 0 | no |
+| Ideas (the Graph's route opens it) | 11 | 0 | 77 | 0 | no |
+| **Lab** (8 decks, 6,990 spare cards) | 83 | 0 | 465 | 0 | no |
+| **Value** | 23 (was 22) | 0 | 114 (was 267: the table's cells are no longer shown) | 0 | no |
+| Help | 9 | 0 | 65 | 0 | no |
+| The Account panel | 89 | 0 | 307 | 0 | no |
+
+Screenshots (390 x 844, the first screen unless named): [Vault](screenshots/phone-dashboard-390.jpg), [Browse](screenshots/phone-browse-390.jpg), [Sets](screenshots/phone-sets-390.jpg), [a set](screenshots/phone-setdetail-390.jpg), [Decks](screenshots/phone-decks-390.jpg), [a saved deck](screenshots/phone-deck-390.jpg), [Ideas](screenshots/phone-ideas-390.jpg), [Lab](screenshots/phone-lab-390.jpg) (summary), [Lab: cards to buy](screenshots/phone-lab-buy-390.jpg), [Lab: spare copies](screenshots/phone-lab-sell-390.jpg), [Value](screenshots/phone-value-390.jpg), [Value: the ledger as a list](screenshots/phone-value-ledger-390.jpg), [Help](screenshots/phone-help-390.jpg), [Account](screenshots/phone-account-390.jpg).
+
+**Not done.** The Browse table is still a table that scrolls sideways inside its panel with the card name pinned (it is not part of this row). Not checked on a real iPhone. The synthetic prices and names are not the owner's, so the Lab's lists show invented cards.
