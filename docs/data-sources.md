@@ -102,7 +102,7 @@ What this means:
 
 | Source | What it has | Terms (read first-hand) | Verdict |
 |---|---|---|---|
-| **17Lands public datasets** (`17lands.com/public_datasets`) | Draft picks, game results and replays for each set and format (PremierDraft, TradDraft, Sealed, a Powered Cube...), updated every few weeks | "Unless otherwise noted, these data sets are licensed under a **Creative Commons Attribution 4.0** International License." Attribution required; the site's own terms forbid reselling its content and exploiting protected content, which the dataset licence overrides for these files | **Usable** with attribution. Files are large (one set and format: draft 75 MB, game 22 MB gzipped), so we never store them: a scheduled job computes small per-card aggregates (games in hand, win rate in hand, pick counts) and keeps only those, labelled "17Lands data, CC BY 4.0, set, format, date" |
+| **17Lands public datasets** (`17lands.com/public_datasets`) | Draft picks, game results and replays for each set and format (PremierDraft, TradDraft, Sealed, a Powered Cube...), updated every few weeks | "Unless otherwise noted, these data sets are licensed under a **Creative Commons Attribution 4.0** International License." Attribution required; the site's own terms forbid reselling its content and exploiting protected content, which the dataset licence overrides for these files | **Usable** with attribution (page, terms and guidelines re-read 2026-10-09: design, exact credit text and what must not be claimed are in `docs/limited-data-design.md`). Files are large (one set and format: draft 75 MB, game 22 MB gzipped), so we never store them: a scheduled job computes small per-card aggregates (games in hand, win rate in hand, pick counts) and keeps only those, labelled "17Lands data, CC BY 4.0, set, format, date" |
 | MTGGoldfish | Metagame shares, decklists, prices | Terms of Use: "intended solely for personal, non-commercial use"; contents may not be reproduced or republished | **Not used as data.** Links only |
 | MTGTop8 | Tournament decklists | No terms of use found on the site; the page says Wizards owns the card information; no API | **Not used.** Ask them first if we ever want it |
 | EDHREC | Commander popularity | Already recorded: not fetched by the Vault; popularity comes from Scryfall's `edhrec_rank` field only | Unchanged |
@@ -110,5 +110,5 @@ What this means:
 
 Consequences for the council (docs/expert-council.md):
 - **Competitive metagame:** no licensed source found; format experts keep labelling metagame statements as opinion.
-- **Limited:** 17Lands aggregates can ground draft help (what a card's win rate in hand is, by set), with attribution; this is a data job plus tool, not yet built (new issue).
+- **Limited:** 17Lands aggregates can ground draft help (what a card's win rate in hand is, by set), with attribution; this is a data job plus tool, not yet built (#178; design in `docs/limited-data-design.md`).
 - **Do not scrape** MTGGoldfish, MTGTop8 or EDHREC; ask for permission or an API if a source is wanted.
