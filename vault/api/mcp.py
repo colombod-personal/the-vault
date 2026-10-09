@@ -173,6 +173,11 @@ ID = {"type": "integer", "minimum": 1, "maximum": MAX_ID}
 SHARE = {"share_id": {**ID, "description": "Read a collection someone shared with you (from list_shared_with_me) instead of your own"}}
 DECKLIST = {"type": "string", "maxLength": 50_000}  # as the API's TextIn and DeckIn
 CONFIRM = {"type": "boolean", "description": "true only after the person agreed to this exact change"}
+TAG_PATTERN = "^[a-z0-9:-]{1,40}$"
+TAG = {"type": "string", "pattern": TAG_PATTERN, "description": "A tag: 1 to 40 lower case letters, digits, '-' and ':' "
+                                                                "(trade, commander-staple, deck:sliver)"}
+CARD_IDS = {"type": "array", "minItems": 1, "maxItems": 200, "items": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"},
+            "description": "Card ids from search_cards (a tag is on the card, so every printing of it gives the same tag)"}
 OWNED_LINES = {"type": "array", "minItems": 1, "maxItems": 50, "items": {
     "type": "object", "required": ["action", "name", "quantity"], "additionalProperties": False, "properties": {
         "action": {"type": "string", "enum": ["add", "remove", "set"], "description": "add or remove copies, or set how many"},
@@ -226,9 +231,41 @@ TOOLS = [
           "bucket": {"type": "integer", "minimum": 1, "maximum": MAX_ID,
                      "description": "Only the copies in this bucket (a place copies live in, from list_buckets): 'what is in my trade "
                                     "binder?'. Not on a shared collection"},
+          "tag": {"type": "string", "pattern": TAG_PATTERN, "maxLength": 40,
+                  "description": "Only cards the person tagged with this (from list_tags): 'show my trade cards'. Every item "
+                                 "also lists its `tags`. Not on a shared collection"},
           **PAGING, **SHARE},
          path=lambda a: _base(a) + "/cards",
-         query=("q", "set", "name", "finish", "condition", "printing", "type", "mana_value", "bucket", "sort", "limit", "cursor")),
+         query=("q", "set", "name", "finish", "condition", "printing", "type", "mana_value", "bucket", "tag", "sort", "limit", "cursor")),
+    Tool("list_tags", "The person's own labels on cards (trade, commander-staple, deck:sliver ...), each with how many cards have it and "
+         "how many of those assignments were written by the person, by an assistant or by the system. A tag is on the card "
+         "(every printing), survives imports and stays when the last copy leaves. Use a tag as `tag` in search_cards to see its cards.",
+         {"query": {"type": "string", "maxLength": 40, "description": "Text in the tag's name"}, **PAGING},
+         path=lambda a: f"{V1}/collection/tags", query=("q", "limit", "cursor")),
+    Tool("tag_cards", "Puts a tag on cards (the tag exists while a card has it; there is nothing to create first). Give card ids "
+         "from search_cards. Tags you write are recorded as written by this app and shown as such: never present them as the "
+         "person's own. More than 25 cards is shown first (applied false) and applied only when sent again with confirm true "
+         "after the person agreed. A card can have 50 tags and a person 500 different ones; a copy the Vault could not match to "
+         "a card can't take a tag.",
+         {"tag": TAG, "card_ids": CARD_IDS, "confirm": CONFIRM}, ["tag", "card_ids"],
+         method="POST", path=lambda a: f"{V1}/collection/tags/{a['tag']}/cards",
+         body=lambda a: {"card_ids": a["card_ids"], **({"confirm": True} if a.get("confirm") is True else {})}, write=True),
+    Tool("untag_cards", "Takes a tag off cards; the cards and their other tags stay, and a tag nobody has any more is gone. More "
+         "than 25 cards is shown first (applied false) and applied only when sent again with confirm true after the person agreed.",
+         {"tag": TAG, "card_ids": CARD_IDS, "confirm": CONFIRM}, ["tag", "card_ids"],
+         method="POST", path=lambda a: f"{V1}/collection/tags/{a['tag']}/cards/remove",
+         body=lambda a: {"card_ids": a["card_ids"], **({"confirm": True} if a.get("confirm") is True else {})},
+         write=True, destructive=True),
+    Tool("rename_tag", "Renames a tag on every card that has it; a card that already has the new name keeps one tag.",
+         {"tag": TAG, "name": {"type": "string", "pattern": TAG_PATTERN, "minLength": 1, "maxLength": 40, "description": "The new name"}},
+         ["tag", "name"], method="PATCH", path=lambda a: f"{V1}/collection/tags/{a['tag']}",
+         body=lambda a: {"name": a["name"]}, write=True),
+    Tool("delete_tag", "Removes a tag from every card that has it (the cards stay). With confirm false or absent it returns the "
+         "tag (how many cards have it, how many are owned, which apps wrote it) and changes nothing; with confirm true it deletes "
+         "it.",
+         {"tag": TAG, "confirm": CONFIRM}, ["tag"],
+         method=lambda a: "DELETE" if a.get("confirm") is True else "GET",
+         path=lambda a: f"{V1}/collection/tags/{a['tag']}", write=True, destructive=True),
     Tool("list_buckets", "The places the person's copies live in: one per folder of their files (a binder, a deck box, a trade "
          "box) and 'Unsorted', plus any they made. Each has its name, kind (default, folder or made), copies and rows; the "
          "buckets' copies add up to the whole collection. Use a bucket's id as `bucket` in search_cards to see what is in it.",
@@ -501,6 +538,7 @@ SCRYFALL_DATA = {"list_decks",  # the commanders' colour identity is Scryfall's 
                  "check_decklist", "lookup_cards", "get_deck", "get_shared_deck",
                  "update_owned_cards", "show_owned_printings"}  # these carry Scryfall's card images
 OWN_DATA_ONLY = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucket", "move_cards",
+                 "list_tags", "tag_cards", "untag_cards", "rename_tag", "delete_tag",
                  "get_acquisition_timeline", "parse_decklist", "save_deck", "update_deck", "list_imports",
                  "import_collection_csv", "list_export_formats", "list_shared_with_me", "get_import", "delete_deck",
                  "list_my_shares", "accept_share", "stop_sharing", "start_collection_upload",

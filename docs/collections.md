@@ -103,6 +103,16 @@ integer `version`, at most 8 KB), the tag check (`^[a-z0-9:-]{1,40}$`) and the `
 (`purge_user`) and export (`buckets.json`, `tags.json`, `card_annotations.json`); `docs/gdpr.md` and `public/privacy.html`. Tests:
 `tests/test_buckets.py`.
 
-Not built yet (they are #123, #124, #127 and the issues after them): the REST routes and MCP tools; the limits of 100 buckets a person
-creates, 50 tags per card and 500 distinct tags (enforced where they are written, not in the schema); the `bucket` filter and field
-in the collection answers; importing into one bucket; the web app.
+Built since (#123): the buckets REST routes and MCP tools (list, make, rename, delete when empty, move copies), the limit of 100 buckets
+a person makes by hand, and the `bucket` filter on the collection answers and exports.
+
+Built since (#127, tags): `/api/v1/collection/tags` and the MCP tools `list_tags`, `tag_cards`, `untag_cards`, `rename_tag`, `delete_tag`.
+A tag exists while a card has it (tagging makes it; there is no separate "create"), tagging by a printing's id tags the card, a copy the
+importer could not match can't take a tag (422), and the limits of 50 tags per card and 500 distinct tags are enforced where they are
+written (409). Who wrote an assignment is decided by how the caller is signed in (`vault/tags.py`, `writer_of`): the web and native apps
+are the person; an OAuth app or a personal access token is an assistant, recorded with its name and shown so. More than 25 cards in one
+tagging or untagging is shown first and applied only with confirm. `/collection/cards` takes `tag` and lists each card's `tags` (own
+collection only; the ETag includes the person's tags so a change shows). Tests: `tests/test_tags_api.py`, `tests/test_tag_tools.py`.
+
+Not built yet: the `vault_metadata` routes and tools (rest of #127), importing into one bucket (#124), the tag and bucket filters on the
+analytics (#130), the web app (#125, #128).
