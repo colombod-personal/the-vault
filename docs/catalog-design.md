@@ -191,6 +191,12 @@ matters and it is the same in every shape tried: **43% to 47%**. These are gener
 measured every day by the budget guard (`db_budget: tables_mb`, `price_snapshots`, in the job log), so the real before and after are the
 logged sizes of the run before and the run after the deploy that carries 0113.
 
+**Production's figure (read from the daily job's logs on 2026-10-09; the deploy of 0113 was on 2026-10-07 around 11:00).** The run of
+6 October ("after the price sync") logged `price_snapshots` at **7.2 MB**; the run of 7 October ("before the price sync", the first run
+after the migration) logged **4.1 MB**: **43% smaller**, the figure the generated rows predicted (43% to 47%). Since then a day's sync adds
+about 0.4 MB to 1.9 MB (6.0 MB before and 6.4 MB after the run of 8 October), and the thinning of `docs/catalog-design.md` "Price history"
+keeps the table from growing past a year of points. The whole database was 207.8 MB (20% of the free plan) on 8 October.
+
 Why a `uuid` and not the 4-byte integer the first estimate assumed: an integer key needs a printing-number table and a join in every
 reader; the native uuid gets most of the saving (the key is 16 bytes instead of 37, in the table and in the index) with no new table.
 The cost is that a text id that is not a UUID can no longer be a key. Scryfall's ids are UUIDs, but `entries.scryfall_id` can hold
