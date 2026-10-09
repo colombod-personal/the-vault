@@ -484,7 +484,7 @@ four criteria; only the third is built, because the others wait for a decision f
 
 ### Built: "Sign out everywhere" ends the other sessions, then shows and removes sign-in methods (criterion 3)
 
-Three read-only agent reviews of this change (2026-10-09, before any merge; no human review yet) found the problems recorded
+Four read-only agent reviews of this change (the author's and three independent ones) (2026-10-09, before any merge; no human review yet) found the problems recorded
 below as "found by review"; each is fixed and tested. The first version listed only what was added in the last 24 hours and signed out last.
 
 - **What the person sees, in this order on purpose.** Account, Sign-in methods, "Sign out everywhere" opens a panel.
@@ -492,8 +492,10 @@ below as "found by review"; each is fixed and tested. The first version listed o
   browser's cookie with the new one, so a copied cookie is dead from this moment and this browser stays signed in. Because a copied
   cookie can also mint more than a browser session (sign in with the attacker's own Google and hand over to an app, or create a
   personal access token or consent to a connected app), step 1 also signs out **every app session** (`api_sessions` with their retired
-  refresh tokens, and unused hand-over codes; the Vault app asks the person to sign in again) and removes the **personal access tokens
-  and connected apps created in the last 24 hours**; older ones are the person's own doing and stay (they are listed under Agents &
+  refresh tokens, and unused hand-over codes; the Vault app asks the person to sign in again), the **OAuth authorization codes not yet
+  redeemed** (a code lives 60 seconds and is redeemed at `/oauth/token` with no cookie, so one minted by the copy would otherwise make a
+  30-day grant after the answer) and unanswered consent screens, and removes the **personal access tokens and connected apps created in
+  the last 24 hours**; older ones are the person's own doing and stay (they are listed under Agents &
   API and Connected apps). The page says exactly this before the button and counts what went afterwards. *Step 2*: the panel
   lists **all** the sign-in methods with their dates (the ones added in the last 24 hours first, marked "new"), each with Remove where the
   server says it can be removed, and the reason where it cannot. Then "Done", or "Also sign out of this browser".
@@ -513,11 +515,16 @@ below as "found by review"; each is fixed and tested. The first version listed o
   stays signed in; their other browsers sign in again). Removing nothing ends nothing. *Found by the second review* (the "Done" of the
   first version never rotated again). Test: the attacker signs in through the planted passkey, the owner removes it, the attacker's new
   cookie is 401 (`tests/test_passkeys.py`).
-- **A request already past authentication cannot add a method after the session ended.** `register_verify` re-reads `users.session_key`
-  under the account's `FOR UPDATE` lock and compares it with the cookie's (401 on a mismatch; a bearer-token caller is not checked
-  this way); the provider link does the same under the lock it takes (`find_or_create(..., expect_key=)`, for a new identity and for
-  moving one over; `SessionEnded` sends the person back to `/` with `session_ended`). Tests: the key is replaced between authentication
-  and the write; no passkey or identity is added.
+- **A request already past authentication cannot mint anything after the session ended.** One helper, `require_live_session`
+  (`vault/auth.py`), re-reads `users.session_key` with `SELECT … FOR UPDATE` in the same transaction as the insert and compares it with
+  the cookie's (401 `SessionEnded` on a mismatch; a bearer-token caller has no cookie and is skipped). It runs right before the insert in:
+  the passkey register, `POST /me/tokens` (inside the idempotent work), the native sign-in that links or returns the cookie's own account,
+  `POST /api/auth/app-handoff` (the one-time code for the app) and the OAuth consent answer (the authorization code). The provider link
+  does the same under the locks it takes (`find_or_create(..., expect_key=)`, for a new identity and for moving one over; the callback
+  sends the person back to `/` with `session_ended`). Step 1 takes the same lock when it replaces the key, so a mint is ordered either
+  before it (and then deleted by it) or after it (and refused). Tests (`tests/test_sign_out_others_*.py`, `tests/test_passkeys.py`,
+  `tests/test_recent_sign_in_methods.py`): for each route the key is replaced between authentication and the check and nothing is
+  minted; with the check removed they fail. *Found by the third review* (the first version re-checked only the passkey and the link).
 - **The one rule for every removal: a method older than 24 hours must remain afterwards.** `established_methods` (`vault/auth.py`) counts
   the OTHER providers and passkeys older than the window, and each removal (`remove_identity`, `remove_passkey`,
   `remove_recent_methods`) has it inside its own `DELETE` statement after locking the account row, so two removals at once take turns
@@ -570,6 +577,14 @@ sign-in (criteria 1 and 2 below), which is why they are listed and not worked ar
   cookie, but not a method the attacker already planted.
 - *Step 1 ends every app session, but a personal access token or connected app made more than 24 hours ago is
   not ended,* because it is the person's own doing; if a copied session made one and the owner waited a day, it must be revoked by hand.
+- *A code redeemed at the same moment as step 1.* `/oauth/token` and `/api/v1/auth/token` do not take the account lock: a code redeemed
+  in the few milliseconds between step 1 reading and deleting the grants can leave one grant that step 1 did not see. It shows in
+  Connected apps (created in the last minute) and is revoked there; closing it means locking the account in both redeem paths.
+
+**Known effect on the owner (not fixed).** The cookie is re-issued by the response that rotates the key. A parallel request from the
+owner's own browser sent just before that response arrives still carries the old cookie and gets a 401: the web app then shows the
+sign-in screen and clears its offline copy. A reload recovers it (the new cookie is in the browser by then). It happens after step 1
+and after each removal of a sign-in method, the moments the owner is looking at the panel.
 
 ### Proposed, waiting for the owner: a recent sign-in for account-level actions (criteria 1, 2 and 4)
 

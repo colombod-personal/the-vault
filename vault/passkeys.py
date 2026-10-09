@@ -48,7 +48,7 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
 )
 
-from .auth import RECENT_SIGN_IN_METHOD_HOURS, Profile, established_methods, rotate_session_key, session_key_matches
+from .auth import RECENT_SIGN_IN_METHOD_HOURS, Profile, established_methods, require_live_session, rotate_session_key
 from .config import Settings
 from .models import Identity, Passkey, PasskeyChallenge, User, utcnow
 from .ratelimit import limited
@@ -210,10 +210,7 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         # The account has one WebAuthn user handle. If another device added the first passkey
         # while this request was open, its handle won: a passkey made with ours could never sign
         # in, so start again (the account row is locked so two of these can't both decide).
-        live = db.scalar(select(User.session_key).where(User.id == user.id).with_for_update())
-        if getattr(request.state, "bearer", None) is None and not session_key_matches(live, request.session.get("sk")):
-            # the session was ended (sign out everywhere, a removal) while this request ran: it may not add a method (#347)
-            raise HTTPException(401, "Your session ended. Sign in again.")
+        require_live_session(db, request, user.id)  # the session was ended (sign out everywhere, a removal) while this ran (#347)
         if db.scalar(select(func.count(Passkey.id)).where(Passkey.user_id == user.id)) >= MAX_PASSKEYS:  # under the lock
             raise too_many()
         identity = db.scalar(select(Identity).where(Identity.user_id == user.id, Identity.provider == PROVIDER))

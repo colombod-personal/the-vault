@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 from .. import analytics, deck_text, lab, oauth_server, outbound, tags as card_tags, tokens
 from ..catalog import Catalog
 from ..auth import (RECENT_SIGN_IN_METHOD_HOURS, IdentityInUse, Profile, find_or_create, remove_identity,
-                    remove_recent_methods, sign_in_methods as account_sign_in_methods, why_not_removable)
+                    remove_recent_methods, require_live_session, sign_in_methods as account_sign_in_methods, why_not_removable)
 from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, history_summary, import_days, view_version
 from .. import archidekt_cache, deck_import, deck_match, deck_overview, deck_refresh, deck_versions, experts, owned_changes
@@ -165,10 +165,14 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         name = body.name if provider == "apple" else claims.get("name")
         if "account" not in request.state.scopes:  # a personal access token can't add sign-in methods
             current = None
+        by_cookie = current is not None and getattr(request.state, "bearer", None) is None
         try:
-            user = find_or_create(db, Profile(provider, str(claims["sub"]), claims.get("email"), name), current)
+            user = find_or_create(db, Profile(provider, str(claims["sub"]), claims.get("email"), name), current,
+                                  request.session.get("sk") if by_cookie else None)
         except IdentityInUse as exc:
             raise HTTPException(409, str(exc)) from exc
+        if by_cookie and user.id == current.id:  # signed in by a copied cookie would mint an app session for the account (#347)
+            require_live_session(db, request, user.id)
         return tokens.issue(db, user, "app", body.device_name)
 
     @router.post("/auth/token", tags=["auth"], response_model=S.TokenResponse,
@@ -358,6 +362,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     def create_token(request: Request, body: S.AccessTokenIn, user: User = Depends(account_user),
                      db: Session = Depends(get_db)):
         def run() -> dict:
+            require_live_session(db, request, user.id)  # not after "Sign out the other browsers" ended this session (#347)
             row, token = tokens.create_pat(db, user, body.name.strip() or "Agent", body.scopes, body.expires_in_days)
             return {**_token(row), "token": token, "mcp_url": f"{settings.base_url}/api/mcp"}
 

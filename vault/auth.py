@@ -189,13 +189,35 @@ PKCE_CHALLENGE = re.compile(r"[A-Za-z0-9_-]{43,128}")
 CANCELLED = {"user_cancelled_authorize": "access_denied", "user_denied": "access_denied"}
 
 
-class SessionEnded(Exception):
+class SessionEnded(HTTPException):
     """The browser's session was ended (its account's session key was replaced) while a request that was already past
-    authentication was still running: it must not add a sign-in method (#347)."""
+    authentication was still running: it must not add a sign-in method or mint anything that outlives the session (#347).
+    A 401; the routes that answer with a redirect or a page catch it and say so in their own way."""
+
+    def __init__(self) -> None:
+        super().__init__(401, "Your session ended. Sign in again.")
 
 
 def session_key_matches(live: str | None, expected) -> bool:
     return bool(live) and isinstance(expected, str) and hmac.compare_digest(live, expected)
+
+
+def require_live_session(db: Session, request: Request, user_id: int) -> None:
+    """Hold the request to the session it was authenticated with, right before it mints something that outlives it (an app
+    session, a personal access token, an authorization code, a hand-over code, a passkey) (#347).
+
+    "Sign out the other browsers" replaces ``users.session_key`` and deletes what a copied cookie minted; a request that was
+    already past authentication when that committed would otherwise mint afterwards. This reads the key again with
+    ``SELECT … FOR UPDATE`` and compares it with the cookie's: on a mismatch (401, ``SessionEnded``) nothing is minted. The
+    lock is held until the caller's transaction ends, so the insert that follows is ordered after the rotation. Call it in the
+    same transaction as the insert, with nothing committed in between. A bearer-token caller has no cookie and is skipped:
+    its token is checked per request (and step 1 deletes app sessions)."""
+    if getattr(request.state, "bearer", None) is not None:
+        return
+    live = db.scalar(select(User.session_key).where(User.id == user_id).with_for_update())
+    if not session_key_matches(live, request.session.get("sk")):
+        db.rollback()
+        raise SessionEnded()
 
 
 def rotate_session_key(db: Session, user_id: int, request: Request | None = None) -> None:
@@ -205,7 +227,8 @@ def rotate_session_key(db: Session, user_id: int, request: Request | None = None
     caller's transaction commits; the account row is already locked by the removal."""
     user = db.get(User, user_id)
     user.session_key = new_session_key()
-    if request is not None and "sk" in request.session:
+    # Only the cookie of this account is re-issued: a bearer-token caller (no session) or a cookie of another account is left alone.
+    if request is not None and request.session.get("uid") == user_id and "sk" in request.session:
         request.session["sk"] = user.session_key
 
 
@@ -215,8 +238,11 @@ def end_other_sessions(db: Session, user: User, request: Request) -> dict:
     (``api_sessions`` with their retired refresh tokens, and unused hand-over codes), and the personal access tokens and
     connected apps created in the last :data:`RECENT_SIGN_IN_METHOD_HOURS`. Older tokens and connected apps are the person's
     own doing and stay; the answer counts what went so the page can say so. The caller commits."""
-    from .models import AccessToken, ApiSession, AuthCode, OAuthGrant
+    from .models import AccessToken, ApiSession, AuthCode, OAuthCode, OAuthConsent, OAuthGrant
 
+    # The account row first: a request that minted something and holds this lock finishes before the deletes below look for it,
+    # and one that asks for the lock afterwards reads the new key and is refused (:func:`require_live_session`).
+    db.execute(select(User.id).where(User.id == user.id).with_for_update())
     since = utcnow() - timedelta(hours=RECENT_SIGN_IN_METHOD_HOURS)
     gone = {
         "apps_signed_out": db.execute(delete(ApiSession).where(ApiSession.user_id == user.id)).rowcount or 0,
@@ -226,6 +252,10 @@ def end_other_sessions(db: Session, user: User, request: Request) -> dict:
             OAuthGrant.user_id == user.id, OAuthGrant.created_at >= since)).rowcount or 0,
     }
     db.execute(delete(AuthCode).where(AuthCode.user_id == user.id))
+    # An authorization code minted with the copied cookie lives 60 seconds and is redeemed at /oauth/token with no cookie: it
+    # would make a 30-day grant after the answer above. Unredeemed codes and unanswered consent screens go too.
+    db.execute(delete(OAuthCode).where(OAuthCode.user_id == user.id, OAuthCode.used_at.is_(None)))
+    db.execute(delete(OAuthConsent).where(OAuthConsent.user_id == user.id))
     user.session_key = new_session_key()
     request.session["sk"] = user.session_key
     return gone
@@ -654,6 +684,10 @@ def build_router(auth: Auth, get_db) -> APIRouter:
             return RedirectResponse(f"{target}?{urlencode({'error': 'access_denied'})}", status_code=303)
         from . import tokens
 
+        try:
+            require_live_session(db, request, user.id)  # the session may have been ended while this request ran (#347)
+        except SessionEnded:
+            return RedirectResponse(f"{target}?{urlencode({'error': 'access_denied'})}", status_code=303)
         code = tokens.create_code(db, user, handoff["code_challenge"], target)
         return RedirectResponse(f"{target}?{urlencode({'code': code})}", status_code=303)
 

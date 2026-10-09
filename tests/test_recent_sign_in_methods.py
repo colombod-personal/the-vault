@@ -606,3 +606,89 @@ def test_a_request_already_past_authentication_cannot_link_a_provider_after_the_
         # the live key is accepted
         find_or_create(db, Profile("google", "owner-own-sub", None, None), current=db.get(User, owner), expect_key=user.session_key)
         assert db.scalar(select(Identity.id).where(Identity.subject == "owner-own-sub")) is not None
+
+
+# -- fourth round: what the third independent review found (2026-10-09) ------------------------------------------------------
+
+
+def test_a_token_request_already_past_authentication_mints_nothing_after_the_session_ended(client, monkeypatch):
+    """POST /me/tokens re-reads the account's session key under the lock before inserting (also with an Idempotency-Key)."""
+    from vault.api import v1 as v1_module
+    from vault.models import AccessToken, new_session_key
+
+    real = v1_module.require_live_session
+
+    def rotate_first(db, request, user_id):
+        with sessions(client) as other:
+            other.get(User, user_id).session_key = new_session_key()
+            other.commit()
+        return real(db, request, user_id)
+
+    monkeypatch.setattr(v1_module, "require_live_session", rotate_first)
+    for headers in ({}, {"Idempotency-Key": "k-1"}):
+        me = login(client, "ann@example.com")  # (the first answer ended the cookie: sign in again)
+        res = client.post(f"{V1}/me/tokens", json={"name": "late", "scopes": ["read"], "expires_in_days": 30}, headers=headers)
+        assert res.status_code == 401 and "session ended" in res.json()["detail"], res.text
+    with sessions(client) as db:
+        assert db.scalar(select(func.count(AccessToken.id)).where(AccessToken.user_id == me)) == 0
+
+
+def test_a_token_is_still_made_while_the_session_lives(client):
+    login(client, "ann@example.com")
+    assert client.post(f"{V1}/me/tokens", json={"name": "ok", "scopes": ["read"], "expires_in_days": 30}).status_code == 201
+
+
+def test_the_cookie_is_reissued_only_for_the_account_whose_method_was_removed():
+    """rotate_session_key re-issues a cookie only when it is this account's (uid matches and it holds a key): a bearer caller
+    (no session) and a cookie of another account are left as they are."""
+    from types import SimpleNamespace
+
+    from vault.auth import rotate_session_key
+
+    row = SimpleNamespace(session_key="old")
+
+    class Db:
+        def get(self, model, ident):
+            return row
+
+    for session, reissued in (({"uid": 7, "sk": "old"}, True), ({}, False), ({"uid": 8, "sk": "other"}, False),
+                              ({"uid": 7}, False), ({"uid": 7, "sk": "old"}, True)):
+        row.session_key = "old"
+        request = SimpleNamespace(session=dict(session))
+        rotate_session_key(Db(), 7, request)
+        assert row.session_key != "old"  # the account's key always changes
+        assert (request.session.get("sk") == row.session_key) is reissued
+        assert request.session.get("sk") in (None, "other", "old", row.session_key)
+    rotate_session_key(Db(), 7, None)  # no request at all (a direct call): nothing to re-issue, nothing fails
+
+
+def test_step_1_waits_for_a_mint_in_flight_and_then_deletes_it(client):
+    """A token insert holds the account lock (as require_live_session does) while step 1 starts: step 1 waits, then its deletes
+    see the committed token and remove it, instead of replacing the key first and leaving the token alive."""
+    from types import SimpleNamespace
+
+    from vault.auth import end_other_sessions
+    from vault.models import AccessToken
+
+    me = login(client, "ann@example.com")
+    db = client.app.state.db
+    outcome = {}
+
+    def step_1():
+        with db.sessions() as s:
+            outcome["gone"] = end_other_sessions(s, s.get(User, me), SimpleNamespace(session={}))
+            s.commit()
+
+    with db.sessions() as s:
+        s.execute(select(User.session_key).where(User.id == me).with_for_update())  # the mint holds the account
+        tokens.create_pat(s, s.get(User, me), "in flight", ["read"], 30)
+        s.flush()
+        racer = threading.Thread(target=step_1)
+        racer.start()
+        time.sleep(0.5)
+        assert racer.is_alive()  # waiting for the lock
+        s.commit()
+    racer.join(20)
+    assert outcome["gone"]["tokens_removed"] == 1
+    with db.sessions() as s:
+        assert s.scalar(select(func.count(AccessToken.id)).where(AccessToken.user_id == me)) == 0
