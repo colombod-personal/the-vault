@@ -40,13 +40,12 @@ def test_the_plugin_copies_of_the_skills_carry_it_too():
         assert "`whoami`" in copy.read_text(encoding="utf-8"), copy
 
 
-def test_the_onboarding_design_does_not_claim_the_first_run_prompt_exists():
-    """docs/onboarding.md says whoami is called by the vault_start prompt, which is a design: it must not be in PROMPTS unannounced,
-    and the doc must keep saying it is not built."""
+def test_the_onboarding_doc_says_the_first_run_prompt_is_built():
+    """docs/onboarding.md says whoami is called by the vault_start prompt: the doc and PROMPTS must agree on whether it exists."""
     doc = (ROOT / "docs" / "onboarding.md").read_text(encoding="utf-8")
-    assert "vault_start" in doc and "Nothing here is built" in doc
-    if "vault_start" not in {p["name"] for p in PROMPTS}:
-        assert "is still only this design and is not in `PROMPTS`" in doc
+    built = "vault_start" in {p["name"] for p in PROMPTS}
+    assert built and "## As built (#153" in doc and "Nothing here is built" not in doc
+    assert "is still only this design and is not in `PROMPTS`" not in doc
 
 
 def test_whoami_is_a_tool_the_server_lists():
