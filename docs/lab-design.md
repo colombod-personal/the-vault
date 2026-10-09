@@ -1,6 +1,6 @@
 # The Lab: decide what to buy, sell, trade or keep (design for #162, epic #158)
 
-Status: agreed by the owner on 2026-10-08 (#287: decisions 10 to 16, all as recommended). Nothing here is built yet; implementation is #164.
+Status: agreed by the owner on 2026-10-08 (#287: decisions 10 to 16, all as recommended). Implementation is #164. Built so far: the server side of tasks 1 and 2 (`GET /collection/spare`, `/collection/spare/printings`, `GET /collection/pnl`, the market-only `summary` of `GET /collection/history`, the tools `list_spare_copies` and `get_collection_pnl`; code in `vault/lab.py`, tests in `tests/test_lab_server.py`, see "Server implementation notes" at the end). Task 3 (#165) and the web page are not built.
 
 Owner direction (2026-10-05, `docs/graph-and-lab-review.md`): **the Lab helps with decisions about buying and selling.** Decks are a view; what matters is whether each deck can stand on its own, and whether a card should move or be bought. This page turns that into sections, data, wireframes and tests.
 
@@ -229,3 +229,15 @@ The implementation (task 5) must update `docs/ai-parity.md`, `public/llms.txt` a
 4. Web: the new Lab page (sections 0, 1, 2a, 2b and 2c) consuming tasks 1 to 3, with every state; remove the old sections; change the page heading and screen label to "Lab" if decision 1 is yes.
 5. Docs: `docs/api.md`, `docs/ai-parity.md`, `public/llms.txt`, skills.
 6. Production visual pass (#175) after it ships, at 1400 and 390 px.
+
+## Server implementation notes (tasks 1 and 2)
+
+Where the design left a choice, the server does this (change here and in `vault/lab.py` together):
+
+- **Needed copies.** Until the extended `GET /decks/overlap` (#165) is on main, `vault.lab.deck_needs` computes `needed` as the design defines it: the copies each readable saved deck needs by name (front face, any printing, basic lands left out), summed across decks. `need_for_all` from #165 replaces that one function. A saved deck the parser cannot read is skipped and reported (`decks_skipped`), as `/decks/overlap` does.
+- **Status.** `GET /collection/spare` answers `status`: `empty_collection` (no copies), `no_decks` (no readable saved deck: nothing is listed, never the whole collection) or `ok`.
+- **Allocation unit.** A row is a printing group (`GET /collection/cards` ids). The decks keep copies cheapest first; at equal prices unmarked copies first; then by group id. A copy with no price counts as price 0, so it is kept before a priced copy. Printing rows are listed cheapest first (the allocation order). `trade_marked_quantity` counts the marked copies among the spare ones.
+- **Unpriced** means the collection view has no price (0) for the printing. `summary.priced_copies` and `unpriced_copies` count spare copies.
+- **Profit and loss.** A holding is a printing group; its counted copies are the ones with a price paid (`copies`). `net_gain` is null while no holding is counted. `summary.reason` carries the one-line reason from the design when `covered_copies` is 0 (plus "the collection is empty"). `side` defaults to `winners`.
+- **Links.** `scryfall_link` is the printing's `scryfall_uri` from the card table, null when the Vault holds no card data for it; `scryfall_search` is always given (a search by card name).
+- **Limits.** `LAB_LIMIT` (120 a minute per person) covers the three routes, which each read the whole collection.

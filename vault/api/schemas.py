@@ -209,8 +209,21 @@ class DayValue(BaseModel):
     imported: bool = Field(False, description="A file was imported that day (a change there may be cards, not prices)")
 
 
+class HistorySummary(BaseModel):
+    """The market value over the requested range (`since` to the last day), computed by the server. It carries no cost:
+    history's market value covers every holding while cost exists only for rows with a price paid recorded, so setting
+    them side by side would mix two populations (`GET /collection/pnl` compares one cohort)."""
+    model_config = ConfigDict(populate_by_name=True)
+    from_: str | None = Field(None, alias="from", description="The first day with a value in the range (null when there is none)")
+    to: str | None = Field(None, description="The last day with a value in the range")
+    market_start: float | None = None
+    market_end: float | None = None
+    market_change: float | None = Field(None, description="market_end - market_start")
+
+
 class HistoryPage(Page):
     items: list[DayValue]
+    summary: HistorySummary = Field(description="Over every day in the range, not just this page")
 
 
 # -- account, tokens -----------------------------------------------------------------------------
@@ -808,6 +821,107 @@ class RefreshProgress(Hal):
     unavailable: bool = Field(False, description="Scryfall didn't answer part of this call: wait, then call again")
     prices_as_of: str | None = None
     version: str = Field(description="The collection's version after this call")
+
+
+# -- the Lab: spare copies, profit and loss (docs/lab-design.md) ---------------------------------------------
+
+class SparePrinting(Hal):
+    id: str = Field(description="The printing group's id, the same as `GET /collection/cards` items")
+    scryfall_id: str | None = Field(None, description="Null for a copy the importer could not match to a printing")
+    set: SetRef
+    collector_number: str
+    printing: str
+    finish: str
+    condition: str
+    language: str
+    spare_quantity: int
+    unit_price: float | None = Field(None, description="Null when the Vault has no price for this printing")
+    price_status: Literal["priced", "unpriced"]
+    trade_marked_quantity: int = Field(description="Of the spare copies, how many are marked for trade")
+    scryfall_link: str | None = Field(None, description="That printing's Scryfall page; null when the Vault holds no card data for it")
+    scryfall_search: str = Field(description="A Scryfall search by the card's name (what to use when `scryfall_link` is null)")
+
+
+class SpareName(Hal):
+    name: str
+    have: int = Field(description="All copies owned, any printing")
+    needed: int = Field(description="Copies the saved decks need together, summed across decks")
+    spare: int = Field(description="max(0, have - needed); only names above 0 are listed")
+    market_value_of_spare: float
+    priced_copies: int
+    unpriced_copies: int = Field(description="Spare copies with no price: counted in `spare`, worth nothing in the value")
+    deck_count: int = Field(description="How many saved decks use the card")
+    printing_rows_total: int
+    printings: list[SparePrinting] = Field(description="At most 10 printing rows, cheapest first (the allocation order); "
+                                           "`_links.printings` pages all of them")
+
+
+class SpareSummary(BaseModel):
+    names: int
+    copies: int
+    market_value: float
+    priced_copies: int
+    unpriced_copies: int
+
+
+class SparePage(Page):
+    items: list[SpareName]
+    status: Literal["ok", "no_decks", "empty_collection"]
+    note: str
+    summary: SpareSummary = Field(description="Over every spare card, whatever the page size")
+    decks_analysed: int
+    decks_skipped: int = Field(description="Saved decks the Vault could not read; their cards are not counted as needed")
+    prices_as_of: str | None = None
+
+
+class SparePrintingPage(Page):
+    items: list[SparePrinting]
+    name: str
+    status: Literal["ok", "no_decks", "empty_collection"]
+    have: int
+    needed: int
+    spare: int
+    market_value_of_spare: float
+    prices_as_of: str | None = None
+
+
+class PnlItem(Hal):
+    id: str
+    name: str
+    set: SetRef
+    collector_number: str
+    printing: str
+    finish: str
+    condition: str
+    language: str
+    quantity: int = Field(description="All copies of the printing")
+    copies: int = Field(description="Copies with a price paid recorded: the ones paid, market_value and gain are about")
+    paid: float
+    unit_price: float = Field(description="Today's market price of one copy")
+    market_value: float = Field(description="unit_price times copies")
+    gain: float = Field(description="market_value - paid")
+    gain_pct: float | None = None
+    scryfall_id: str | None = None
+    scryfall_link: str | None = None
+    scryfall_search: str
+
+
+class PnlSummary(BaseModel):
+    biggest_gain: PnlItem | None = Field(None, description="Null when no counted holding is above cost")
+    biggest_loss: PnlItem | None = Field(None, description="Null when no counted holding is below cost")
+    net_gain: float | None = Field(None, description="The sum of the gains of the counted holdings; null when none is counted")
+    total_copies: int
+    covered_copies: int = Field(description="Copies counted: a price paid and a current market price are both known")
+    unknown_cost_copies: int = Field(description="No price paid recorded (a copy with neither is counted here)")
+    unpriced_market_copies: int = Field(description="A price paid but no current market price")
+    reason: str | None = Field(None, description="Why there is nothing to show; null while some holding is counted")
+
+
+class PnlPage(Page):
+    items: list[PnlItem]
+    side: Literal["winners", "losers"]
+    summary: PnlSummary = Field(description="The same on every page and on both sides")
+    prices_as_of: str | None = None
 
 
 # -- deck independence (#165, docs/deck-independence.md) ------------------------------------------------------

@@ -255,6 +255,13 @@ def test_a_filtered_value_history_prices_the_selections_copies_at_each_days_pric
     assert sum(p["market"] for p in per_bucket) == pytest.approx(summary["market_value"] + 0.2 + 0.05)  # Sol Ring + Mountain + unknown
     page = stocked.get(f"{COL}/history", params={"tag": "staple", "limit": 1}).json()
     assert page["count"] == 1 and "tag=staple" in page["_links"]["self"]["href"] and "tag=staple" in page["_links"]["next"]["href"]
+    # the summary's two ends are the selection's own (the Lab's market-only summary, docs/lab-design.md), not the whole inventory's
+    selected = page["summary"]
+    assert selected["from"] == before.isoformat() and selected["to"] == today.isoformat()
+    assert selected["market_start"] == pytest.approx(13.8) and selected["market_end"] == pytest.approx(staple[today.isoformat()]["market"])
+    assert selected["market_change"] == pytest.approx(round(selected["market_end"] - selected["market_start"], 2))
+    whole = stocked.get(f"{COL}/history").json()["summary"]
+    assert whole["market_start"] == 0.0 and whole["market_end"] == pytest.approx(whole_today["market"])  # the recorded totals
 
 
 # -- the MCP tools -----------------------------------------------------------------------------
