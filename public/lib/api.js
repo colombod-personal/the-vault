@@ -429,6 +429,13 @@ window.VaultApi = (() => {
       body.append('file', file);
       return create(V1 + '/imports', { body });
     },
+    // buckets (#125): the places copies live in; a move writes the target's name as the copies' folder and is recorded as a change
+    buckets: () => all(V1 + '/collection/buckets'),
+    createBucket: (name) => create(V1 + '/collection/buckets', { json: { name } }),
+    renameBucket: (id, name) => call(V1 + '/collection/buckets/' + id, { method: 'PATCH', json: { name } }),
+    deleteBucket: (id) => call(V1 + '/collection/buckets/' + id, { method: 'DELETE' }),
+    moveCards: (from, to, lines, confirm) => create(V1 + '/collection/buckets/' + from + '/move', { json: { to, lines, confirm } }),
+    cardDetail: (href) => call(href),
     archidektDeck: (id, refresh = false) => call(V1 + '/archidekt/decks/' + encodeURIComponent(id) + '?detail=cards' + (refresh ? '&refresh=true' : '')),
     logout: (everywhere = false) => call('/api/auth/logout' + (everywhere ? '?everywhere=true' : ''), { method: 'POST' })
       .finally(() => localStore.clear()),

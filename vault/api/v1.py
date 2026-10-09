@@ -468,7 +468,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
             def body():
                 # the rows this printing came from, bounded so one response stays small (copies_total counts all)
-                copies = [dict(c, purchase_price=None if ctx.hide_costs else c["purchase_price"]) for c in g.copies[:MAX_COPY_ROWS]]
+                copies = [dict(c, purchase_price=None if ctx.hide_costs else c["purchase_price"], bucket_id=c["bucket_id"] if ctx.own else None)
+                          for c in g.copies[:MAX_COPY_ROWS]]  # buckets are the owner's own grouping, not part of a share
                 links = card_links(ctx, g) | {"collection": link(ctx.base),
                                               "same_card": link(f"{ctx.base}/cards?{urlencode({'name': g.name.split(' // ')[0]})}")}
                 card_data = card_out(view.card_data(g))
