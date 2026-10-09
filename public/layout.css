@@ -645,6 +645,13 @@ p.tag-note { margin: 0 0 14px; font-size: 12px; }
 .signout-why { color: var(--text-2); font-size: 12px; text-transform: none; letter-spacing: 0; }
 .signout-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .signout-actions .btn { min-height: 44px; }
+/* Confirm it's you (#347): a step at the top of the Account panel that stays in view while the panel scrolls. */
+.confirm-its-you { position: sticky; top: 0; z-index: 5; margin: 0 0 16px; padding: 12px; background: var(--surface); border: 1px solid var(--gold); border-radius: var(--radius); display: flex; flex-direction: column; gap: 8px; }
+.confirm-its-you:focus { outline: none; }
+.confirm-its-you:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.confirm-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.confirm-actions .btn { min-height: 44px; font-size: 12px; }
+.confirm-code { min-height: 44px; font-size: 20px; letter-spacing: 0.25em; text-align: center; max-width: 12em; }
 
 /* ---- Value (#95): the ledger of months is a list on a phone, the summary leads ----
    The table (wider screens) and the list (phones) are both in the page; one of them is display: none. */

@@ -45,6 +45,7 @@ This is an engineering document, not legal advice: have the privacy notice
 | `idempotent_requests` | yes | stored answers to retried POSTs (24 hours) | – (short-lived copies of answers already in the export) | `purge_user` |
 | `staged_uploads` | yes | a collection file an assistant asked the person to upload (the file itself, its name, when, and the bucket it goes into, if any), until it is applied or its link expires (one hour); only a hash of the link is stored | – (the person's own file, gone within the hour; the import it becomes is in the export) | applied, deleted when expired (the daily job, and whenever someone starts a link), `purge_user` |
 | `auth_codes` | yes | one-time sign-in codes for apps (2 minutes) | – (expire in minutes) | `purge_user` |
+| `email_codes` | yes | a code and link e-mailed to the address on the account to confirm it is the person before a serious account action (#347): only keyed hashes of the code, of the link's token and of the browser session that asked, what asked (a coarse browser and system such as "Chrome on Windows", never an IP address), tries and times. The code works for **10 minutes**, once; the row is kept **2 days** only because the send caps (3 an hour per account, a daily total) count it | – (hashes of short-lived secrets, no profile data) | the daily retention job after 2 days; `purge_user` |
 | `collection_values` | yes | daily market value and cost | `value_history.json` | `purge_user` |
 | `native_nonces` | no | hashes of used native sign-in nonces and Facebook data-deletion requests, until they would expire | – | deleted when expired |
 | `passkey_challenges` | no | a passkey ceremony someone tried to finish (random id, five minutes; the challenge itself is in the session cookie), naming no one | – | deleted once expired |
@@ -136,7 +137,16 @@ own window, as for any deletion (see the checklist below). **Erasure** (`DELETE 
       DPA covers them), Neon, GitHub (the price job), the four sign-in providers in `vault/auth.py` (Google, Microsoft, Apple,
       Facebook) and passkeys (no third party), Scryfall (card images in the browser; identifiers only from the server),
       Commander Spellbook (`vault/combos.py` sends a deck's card names and nothing that identifies the person), Archidekt
-      (a GET of a public deck by number) and the AI assistant the person connects (their own choice, scoped, revocable).
+      (a GET of a public deck by number), Resend (`vault/email.py`: the account's e-mail address and a one-time code, only when the
+      person asks for one and only once `RESEND_API_KEY` is set) and the AI assistant the person connects (their own choice, scoped, revocable).
       `tests/test_legal_pages.py` fails if the notice stops naming one of them. Add any new outbound host here and in the notice.
+- [ ] **Resend** (`vault/email.py`, only when `RESEND_API_KEY` is set) receives the account's e-mail address and the confirmation
+      message (a six-digit code and a link). Before the key is set: sign Resend's DPA, and check what Resend retains. Read from Resend's
+      own pages on 2026-10-09 (not legal advice, and not a promise by Resend): its privacy policy (resend.com/legal/privacy-policy,
+      last updated 2026-08-27) describes the processing of its website visitors, says personal data is kept "only for as long as is
+      necessary" and may be processed in the United States, names no retention period for customers' e-mail content and points to a
+      subprocessors page; its account limits page (resend.com/docs/knowledge-base/account-quotas-and-limits) says e-mail content,
+      metadata, delivery status, events and logs are kept 30 days on the Free plan. The Vault stores nothing at Resend beyond that and
+      sends nothing but this one message, only when the person asks. See Resend's own terms for the current position.
 - [ ] Have a breach procedure: the supervisory authority must be notified within 72 hours.
 - [ ] Decide on inactive-account retention (for example, warn after 24 months, then delete).

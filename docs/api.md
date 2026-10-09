@@ -125,8 +125,8 @@ the UV flag is refused (`400` when creating a passkey, `401` when signing in).
 | New account | `POST /api/auth/passkey/signup/options {"name"}`, then `.../signup/verify {"credential", "name"}` |
 | Sign in (discoverable credentials) | `POST /api/auth/passkey/login/options`, then `.../login/verify {"credential"}` |
 | Add a passkey to your account | `POST /api/auth/passkey/register/options`, then `.../register/verify {"credential", "name"}` |
-| List / remove | `GET /api/v1/me/passkeys`, `DELETE /api/v1/me/passkeys/{id}` (your last sign-in method can't be removed; nor one while no other method older than 24 hours would remain) |
-| Every sign-in method, with when it was added | `GET /api/v1/me/sign-in-methods` (passkeys and linked providers, newest first; `recent_only=true` keeps those added in the last 24 hours; each has `removable` and, when false, `removable_reason`), `DELETE /api/v1/me/identities/{id}` to unlink a provider linked in the last 24 hours, `DELETE /api/v1/me/sign-in-methods/recent` to remove everything added in the last 24 hours. Every removal needs another method **older than 24 hours** to remain (409 otherwise; also for `DELETE /me/passkeys/{id}`), so a copied session cannot replace your methods with its own; your last method is never removed |
+| List / remove | `GET /api/v1/me/passkeys`, `DELETE /api/v1/me/passkeys/{id}` (your last sign-in method can't be removed; nor one while no other method older than 24 hours would remain; one added more than 24 hours ago needs a recent sign-in, below) |
+| Every sign-in method, with when it was added | `GET /api/v1/me/sign-in-methods` (passkeys and linked providers, newest first; `recent_only=true` keeps those added in the last 24 hours; each has `removable` and, when false, `removable_reason`: `only_method`, `needs_older_method` or `recent_sign_in_required`), `DELETE /api/v1/me/identities/{id}` to unlink a provider (one linked more than 24 hours ago needs a recent sign-in, below), `DELETE /api/v1/me/sign-in-methods/recent` to remove everything added in the last 24 hours. Every removal needs another method **older than 24 hours** to remain (409 otherwise; also for `DELETE /me/passkeys/{id}`), so a copied session cannot replace your methods with its own; your last method is never removed |
 | End the other sessions | `POST /api/auth/sign-out-others` (this browser stays signed in on a re-issued cookie; also signs out every app session, ends unredeemed OAuth authorization codes and removes personal access tokens and connected apps made in the last 24 hours, and says how many: `apps_signed_out`, `tokens_removed`, `connected_apps_removed`; the first step of Account, Sign out everywhere; a reviewer's demo session gets 403). Removing a sign-in method does the same for the browsers |
 | Passkey limit | at most 20 per account (409 at `register/options` and `register/verify`) |
 
@@ -134,6 +134,34 @@ the UV flag is refused (`400` when creating a passkey, `401` when signing in).
 Vercel, a deployment without `BASE_URL` uses its own address. Personal access tokens can't add
 passkeys. `GET /api/auth/providers` says whether passkeys are available (`"passkeys": true` on
 https and localhost).
+
+### A recent sign-in for the serious account actions (#347)
+
+These need a sign-in from the last **10 minutes** (`RECENT_SIGNIN_SECONDS`, 60 to 3600): `DELETE /api/v1/me`, `GET /api/v1/me/export`,
+`POST /api/v1/me/tokens`, `POST /api/auth/passkey/register/options` and `.../register/verify`, `DELETE /api/v1/me/passkeys/{id}` and
+`DELETE /api/v1/me/identities/{id}` for a method **added more than 24 hours ago**, and linking a provider (the sign-in callback, and
+`POST /api/v1/auth/native/{provider}` when the sign-in is new to the account). A stale session gets **403** with the stable code
+`recent_sign_in_required` (`"code"` in the problem document, also the `X-Error` header, plus `window_seconds`) and nothing changes.
+Not needed for: "Sign out everywhere" (`POST /api/auth/sign-out-others`), removing a method added in the last 24 hours
+(`DELETE /me/sign-in-methods/recent`, and the single removals above), and everything else. Personal access tokens, connected apps and a
+reviewer's demo session never had these powers (403 as before, without the code).
+
+A session is recent when it signed in with a method **the account already had** (a passkey, a linked provider) or confirmed with an
+e-mailed code. Signing in with a provider that is *new* to the account is a link, and does not make a session recent. A cookie from before
+the release counts as stale. An app (a bearer token of the Vault app) is as recent as its app session: refreshing does not renew it,
+signing in again in the app (a new session) does; apps do not use the e-mailed code.
+
+| | |
+|---|---|
+| `GET /api/v1/me/recent-sign-in` | `{fresh, seconds_left, window_seconds, email: {available, to, reason}}`: `to` is the masked address (`***@e***.com`), `reason` is `no_sender`, `no_address` or `app` when `available` is false |
+| `POST /api/auth/recent/email/start` | e-mails a six-digit code **and** a link to the address on the account; answers `{sent, to, expires_in}` (masked address, never the code). Needs `RESEND_API_KEY`: without it, or without an address on the account, 409 `email_unavailable` / `no_email_on_account` (confirm with a passkey or a linked provider instead). 429 `email_hourly_limit` (3 an hour for an account) or `email_daily_cap` (`EMAIL_DAILY_CAP`, default 90 a day for the Vault, below Resend's free 100); 502 `email_send_failed` |
+| `POST /api/auth/recent/email/confirm {"code"}` | the code from the e-mail. Works once, for 10 minutes, **only in the browser session that asked** (bound to the account's session key and that browser), dies after 5 tries (`wrong_code` with `tries_left`, then `code_dead`); 400 `no_code` when none is waiting. Answers `{fresh: true, seconds_left}` and the cookie becomes recent |
+| `GET /api/auth/recent/email/link?token=` | the page the e-mail's link opens: says who asked (browser, minutes ago) and has **Approve** and **This wasn't me** buttons. Opening it changes nothing, so a mail scanner or link preview cannot spend the code. `POST` of the form approves or cancels; approving elsewhere is picked up by the browser that asked |
+| `POST /api/auth/recent/email/poll` | has the link been approved? `{fresh: true}` confirms this browser (once), else `{fresh: false, waiting}` |
+
+Only keyed hashes of the code, the link and the session are stored (`email_codes`, 2 days, `docs/gdpr.md`). Mail goes through Resend
+(`vault/email.py`, `ResendSender`) and nothing is sent unless `RESEND_API_KEY` is set; `EMAIL_FROM` defaults to
+`The Vault <login@mtgvault.cards>` and must be on a domain verified at Resend. Tests use `twins/resend.py`.
 
 ### Rate limits
 
@@ -144,7 +172,8 @@ is stored). Over the limit they answer `429` (problem+json) with `Retry-After` i
 | Endpoints | Requests per minute | Setting |
 |---|---|---|
 | `POST /api/auth/passkey/{signup,register,login}/options`, `GET /api/auth/login/{provider}`, `GET\|POST /api/auth/callback/{provider}`, `POST /api/facebook/data-deletion`, `GET /api/facebook/deletion-status` | 30 | `AUTH_RATE_LIMIT` |
-| `POST /api/auth/passkey/{signup,register,login}/verify`, `POST /api/v1/auth/native/{provider}`, `POST /api/v1/auth/token` | 10 | `AUTH_VERIFY_RATE_LIMIT` |
+| `POST /api/auth/passkey/{signup,register,login}/verify`, `POST /api/v1/auth/native/{provider}`, `POST /api/v1/auth/token`, `POST /api/auth/recent/email/{start,confirm}`, `GET\|POST /api/auth/recent/email/link` | 10 | `AUTH_VERIFY_RATE_LIMIT` |
+| `POST /api/auth/recent/email/poll` (the page asks every 4 seconds while a code is awaited) | 30 | `AUTH_RATE_LIMIT` |
 | `POST /api/v1/collection/refresh` (per signed-in user, not per IP) | 20 | `REFRESH_RATE_LIMIT` |
 | `POST /api/v1/cards/lookup` with `refresh: true` (per signed-in user; a call to Scryfall for up to 75 printings) | 20 | `LOOKUP_REFRESH_LIMIT` |
 | `GET /api/v1/archidekt/decks/{id}`, `POST /api/v1/decks/import-link` and `POST /api/v1/decks/{id}/refresh`: the calls that really go to Archidekt, together (per signed-in user; a read served from the cache is never limited, and over the limit the copy the Vault holds is served, only a deck it holds no copy of is refused) | 30 | `ARCHIDEKT_LIMIT` |
@@ -180,14 +209,15 @@ ignored and the connection's address is used.
 | POST | `/api/v1/auth/native/{provider}` | native ID token → tokens |
 | POST | `/api/v1/auth/token` | redeem an app code (PKCE) or rotate a refresh token |
 | POST | `/api/v1/auth/revoke` | sign this app out |
-| GET / PATCH / DELETE | `/api/v1/me` | profile / change display name / delete account (`{"confirm": "DELETE"}`) |
-| GET | `/api/v1/me/export` | everything held about you, as a ZIP (GDPR) |
+| GET / PATCH / DELETE | `/api/v1/me` | profile / change display name / delete account (`{"confirm": "DELETE"}`; needs a recent sign-in) |
+| GET | `/api/v1/me/export` | everything held about you, as a ZIP (GDPR; needs a recent sign-in) |
+| GET | `/api/v1/me/recent-sign-in` | whether this session signed in recently, and whether a code can be e-mailed (see "A recent sign-in for the serious account actions"). Account endpoint: not for tokens, no MCP tool |
 | GET / DELETE | `/api/v1/me/sessions[/{id}]` | signed-in apps |
 | GET / DELETE | `/api/v1/me/apps[/{id}]` | apps connected with OAuth (ChatGPT, Claude, ...): one row per app: name, domain, scopes, number of connections, first connected, last used, idle; disconnect revokes all its connections. Account endpoints: not for tokens, no MCP tool |
 | GET | `/.well-known/oauth-protected-resource[/api/mcp]`, `/.well-known/oauth-authorization-server` | OAuth discovery (RFC 9728, RFC 8414) |
 | GET / POST | `/oauth/authorize` | OAuth authorization request (PKCE S256, `resource`) and the consent answer; HTML pages, see `agents.md` |
 | POST | `/oauth/token`, `/oauth/revoke`, `/oauth/register` | OAuth token endpoint (authorization_code, refresh_token), revocation, dynamic client registration |
-| POST / GET / DELETE | `/api/v1/me/tokens[/{id}]` | personal access tokens for agents and scripts (shown once) |
+| POST / GET / DELETE | `/api/v1/me/tokens[/{id}]` | personal access tokens for agents and scripts (shown once; creating one needs a recent sign-in) |
 | GET | `/api/v1/collection` | summary: copies, printings, value, cost, dates, links. P&L over the copies with a known cost only (a non-zero price paid recorded): `pnl` (`known_cost_market - known_cost_paid`, null when no cost is known), `pnl_pct`, `known_cost_paid`, `known_cost_market`, `known_cost_copies`, `unknown_cost_copies` (all null when costs are hidden) |
 | GET | `/api/v1/collection/buckets` | the places your copies are grouped in (#121, #123): one per folder of your files and "Unsorted", plus the ones you make; each with `kind` (default, folder or made), `position`, `copies`, `entries` (rows), `vault_metadata`; cursor-paged; the buckets' copies add up to the inventory |
 | GET | `/api/v1/collection/buckets/{id}` | one bucket; another person's id is 404. A card's detail (`/collection/cards/{id}`) names the bucket of each copy row (`copies[].bucket_id`; null on a shared collection, where buckets are not shown) |

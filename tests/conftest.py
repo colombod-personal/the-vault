@@ -130,6 +130,22 @@ def client(app):
 
 
 @pytest.fixture
+def go_stale(monkeypatch):
+    """Call it after signing in: the clock the recent-sign-in check reads moves on, so the session's sign-in is no longer
+    recent (#347). ``go_stale(seconds)`` moves it by that much (default: a little over the 10-minute window). Cumulative."""
+    from vault import recent_signin
+
+    moved = {"by": 0}
+    real = recent_signin.now_ts
+
+    def go(seconds: int = 700) -> None:
+        moved["by"] += seconds
+
+    monkeypatch.setattr(recent_signin, "now_ts", lambda: real() + moved["by"])
+    return go
+
+
+@pytest.fixture
 def signed_in(client):
     assert client.post("/api/auth/dev-login").status_code == 200
     return client

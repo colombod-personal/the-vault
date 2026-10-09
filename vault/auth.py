@@ -48,7 +48,7 @@ from sqlalchemy import delete, exists, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from . import outbound
+from . import outbound, recent_signin
 from .config import Settings
 from .locks import lock_account, lock_accounts
 from .models import Identity, User, new_session_key, utcnow
@@ -412,17 +412,18 @@ def established_methods(user_id: int, since, *, skip_identity: int | None = None
     return providers.scalar_subquery() + passkeys.scalar_subquery()
 
 
-def why_not_removable(method: dict, methods: list[dict]) -> str | None:
+def why_not_removable(method: dict, methods: list[dict], fresh: bool = False) -> str | None:
     """Why ``method`` (one of ``methods``, from :func:`sign_in_methods`) would be refused if the person tried to remove it, or
     None. The same rules the removal routes apply, so the page shows a Remove button only where the route will say yes:
-    ``only_method`` (the last way to sign in), ``provider_too_old`` (a provider linked more than the window ago is not unlinked
-    here), ``needs_older_method`` (no OTHER method older than the window would remain)."""
+    ``only_method`` (the last way to sign in), ``needs_older_method`` (no OTHER method older than the window would remain), and
+    ``recent_sign_in_required`` (the method was added more than the window ago and this session has not signed in recently:
+    ``fresh`` says it has; #347)."""
     if len(methods) <= 1:
         return "only_method"
-    if method["kind"] == "provider" and not method["recently_added"]:
-        return "provider_too_old"
     if all(o["recently_added"] for o in methods if o is not method):
         return "needs_older_method"
+    if not method["recently_added"] and not fresh:
+        return "recent_sign_in_required"
     return None
 
 
@@ -453,17 +454,17 @@ def remove_recent_methods(db: Session, user_id: int, request: Request | None = N
     return gone
 
 
-def remove_identity(db: Session, user_id: int, identity_id: int, request: Request | None = None) -> None:
-    """Unlink one of the account's providers (Google, Microsoft, Apple, Facebook) that was added in the last
-    :data:`RECENT_SIGN_IN_METHOD_HOURS` (409 for an older one), unless it is the last way to sign in (409). Another
-    person's identity, a passkey's handle and an unknown id are all a 404.
+def remove_identity(db: Session, user_id: int, identity_id: int, request: Request | None = None, fresh: bool = False) -> None:
+    """Unlink one of the account's providers (Google, Microsoft, Apple, Facebook), unless it is the last way to sign in (409).
+    Another person's identity, a passkey's handle and an unknown id are all a 404.
 
-    Only a recent one, on purpose (#347): this route exists for "Sign out everywhere", to remove what a copied session
-    linked. Unlinking any provider would let that same copied session (while the owner has no recent-sign-in check yet)
-    link its own sign-in and then unlink every one the owner uses, which is a takeover, not a nuisance. For the same reason
-    a method used for longer than that window must remain after the removal (409 otherwise): in an account whose methods
-    are all new, a copied session could add a passkey and unlink the owner's only provider, and nothing tells whose is whose.
-    Widening it is part of the owner's decision on a recent sign-in for account-level actions (docs/mcp-oauth-threat-model.md).
+    A provider linked in the last :data:`RECENT_SIGN_IN_METHOD_HOURS` can always be unlinked (this is what "Sign out everywhere"
+    offers for what a copied session linked). An older one only by a session that signed in recently (``fresh``; otherwise
+    403 ``recent_sign_in_required``, #347): the person has just proved control of a method of their own, so a provider an attacker
+    linked days ago can go. In every case a method used for longer than the window must remain after the removal (409
+    otherwise): in an account whose methods are all new, a copied session could add a passkey and unlink the owner's only
+    provider, and nothing tells whose is whose; and a copied session inside its own ten fresh minutes can still never remove the
+    last old method, so the owner always keeps a way in (docs/mcp-oauth-threat-model.md).
 
     Same shape as :func:`vault.passkeys.remove_passkey`: the account row is locked, so two removals take turns,
     and the "another way to sign in is left" check is part of the DELETE itself. The caller commits."""
@@ -475,17 +476,15 @@ def remove_identity(db: Session, user_id: int, identity_id: int, request: Reques
         raise HTTPException(404, "Sign-in method not found")
     db.expunge(identity)
     since = utcnow() - timedelta(hours=RECENT_SIGN_IN_METHOD_HOURS)
-    if identity.created_at < since:
-        raise HTTPException(409, f"Only a sign-in linked in the last {RECENT_SIGN_IN_METHOD_HOURS} hours can be unlinked here "
-                                 "(Account, Sign out everywhere).")
+    if identity.created_at < since and not fresh:
+        raise recent_signin.stale_error(request.app.state.settings if request is not None else None)
     passkeys = select(func.count(Passkey.id)).where(Passkey.user_id == user_id).scalar_subquery()
     providers = select(func.count(Identity.id)).where(
         Identity.user_id == user_id, Identity.provider != PASSKEY_IDENTITY).scalar_subquery()
     established = established_methods(user_id, since, skip_identity=identity_id)
     removed = db.execute(
         delete(Identity).where(Identity.id == identity_id, Identity.user_id == user_id,
-                               Identity.provider != PASSKEY_IDENTITY, Identity.created_at >= since,
-                               passkeys + providers > 1, established > 0)
+                               Identity.provider != PASSKEY_IDENTITY, passkeys + providers > 1, established > 0)
         .execution_options(synchronize_session=False)).rowcount
     if not removed:
         if db.scalar(select(passkeys + providers)) <= 1:
@@ -549,6 +548,14 @@ def sign_in(db: Session, request: Request, profile: Profile, link: bool = True) 
     Without it (passkey sign-in and sign-up, dev login) the browser simply switches accounts."""
     # A reviewer's demo session never takes a sign-in method of its own (#345): signing in with a provider switches accounts.
     current = session_user(db, request) if link and "rv" not in request.session else None
+    # A recent sign-in (#347) means someone just proved control of a method the account ALREADY had. Signing in with a method that
+    # is new to the account is a link (or a claim of an empty account): it must not make a copied session fresh, so the old
+    # ``auth_at`` is kept. No account yet, or a sign-in that switches accounts (passkey, dev, reviewer), is a sign-in like any other.
+    proved = True
+    if current is not None:
+        owner = db.scalar(select(Identity.user_id).where(Identity.provider == profile.provider, Identity.subject == profile.subject))
+        proved = owner == current.id
+    kept_auth_at = request.session.get("auth_at")
     user = find_or_create(db, profile, current, request if current is not None else None)
     if not user.session_key:
         user.session_key = new_session_key()
@@ -558,6 +565,10 @@ def sign_in(db: Session, request: Request, profile: Profile, link: bool = True) 
     request.session["uid"] = user.id
     request.session["sk"] = user.session_key
     request.session.update(carried)
+    if proved:
+        recent_signin.mark_recent(request)
+    elif kept_auth_at is not None:
+        request.session["auth_at"] = kept_auth_at
     return user
 
 
@@ -658,6 +669,14 @@ def build_router(auth: Auth, get_db) -> APIRouter:
             current = session_user(db, request)
             owner = db.scalar(select(Identity.user_id).where(
                 Identity.provider == profile.provider, Identity.subject == profile.subject)) if current else None
+            # Linking a provider (or moving one over from an empty account) is a serious account action: only a recent sign-in (#347).
+            # The callback checks, not only the Account page, because a copied session can open /api/auth/login/google directly.
+            if current is not None and "rv" not in request.session and owner != current.id and not recent_signin.is_fresh(
+                    db, request, auth.settings):
+                request.session.pop("app_flow", None)
+                if app_flow:
+                    return RedirectResponse(f"{app_flow['app_redirect_uri']}?{urlencode({'error': recent_signin.CODE})}", status_code=303)
+                return RedirectResponse(f"/?{urlencode({'link_error': recent_signin.CODE, 'provider': provider})}", status_code=303)
             try:
                 user = sign_in(db, request, profile)
             except SessionEnded:

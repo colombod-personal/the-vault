@@ -25,11 +25,12 @@ from starlette.requests import ClientDisconnect
 
 from . import auth as auth_module
 from . import observability
-from . import oauth_clients, oauth_routes, oauth_server, outbound, passkeys, reviewer_routes, rules_live, tokens, uploads
+from . import oauth_clients, oauth_routes, oauth_server, outbound, passkeys, recent_signin, reviewer_routes, rules_live, tokens, uploads
 from .api import buckets_api, catalog_api, deck_api, ideas_api, independence_api, mcp, meta, metadata_api, reset_api, tags_api, v1
 from .api.hal import problem
 from .config import Settings
 from .db import Database
+from .email import make_sender
 from .models import User
 from .native import NativeVerifier
 
@@ -81,10 +82,12 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
     app.state.db = db
     app.state.settings = settings
     app.state.client_fetcher = fetcher
+    app.state.email_sender = make_sender(settings, transport)  # None without RESEND_API_KEY: the e-mailed code is then not offered
 
     @app.exception_handler(StarletteHTTPException)
     async def http_problem(request: Request, exc: StarletteHTTPException):
-        res = problem(exc.status_code, str(exc.detail))
+        extra = {"code": exc.code, **exc.extra} if isinstance(exc, recent_signin.CodedError) else {}  # a stable code the web app acts on
+        res = problem(exc.status_code, str(exc.detail), **extra)
         for k, v in (exc.headers or {}).items():
             res.headers[k] = v
         return res
@@ -254,11 +257,17 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
             raise HTTPException(403, "Access tokens (personal tokens and connected apps) can't manage the account. Use the web or iOS app.")
         return user
 
+    def fresh_user(request: Request, user: User = Depends(account_user), session: Session = Depends(get_db)) -> User:
+        """``account_user`` who also signed in recently (#347): the serious account actions. 403 ``recent_sign_in_required`` otherwise."""
+        recent_signin.require_recent(session, request, settings)
+        return user
+
     app.include_router(auth_module.build_router(auth, get_db))
+    app.include_router(recent_signin.build_router(settings, get_db, account_user))
     app.include_router(independence_api.build_router(get_db, current_user))  # before v1: /decks/overlap is not a /decks/{deck_id}
     app.include_router(ideas_api.build_router(get_db, current_user, transport))  # the deck ideas lab (#163)
     app.include_router(v1.build_router(get_db, current_user, optional_user, settings, verifier,
-                                       lambda: auth.offered, transport, account_user))
+                                       lambda: auth.offered, transport, account_user, fresh_user))
     app.state.rules_live = rules_live.LiveRules(transport=transport)  # the rules, read live from Wizards: nothing stored
     app.include_router(catalog_api.build_router(get_db, optional_user, current_user, settings, app.state.rules_live))
     app.include_router(deck_api.build_router(get_db, current_user, settings, transport))
@@ -266,7 +275,7 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
     app.include_router(reset_api.build_router(get_db, current_user, settings))
     app.include_router(tags_api.build_router(get_db, current_user))
     app.include_router(metadata_api.build_router(get_db, current_user))
-    app.include_router(passkeys.build_router(settings, get_db, auth_module.sign_in, account_user))
+    app.include_router(passkeys.build_router(settings, get_db, auth_module.sign_in, account_user, fresh_user))
     app.include_router(reviewer_routes.build_router(settings, get_db, auth_module.sign_in))
     app.include_router(mcp.build_router(mcp_user, resource_metadata))
     app.include_router(oauth_routes.build_router(get_db, settings, fetcher, auth))

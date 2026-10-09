@@ -51,6 +51,11 @@
       scrambled (hashed) copies of their sign-in tokens, including replaced ones until they would have
       expired</td><td>To keep those apps signed in, let you sign them out, and sign an app out if a
       copied token is used.</td></tr>
+    <tr><td>When you ask the Vault to e-mail you a code to confirm it is you (before deleting your account, downloading your
+      data, creating an access token, or adding or removing a sign-in method): the code and a link, sent to the e-mail address on
+      your account, and on our side a scrambled (hashed) copy of the code, the browser it was asked from (such as "Chrome on Windows",
+      never your IP address) and the time. Nothing is sent unless you ask.</td><td>To check it is really you before a serious
+      action. The code works once and for ten minutes; the record is deleted after two days.</td></tr>
     <tr><td>Passkeys you add: a public key, a name such as "iPhone", and when it was added and last used.
       The private key stays on your device.</td><td>To let you sign in without a password.</td></tr>
     <tr><td>Access tokens you create for your own agents or scripts (name, permissions, dates, and a
@@ -82,6 +87,10 @@
       collection's rows (card names, sets, numbers, quantities and prices) to match them with
       Scryfall's price list, but not your name or e-mail address.</li>
     <li>Your <strong>sign-in provider</strong> (Google, Microsoft, Apple or Facebook) confirms who you are.</li>
+    <li><strong>Resend</strong> (a US e-mail delivery service) delivers the one-time code and link we e-mail you when you ask for
+      one to confirm it is you. It receives your e-mail address and the message. It keeps its own delivery records
+      under its own terms and privacy policy (<a href="https://resend.com/legal/privacy-policy" target="_blank" rel="noopener">resend.com/legal/privacy-policy</a>);
+      the Vault stores nothing of this at Resend. It is used only if the Vault has it switched on, and only when you ask for a code.</li>
     <li><strong>Scryfall</strong>: your browser loads card images and set icons from Scryfall's
       image servers, which see your IP address. Card data and prices are fetched by the Vault's
       server, which sends Scryfall only card identifiers, never who you are.</li>

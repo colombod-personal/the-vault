@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from .importer import export_collection
 from .sharing import display_name
-from .models import AccessToken, ApiSession, Bucket, BucketBaseline, CardAnnotation, TagAssignment, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionBaseline, ResetSnapshot, CollectionValue, Deck, DeckVersion, Entry, Identity, Import, Share, StagedUpload, User
+from .models import AccessToken, ApiSession, Bucket, BucketBaseline, CardAnnotation, TagAssignment, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, EmailCode, CollectionBaseline, ResetSnapshot, CollectionValue, Deck, DeckVersion, Entry, Identity, Import, Share, StagedUpload, User
 from .prices import history
 from .collection_view import CollectionView
 
@@ -227,6 +227,7 @@ def personal_data(user_id: int) -> dict:
         "passkeys": delete(Passkey).where(Passkey.user_id == user_id),
         "idempotent_requests": delete(IdempotentRequest).where(IdempotentRequest.user_id == user_id),
         "auth_codes": delete(AuthCode).where(AuthCode.user_id == user_id),
+        "email_codes": delete(EmailCode).where(EmailCode.user_id == user_id),  # hashed sign-in confirmation codes (#347)
         "shares": delete(Share).where(or_(Share.owner_id == user_id, Share.grantee_id == user_id)),
         "decks": delete(Deck).where(Deck.user_id == user_id),
         "tag_assignments": delete(TagAssignment).where(TagAssignment.user_id == user_id),

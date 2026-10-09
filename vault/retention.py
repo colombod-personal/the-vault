@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import delete, text
 from sqlalchemy.orm import Session
 
-from .models import CollectionValue, ResetSnapshot, StagedUpload
+from .models import CollectionValue, EmailCode, ResetSnapshot, StagedUpload
 
 DAILY_DAYS = 90
 WEEKLY_UNTIL = DAILY_DAYS + 182  # six months of weekly points
@@ -72,8 +72,19 @@ def prune_reset_snapshots(db: Session) -> int:
     return db.execute(delete(ResetSnapshot).where(ResetSnapshot.expires_at <= datetime.now(timezone.utc))).rowcount or 0
 
 
+EMAIL_CODE_KEEP_HOURS = 48
+
+
+def prune_email_codes(db: Session) -> int:
+    """E-mailed sign-in confirmation codes (#347) work for ten minutes; the rows are kept two days only because the send caps
+    count them (three an hour per account, a daily total for the Vault). They hold keyed hashes, no address and no code."""
+    return db.execute(delete(EmailCode).where(
+        EmailCode.created_at < datetime.now(timezone.utc) - timedelta(hours=EMAIL_CODE_KEEP_HOURS))).rowcount or 0
+
+
 def apply(db: Session, today: date | None = None) -> dict:
     report = {"prices_deleted": prune_price_snapshots(db, today), "values_deleted": prune_collection_values(db, today),
-              "uploads_deleted": prune_staged_uploads(db), "reset_snapshots_deleted": prune_reset_snapshots(db)}
+              "uploads_deleted": prune_staged_uploads(db), "reset_snapshots_deleted": prune_reset_snapshots(db),
+              "email_codes_deleted": prune_email_codes(db)}
     db.commit()
     return report

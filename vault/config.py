@@ -91,6 +91,16 @@ class Settings:
     # docs/compliance.md is decided: Wizards' Fan Content Policy says no registration to access its content.
     catalog_rate_limit: int = field(default_factory=lambda: int(_env("CATALOG_RATE_LIMIT", "60")))  # a minute, per person or per IP
 
+    # Serious account actions (delete, export, a token, adding or removing a passkey, linking a provider) need a sign-in this
+    # recent (#347, vault.recent_signin). Seconds; 60 to 3600.
+    recent_signin_seconds: int = field(default_factory=lambda: int(_env("RECENT_SIGNIN_SECONDS", "600")))
+    # E-mail (vault.email): the one-time code that confirms it is the person. Resend is the only sender; with no key the feature
+    # is inert and the person confirms with a passkey or a linked sign-in. The key is a secret and is never logged.
+    resend_api_key: str = field(default_factory=lambda: _env("RESEND_API_KEY"))
+    email_from: str = field(default_factory=lambda: _env("EMAIL_FROM", "The Vault <login@mtgvault.cards>"))
+    # Mails the Vault sends in one day, all accounts together (Resend's free plan allows 100 a day; the default leaves room).
+    email_daily_cap: int = field(default_factory=lambda: int(_env("EMAIL_DAILY_CAP", "90")))
+
     @property
     def secure_cookies(self) -> bool:
         return self.base_url.startswith("https://")
@@ -110,5 +120,11 @@ class Settings:
             raise RuntimeError("VAULT_TWINS_URL is for local development only")
         if self.secure_cookies and self.dev_login:
             raise RuntimeError("DEV_LOGIN must not be enabled on a public deployment")
+        if not 60 <= self.recent_signin_seconds <= 3600:
+            raise RuntimeError("RECENT_SIGNIN_SECONDS must be between 60 and 3600")
+        if self.resend_api_key and "@" not in self.email_from:
+            raise RuntimeError("EMAIL_FROM must be an address, e.g. 'The Vault <login@mtgvault.cards>'")
+        if self.email_daily_cap < 1:
+            raise RuntimeError("EMAIL_DAILY_CAP must be at least 1")
         if self.reviewer_passphrase and len(self.reviewer_passphrase) < 16:
             raise RuntimeError("REVIEWER_PASSPHRASE must be at least 16 characters (it is the way in for the stores' reviewers)")

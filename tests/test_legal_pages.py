@@ -59,7 +59,7 @@ def test_the_privacy_notice_names_every_recipient_of_data_the_code_sends_to():
     for provider in auth.PROVIDERS:
         assert provider in text, provider
     for recipient in ("vercel", "neon", "github", "scryfall", "commander spellbook", "archidekt", "ai assistant",
-                      "web analytics", "speed insights"):
+                      "web analytics", "speed insights", "resend"):
         assert recipient in text, recipient
     assert "commanderspellbook.com" in combos.URL  # the service named above is the one vault/combos.py calls
     assert "analytics trackers" not in text  # the notice also describes the anonymous visitor statistics

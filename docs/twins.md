@@ -2,7 +2,7 @@
 
 The Vault depends on these outside services: Google, Microsoft, Apple and Facebook for sign-in,
 Scryfall for card data and prices, Archidekt for decks, Vercel's API for the setup job
-(`jobs/vercel_setup.py`), Commander Spellbook for combos, Wizards of the Coast's site for the Comprehensive Rules, GitHub's issues API
+(`jobs/vercel_setup.py`), Commander Spellbook for combos, Resend for the one confirmation e-mail the Vault can send (`twins/resend.py`, built from Resend's documentation and not yet compared with the live service: `tests/conformance/test_resend_live.py` waits for a key), Wizards of the Coast's site for the Comprehensive Rules, GitHub's issues API
 for the budget guard's alerts (`jobs/budget_alert.py`), Neon's console API for compute-hour tracking (`jobs/neon_usage.py`) and 17Lands' public data files on S3 (`jobs/sync_limited.py`). `twins/` contains a **behavioural
 clone** ("digital twin") of each one. The idea comes from StrongDM's Digital Twin Universe and
 Microsoft's `amplifier-bundle-digital-twin-universe`.
@@ -125,6 +125,7 @@ How the pieces connect:
 | `POST /_twins/api/{google\|microsoft\|apple\|facebook}/accounts` `{"sub", "email", "name", "hide_email", "share_email"}` | add a user |
 | `POST /_twins/api/{provider}/rotate-keys` `{"keep_old": false}` | key rotation |
 | `POST /_twins/api/{apple\|google}/native-token` `{"aud", "sub", "nonce"}` | the ID token Sign in with Apple / Google Sign-In would give the iOS app |
+| `GET /_twins/api/resend/sent` | the mails the Vault "sent" (run it with `RESEND_API_KEY=re_twin_dev_key`; read the confirmation code here) |
 | `POST /_twins/api/scryfall/cards` `{"name", "set", "collector_number", "prices": {"usd": 1}}` | add a card |
 | `POST /_twins/api/scryfall/prices` `{"id", "usd": 2.5}` | move a price |
 | `POST /_twins/api/scryfall/rate-limits` `{"on": true}` | enforce Scryfall's rate limits |

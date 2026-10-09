@@ -242,6 +242,140 @@ function AccountMenu({ me, onImported, onAccount, readOnly }) {
 
 Object.assign(window, { SignIn, signOut, SESSION_ENDED_KEY, ImportButton, EmptyVault, AccountMenu, describeChanges });
 
+// ---- Confirm it's you (#347): the serious account actions need a sign-in from the last few minutes ----
+// The server decides (403, code `recent_sign_in_required`); this asks the person and tries the action again. Three ways: an e-mailed
+// code (or the link in the same e-mail, approved on any device), the passkey, or a provider the account has linked.
+const CONFIRM_KEY = 'vault_confirm_return';
+const ConfirmContext = React.createContext(null);
+
+// Run `fn`; when the server wants a recent sign-in, ask (`ask(what)` resolves true once confirmed) and run it once more.
+// Cancelling throws an Error with `cancelled: true`: callers show nothing for it.
+async function runWithConfirm(ask, what, fn) {
+  try { return await fn(); } catch (e) {
+    if (!ask || !e || e.code !== 'recent_sign_in_required') throw e;
+    if (!(await ask(what))) { const c = new Error('Cancelled.'); c.cancelled = true; throw c; }
+    return fn();
+  }
+}
+function useRecentSignIn() {
+  const ask = React.useContext(ConfirmContext);
+  return (what, fn) => runWithConfirm(ask, what, fn);
+}
+const shownError = (e) => (e && e.cancelled ? null : (e && e.message) || String(e));
+
+function ConfirmItsYou({ me, what, onDone, onCancel }) {
+  const api = window.VaultApi;
+  const [info, setInfo] = useStateAcc(null); // GET /me/recent-sign-in; false if it failed
+  const [step, setStep] = useStateAcc('choose'); // choose | code
+  const [sentTo, setSentTo] = useStateAcc(null);
+  const [code, setCode] = useStateAcc('');
+  const [busy, setBusy] = useStateAcc(null);
+  const [error, setError] = useStateAcc(null);
+  const box = useRefAcc(null);
+  useEffectAcc(() => {
+    if (box.current) { box.current.focus(); if (box.current.scrollIntoView) box.current.scrollIntoView({ block: 'nearest' }); }
+    api.recent.status().then(setInfo).catch(() => setInfo(false));
+  }, []);
+  // Escape cancels this step, not the Account panel behind it.
+  useEffectAcc(() => {
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopImmediatePropagation(); onCancel(); } };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onCancel]);
+  // The link in the e-mail may be approved on another device: this browser asks every few seconds whether it was.
+  useEffectAcc(() => {
+    if (step !== 'code') return undefined;
+    let stop = false;
+    const id = setInterval(async () => {
+      try { const r = await api.recent.emailPoll(); if (!stop && r.fresh) onDone(); } catch {}
+    }, 4000);
+    return () => { stop = true; clearInterval(id); };
+  }, [step]);
+
+  const have = (me && me.providers) || [];
+  const providers = have.filter((p) => PROVIDERS[p]);
+  const withPasskey = have.includes('passkey') && api.passkeys.supported();
+  const mail = info && info.email;
+  const minutes = info ? Math.max(1, Math.round(info.window_seconds / 60)) : 10;
+  const send = async () => {
+    setError(null); setBusy('email');
+    try { const r = await api.recent.emailStart(); setSentTo(r.to); setCode(''); setStep('code'); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(null); }
+  };
+  const submit = async (ev) => {
+    ev.preventDefault(); setError(null); setBusy('code');
+    try { await api.recent.emailConfirm(code); onDone(); }
+    catch (e) { setError(e.message); setBusy(null); }
+  };
+  const passkey = async () => {
+    setError(null); setBusy('passkey');
+    try {
+      await api.passkeys.signIn();
+      const now = await api.me();
+      if (me && now.id !== me.id) { location.reload(); return; } // that passkey belongs to another account: the browser is in it now
+      onDone();
+    } catch (e) { setError(api.passkeys.explain(e)); setBusy(null); }
+  };
+  const provider = (p) => {
+    try { sessionStorage.setItem(CONFIRM_KEY, JSON.stringify({ what, at: Date.now() })); } catch {}
+    location.href = `/api/auth/login/${p}`;
+  };
+  const digits = code.replace(/\D/g, '');
+  return (
+    <div className="confirm-its-you" role="group" aria-labelledby="confirm-title" ref={box} tabIndex={-1}>
+      <p id="confirm-title" className="signout-all-title">Confirm it's you</p>
+      <p className="label-mono">
+        To {what}, the Vault needs you to have signed in within the last {minutes === 1 ? 'minute' : `${minutes} minutes`}. Pick one way; it takes a moment.
+      </p>
+      {step === 'choose' && (
+        <div className="confirm-actions">
+          {mail && mail.available && (
+            <button className="btn sm primary" disabled={busy !== null} onClick={send}>
+              {busy === 'email' ? 'Sending…' : `Email me a code (${mail.to})`}
+            </button>
+          )}
+          {withPasskey && (
+            <button className="btn sm" disabled={busy !== null} onClick={passkey}>
+              {busy === 'passkey' ? 'Waiting for your device…' : 'Use my passkey'}
+            </button>
+          )}
+          {providers.map((p) => (
+            <button key={p} className="btn sm" disabled={busy !== null} onClick={() => provider(p)}>Continue with {PROVIDERS[p].name}</button>
+          ))}
+          <button className="btn sm ghost" onClick={onCancel}>Cancel</button>
+        </div>
+      )}
+      {step === 'choose' && mail && !mail.available && mail.reason === 'no_address' && (
+        <p className="label-mono">This account has no e-mail address on file, so a code can't be e-mailed.</p>
+      )}
+      {step === 'choose' && mail && !mail.available && mail.reason === 'no_sender' && (
+        <p className="label-mono">E-mailed codes are not set up on this Vault yet.</p>
+      )}
+      {step === 'choose' && info === false && <p className="label-mono">Couldn't check your sign-in. Try again in a moment.</p>}
+      {step === 'code' && (
+        <form onSubmit={submit}>
+          <p className="label-mono" role="status">
+            We sent a code to the address on this account ({sentTo}). It works once and lasts 10 minutes. Type it here, or open the
+            link in the e-mail and press Approve: this page then carries on by itself.
+          </p>
+          <label className="label-mono" htmlFor="confirm-code">6-digit code</label>
+          <input id="confirm-code" className="input confirm-code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]*"
+            maxLength={7} value={code} onChange={(e) => setCode(e.target.value)} autoFocus />
+          <div className="confirm-actions">
+            <button type="submit" className="btn sm primary" disabled={busy !== null || digits.length !== 6}>
+              {busy === 'code' ? 'Checking…' : 'Confirm'}
+            </button>
+            <button type="button" className="btn sm" disabled={busy !== null} onClick={send}>Send a new code</button>
+            <button type="button" className="btn sm ghost" onClick={() => { setStep('choose'); setError(null); }}>Other ways</button>
+          </div>
+        </form>
+      )}
+      {error && <p role="alert" style={{ color: 'var(--danger)' }}>{error}</p>}
+    </div>
+  );
+}
+
 // ---- Account panel: profile, sharing, shared with me, saved decks, GDPR export/delete ----
 
 // Keyboard handling shared by the dialogs (this panel and the card panel): focus moves into the dialog when it
@@ -321,7 +455,20 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged, onCo
   const [confirmText, setConfirmText] = useStateAcc('');
   const [downloaded, setDownloaded] = useStateAcc(false);
   const [error, setError] = useStateAcc(null);
+  const [confirming, setConfirming] = useStateAcc(null); // { what, resolve } while "Confirm it's you" is open
+  const [back, setBack] = useStateAcc(null); // what to say after a provider sign-in came back
   const api = window.VaultApi;
+  const askConfirm = (what) => new Promise((resolve) => setConfirming({ what, resolve }));
+  const closeConfirm = (ok) => { if (confirming) confirming.resolve(ok); setConfirming(null); };
+  // Coming back from a provider's page after "Continue with Google" (ConfirmItsYou): say whether it confirmed.
+  useEffectAcc(() => {
+    let marker = null;
+    try { marker = JSON.parse(sessionStorage.getItem(CONFIRM_KEY) || 'null'); sessionStorage.removeItem(CONFIRM_KEY); } catch {}
+    if (!marker || Date.now() - marker.at > 15 * 60 * 1000) return;
+    api.recent.status().then((s) => setBack(s.fresh
+      ? `Confirmed. To ${marker.what}, press it again: it works for the next ${Math.max(1, Math.round(s.seconds_left / 60))} minutes.`
+      : "That sign-in didn't confirm it's you (it must be one this account already has). Try again."), () => {});
+  }, []);
 
   const [loadFailed, setLoadFailed] = useStateAcc(false);
   const reload = () => {
@@ -335,8 +482,14 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged, onCo
 
   const wrap = (fn) => async (...args) => {
     setError(null);
-    try { await fn(...args); } catch (e) { setError(e.message); }
+    try { await fn(...args); } catch (e) { const m = shownError(e); if (m) setError(m); }
   };
+  // A download is a link the browser follows, so ask first whether the sign-in is recent (it answers like the API does).
+  const download = wrap(async () => {
+    await runWithConfirm(askConfirm, 'download all my data', () => api.recent.ensure());
+    setDownloaded(true);
+    location.href = api.exportUrl;
+  });
   const share = wrap(async (kind, deckId) => {
     const res = await api.createShare(kind, deckId || null, showCosts);
     setInvite({ ...res, kind, deckId });
@@ -348,14 +501,17 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged, onCo
     if (confirm('Delete this deck? Anyone you shared it with loses access.')) { await api.deleteDeck(id); reload(); }
   });
   const deleteAccount = wrap(async () => {
-    await api.deleteAccount();
+    await runWithConfirm(askConfirm, 'delete my account', () => api.deleteAccount());
     await api.clearLocalData();
     alert('Your account and all of its data have been deleted.');
     location.href = '/';
   });
 
   return (
+    <ConfirmContext.Provider value={askConfirm}>
     <Modal title="Account" onClose={onClose}>
+      {confirming && <ConfirmItsYou me={me} what={confirming.what} onDone={() => closeConfirm(true)} onCancel={() => closeConfirm(false)} />}
+      {back && <p role="status" className="label-mono" style={{ marginBottom: 8 }}>{back}</p>}
       {error && <p style={{ color: 'var(--danger)', marginBottom: 8 }}>{error}</p>}
       {(loadFailed || !me) && (
         <p role="status" className="label-mono account-offline" style={{ color: 'var(--danger)', marginBottom: 8 }}>
@@ -455,7 +611,7 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged, onCo
           Download everything the Vault holds about you: profile, collection (CSV and JSON), import history,
           value history, decks and shares. <a href="/privacy.html" target="_blank" rel="noopener">Privacy notice</a>
         </p>
-        <a className="btn sm" href={api.exportUrl} onClick={() => setDownloaded(true)}>Download my data (.zip)</a>
+        <button className="btn sm" onClick={download}>Download my data (.zip)</button>
         {!deleting ? (
           <button className="btn sm ghost" style={{ marginLeft: 8, color: 'var(--danger)' }} onClick={() => setDeleting(true)}>
             Delete my account…
@@ -469,7 +625,7 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged, onCo
             </p>
             <p className="label-mono" style={{ marginBottom: 8 }}>
               Step 1 — keep a copy (recommended):{' '}
-              <a className="btn xs" href={api.exportUrl} onClick={() => setDownloaded(true)}>Download my data</a>
+              <button className="btn xs" onClick={download}>Download my data</button>
               {downloaded && ' ✓'}
             </p>
             <p className="label-mono" style={{ marginBottom: 6 }}>Step 2 — type DELETE to confirm:</p>
@@ -484,6 +640,7 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged, onCo
         )}
       </Section>
     </Modal>
+    </ConfirmContext.Provider>
   );
 }
 
@@ -522,6 +679,7 @@ Object.assign(window, { AccountPanel, VaultFooter, useDialogFocus, CloseIcon });
 // Personal access tokens: let people connect their own AI agents and scripts (MCP or HTTP API).
 function AgentsSection() {
   const api = window.VaultApi;
+  const withConfirm = useRecentSignIn();
   const [tokens, setTokens] = useStateAcc([]);
   const [name, setName] = useStateAcc('My agent');
   const [write, setWrite] = useStateAcc(false);
@@ -532,9 +690,9 @@ function AgentsSection() {
   const create = async () => {
     setError(null);
     try {
-      setCreated(await api.createToken(name, write ? ['read', 'write'] : ['read']));
+      setCreated(await withConfirm('create a token', () => api.createToken(name, write ? ['read', 'write'] : ['read'])));
       reload();
-    } catch (e) { setError(e.message); }
+    } catch (e) { setError(shownError(e)); }
   };
   const remove = async (id) => { await api.deleteToken(id); reload(); };
   const copy = (text) => navigator.clipboard && navigator.clipboard.writeText(text);
@@ -888,12 +1046,13 @@ function addedAgo(minutes) {
 // What can be removed is the server's answer (`removable`, `removable_reason`): the page never decides.
 const WHY_NOT = {
   only_method: 'Your only way to sign in. Add your own passkey first (Add a passkey, above), then this can be removed.',
-  provider_too_old: "Linked more than 24 hours ago: it can't be unlinked here yet. A recent-sign-in check that would allow it is proposed, not built (issue #347).",
+  recent_sign_in_required: 'Added more than 24 hours ago, so removing it needs a recent sign-in: confirm it\'s you first.',
   needs_older_method: "Can't be removed yet: no other sign-in is more than 24 hours old, so it can't be told from one someone else added. Try again when another is a day old.",
 };
 
 function SignOutEverywhere({ onCancel, onRemoved }) {
   const api = window.VaultApi;
+  const withConfirm = useRecentSignIn();
   const [step, setStep] = useStateAcc('start'); // start | ending | review
   const [ended, setEnded] = useStateAcc(null); // what step 1 ended, as the server counted it
   const [found, setFound] = useStateAcc(null); // review: null while loading, false if it failed, else the server's page
@@ -909,8 +1068,15 @@ function SignOutEverywhere({ onCancel, onRemoved }) {
   };
   const remove = async (m) => {
     setError(null); setBusy(m.kind + m.id);
-    try { await api.signInMethods.remove(m); await load(); onRemoved && onRemoved(); }
-    catch (e) { setError(e.message); }
+    try { await withConfirm(`remove ${m.name}`, () => api.signInMethods.remove(m)); await load(); onRemoved && onRemoved(); }
+    catch (e) { setError(shownError(e)); }
+    finally { setBusy(null); }
+  };
+  // An older method needs a recent sign-in first: confirm, then the list is read again and offers Remove.
+  const confirmFirst = async (m) => {
+    setError(null); setBusy(m.kind + m.id);
+    try { await withConfirm(`remove ${m.name}`, () => api.recent.ensure()); await load(); }
+    catch (e) { setError(shownError(e)); }
     finally { setBusy(null); }
   };
   const items = (found && found.items) || [];
@@ -983,6 +1149,12 @@ function SignOutEverywhere({ onCancel, onRemoved }) {
                     {m.recently_added && <span className="signout-flag"> · new</span>}
                     {!m.removable && m.removable_reason && <span className="signout-why"><br />{WHY_NOT[m.removable_reason]}</span>}
                   </span>
+                  {!m.removable && m.removable_reason === 'recent_sign_in_required' && (
+                    <button className="btn xs" disabled={busy !== null} onClick={() => confirmFirst(m)}
+                      aria-label={`Confirm it's you to remove ${m.kind === 'passkey' ? 'passkey ' : ''}${m.name}`}>
+                      Confirm it's you
+                    </button>
+                  )}
                   {m.removable && (
                     <button className="btn xs" disabled={busy !== null} onClick={() => remove(m)}
                       aria-label={`Remove ${m.kind === 'passkey' ? 'passkey ' : ''}${m.name}, ${when(m)}`}>
@@ -1018,6 +1190,7 @@ function SignOutEverywhere({ onCancel, onRemoved }) {
 // Passkeys and linked providers: add a passkey to this account, remove one, link another provider.
 function SignInMethods({ me, onChanged }) {
   const api = window.VaultApi;
+  const withConfirm = useRecentSignIn();
   const [keys, setKeys] = useStateAcc([]);
   const [info, setInfo] = useStateAcc(null);
   const [error, setError] = useStateAcc(null);
@@ -1026,11 +1199,18 @@ function SignInMethods({ me, onChanged }) {
   useEffectAcc(() => { reload(); api.providers().then(setInfo).catch(() => {}); }, []);
   const add = async () => {
     setError(null);
-    try { await api.passkeys.add(); reload(); onChanged && onChanged(); } catch (e) { setError(api.passkeys.explain(e)); }
+    try { await withConfirm('add a passkey', () => api.passkeys.add()); reload(); onChanged && onChanged(); }
+    catch (e) { const m = e && e.cancelled ? null : api.passkeys.explain(e); if (m) setError(m); }
   };
   const remove = async (id) => {
     setError(null);
-    try { await api.passkeys.remove(id); reload(); onChanged && onChanged(); } catch (e) { setError(e.message); }
+    try { await withConfirm('remove a passkey', () => api.passkeys.remove(id)); reload(); onChanged && onChanged(); } catch (e) { setError(shownError(e)); }
+  };
+  // Linking leaves the page for the provider, so check first that the sign-in is recent (the server checks again when it comes back).
+  const link = async (p) => {
+    setError(null);
+    try { await withConfirm(`link ${providerName(p)}`, () => api.recent.ensure()); location.href = `/api/auth/login/${p}`; }
+    catch (e) { setError(shownError(e)); }
   };
   const linked = new Set((me && me.providers) || []);
   // Passkeys get their own rows below; every other sign-in is one row with its logo.
@@ -1068,7 +1248,7 @@ function SignInMethods({ me, onChanged }) {
       </ul>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
         {info && info.passkeys && api.passkeys.supported() && <button className="btn sm" onClick={add}>Add a passkey</button>}
-        {linkable.map((p) => <a key={p} className="btn sm ghost" href={`/api/auth/login/${p}`}>Link {p[0].toUpperCase() + p.slice(1)}</a>)}
+        {linkable.map((p) => <button key={p} className="btn sm ghost" onClick={() => link(p)}>Link {p[0].toUpperCase() + p.slice(1)}</button>)}
         {/* On a phone the top bar has no room for Sign out, so it is here (layout.css shows .m-only). */}
         <button className="btn sm m-only" onClick={() => signOut()}>Sign out</button>
         <button className="btn sm ghost" title="Opens a check: first signs out the other browsers (this one stays signed in), then lists your sign-in methods"

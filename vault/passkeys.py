@@ -48,6 +48,7 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
 )
 
+from . import recent_signin
 from .auth import RECENT_SIGN_IN_METHOD_HOURS, Profile, established_methods, hold_account, require_live_session, rotate_session_key
 from .config import Settings
 from .models import Identity, Passkey, PasskeyChallenge, User, utcnow
@@ -114,7 +115,8 @@ def _label(credential: dict, given: str | None) -> str:
     return "Passkey"
 
 
-def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter:
+def build_router(settings: Settings, get_db, sign_in, account_user, fresh_user=None) -> APIRouter:
+    fresh_user = fresh_user or account_user  # the account's person who also signed in recently (#347); tests of the router alone pass none
     router = APIRouter(prefix="/api/auth/passkey", tags=["auth"])
     rp_id, origin = relying_party(settings)
 
@@ -189,7 +191,7 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
     # -- another passkey for the signed-in account --------------------------------------------
     @router.post("/register/options", dependencies=limited("passkey-register"),
                  summary="Start adding a passkey to your account")
-    def register_options(request: Request, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+    def register_options(request: Request, user: User = Depends(fresh_user), db: Session = Depends(get_db)) -> dict:
         require_enabled()
         identity = db.scalar(select(Identity).where(Identity.user_id == user.id, Identity.provider == PROVIDER))
         handle = base64url_to_bytes(identity.subject) if identity else secrets.token_bytes(32)
@@ -201,7 +203,7 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
 
     @router.post("/register/verify", dependencies=limited("passkey-register-verify", verify=True),
                  summary="Finish adding a passkey to your account")
-    def register_verify(body: Verify, request: Request, user: User = Depends(account_user),
+    def register_verify(body: Verify, request: Request, user: User = Depends(fresh_user),
                         db: Session = Depends(get_db)) -> dict:
         require_enabled()
         pending = _take(request, db, "register")
@@ -266,15 +268,15 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
     return router
 
 
-def remove_passkey(db: Session, user_id: int, passkey_id: int, request: Request | None = None) -> None:
+def remove_passkey(db: Session, user_id: int, passkey_id: int, request: Request | None = None, fresh: bool = False) -> None:
     """Delete one of the account's passkeys, unless it is the last way to sign in (409), or unless no OTHER sign-in method
     older than :data:`vault.auth.RECENT_SIGN_IN_METHOD_HOURS` would remain (409; #347).
 
-    The second rule is a behaviour change: before, any passkey could be removed while another way in remained. A copied session
-    could register a passkey of its own and delete the owner's old ones, leaving its own as the only method. Now a method
-    must stay that is older than a day, so what a copied session adds can never replace what the owner had, and an account
-    whose only old method is this passkey cannot remove it (add another passkey or sign-in, wait a day, then remove). The
-    recent-sign-in proposal in docs/mcp-oauth-threat-model.md is the way to lift it.
+    The second rule: a copied session could register a passkey of its own and delete the owner's old ones, leaving its own as
+    the only method. A method must stay that is older than a day, so what a copied session adds can never replace what the
+    owner had, and an account whose only old method is this passkey cannot remove it (add another passkey or sign-in, wait a
+    day, then remove). A passkey added in the last day can always be removed (that is "Sign out everywhere"); an older one only by
+    a session that signed in recently (``fresh``, else 403 ``recent_sign_in_required``).
 
     Two removals running at the same time must not both pass the "another way to sign in is
     left" check. The account row is locked first (``SELECT … FOR UPDATE``), so they take turns,
@@ -285,6 +287,8 @@ def remove_passkey(db: Session, user_id: int, passkey_id: int, request: Request 
     if passkey is None or passkey.user_id != user_id:
         raise HTTPException(404, "Passkey not found")
     db.expunge(passkey)
+    if passkey.created_at < utcnow() - timedelta(hours=RECENT_SIGN_IN_METHOD_HOURS) and not fresh:
+        raise recent_signin.stale_error(request.app.state.settings if request is not None else None)
     passkeys = select(func.count(Passkey.id)).where(Passkey.user_id == user_id).scalar_subquery()
     other_sign_ins = select(func.count(Identity.id)).where(
         Identity.user_id == user_id, Identity.provider != PROVIDER).scalar_subquery()
