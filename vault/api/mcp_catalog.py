@@ -210,11 +210,26 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
     ]
 
 
+START_TOUR = """Start here: a first look at The Vault, from the person's own data. This tour is read-only: never write anything. Do not save, import, edit or delete anything, and do not offer to do it during the tour.
+
+1. Call `whoami`. Say who the person is signed in as, their scopes and the data versions the Vault holds (the Comprehensive Rules edition and the price date). If it fails, stop and say the connection is not working; the Connect page of the Vault has the setup page for their assistant.
+2. Call `get_collection_summary`. If it shows no collection (no cards), say so, explain how to import one (in the Vault, the Import page takes a Dragon Shield, Moxfield or generic CSV export) and stop here.
+3. Otherwise show the totals from that answer: copies, printings, sets, market value and the prices date. Then call `search_cards` with sort `-value` and a limit of 1, and show their most valuable card with its dated Scryfall price.
+4. Answer one rules question with a citation, about a card or an ability from their own collection: use `find_rules_term` or `search_rules`, open the rule with `get_rule`, check any quote with `verify_citation` before you present it, and say the rule number and the rules edition.
+5. Decks: call `list_decks`. If there are decks, show one with `get_deck`: lead with its name, format, commander(s), card count and colour identity, then how much of it the person owns and what is missing. If there are no decks (normal for a new account), say so, keep going read-only, and offer to look at a decklist they paste (`check_decklist`) or a public Archidekt link (`get_archidekt_deck`) right now: nothing is saved. Say that saving a deck needs write access, which setup did not ask for, and continue with the next step.
+6. Finish with three next steps the person can ask for, chosen from what you saw (for example a rules question, checking a deck against their collection, or what their most valuable cards are worth over time).
+"""
+
+
 def _arg(name: str, description: str, required: bool = True) -> dict:
     return {"name": name, "description": description, "required": required}
 
 
 PROMPTS = [
+    {"name": "vault_start", "title": "Start here: a first look at your Vault",
+     "description": "A short, read-only tour of the person's own collection and decks, with a rules answer and three next steps. Use it right after connecting.",
+     "arguments": [],
+     "text": START_TOUR + "\n" + GROUNDING},
     {"name": "rules_judge", "title": "Answer a rules question",
      "description": "Answer a Magic rules question from the Comprehensive Rules and rulings, with verified citations.",
      "arguments": [_arg("question", "The rules question")],
