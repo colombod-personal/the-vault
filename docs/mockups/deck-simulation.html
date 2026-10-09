@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deck page: Opening turns (design mockup)</title><style>
+:root{--bg:oklch(0.20 0.014 65);--bg-2:oklch(0.23 0.014 65);--surface:oklch(0.26 0.014 65);--surface-2:oklch(0.30 0.015 65);--border:oklch(0.36 0.014 65);--border-2:oklch(0.44 0.018 70);
+--text:oklch(0.96 0.012 85);--text-2:oklch(0.82 0.012 80);--muted:oklch(0.70 0.014 70);--gold:oklch(0.80 0.13 80);--gold-2:oklch(0.88 0.12 85);--copper:oklch(0.66 0.13 50);--danger:oklch(0.72 0.17 25);--good:oklch(0.70 0.14 145);
+--sans:'Manrope',system-ui,-apple-system,'Segoe UI',sans-serif;--mono:'JetBrains Mono',ui-monospace,Consolas,monospace;--display:'Cormorant Garamond',Georgia,serif;--radius:4px;--radius-lg:8px}
+*{box-sizing:border-box}html,body{margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.5 var(--sans)}
+.mock{background:var(--gold);color:oklch(0.2 0.02 65);padding:10px 16px;font-weight:700;font-size:13px}
+.wrap{max-width:1240px;margin:0 auto;padding:16px}
+h1{font:600 30px/1.1 var(--display);margin:4px 0 4px}
+h2.sh{font:600 22px/1.2 var(--display);margin:28px 0 10px}
+.eyebrow{font:500 11px/1.4 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--gold);margin:0 0 6px}
+.muted{color:var(--muted)}.danger{color:var(--danger)}
+.sub{color:var(--text-2);font-size:13px;margin:4px 0 8px}.sub.tight{margin-top:14px}
+.meta{color:var(--text-2);font-size:13px;margin:0 0 12px}
+.back{display:inline-flex;align-items:center;min-height:44px;color:var(--text-2);text-decoration:none;font-size:13px}
+.deck-tabs{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:8px 0 14px;padding-bottom:2px}
+.deck-tabs::-webkit-scrollbar{display:none}
+.chip,.btn,select{font:600 12px var(--sans);min-height:44px;padding:0 14px;border-radius:var(--radius);border:1px solid var(--border-2);background:var(--surface);color:var(--text);cursor:pointer}
+.deck-tabs .chip{flex:0 0 auto}
+.chip.active{background:var(--gold);color:oklch(0.2 0.02 65);border-color:var(--gold)}
+.btn{font-size:13px}.btn[disabled]{opacity:.55;cursor:default}
+.btn.primary{background:var(--gold);color:oklch(0.2 0.02 65);border-color:var(--gold)}
+:focus-visible{outline:2px solid var(--gold-2);outline-offset:2px}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px;margin-bottom:12px;min-width:0}
+.grid2{display:grid;grid-template-columns:1fr;gap:12px}
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px}
+.seg{display:inline-flex}.seg .chip{border-radius:0}.seg .chip:first-child{border-radius:var(--radius) 0 0 var(--radius)}.seg .chip:last-child{border-radius:0 var(--radius) var(--radius) 0;border-left:0}
+.lbl{font:500 11px var(--mono);color:var(--text-2);display:flex;align-items:center;gap:8px}
+.asplayed{margin:10px 0 0;font-size:13px;color:var(--text-2)}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.tile{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px}
+.tile .k{font:500 11px/1.3 var(--mono);color:var(--text-2);margin:0}
+.tile .v{font:600 30px/1.1 var(--display);margin:4px 0 2px;color:var(--gold-2)}
+.tile .u{font-size:12px;color:var(--text-2);margin:0}
+.curve{display:flex;align-items:flex-end;gap:6px;height:150px;margin-top:10px}
+.ccol{flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px}
+.cbar{width:100%;min-height:2px;background:var(--gold);border-radius:2px 2px 0 0}
+.cn2,.cl{font:500 11px var(--mono);color:var(--text-2)}
+.bars{list-style:none;margin:0;padding:0}
+.bars li{display:grid;grid-template-columns:52px 1fr 108px;gap:8px;align-items:center;min-height:26px;font-size:13px}
+.bl{color:var(--text-2);font-size:12px}.bv{text-align:right;font-variant-numeric:tabular-nums}
+.track{height:10px;background:var(--bg-2);border-radius:2px;overflow:hidden;display:block}
+.fill{display:block;height:100%;background:var(--gold)}
+.bars.alt .fill{background:var(--copper)}.bars.neutral .fill{background:var(--text-2)}
+.fill.danger{background:var(--danger)}
+.note.plan{margin-top:14px;border:1px solid var(--border-2);border-left:4px solid var(--gold);border-radius:var(--radius);padding:10px 12px;background:var(--bg-2)}
+.note ul{margin:6px 0;padding-left:18px}.note li{margin:2px 0}.cn{font-weight:600}.why{color:var(--text-2)}
+.notice{border:1px solid var(--gold);border-left:4px solid var(--gold);border-radius:var(--radius);padding:10px 12px;background:var(--bg-2);margin-bottom:12px;font-size:13px}
+.warn-line{color:var(--gold);font-size:13px;margin:4px 0}
+details.numbers{margin:8px 0}summary{cursor:pointer;min-height:44px;display:flex;align-items:center}
+details.game{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:0 14px 10px;margin-bottom:8px}
+details.game summary{font-weight:600}
+table{border-collapse:collapse;width:100%}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:top}
+thead th{font:500 11px var(--mono);color:var(--text-2);text-transform:uppercase}
+table.small{max-width:260px}
+.flag{display:inline-block;font-size:12px;padding:1px 6px;border-radius:3px;margin:1px 4px 1px 0}
+.flag.warn{background:oklch(0.35 0.06 80);color:var(--gold-2)}.flag.bad{background:oklch(0.35 0.09 25);color:oklch(0.9 0.05 25)}
+.assump{margin:6px 0 0;padding-left:18px}.assump li{margin:4px 0}
+.prov{color:var(--text-2);font-size:12px;margin:12px 0 0}
+.load{display:flex;gap:10px;align-items:center;min-height:44px}
+.spinner{width:16px;height:16px;border:2px solid var(--border-2);border-top-color:var(--gold);border-radius:50%;display:inline-block}
+a{color:var(--gold-2)}
+code{font-family:var(--mono);font-size:12px}
+@media (max-width:759px){
+  table.turns,table.turns thead,table.turns tbody,table.turns tr,table.turns th,table.turns td{display:block}
+  table.turns thead{position:absolute;left:-9999px}
+  table.turns tr{border:1px solid var(--border);border-radius:var(--radius);padding:6px 8px;margin:8px 0;background:var(--bg-2)}
+  table.turns th[scope=row]{font:600 13px var(--sans);text-transform:none;border:0;padding:2px 0}
+  table.turns th[scope=row]::before{content:"Turn "}
+  table.turns tr{display:grid;grid-template-columns:1fr 1fr;gap:2px 12px}
+  table.turns th[scope=row],table.turns td[data-l=Cast],table.turns td[data-l=Notes]{grid-column:1 / -1}
+  table.turns td{border:0;padding:2px 0}
+  table.turns td::before{content:attr(data-l);display:block;font:500 11px var(--mono);color:var(--text-2);text-transform:uppercase}
+  table.turns td[data-l=Mana]{grid-row:3;grid-column:1}
+  table.turns td[data-l=Hand]{grid-row:3;grid-column:2}
+  table.turns td[data-l=Cast]{grid-row:4}
+  table.turns td[data-l=Notes]{grid-row:5}
+  table.turns td.none{display:none}
+}
+@media (min-width:760px){
+  .grid2{grid-template-columns:1fr 1fr}
+  .tiles{grid-template-columns:repeat(4,1fr)}
+  .bars li{grid-template-columns:60px 1fr 130px}
+  .wrap{padding:24px}
+}
+</style></head>
+<body>
+<div class="mock">DESIGN MOCKUP (issue #138): every figure on this page is invented to show the layout. It is not the result of a real simulation. Static HTML, no script, no network requests.</div>
+<div class="wrap">
+  <a class="back" href="#decks">&larr; Your decks</a>
+  <h1>Example deck (mockup)</h1>
+  <div class="deck-tabs" role="group" aria-label="Deck views">
+    <button class="chip" aria-pressed="false">Cards</button><button class="chip" id="stats" aria-pressed="false">Stats</button>
+    <button class="chip active" aria-pressed="true">Opening turns</button><button class="chip" aria-pressed="false">Legality</button>
+    <button class="chip" aria-pressed="false">Upgrades</button><button class="chip" aria-pressed="false">Combos</button>
+    <button class="chip" aria-pressed="false">Buy list</button><button class="chip" aria-pressed="false">History</button>
+  </div>
+
+  <section class="panel" aria-labelledby="h-intro">
+    <h2 id="h-intro" class="eyebrow" style="font-size:11px">Opening turns</h2>
+    <p class="meta" style="margin:0 0 8px"><strong>Example deck (mockup)</strong> &middot; commander &middot; 100 cards &middot; commander: Xenagos, God of Revels &middot; colours R G</p>
+    <p style="margin:0 0 4px;font-size:15px"><strong>A simulation, not a prediction.</strong> The Vault played this list 1,000 times with a simple player (no opponent) and counted what happened in the first 6 turns.
+    Run it again and the figures move by a few points: at 1,000 games a percentage is good to about 3 points either way.</p>
+    <p class="asplayed"><strong>As played:</strong> commander &middot; multiplayer: everyone draws on turn 1 &middot; on the play &middot; 6 turns &middot; 1,000 games &middot; seed 1829437218 (same deck, same seed, same figures)</p>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="Who goes first"><button class="chip active" aria-pressed="true">On the play</button><button class="chip" aria-pressed="false">On the draw</button></div>
+      <label class="lbl">Turns <select aria-label="Turns to play"><option>4</option><option selected>6</option><option>8</option><option>10</option></select></label>
+      <label class="lbl">Format <select aria-label="Format"><option selected>commander</option><option>modern</option></select></label>
+      <button class="btn primary">Play again with a new seed</button>
+    </div>
+  </section>
+
+  <h2 class="eyebrow" style="margin:18px 0 8px">The headline figures</h2>
+  <div class="tiles"><div class="tile"><p class="k">Five mana by turn 5</p><p class="v">58.3%</p><p class="u">of simulated games</p></div><div class="tile"><p class="k">Missed a land drop by turn 4</p><p class="v">38.0%</p><p class="u">of simulated games</p></div><div class="tile"><p class="k">Discarded by turn 5</p><p class="v">8.8%</p><p class="u">of simulated games</p></div><div class="tile"><p class="k">Mulligan rate</p><p class="v">14.1%</p><p class="u">of simulated games</p></div></div>
+
+  <div class="grid2" style="margin-bottom:0">
+    
+<section class="panel" aria-labelledby="h-curve">
+  <h3 id="h-curve" class="eyebrow">Mana curve <span class="muted">(cards that are not lands, by mana value)</span></h3>
+  <div class="curve" role="img" aria-label="Mana curve, number of non-land cards by mana value. 0: 1, 1: 11, 2: 18, 3: 13, 4: 8, 5: 6, 6: 3, 7+: 2."><div class="ccol"><span class="cn2">1</span><span class="cbar" style="height:6%"></span><span class="cl">0</span></div><div class="ccol"><span class="cn2">11</span><span class="cbar" style="height:61%"></span><span class="cl">1</span></div><div class="ccol"><span class="cn2">18</span><span class="cbar" style="height:100%"></span><span class="cl">2</span></div><div class="ccol"><span class="cn2">13</span><span class="cbar" style="height:72%"></span><span class="cl">3</span></div><div class="ccol"><span class="cn2">8</span><span class="cbar" style="height:44%"></span><span class="cl">4</span></div><div class="ccol"><span class="cn2">6</span><span class="cbar" style="height:33%"></span><span class="cl">5</span></div><div class="ccol"><span class="cn2">3</span><span class="cbar" style="height:17%"></span><span class="cl">6</span></div><div class="ccol"><span class="cn2">2</span><span class="cbar" style="height:11%"></span><span class="cl">7+</span></div></div>
+  <p class="sub">37 lands, 62 other cards, average mana value of the non-land cards 2.9. The commander is in the command zone.</p>
+  <details class="numbers"><summary>Show the curve as a table</summary>
+    <table class="small"><thead><tr><th scope="col">Mana value</th><th scope="col">Cards</th></tr></thead><tbody><tr><th scope='row'>0</th><td>1</td></tr><tr><th scope='row'>1</th><td>11</td></tr><tr><th scope='row'>2</th><td>18</td></tr><tr><th scope='row'>3</th><td>13</td></tr><tr><th scope='row'>4</th><td>8</td></tr><tr><th scope='row'>5</th><td>6</td></tr><tr><th scope='row'>6</th><td>3</td></tr><tr><th scope='row'>7+</th><td>2</td></tr></tbody></table>
+  </details>
+  <p class="sub"><a href="#stats">The Stats tab has the same curve with the deck&rsquo;s roles.</a></p>
+</section>
+    <section class="panel" aria-labelledby="h-know">
+      <h3 id="h-know" class="eyebrow">How to read this</h3>
+      <ul class="assump" style="margin-top:0">
+        <li>The player keeps 7 cards with 2 to 5 lands, otherwise takes a mulligan (up to two).</li>
+        <li>Every turn: draw, play one land, cast the biggest thing the mana allows (ramp first in the early turns).</li>
+        <li>Figures are shares of the 1,000 games, or averages over them.</li>
+      </ul>
+      <p class="sub">These three lines are fixed copy about the player; the full list of what is not modelled is at the bottom, from the server.</p>
+    </section>
+  </div>
+
+  <h2 class="eyebrow" style="margin:18px 0 8px">The odds, turn by turn</h2>
+  
+<div class="grid2">
+  <section class="panel" aria-labelledby="h-land">
+    <h3 id="h-land" class="eyebrow">Land drops</h3>
+    <p class="sub">Did the player play a land this turn?</p>
+    <ul class="bars ">
+<li><span class="bl">Turn 1</span><span class="track" aria-hidden="true"><span class="fill" style="width:93.4%"></span></span><span class="bv">93.4% of games</span></li>
+<li><span class="bl">Turn 2</span><span class="track" aria-hidden="true"><span class="fill" style="width:88.1%"></span></span><span class="bv">88.1% of games</span></li>
+<li><span class="bl">Turn 3</span><span class="track" aria-hidden="true"><span class="fill" style="width:82.7%"></span></span><span class="bv">82.7% of games</span></li>
+<li><span class="bl">Turn 4</span><span class="track" aria-hidden="true"><span class="fill" style="width:77.9%"></span></span><span class="bv">77.9% of games</span></li>
+<li><span class="bl">Turn 5</span><span class="track" aria-hidden="true"><span class="fill" style="width:72.5%"></span></span><span class="bv">72.5% of games</span></li>
+<li><span class="bl">Turn 6</span><span class="track" aria-hidden="true"><span class="fill" style="width:68.0%"></span></span><span class="bv">68.0% of games</span></li>
+</ul>
+    <p class="sub tight">Every land drop made so far, with no miss since turn 1:</p>
+    <ul class="bars alt">
+<li><span class="bl">Turn 1</span><span class="track" aria-hidden="true"><span class="fill" style="width:93.4%"></span></span><span class="bv">93.4% of games</span></li>
+<li><span class="bl">Turn 2</span><span class="track" aria-hidden="true"><span class="fill" style="width:84.0%"></span></span><span class="bv">84.0% of games</span></li>
+<li><span class="bl">Turn 3</span><span class="track" aria-hidden="true"><span class="fill" style="width:72.3%"></span></span><span class="bv">72.3% of games</span></li>
+<li><span class="bl">Turn 4</span><span class="track" aria-hidden="true"><span class="fill" style="width:62.0%"></span></span><span class="bv">62.0% of games</span></li>
+<li><span class="bl">Turn 5</span><span class="track" aria-hidden="true"><span class="fill" style="width:52.6%"></span></span><span class="bv">52.6% of games</span></li>
+<li><span class="bl">Turn 6</span><span class="track" aria-hidden="true"><span class="fill" style="width:44.9%"></span></span><span class="bv">44.9% of games</span></li>
+</ul>
+  </section>
+  <section class="panel" aria-labelledby="h-mana">
+    <h3 id="h-mana" class="eyebrow">Mana by turn</h3>
+    <p class="sub">Average mana the player had, and how much of it the simulated player spent.</p>
+    <ul class="bars ">
+<li><span class="bl">Turn 1</span><span class="track" aria-hidden="true"><span class="fill" style="width:11.6%"></span></span><span class="bv">0.93 available</span></li>
+<li><span class="bl">Turn 2</span><span class="track" aria-hidden="true"><span class="fill" style="width:24.0%"></span></span><span class="bv">1.92 available</span></li>
+<li><span class="bl">Turn 3</span><span class="track" aria-hidden="true"><span class="fill" style="width:37.6%"></span></span><span class="bv">3.01 available</span></li>
+<li><span class="bl">Turn 4</span><span class="track" aria-hidden="true"><span class="fill" style="width:51.0%"></span></span><span class="bv">4.08 available</span></li>
+<li><span class="bl">Turn 5</span><span class="track" aria-hidden="true"><span class="fill" style="width:64.6%"></span></span><span class="bv">5.17 available</span></li>
+<li><span class="bl">Turn 6</span><span class="track" aria-hidden="true"><span class="fill" style="width:76.5%"></span></span><span class="bv">6.12 available</span></li>
+</ul>
+    <p class="sub tight">Spent on spells (average):</p>
+    <ul class="bars alt">
+<li><span class="bl">Turn 1</span><span class="track" aria-hidden="true"><span class="fill" style="width:7.6%"></span></span><span class="bv">0.61 spent</span></li>
+<li><span class="bl">Turn 2</span><span class="track" aria-hidden="true"><span class="fill" style="width:18.5%"></span></span><span class="bv">1.48 spent</span></li>
+<li><span class="bl">Turn 3</span><span class="track" aria-hidden="true"><span class="fill" style="width:32.1%"></span></span><span class="bv">2.57 spent</span></li>
+<li><span class="bl">Turn 4</span><span class="track" aria-hidden="true"><span class="fill" style="width:43.6%"></span></span><span class="bv">3.49 spent</span></li>
+<li><span class="bl">Turn 5</span><span class="track" aria-hidden="true"><span class="fill" style="width:56.5%"></span></span><span class="bv">4.52 spent</span></li>
+<li><span class="bl">Turn 6</span><span class="track" aria-hidden="true"><span class="fill" style="width:66.4%"></span></span><span class="bv">5.31 spent</span></li>
+</ul>
+    <p class="sub tight">Stuck: every spell in hand cost more than the mana (turn 1 with no one-drops is normal):</p>
+    <ul class="bars alt">
+<li><span class="bl">Turn 1</span><span class="track" aria-hidden="true"><span class="fill" style="width:31.2%"></span></span><span class="bv">31.2% of games</span></li>
+<li><span class="bl">Turn 2</span><span class="track" aria-hidden="true"><span class="fill" style="width:14.5%"></span></span><span class="bv">14.5% of games</span></li>
+<li><span class="bl">Turn 3</span><span class="track" aria-hidden="true"><span class="fill" style="width:9.1%"></span></span><span class="bv">9.1% of games</span></li>
+<li><span class="bl">Turn 4</span><span class="track" aria-hidden="true"><span class="fill" style="width:7.4%"></span></span><span class="bv">7.4% of games</span></li>
+<li><span class="bl">Turn 5</span><span class="track" aria-hidden="true"><span class="fill" style="width:6.2%"></span></span><span class="bv">6.2% of games</span></li>
+<li><span class="bl">Turn 6</span><span class="track" aria-hidden="true"><span class="fill" style="width:5.0%"></span></span><span class="bv">5.0% of games</span></li>
+</ul>
+  </section>
+  <section class="panel" aria-labelledby="h-hand">
+    <h3 id="h-hand" class="eyebrow">Cards in hand</h3>
+    <p class="sub">Average hand size at the end of each turn.</p>
+    <ul class="bars ">
+<li><span class="bl">Turn 1</span><span class="track" aria-hidden="true"><span class="fill" style="width:76.2%"></span></span><span class="bv">6.10 cards</span></li>
+<li><span class="bl">Turn 2</span><span class="track" aria-hidden="true"><span class="fill" style="width:80.0%"></span></span><span class="bv">6.40 cards</span></li>
+<li><span class="bl">Turn 3</span><span class="track" aria-hidden="true"><span class="fill" style="width:78.8%"></span></span><span class="bv">6.30 cards</span></li>
+<li><span class="bl">Turn 4</span><span class="track" aria-hidden="true"><span class="fill" style="width:76.2%"></span></span><span class="bv">6.10 cards</span></li>
+<li><span class="bl">Turn 5</span><span class="track" aria-hidden="true"><span class="fill" style="width:73.8%"></span></span><span class="bv">5.90 cards</span></li>
+<li><span class="bl">Turn 6</span><span class="track" aria-hidden="true"><span class="fill" style="width:70.0%"></span></span><span class="bv">5.60 cards</span></li>
+</ul>
+  </section>
+  <section class="panel" aria-labelledby="h-disc">
+    <h3 id="h-disc" class="eyebrow">Discard risk</h3>
+    <p class="sub">Share of games in which the player has had to discard to hand size by this turn (cumulative).</p>
+    <ul class="bars neutral">
+<li><span class="bl">Turn 1</span><span class="track" aria-hidden="true"><span class="fill" style="width:0.0%"></span></span><span class="bv">0.0% of games</span></li>
+<li><span class="bl">Turn 2</span><span class="track" aria-hidden="true"><span class="fill" style="width:0.4%"></span></span><span class="bv">0.4% of games</span></li>
+<li><span class="bl">Turn 3</span><span class="track" aria-hidden="true"><span class="fill" style="width:2.6%"></span></span><span class="bv">2.6% of games</span></li>
+<li><span class="bl">Turn 4</span><span class="track" aria-hidden="true"><span class="fill" style="width:5.1%"></span></span><span class="bv">5.1% of games</span></li>
+<li><span class="bl">Turn 5</span><span class="track" aria-hidden="true"><span class="fill" style="width:8.8%"></span></span><span class="bv">8.8% of games</span></li>
+<li><span class="bl">Turn 6</span><span class="track" aria-hidden="true"><span class="fill" style="width:12.3%"></span></span><span class="bv">12.3% of games</span></li>
+</ul>
+    <div class="note plan" role="note">
+      <strong>Discarding may be part of this deck&rsquo;s plan.</strong>
+      <ul><li><span class='cn'>Reliquary Tower</span> <span class='why'>no maximum hand size</span></li><li><span class='cn'>Wheel of Fortune</span> <span class='why'>wheels hands</span></li></ul>
+      <p class="sub">The simulation lifts the hand limit once a &ldquo;no maximum hand size&rdquo; card is in play. A deck that wants cards in its graveyard
+      or swaps hands may be glad to discard: read the figures as a fact about the deck, not as a fault.</p>
+    </div>
+  </section>
+</div>
+
+  <h2 class="eyebrow" style="margin:18px 0 8px">Sample games, turn by turn</h2>
+  <p class="sub" style="margin-top:0">The first 5 of the 1,000 games, as they came up. They are not picked to be typical, lucky or unlucky.</p>
+  
+<details class="game" open>
+  <summary><span>Game 1 <span class="muted">· kept 7 · land drops made in turns 1 to 3: 3 of 3</span></span></summary>
+  <p class="sub"><strong>Opening hand:</strong> Forest, Mountain, Rootbound Crag, Llanowar Elves, Sol Ring, Beast Within, Craterhoof Behemoth</p>
+  <table class="turns"><thead><tr><th scope="col">Turn</th><th scope="col">Drew</th><th scope="col">Land played</th><th scope="col">Mana</th><th scope="col">Cast</th><th scope="col">Hand</th><th scope="col">Notes</th></tr></thead>
+  <tbody><tr><th scope="row" data-l="Turn">1</th><td data-l="Drew"><span class=muted>no draw (on the play)</span></td><td data-l="Land played">Forest</td><td data-l="Mana">1 <span class="muted">(spent 1)</span></td><td data-l="Cast">Llanowar Elves</td><td data-l="Hand">5</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">2</th><td data-l="Drew">Wild Growth</td><td data-l="Land played">Mountain</td><td data-l="Mana">2 <span class="muted">(spent 2)</span></td><td data-l="Cast">Sol Ring</td><td data-l="Hand">5</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">3</th><td data-l="Drew">Command Tower</td><td data-l="Land played">Rootbound Crag</td><td data-l="Mana">6 <span class="muted">(spent 6)</span></td><td data-l="Cast">Wild Growth, Beast Within</td><td data-l="Hand">4</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">4</th><td data-l="Drew">Forest</td><td data-l="Land played">Command Tower</td><td data-l="Mana">7 <span class="muted">(spent 7)</span></td><td data-l="Cast">Xenagos, God of Revels</td><td data-l="Hand">4</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">5</th><td data-l="Drew">Wheel of Fortune</td><td data-l="Land played">Forest</td><td data-l="Mana">8 <span class="muted">(spent 8)</span></td><td data-l="Cast">Wheel of Fortune</td><td data-l="Hand">3</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">6</th><td data-l="Drew">Mountain</td><td data-l="Land played">Mountain</td><td data-l="Mana">9 <span class="muted">(spent 7)</span></td><td data-l="Cast">Craterhoof Behemoth</td><td data-l="Hand">2</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr></tbody></table>
+</details>
+<details class="game">
+  <summary><span>Game 2 <span class="muted">· kept 7 · land drops made in turns 1 to 3: 3 of 3</span></span></summary>
+  <p class="sub"><strong>Opening hand:</strong> Forest, Forest, Mountain, Mountain, Mountain, Zhur-Taa Druid, Hellkite Tyrant</p>
+  <table class="turns"><thead><tr><th scope="col">Turn</th><th scope="col">Drew</th><th scope="col">Land played</th><th scope="col">Mana</th><th scope="col">Cast</th><th scope="col">Hand</th><th scope="col">Notes</th></tr></thead>
+  <tbody><tr><th scope="row" data-l="Turn">1</th><td data-l="Drew"><span class=muted>no draw (on the play)</span></td><td data-l="Land played">Forest</td><td data-l="Mana">1 <span class="muted">(spent 0)</span></td><td data-l="Cast"><span class=muted>nothing</span></td><td data-l="Hand">6</td><td data-l="Notes"><span class="flag warn">Nothing castable: every spell in hand costs more than the mana</span></td></tr><tr><th scope="row" data-l="Turn">2</th><td data-l="Drew">Command Tower</td><td data-l="Land played">Command Tower</td><td data-l="Mana">2 <span class="muted">(spent 2)</span></td><td data-l="Cast">Zhur-Taa Druid</td><td data-l="Hand">5</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">3</th><td data-l="Drew">Rampant Growth</td><td data-l="Land played">Mountain</td><td data-l="Mana">4 <span class="muted">(spent 3)</span></td><td data-l="Cast">Rampant Growth</td><td data-l="Hand">5</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">4</th><td data-l="Drew">Forest</td><td data-l="Land played">Forest</td><td data-l="Mana">5 <span class="muted">(spent 4)</span></td><td data-l="Cast">Xenagos, God of Revels</td><td data-l="Hand">4</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">5</th><td data-l="Drew">Sol Ring</td><td data-l="Land played">Mountain</td><td data-l="Mana">7 <span class="muted">(spent 6)</span></td><td data-l="Cast">Sol Ring, Hellkite Tyrant</td><td data-l="Hand">3</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">6</th><td data-l="Drew">Forest</td><td data-l="Land played">Forest</td><td data-l="Mana">8 <span class="muted">(spent 7)</span></td><td data-l="Cast"><span class=muted>nothing</span></td><td data-l="Hand">3</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr></tbody></table>
+</details>
+<details class="game">
+  <summary><span>Game 3 <span class="muted">· mulligan 1, kept 6 · land drops made in turns 1 to 3: 3 of 3</span></span></summary>
+  <p class="sub"><strong>Opening hand:</strong> Forest, Mountain, Mountain, Elvish Mystic, Burnished Hart, Eternal Witness</p>
+  <table class="turns"><thead><tr><th scope="col">Turn</th><th scope="col">Drew</th><th scope="col">Land played</th><th scope="col">Mana</th><th scope="col">Cast</th><th scope="col">Hand</th><th scope="col">Notes</th></tr></thead>
+  <tbody><tr><th scope="row" data-l="Turn">1</th><td data-l="Drew"><span class=muted>no draw (on the play)</span></td><td data-l="Land played">Forest</td><td data-l="Mana">1 <span class="muted">(spent 1)</span></td><td data-l="Cast">Elvish Mystic</td><td data-l="Hand">4</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">2</th><td data-l="Drew">Command Tower</td><td data-l="Land played">Command Tower</td><td data-l="Mana">3 <span class="muted">(spent 3)</span></td><td data-l="Cast">Burnished Hart</td><td data-l="Hand">4</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">3</th><td data-l="Drew">Forest</td><td data-l="Land played">Mountain</td><td data-l="Mana">5 <span class="muted">(spent 5)</span></td><td data-l="Cast">Eternal Witness, Wild Growth</td><td data-l="Hand">3</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">4</th><td data-l="Drew">Kodama&#x27;s Reach</td><td data-l="Land played">Forest</td><td data-l="Mana">6 <span class="muted">(spent 5)</span></td><td data-l="Cast">Kodama&#x27;s Reach</td><td data-l="Hand">3</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">5</th><td data-l="Drew">Forest</td><td data-l="Land played">Forest</td><td data-l="Mana">7 <span class="muted">(spent 7)</span></td><td data-l="Cast">Xenagos, God of Revels</td><td data-l="Hand">3</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">6</th><td data-l="Drew">Beast Within</td><td data-l="Land played">Mountain</td><td data-l="Mana">8 <span class="muted">(spent 3)</span></td><td data-l="Cast">Beast Within</td><td data-l="Hand">3</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr></tbody></table>
+</details>
+<details class="game">
+  <summary><span>Game 4 <span class="muted">· kept 7 · land drops made in turns 1 to 3: 3 of 3</span></span></summary>
+  <p class="sub"><strong>Opening hand:</strong> Forest, Mountain, Sylvan Library, Hellkite Tyrant, Craterhoof Behemoth, Sol Ring, Wheel of Fortune</p>
+  <table class="turns"><thead><tr><th scope="col">Turn</th><th scope="col">Drew</th><th scope="col">Land played</th><th scope="col">Mana</th><th scope="col">Cast</th><th scope="col">Hand</th><th scope="col">Notes</th></tr></thead>
+  <tbody><tr><th scope="row" data-l="Turn">1</th><td data-l="Drew"><span class=muted>no draw (on the play)</span></td><td data-l="Land played">Forest</td><td data-l="Mana">1 <span class="muted">(spent 1)</span></td><td data-l="Cast"><span class=muted>nothing</span></td><td data-l="Hand">6</td><td data-l="Notes"><span class="flag warn">Nothing castable: every spell in hand costs more than the mana</span></td></tr><tr><th scope="row" data-l="Turn">2</th><td data-l="Drew">Forest</td><td data-l="Land played">Forest</td><td data-l="Mana">2 <span class="muted">(spent 2)</span></td><td data-l="Cast">Sol Ring</td><td data-l="Hand">6</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">3</th><td data-l="Drew">Mountain</td><td data-l="Land played">Mountain</td><td data-l="Mana">5 <span class="muted">(spent 5)</span></td><td data-l="Cast"><span class=muted>nothing</span></td><td data-l="Hand">6</td><td data-l="Notes"><span class="flag warn">Nothing castable: every spell in hand costs more than the mana</span></td></tr><tr><th scope="row" data-l="Turn">4</th><td data-l="Drew">Reliquary Tower</td><td data-l="Land played">Reliquary Tower</td><td data-l="Mana">6 <span class="muted">(spent 6)</span></td><td data-l="Cast">Sylvan Library, Wheel of Fortune</td><td data-l="Hand">6</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">5</th><td data-l="Drew">Forest</td><td data-l="Land played">Forest</td><td data-l="Mana">7 <span class="muted">(spent 7)</span></td><td data-l="Cast">Xenagos, God of Revels</td><td data-l="Hand">5</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">6</th><td data-l="Drew">Mountain</td><td data-l="Land played">Mountain</td><td data-l="Mana">8 <span class="muted">(spent 8)</span></td><td data-l="Cast">Hellkite Tyrant</td><td data-l="Hand">4</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr></tbody></table>
+</details>
+<details class="game">
+  <summary><span>Game 5 <span class="muted">· kept 7 · land drops made in turns 1 to 3: 3 of 3</span></span></summary>
+  <p class="sub"><strong>Opening hand:</strong> Forest, Forest, Mountain, Mountain, Command Tower, Kodama&#x27;s Reach, Beast Within</p>
+  <table class="turns"><thead><tr><th scope="col">Turn</th><th scope="col">Drew</th><th scope="col">Land played</th><th scope="col">Mana</th><th scope="col">Cast</th><th scope="col">Hand</th><th scope="col">Notes</th></tr></thead>
+  <tbody><tr><th scope="row" data-l="Turn">1</th><td data-l="Drew"><span class=muted>no draw (on the play)</span></td><td data-l="Land played">Forest</td><td data-l="Mana">1 <span class="muted">(spent 0)</span></td><td data-l="Cast"><span class=muted>nothing</span></td><td data-l="Hand">6</td><td data-l="Notes"><span class="flag warn">Nothing castable: every spell in hand costs more than the mana</span></td></tr><tr><th scope="row" data-l="Turn">2</th><td data-l="Drew">Cultivate</td><td data-l="Land played">Forest</td><td data-l="Mana">2 <span class="muted">(spent 0)</span></td><td data-l="Cast"><span class=muted>nothing</span></td><td data-l="Hand">6</td><td data-l="Notes"><span class="flag warn">Nothing castable: every spell in hand costs more than the mana</span></td></tr><tr><th scope="row" data-l="Turn">3</th><td data-l="Drew">Forest</td><td data-l="Land played">Mountain</td><td data-l="Mana">3 <span class="muted">(spent 3)</span></td><td data-l="Cast">Kodama&#x27;s Reach</td><td data-l="Hand">5</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">4</th><td data-l="Drew">Sol Ring</td><td data-l="Land played">Mountain</td><td data-l="Mana">4 <span class="muted">(spent 4)</span></td><td data-l="Cast">Cultivate, Sol Ring</td><td data-l="Hand">4</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">5</th><td data-l="Drew">Mountain</td><td data-l="Land played">Command Tower</td><td data-l="Mana">7 <span class="muted">(spent 7)</span></td><td data-l="Cast">Xenagos, God of Revels</td><td data-l="Hand">5</td><td data-l="Notes" class=none><span class=muted>-</span></td></tr><tr><th scope="row" data-l="Turn">6</th><td data-l="Drew">Forest</td><td data-l="Land played">Forest</td><td data-l="Mana">8 <span class="muted">(spent 2)</span></td><td data-l="Cast">Beast Within</td><td data-l="Hand">7</td><td data-l="Notes"><span class="flag bad">Discarded Forest</span></td></tr></tbody></table>
+</details>
+
+  <section class="panel" aria-labelledby="h-not" style="margin-top:16px">
+    <h3 id="h-not" class="eyebrow">What this simulation does not do</h3>
+    <ul class="assump"><li>Colours are not checked: any land pays for any spell (a deck with colour problems will do worse than shown).</li><li>Only the draw step draws cards; card draw, tutors and cantrips are not played out.</li><li>Mana from rocks and creatures is read from the card text (a creature&#x27;s mana starts the turn after it is cast); spells that put lands onto the battlefield count as one more land.</li><li>X spells count their mana value with X = 0.</li><li>No opponent: no interaction, no combat, nothing is destroyed.</li><li>Keep rule: keep 7 cards with 2 to 5 lands; otherwise mulligan (London) up to twice, putting back the most expensive spells or extra lands.</li></ul>
+    <p class="prov">Computed by the Vault from Scryfall&rsquo;s Oracle card data (as of 2026-10-08). The mana a card makes is the Vault&rsquo;s reading of its text, not Scryfall&rsquo;s or Wizards&rsquo; figure.
+    Unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. &copy; Wizards of the Coast LLC.</p>
+  </section>
+  
+<h2 class="sh">Other states</h2>
+<div class="grid2">
+  <section class="panel" aria-labelledby="s1"><h3 id="s1" class="eyebrow">Loading (first run)</h3>
+    <div class="load" role="status"><span class="spinner" aria-hidden="true"></span> <span class="muted">Playing 1,000 games&hellip;</span></div>
+    <p class="sub">Controls are disabled while it runs. The curve does not wait: it comes from the Stats call and shows as soon as that is back.</p></section>
+  <section class="panel" aria-labelledby="s2"><h3 id="s2" class="eyebrow">Playing again (a result is already shown)</h3>
+    <p class="sub">The old figures stay on screen, dimmed, so the page does not jump. The button reads &ldquo;Playing again&hellip;&rdquo; and is disabled. New figures replace them together.</p>
+    <button class="btn" disabled>Playing again&hellip;</button></section>
+  <section class="panel" aria-labelledby="s3"><h3 id="s3" class="eyebrow">Error</h3>
+    <div role="alert"><strong class="danger">Couldn&rsquo;t work out the opening turns:</strong> Network error: Failed to fetch</div>
+    <p><button class="btn">Try again</button></p></section>
+  <section class="panel" aria-labelledby="s4"><h3 id="s4" class="eyebrow">Asked too often (HTTP 429)</h3>
+    <div role="alert"><strong class="danger">Too many analyses this minute.</strong> The Vault allows 30 a minute for each person. You can play again in 41 seconds.</div>
+    <p><button class="btn" disabled>Play again in 41 s</button></p></section>
+  <section class="panel" aria-labelledby="s5"><h3 id="s5" class="eyebrow">Too few cards (HTTP 400)</h3>
+    <div role="alert"><strong>Not enough cards to play 6 turns.</strong> The Vault says: &ldquo;The deck has 9 cards: too few to play 6 turns.&rdquo;
+    Add cards, or choose fewer turns (a deck needs 7 cards plus one for each turn).</div>
+    <p class="sub">The curve above still shows. The odds and the sample games are replaced by this message.</p></section>
+  <section class="panel" aria-labelledby="s6"><h3 id="s6" class="eyebrow">Cards the catalog does not know</h3>
+    <p class="warn-line">Not in the card catalog: Unknown Card, Misspeled Name</p>
+    <p class="sub">These cards are left out of the games, so the deck plays with fewer cards than the list has. Same wording as the Stats tab, plus this sentence.</p></section>
+</div>
+
+<h2 class="sh">Colour warning (a deck of three or more colours)</h2>
+<div class="notice" role="note"><strong>This deck uses 3 colours (WUB), and the simulation does not check colours: any land pays for any spell.</strong>
+Real games will miss more spells and start slower than these numbers show, the more so the more colours the deck has.</div>
+<p class="sub">The sentence is the server&rsquo;s own <code>colour_warning</code>, shown above the headline figures, not hidden in the assumptions.</p>
+
+<h2 class="sh">A 60-card format (Modern, two players)</h2>
+<div class="panel">
+  <p class="asplayed"><strong>As played:</strong> modern &middot; two players: no draw on turn 1 on the play &middot; on the play &middot; 6 turns &middot; 1,000 games &middot; seed 904412377</p>
+  <p class="sub">No command zone, no commander line, and the curve caption reads &ldquo;24 lands, 36 other cards&rdquo;. Everything else is the same layout. Brawl, Standard Brawl and Pauper-style two-player
+  lists use the same view; the server decides who draws on turn 1 from the format (Commander, Oathbreaker, Pauper Commander and PreDH count as multiplayer).</p>
+</div>
+
+</div>
+</body></html>
