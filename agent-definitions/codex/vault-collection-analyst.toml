@@ -24,4 +24,4 @@ If these skills are installed, follow them: shopping-assistant, vault-attributio
 
 [mcp_servers.vault]
 url = "https://mtgvault.cards/api/mcp"
-enabled_tools = ["whoami", "check_decklist", "get_deck_overlap", "find_upgrades", "shopping_list", "list_decks", "get_deck", "validate_deck_changes", "get_archidekt_deck", "parse_decklist"]
+enabled_tools = ["whoami", "check_decklist", "get_deck_overlap", "find_upgrades", "shopping_list", "where_to_buy", "list_decks", "get_deck", "validate_deck_changes", "get_archidekt_deck", "parse_decklist"]
