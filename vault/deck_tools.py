@@ -271,6 +271,53 @@ def stats(db: Session, resolved: Resolved, combos: dict | None = None) -> dict:
 
 # -- legality -----------------------------------------------------------------------------------
 
+_NUMBER_WORDS = {w: i for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen "
+    "nineteen twenty".split())}
+_UP_TO = re.compile(r"A deck can have up to (\w+) cards named", re.IGNORECASE)
+
+
+def copy_limit(card, fmt: str) -> int | None:
+    """Copies of this card a deck may hold in ``fmt``; ``None`` for any number. A basic land, or a card that says 'A deck can have
+    any number of cards named ...' (Relentless Rats), holds any number; 'A deck can have up to nine cards named ...' (Nazgul, Seven
+    Dwarves) holds that many in every format, Commander included (#423); every other card holds the format's limit."""
+    if "Basic Land" in (card.type_line or ""):
+        return None
+    kind, count = deck_rule(all_text(card))
+    if kind == "any":
+        return None
+    if kind == "up_to":
+        return count
+    return 1 if fmt in SINGLETON or card.legalities.get(fmt) == "restricted" else 4
+
+
+def deck_rule(text: str) -> tuple[str | None, int | None]:
+    """What a card's own text says about how many copies a deck may hold: ('any', None), ('up_to', N), ('one', 1) for the old DCI
+    ruling 'a deck can have only one card named', or (None, None). Every card that has such a sentence (14 of them on 2026-10-09)
+    is covered by one of the three; the catalog sync warns about any other wording (``unread_deck_rule``)."""
+    if "A deck can have any number of cards named" in text:
+        return "any", None
+    found = _UP_TO.search(text)
+    if found:
+        word = found.group(1).lower()
+        count = int(word) if word.isdigit() else _NUMBER_WORDS.get(word)
+        if count:
+            return "up_to", count
+    if "A deck can have only one card named" in text:
+        return "one", 1
+    return None, None
+
+
+_DECK_RULE_WORDS = re.compile(r"(?<![a-z])(?:a|your) deck (?:can|may|must|cannot|can't|may not)(?![a-z])", re.IGNORECASE)
+
+
+def unread_deck_rule(text: str) -> bool:
+    """A card whose text talks about what a deck can or must hold in a way ``deck_rule`` does not read. The catalog sync reports
+    these, so a new Scryfall wording or a new card of this kind is seen at ingestion, not by a person whose legal deck is
+    called illegal (#423)."""
+    return bool(_DECK_RULE_WORDS.search(text)) and deck_rule(text) == (None, None)
+
+
 def legality(resolved: Resolved, fmt: str) -> dict:
     fmt = check_format(fmt)
     issues: list[dict] = []
@@ -288,10 +335,10 @@ def legality(resolved: Resolved, fmt: str) -> dict:
             continue
         name, n = e.card.name, counts[e.card.name]
         counts[e.card.name] = 0
-        free = "Basic Land" in (e.card.type_line or "") or "A deck can have any number of cards named" in all_text(e.card)
-        limit = 1 if fmt in SINGLETON or e.card.legalities.get(fmt) == "restricted" else 4
-        if n > limit and not free:
-            issues.append({"kind": "too_many_copies", "card": name, "detail": f"{n} copies, at most {limit} allowed in {fmt}"})
+        limit = copy_limit(e.card, fmt)
+        if limit is not None and n > limit:
+            own = f" (this card says a deck can have up to {limit})" if limit > 4 or (limit > 1 and fmt in SINGLETON) else ""
+            issues.append({"kind": "too_many_copies", "card": name, "detail": f"{n} copies, at most {limit} allowed in {fmt}{own}"})
     total = sum(e.line.quantity for e in played)
     if fmt in SIZE_100 and total != 100:
         issues.append({"kind": "deck_size", "card": None, "detail": f"{total} cards; {fmt} decks have exactly 100 (commander included)"})

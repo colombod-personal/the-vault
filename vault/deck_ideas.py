@@ -237,10 +237,8 @@ def combo_edges(found: dict, rows: list[dict]) -> dict:
 
 def copy_limit(card: OracleCard, fmt: str) -> int | None:
     """Copies of this card a deck may hold in ``fmt``; ``None`` for any number (basic lands, 'a deck can have any number of cards
-    named'). The same rule ``deck_tools.legality`` applies."""
-    if "Basic Land" in (card.type_line or "") or "A deck can have any number of cards named" in all_text(card):
-        return None
-    return 1 if fmt in dt.SINGLETON or card.legalities.get(fmt) == "restricted" else 4
+    named', 'up to nine cards named'). The one rule ``deck_tools.legality`` applies (#423)."""
+    return dt.copy_limit(card, fmt)
 
 
 def deck_identity(resolved: dt.Resolved, fmt: str) -> list[str]:

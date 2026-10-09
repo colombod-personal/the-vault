@@ -11,14 +11,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections.abc import Iterable
 from datetime import date, datetime, timezone
+from types import SimpleNamespace
 
 from sqlalchemy import delete, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 
+from .card_faces import all_text
+from .deck_tools import unread_deck_rule
 from .models import (CatalogSource, LegalityChange, OracleCard, OraclePrice, OraclePrinting, OracleTag, OracleTagLink, Ruling)
+
+log = logging.getLogger(__name__)
 
 # Layouts that are not playable cards (art series cards have their own Oracle ids but no rules).
 SKIPPED_LAYOUTS = {"art_series"}
@@ -134,7 +140,11 @@ def sync_oracle_cards(db: Session, objects: Iterable[dict], today: date | None =
         db.execute(delete(OracleCard).where(OracleCard.oracle_id.in_(part)))
     for part in chunks(legality):
         db.execute(postgresql.insert(LegalityChange.__table__).values(part))
-    return {"cards": len(new), "written": len(changed), "removed": len(gone), "legality_changes": len(legality)}
+    unread = sorted(row["name"] for row in new.values() if unread_deck_rule(all_text(SimpleNamespace(oracle_text=row.get("oracle_text"), faces=row.get("faces")))))
+    if unread:
+        log.warning("catalog sync: %d card(s) have deck-building wording the legality check does not read: %s", len(unread), ", ".join(unread[:20]))
+    counts = {"cards": len(new), "written": len(changed), "removed": len(gone), "legality_changes": len(legality)}
+    return {**counts, "unread_deck_rules": unread} if unread else counts
 
 
 def ruling_row(obj: dict) -> dict:
