@@ -130,6 +130,24 @@ OAUTH_READY = True
 LISTINGS = {"claude": None, "chatgpt": None}
 
 MCP_URL = f"{HOST}/api/mcp"
+
+# Perplexity (#362): a custom remote connector added in the web app. Everything below was seen in one real run on 2026-10-09
+# (Perplexity Pro plan, the demo account); Perplexity's own documentation was not used and Comet was not looked at, so
+# nothing here says more than that run showed. The wording is shared by the Connect page, llms.txt and the setup page.
+PERPLEXITY_CONNECTORS = "https://www.perplexity.ai/computer/connectors"
+PERPLEXITY_CHECKED = "2026-10-09"
+PERPLEXITY_HOW = [
+    f"In the Perplexity web app open Connectors ({PERPLEXITY_CONNECTORS}) and choose Custom connector (Remote), then Add MCP connector. "
+    "It needs a plan that offers custom connectors (the check ran on Pro).",
+    f"Name it The Vault, leave the description optional, set the MCP server URL to {MCP_URL}, leave Advanced as it is "
+    "(OAuth, no client ID or client secret, Streamable HTTP, Public), tick that you understand custom connectors can introduce risks, and add it.",
+    "Open the connector and press Add connector. Perplexity opens the Vault's page \"Connect Perplexity (www.perplexity.ai) to your Vault?\": "
+    "sign in (a passkey, Google and so on; the page shows who is signed in) and press Allow.",
+    "The connector then shows Connected with the Vault's tools, each with a permission: Disable, Always ask or Allow.",
+    "Use it in Computer mode and name the Vault in the question (Perplexity reaches a connector's tools through list_external_tools, "
+    "describe_external_tools and call_external_tool). Comet: not verified yet. The connector tile shows Perplexity's generic plug icon, "
+    "because Perplexity has no icon field for custom connectors.",
+]
 TOKEN_ENV = "VAULT_TOKEN"
 # When the docs below were read for the blocks (docs/onboarding.md, "The connect page's blocks"). Nothing here has been
 # run in the harness itself, except Claude Code and the plugin validators: the page says what the docs say.
@@ -219,7 +237,7 @@ def llms_connection() -> str:
     ]
     if OAUTH_READY:
         lines += [
-            f"- OAuth (ChatGPT, Claude.ai, any MCP client): add the connector URL `{MCP_URL}`. The",
+            f"- OAuth (ChatGPT, Claude.ai, Perplexity, any MCP client): add the connector URL `{MCP_URL}`. The",
             "  401 from `/api/mcp` points at `/.well-known/oauth-protected-resource/api/mcp`; the server",
             "  metadata is at `/.well-known/oauth-authorization-server`. PKCE S256, the `resource` parameter",
             f"  (`{MCP_URL}`), a Client ID Metadata Document URL or `POST /oauth/register` as",
@@ -230,6 +248,7 @@ def llms_connection() -> str:
     else:
         lines.append("- OAuth sign-in is not switched on yet: use a personal access token.")
     lines += llms_setup().splitlines()
+    lines += llms_perplexity().splitlines()
     lines += [
         "- Token: header `Authorization: Bearer vault_pat_...` (a personal access token from Account → Agents & API). Keep it in an",
         f"  environment variable or the client's own secret prompt, never in a command line (shell history, the chat).",
@@ -279,6 +298,8 @@ SURFACES = [
     {"id": "copilot-cli", "name": "GitHub Copilot CLI", "page": "copilot"},
     {"id": "vscode", "name": "VS Code (GitHub Copilot)", "page": "copilot"},
     {"id": "copilot-app", "name": "GitHub Copilot desktop app", "page": "copilot"},
+    {"id": "perplexity-web", "name": "Perplexity (web)", "page": "perplexity"},
+    {"id": "comet", "name": "Comet (Perplexity's browser)", "page": "perplexity"},
 ]
 SETUP_HOSTS = [
     {"id": "claude", "title": "Claude", "app": "Claude Code, claude.ai or Claude Desktop",
@@ -292,6 +313,9 @@ SETUP_HOSTS = [
     {"id": "copilot", "title": "GitHub Copilot", "app": "GitHub Copilot CLI, VS Code or the GitHub Copilot desktop app",
      "docs": [("GitHub Docs: add MCP servers to Copilot CLI", "https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers"),
               ("VS Code: MCP servers", "https://code.visualstudio.com/docs/copilot/customization/mcp-servers")]},
+    # No documentation page is cited: the page follows one real run (#362). "checked" replaces the documentation line.
+    {"id": "perplexity", "title": "Perplexity", "app": "Perplexity on the web in Computer mode; Comet is not verified yet", "docs": [],
+     "checked": PERPLEXITY_CHECKED},
 ]
 
 # The safety rules, repeated at the end of every page (docs/onboarding.md, "Safety"). The last one ends the page.
@@ -454,13 +478,44 @@ def _copilot_sections() -> list[tuple[str, str]]:
     return [("GitHub Copilot CLI", _steps(cli)), ("VS Code (GitHub Copilot)", _steps(vs)), ("GitHub Copilot desktop app", _steps(app))]
 
 
+def _perplexity_sections() -> list[tuple[str, str]]:
+    if not OAUTH_READY:
+        return [("Perplexity (web)", "Coming soon. Connecting by sign-in is not switched on yet, and this page does not offer another route.")]
+    web = [
+        ("ASSISTANT", f"Tell the person this is the one step you cannot do: adding a custom connector is a Settings screen that only they can use. The address to add is `{MCP_URL}`, with sign-in by OAuth."),
+        ("PERSON", f"Open Connectors in the Perplexity web app ({PERPLEXITY_CONNECTORS}; also Settings, Connectors) and choose Custom connector (Remote), then Add MCP connector. "
+                   "This needs a plan that offers custom connectors: the real run used Pro, and which other plans have it is not verified yet. If the option is not there, say so and stop."),
+        ("PERSON", f"In the form type the name The Vault, leave the description empty or add one, and enter `{MCP_URL}` as the MCP server URL. "
+                   "Leave Advanced as it is: authentication OAuth, no client ID or client secret, transport Streamable HTTP, network access Public. "
+                   "Tick the box saying you understand custom connectors can introduce risks (only you can agree to that), then add the connector."),
+        ("PERSON", "Open the connector The Vault and press Add connector. Perplexity opens a page of the Vault titled \"Connect Perplexity (www.perplexity.ai) to your Vault?\". "
+                   "Sign in if it asks (a passkey, Google and so on; the page shows who is signed in), read what it lists, and press Allow. "
+                   "The page lists what Perplexity may do (Read, Write): keep Write unticked unless you want the assistant to save things."),
+        ("PERSON", "The connector should now show Connected with the Vault's tools. Each tool has a permission: Disable, Always ask or Allow (what each starts as is not verified yet). Choose what suits you; read-only tools are listed first."),
+        ("PERSON", "Start a chat in Computer mode and name the Vault in your question, for example \"Use The Vault: ...\". Whether the other modes can use the connector is not verified yet. "
+                   "Then paste the same setup line again in that chat; the assistant skips what is done and continues at the check."),
+        ("ASSISTANT", "Perplexity reaches a connector's tools through its own list_external_tools, describe_external_tools and call_external_tool, so use those to find and call the Vault's tools. "
+                      "The tile for the connector shows Perplexity's generic plug icon: Perplexity has no icon field for custom connectors, so this is expected."),
+    ]
+    comet = [
+        ("ASSISTANT", "Say that whether the Perplexity account's connectors are available in Comet, or Comet has its own setup, is not verified yet: it has not been looked at. Do not try to work around it."),
+        ("PERSON", "Use Perplexity on the web with the steps above for The Vault."),
+    ]
+    return [("Perplexity (web)", "Skip any step that is already done: if the connector The Vault already shows Connected, go to the check.\n\n" + _steps(web)),
+            ("Comet (Perplexity's browser)", _steps(comet))]
+
+
 def _fail_rows(host: str) -> list[tuple[str, str, str]]:
     status = {"claude": "`claude mcp get vault`", "chatgpt": "the app's entry under Apps", "codex": "`codex mcp list`",
-              "copilot": "`/mcp` in Copilot CLI or the server list in VS Code"}[host]
+              "copilot": "`/mcp` in Copilot CLI or the server list in VS Code",
+              "perplexity": "the connector's entry under Connectors"}[host]
     cli = {"claude": "claude", "codex": "codex", "copilot": "copilot"}.get(host)
     if cli:
         first = (f"Command not found (`{cli}`)", "The host's command-line tool is not installed, or is too old",
                  f"Tell the person; they install or update it from the documentation linked above. The minimum version is not verified yet. Do not install it yourself")
+    elif host == "perplexity":
+        first = ("Custom connector (Remote) is not found", "The plan does not offer custom connectors, or an organisation setting hides them",
+                 "Say which (see Before you start) and stop; for a command-line route use the Codex or Claude Code page")
     else:
         first = ("The Apps option, developer mode or Create is not found", "The plan does not have it, or an admin has not turned it on",
                  "Say which (see Before you start) and stop; for a command-line route use the Codex or Claude Code page")
@@ -477,6 +532,18 @@ def _fail_rows(host: str) -> list[tuple[str, str, str]]:
          f"Do not add a second one: check it with {status}, and reconnect it or sign in again if it is not connected"),
         ("Wrong address: the entry shows an address other than the production one", "A typo, or a test address", f"Ask the person, then remove the entry and add it again with exactly `{MCP_URL}`"),
     ]
+    if host == "perplexity":
+        rows[1] = ("Needs authentication, or a 401", "The sign-in is not finished",
+                   "Open the connector and press Add connector again, and press Allow on the Vault's page; the browser must be able to reach mtgvault.cards")
+        rows += [
+            ("The connector tile shows a generic plug icon, not the Vault's logo", "Perplexity's form for a custom connector has a name, a description and the address, and no icon field",
+             "Say that this is Perplexity's, not a fault: the connector works the same"),
+            ("The answer does not use the Vault, or is from the assistant's memory", "The chat was not in Computer mode, or the question did not name the Vault",
+             "Ask again in Computer mode and say \"Use The Vault\" in the question"),
+            ("The answer names list_external_tools, describe_external_tools and call_external_tool", "Perplexity reaches a connector's tools through these three calls",
+             "Expected: check that the answer also names the Vault tool it called (for example whoami)"),
+            ("Perplexity asks to approve a tool every time", "That tool's permission is Always ask", "Say so; the person can change the permission in the connector's tool list (Disable, Always ask, Allow)"),
+        ]
     if host == "claude":
         rows.insert(1, ("Add custom connector is not found (claude.ai, Claude Desktop)", "The plan or an organisation setting hides custom connectors",
                         "Say which plan or admin setting, and use Claude Code on the computer instead"))
@@ -492,6 +559,7 @@ def setup_page(host_id: str) -> str:
     sections = {
         "claude": [_claude_code_section(), _claude_ai_section()],
         "chatgpt": _chatgpt_sections(), "codex": _codex_sections(), "copilot": _copilot_sections(),
+        "perplexity": _perplexity_sections(),
     }[host_id]
     docs = "; ".join(f"[{t}]({u})" for t, u in host["docs"])
     before = [
@@ -503,6 +571,13 @@ def setup_page(host_id: str) -> str:
     ]
     if host_id == "chatgpt":
         before.insert(3, "- A ChatGPT plan with developer mode and custom MCP apps. Which plans have it is not verified yet.")
+    if host_id == "perplexity":
+        before[3:5] = [
+            "- A Perplexity plan that offers custom connectors. The real run used Pro; which other plans have them is not verified yet.",
+            f"- Where this page comes from: one real run of the connection steps in the Perplexity web app on {host['checked']} (a Pro plan, a demo Vault account), recorded in issue #362 of the Vault's repository. "
+            "No Perplexity documentation page is cited, so anything that run did not show is marked \"not verified yet\".",
+            f"- Status: the connection steps were done once in a real {title} account; this page itself is not run in a real {title} account as a one-prompt setup yet. Comet was not looked at.",
+        ]
     do = "\n\n".join(f"### {name}\n\n{body}" for name, body in sections)
     if len(sections) == 1 and not OAUTH_READY and host_id != "claude":
         do = sections[0][1]
@@ -515,7 +590,8 @@ def setup_page(host_id: str) -> str:
     then = (_steps([("ASSISTANT", "call the MCP prompt `vault_start`. It is a short, read-only tour from the person's own data and ends with three next steps."),
                     ("ASSISTANT", f"If {title} cannot call MCP prompts (whether it lists them is not verified yet), follow this text instead, which is the prompt's own:")])
             + "\n\n" + quoted + "\n\n### Let it save decks and imports\n\n"
-            + _steps([("PERSON", f"Only if you want the assistant to save decks or import collections: disconnect The Vault in {title}, connect it again, and tick Write on the Vault's approval page. Setup never asks for this."),
+            + _steps([("PERSON", f"Only if you want the assistant to save decks or import collections: disconnect The Vault in {title}, connect it again, and tick Write on the Vault's approval page. Setup never asks for this."
+                                          + (" (Where Perplexity offers a disconnect is not verified yet; removing the connector and adding it again is the fallback.)" if host_id == "perplexity" else "")),
                       ("ASSISTANT", "Destructive tools preview first and ask before they run; show the preview and wait for the person's yes.")]))
     never = "\n".join(f"- {rule}" for rule in SETUP_NEVER)
     return (f"# Set up The Vault in {title}\n\n"
@@ -534,6 +610,14 @@ def setup_page(host_id: str) -> str:
 
 def setup_files() -> dict[Path, str]:
     return {SETUP_DIR / f"{h['id']}.md": setup_page(h["id"]) for h in SETUP_HOSTS}
+
+
+def llms_perplexity() -> str:
+    """The Perplexity connection steps for llms.txt: the real wording of the run on PERPLEXITY_CHECKED (PERPLEXITY_HOW)."""
+    lines = [f"- Perplexity (custom remote connector; seen in a real run on {PERPLEXITY_CHECKED}, Pro plan; Comet: not verified yet), "
+             f"connector URL `{MCP_URL}`:"]
+    lines += [f"  {i}. {step}" for i, step in enumerate(PERPLEXITY_HOW, 1)]
+    return "\n".join(lines) + "\n"
 
 
 def llms_setup() -> str:
@@ -597,6 +681,13 @@ def connect_page() -> str:
                             "In ChatGPT: <strong>Plugins → Add → Add custom MCP server</strong>, name it The Vault, paste this "
                             "address and keep OAuth:",
                             "ChatGPT reads the tools only when the app is added: delete it (not only uninstall) and add it again.")
+    perplexity_steps = "".join(f"<li>{html.escape(s)}</li>" for s in PERPLEXITY_HOW)
+    perplexity_card = (
+        '<div class="card" id="perplexity"><h3>Perplexity</h3>'
+        f"<ol>{perplexity_steps}</ol>" + _block(mcp_url) +
+        f'<p class="note">Seen in a real run on {PERPLEXITY_CHECKED} on a Pro plan; the documentation of Perplexity was not used. '
+        "Comet (Perplexity's browser) was not looked at: not verified yet.</p></div>")
+
     def harness_card(h: dict) -> str:
         steps = "".join(f"<p>{html.escape(s['label'])}</p>" + _block(s["code"]) for s in harness_steps(h))
         docs = ", ".join(f'<a href="{u}" target="_blank" rel="noopener">{html.escape(t)}</a>' for t, u in h["docs"])
@@ -612,7 +703,7 @@ def connect_page() -> str:
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Connect your AI assistant · The Vault</title>
-  <meta name="description" content="Connect Claude, ChatGPT, Codex, Cursor or VS Code to The Vault: Magic rules, cards, decks and your collection, with sources shown." />
+  <meta name="description" content="Connect Claude, ChatGPT, Perplexity, Codex, Cursor or VS Code to The Vault: Magic rules, cards, decks and your collection, with sources shown." />
   <link rel="icon" href="/favicon.ico" sizes="32x32" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -646,11 +737,12 @@ def connect_page() -> str:
     (the <code>vault_start</code> prompt). The sections below are the same steps by hand.</p>
   {setup_cards()}
 
-  <h2>1. In Claude or ChatGPT</h2>
+  <h2>1. In Claude, ChatGPT or Perplexity</h2>
   <p>No token needed: you sign in with your Vault account and choose what the assistant may do. You can disconnect it
     any time under <strong>Account → Connected apps</strong>.</p>
   {claude_card}
   {chatgpt_card}
+  {perplexity_card}
 
   <div class="card" id="use-it">
     <h3>Make your assistant use it</h3>
