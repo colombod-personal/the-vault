@@ -33,7 +33,7 @@ COUNCIL = {"vault-devils-advocate", "vault-synergy-analyst", "vault-collection-a
 
 
 def test_the_agents_exist():
-    assert NAMES == {"vault-judge", "vault-deckbuilder", "vault-buyer"} | COUNCIL
+    assert NAMES == {"vault-judge", "vault-deckbuilder", "vault-buyer", "vault-curator"} | COUNCIL
 
 
 def test_council_members_stay_in_their_lane_and_cite_evidence():
@@ -189,3 +189,35 @@ def test_no_one_says_no_infinite_combos_because_find_combos_found_none(path):
     text = " ".join(raw.replace(chr(92) + "n", " ").replace(chr(92), "").split())  # TOML and Python literals escape the quotes and newlines
     assert re.search(r'never (tell the person a deck has|say (that )?a deck has) "no infinite combos"', text), path
     assert "find_combos" in text and re.search(r"Commander Spellbook (knows|know)|known to Commander Spellbook", text), path
+
+
+# #172: find_combos can also give the Vault's own reading of the card text (include_possible_loops). Whoever uses it must call it the
+# Vault's reading and not Commander Spellbook's, never call a possible loop infinite or a combo, and never round "one mana short" up
+HOSTS = (("agents", ".md"), ("plugins/the-vault/agents", ".md"), ("agent-definitions/codex", ".toml"), ("agent-definitions/cursor", ".md"),
+         ("agent-definitions/copilot", ".agent.md"), ("plugins/the-vault/com.github.copilot/agents", ".agent.md"))
+READING_MEMBERS = ("casual-table", "synergy-analyst", "devils-advocate")
+READS_THE_NOTE = [
+    "skills/expert-council/SKILL.md", "plugins/the-vault/skills/expert-council/SKILL.md", "plugins/the-vault-openai/skills/expert-council/SKILL.md",
+    *[f"{base}/vault-{member}{ext}" for member in READING_MEMBERS for base, ext in HOSTS],
+    *[f"plugins/the-vault-openai/skills/vault-{member}/SKILL.md" for member in READING_MEMBERS],
+]
+
+
+def flat(path):
+    raw = (Path(__file__).parent.parent / path).read_text(encoding="utf-8")
+    return " ".join(raw.replace(chr(92) + "n", " ").replace(chr(92), "").split())
+
+
+@pytest.mark.parametrize("path", READS_THE_NOTE)
+def test_whoever_uses_the_possible_loops_note_calls_it_the_vaults_reading_and_never_rounds_one_short_up(path):
+    text = flat(path)
+    assert "include_possible_loops" in text and "possible_loops" in text, path
+    assert "the Vault's reading" in text and "not Commander Spellbook's" in text, path
+    assert "one mana short" in text and "engine" in text, path
+    assert re.search(r"never (that the deck has no loops|infinite|round it up)|and never round it up", text) or "does not show the deck has none" in text, path
+
+
+@pytest.mark.parametrize("path", [p for p in READS_THE_NOTE if "devils-advocate" not in p])
+def test_and_never_calls_a_possible_loop_infinite_a_combo_or_guaranteed(path):
+    text = flat(path)
+    assert re.search(r"never infinite, (never )?a combo,? (or|never) guaranteed|never infinite, never a combo, never guaranteed", text), path

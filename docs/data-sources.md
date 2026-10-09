@@ -55,6 +55,10 @@ rejects a line shape, the fix is in `vault/shopping.py` (`STORES`, `render`) and
 - Decision: query Commander Spellbook's public API on demand when a user asks about a deck. No
   combo table, no bulk copy, no cache beyond a short in-process one. Every answer carries
   provenance (Commander Spellbook, link to each combo's page, as-of) and no claim of our own.
+- Apart from their list, `find_combos` can also give the Vault's own reading of the deck's card text (`include_possible_loops`, #172,
+  `docs/possible-loops-design.md`). It is **not** Commander Spellbook's data and uses nothing of theirs: it reads Scryfall's Oracle text
+  (source `oracle_cards`, already gated), is a `computed` provenance block with that input and the Fan Content notice, and is labelled
+  "the Vault's reading" wherever it is shown. It does not depend on Spellbook answering, and the Commander Bracket hint does not use it.
 - To revisit: ask the Commander Spellbook maintainers (Discord) whether a nightly copy is welcome.
   Ingestion is worth it only with their consent; until then a call per request is the safe option.
 - Their client (`vault/combos.py`) sends a descriptive `User-Agent`, has a 15 s timeout, and **since #20** a rate limit and

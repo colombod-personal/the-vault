@@ -63,6 +63,7 @@ All collection tools also read a collection someone shared with you (`share_id`,
 | Load a deck from an Archidekt link | “Decks” tab: “From a link”, then “Open deck” | `GET /archidekt/decks/{id}` | `get_archidekt_deck`; `import_deck_from_link` saves it | read / write | no |
 | Check a decklist against the collection | “Decks” tab: “Paste a list”, then “Open list” (“Cards” tab) | `POST /decks/coverage`, `/decks/parse` | `check_decklist`, `parse_decklist` | read | no |
 | Stats, legality, upgrades, combos | A deck's page tabs: “Stats”, “Legality”, “Upgrades” (“Find upgrades”), “Combos” | `POST /decks/stats`, `/legality`, `/upgrades`, `/validate-changes`, `/combos` | `deck_stats`, `deck_legality`, `find_upgrades`, `validate_deck_changes`, `find_combos` (each takes a saved `deck_id` or pasted text) | read | no (the check of a proposed change is in “Change this deck”, above) |
+| The Vault's reading of a deck's card text for a possible loop Commander Spellbook does not list (#172) | none yet: the “Combos” tab lists only Commander Spellbook's combos (the web part is the next slice of #172) | `POST /decks/combos` with `include_possible_loops: true` | `find_combos` (`include_possible_loops`; answers `possible_loops`, labelled the Vault's reading and not Spellbook's) | read | yes: no web view of it yet (#172) |
 | Shopping list | A deck's page: “Buy list” tab (“Copy list”) | `POST /decks/shopping-list` | `shopping_list` (`format`: plain, cardkingdom, tcgplayer, cardmarket, csv; `finish`, `language`, `sets`, `condition`) | read | partly: the web tab copies the plain list; store formats and printing rules are assistant-side (#55) |
 | Simulate the first turns of a deck (mana curve odds) | none yet: the web visual is #138 | `POST /decks/simulate` | `simulate_draws` (takes a saved `deck_id` or pasted text) | read | yes: no web view of it (#138) |
 | Check the connection (who, scopes, data versions) | none: assistants only | `GET /agent/whoami`, `/catalog/status` | `whoami` | read | no |
@@ -95,6 +96,12 @@ Shown on the consent screen as "It will never be able to". These stay web-only.
 | Export all my data | Account panel, “Your data” (“Download my data (.zip)”) | `GET /me/export` | Bulk personal data; the person downloads it themselves |
 | Delete my account | Account panel, “Your data” (the delete button) | `DELETE /me` | Irreversible |
 | Tokens, passkeys, sessions, connected apps, sign-in methods | Account panel: “Agents & API” (“Create token”), “Connected apps” (“Disconnect”), “Sign-in methods” (“Add a passkey”), “Sign out” | `/me/tokens`, `/me/passkeys`, `/me/sessions`, `/me/apps`, `/login/*` | Would let an app grant itself more access or lock the person out |
+
+## Skills, agents and flows (#102)
+
+Each tool in the tables above is in at least one skill and one agent, and the common jobs are flows in the skills with a matching
+MCP prompt (`docs/skills.md`, "Flows" and "Every capability is reachable"); `tests/test_capabilities.py` parses this file and lists
+what is not covered. The real-host check (that Claude, ChatGPT, Codex, Cursor and Copilot pick the flows up) is #85.
 
 ## Gaps (to close in #101)
 

@@ -25,6 +25,7 @@ from .. import catalog_queries as q
 from .. import combos
 from .. import deck_overview
 from .. import deck_tools as dt
+from .. import possible_loops
 from .. import provenance as prov
 from .. import shopping as shop
 from .. import simulate
@@ -55,6 +56,14 @@ class StatsIn(DeckIn):
     include_combos: bool = Field(default=False, description="Also ask Commander Spellbook for the deck's two-card combos, which one "
                                  "input of the Commander Bracket hint needs. The deck's card names are sent to Commander Spellbook "
                                  "only when this is true")
+
+
+class CombosIn(DeckIn):
+    include_possible_loops: bool = Field(default=False, description="Also give the Vault's own reading of the deck's card text for a "
+                                         "possible loop Commander Spellbook does not list (`possible_loops`, labelled the Vault's reading "
+                                         "and not Spellbook's). Today it checks one pattern: a repeatable ability that pays mana for a "
+                                         "creature token, with something that lets the token tap for mana and haste. If Spellbook cannot "
+                                         "be asked, the reading is still returned")
 
 
 class FormatIn(DeckIn):
@@ -278,25 +287,40 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
 
     @router.post("/combos", response_model=Answer, response_model_by_alias=True,
                  summary="Combos in a decklist, and those one card short (asked of Commander Spellbook on demand)")
-    def deck_combos(request: Request, body: DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    def deck_combos(request: Request, body: CombosIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         resolved = prepared(request, db, user, text_of(db, user, body))
         names = {e.name for e in resolved.played()}
         commanders = [e.name for e in resolved.section("commander")]
         main = [(e.name, e.line.quantity) for e in resolved.played() if e.line.section != "commander"]
+        results, unavailable = None, None
         try:
             results = combos.ask(main, commanders, transport)
         except combos.ComboServiceBusy as exc:  # the client's own rate limit or an open breaker: nothing was asked of them
-            raise HTTPException(503, str(exc), headers={"Retry-After": str(exc.retry_after)}) from exc
+            if not body.include_possible_loops:
+                raise HTTPException(503, str(exc), headers={"Retry-After": str(exc.retry_after)}) from exc
+            unavailable = str(exc)  # the reading uses only the deck's Oracle text, so it does not depend on Spellbook (design section 4)
         except combos.ComboServiceError as exc:
-            raise HTTPException(502, str(exc)) from exc
-        out = combos.summarize(results, names)
+            if not body.include_possible_loops:
+                raise HTTPException(502, str(exc)) from exc
+            unavailable = str(exc)
+        out = combos.summarize(results, names) if results is not None else {}
+        if unavailable is not None:
+            out["spellbook"] = {"unavailable": unavailable + " No Commander Spellbook combos are listed, which says nothing about whether the deck has any."}
         out["limits"] = ("Only combos known to Commander Spellbook are listed. A deck can hold other loops and engines that are not "
                          "listed (for example a repeatable token engine with mana creatures): finding none does not mean the deck has "
                          "no infinite combos, so never tell a player it is combo-free from this alone.")
-        spellbook = prov.source("Commander Spellbook", origin="combos written by its community", url="https://commanderspellbook.com",
-                                as_of=date.today(), wizards_material=True)
-        return {"deck": identity(db, user, body), "result": out,
-                "provenance": [spellbook, prov.computed("combo lookup", [spellbook], as_of=date.today())],
+        blocks = []
+        if results is not None:
+            spellbook = prov.source("Commander Spellbook", origin="combos written by its community", url="https://commanderspellbook.com",
+                                    as_of=date.today(), wizards_material=True)
+            blocks = [spellbook, prov.computed("combo lookup", [spellbook], as_of=date.today())]
+        if body.include_possible_loops:
+            # the Vault's reading of Scryfall's Oracle text (Wizards' text, so the Fan Content notice rides with it): kept apart from
+            # Spellbook's combos, never listed as a Spellbook source, and not an input of the Commander Bracket hint (design section 4)
+            out["possible_loops"] = possible_loops.read(possible_loops.card_texts(e for e in resolved.played() if e.line.section != "companion"),
+                                                        combos.listed_card_names(results) if results is not None else ())
+            blocks.append(prov.computed(possible_loops.SOURCE, q.provenance_for(db, "oracle_cards"), as_of=date.today()))
+        return {"deck": identity(db, user, body), "result": out, "provenance": blocks,
                 "_links": {"self": link(f"{V1}/decks/combos")}}
 
     @router.post("/shopping-list", response_model=Answer, response_model_by_alias=True,

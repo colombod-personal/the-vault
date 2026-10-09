@@ -163,6 +163,11 @@ def two_card_combos(results: dict) -> list[dict]:
     return found
 
 
+def listed_card_names(results: dict) -> list[list[str]]:
+    """The card names of every combo Commander Spellbook lists as in the deck (uncapped), for leaving to them what they already list."""
+    return [[u["card"]["name"] for u in v.get("uses", []) if u.get("card")] for v in results.get("included") or []]
+
+
 def summarize(results: dict, deck_names: set[str]) -> dict:
     """The combos in the deck, and the ones a card short, shortened and capped."""
     have = {n.lower() for n in deck_names}
