@@ -189,4 +189,11 @@ What the design left open, and how it was decided:
   so a changed file or bucket after the preview is refused (409). A link whose bucket is deleted is deleted with it, never turned into a
   whole-collection import. `bucket_id` on the preview and apply of an upload is only a check that it is the bound bucket.
 
-Not built yet: the web app's import with a bucket picker (#124), the tags view of the app (#128) and the web part of #130 (analytics that follow the selected bucket or tag).
+Built since (#128, the app): tags in Browse and the card drawer (`public/views/tags.jsx`): chips under each card's name, the tag filter
+(`#/browse?tag=`, combinable with `bucket=`), tick boxes on every list (the bucket move bar stays bucket-only) with a bulk bar to tag or
+untag the ticked cards (more than 25 waits for a button that says the count), "Manage tags" (rename, remove from every card), the
+card's tags in the drawer with an assistant's tag marked "AI" and its app's name and accepted (the person tags the same card with the
+same tag) or removed, and the card's notes (`vault_metadata`) read only, one block per writer. A shared collection shows none of it. The
+server gave each card `tags_detail` (who wrote each tag) for this, and the summary `version` now moves with the tags.
+
+Not built yet: the web app's import with a bucket picker (#124) and the web part of #130 (analytics that follow the selected bucket or tag).

@@ -399,6 +399,9 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         def card_links(ctx: Ctx, g) -> dict:
             return {"self": link(f"{ctx.base}/cards/{g.id}")}
 
+        def tags_fields(rows: list[dict]) -> dict:
+            return {"tags": [r["tag"] for r in rows], "tags_detail": rows}
+
         def card_out(data: dict | None) -> dict | None:
             if data and settings.twins_url:  # local development: images come from the Scryfall twin
                 data = {**data, "image": {k: outbound.browser_url(settings, v) if k in ("small", "normal") and v else v
@@ -409,6 +412,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         def summary(request: Request, ctx: Ctx = Depends(ctx_dep), bucket: BucketQ = None, tag: TagQ = None):
             bucket_id, tag = ctx.scope(bucket, tag)
             view = ctx.view(bucket_id, tag)
+            # A tag change is a change a client caches by this version (the cards it lists carry their tags), so it moves the version too.
+            tags_stamp = f".{card_tags.stamp(ctx.db, ctx.owner)}" if ctx.own else ""
             qs = scope_query(bucket_id, tag)  # the links keep the selection
 
             def body():
@@ -427,12 +432,12 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                               "exports": link(f"{ctx.base}/exports", title="Export to Moxfield, Archidekt, CSV, text"),
                               "refresh": link(f"{V1}/collection/refresh", title="POST: refresh card data and today's "
                                               "prices from Scryfall, a chunk per call")}
-                version = hashlib.sha256(view.version.encode()).hexdigest()[:16]  # changes whenever the data does
+                version = hashlib.sha256((view.version + tags_stamp).encode()).hexdigest()[:16]  # changes whenever the data does
                 # P&L in SQL, over the copies with a known cost only (vault.analytics)
                 pnl = analytics.HIDDEN_PNL if ctx.hide_costs else analytics.pnl(ctx.db, ctx.owner.id, bucket_id, tag)
                 return {**view.summary(), **pnl, "owner": ctx.owner_name, "version": version, "_links": links}
 
-            return etag_response(request, view.version, body)
+            return etag_response(request, view.version + tags_stamp, body)
 
         @r.get("/cards", response_model=S.CardPage, summary="Printings you own, one page at a time")
         def cards(request: Request, q: str | None = None, set: str | None = None, name: str | None = None,
@@ -470,9 +475,9 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                     items = [g for g in items if g.scryfall_id in printings]
                 page, nxt = paginate(items, SORTS[sort], lambda g: g.id, cursor=cursor, limit=limit)
                 cards = view.cards(page)  # card data for the whole page in one query
-                mine = card_tags.tags_of(ctx.db, ctx.owner, {c["oracle_id"] for c in cards.values() if c["oracle_id"]}) if ctx.own else None
+                mine = card_tags.details_of(ctx.db, ctx.owner, {c["oracle_id"] for c in cards.values() if c["oracle_id"]}) if ctx.own else None
                 out = [{**view.item(g), "card": card_out(cards.get(g.scryfall_id)), "_links": card_links(ctx, g),
-                        **({"tags": mine.get((cards.get(g.scryfall_id) or {}).get("oracle_id"), [])} if mine is not None else {})}
+                        **(tags_fields(mine.get((cards.get(g.scryfall_id) or {}).get("oracle_id"), [])) if mine is not None else {})}
                        for g in page]
                 return {**page_body(request, out, nxt, len(items), q=q, set=set, name=name, finish=finish,
                                     condition=condition, printing=printing, type=card_type, mana_value=mana_value,
@@ -498,10 +503,10 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 if card_data and card_data.get("scryfall_uri"):
                     links["scryfall"] = link(card_data["scryfall_uri"], title="View on Scryfall")
                 oracle_id = (view.card_data(g) or {}).get("oracle_id")
-                mine = card_tags.tags_of(ctx.db, ctx.owner, {oracle_id}).get(oracle_id, []) if ctx.own and oracle_id else None
+                mine = card_tags.details_of(ctx.db, ctx.owner, {oracle_id}).get(oracle_id, []) if ctx.own and oracle_id else None
                 return {**view.item(g), "card": card_data, "price_history": view.price_history(g),
                         "copies": copies, "copies_total": len(g.copies), "_links": links,
-                        **({"tags": mine} if mine is not None else {})}
+                        **(tags_fields(mine) if mine is not None else {})}
 
             return etag_response(request, view.version + (f".{card_tags.stamp(ctx.db, ctx.owner)}" if ctx.own else ""), body)
 
@@ -1412,7 +1417,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         elif unavailable:
             raise HTTPException(503, "Scryfall didn't answer. Try again shortly.", headers={"Retry-After": "30"})
         after = analytics.refresh_state(db, user.id, today, cursor, body.force, limit=0)
-        version = hashlib.sha256(view_version(db, user).encode()).hexdigest()[:16]
+        version = hashlib.sha256((view_version(db, user) + f".{card_tags.stamp(db, user)}").encode()).hexdigest()[:16]  # as the summary's (tags move it too)
         prices_as_of = db.scalar(select(func.max(PriceSnapshot.day)))
         return {"done": after["total"] - after["remaining"], "total": after["total"], "remaining": after["remaining"],
                 "processed": processed, "not_found": not_found, "unmatched_rows": after["unmatched"],
