@@ -96,7 +96,7 @@ Shown on the consent screen as "It will never be able to". These stay web-only.
 | Change my name | Account panel, “Profile” (“Save”) | `PATCH /me` | Account data (right to rectification is done by the person) |
 | Export all my data | Account panel, “Your data” (“Download my data (.zip)”) | `GET /me/export` | Bulk personal data; the person downloads it themselves |
 | Delete my account | Account panel, “Your data” (the delete button) | `DELETE /me` | Irreversible |
-| Tokens, passkeys, sessions, connected apps, sign-in methods | Account panel: “Agents & API” (“Create token”), “Connected apps” (“Disconnect”), “Sign-in methods” (“Add a passkey”), “Sign out” | `/me/tokens`, `/me/passkeys`, `/me/sessions`, `/me/apps`, `/login/*` | Would let an app grant itself more access or lock the person out |
+| Tokens, passkeys, sessions, connected apps, sign-in methods | Account panel: “Agents & API” (“Create token”), “Connected apps” (“Disconnect”), “Sign-in methods” (“Add a passkey”, “Sign out everywhere”), “Sign out” | `/me/tokens`, `/me/passkeys`, `/me/sign-in-methods`, `/me/identities`, `/me/sessions`, `/me/apps`, `/login/*` | Would let an app grant itself more access or lock the person out |
 
 ## Skills, agents and flows (#102)
 

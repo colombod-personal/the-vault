@@ -26,6 +26,8 @@ function signInProblem(code, provider) {
   switch (code) {
     case 'access_denied': return `You cancelled signing in with ${who}. Nothing was shared with the Vault.`;
     case 'temporarily_unavailable': return `${who} isn't answering right now. Try again in a minute, or use another way to sign in.`;
+    case 'session_ended':
+      return 'Your session was ended while you were signing in, so nothing was linked. Sign in again.';
     case 'mismatching_state':
       return 'That sign-in expired or was started in another tab. Please start again from here.';
     case 'consent_required': case 'interaction_required': return `${who} needs you to confirm access. Please try again.`;
@@ -873,12 +875,153 @@ function MoveSection() {
 }
 
 
+function addedAgo(minutes) {
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  const h = Math.floor(minutes / 60);
+  return `${h} hour${h === 1 ? '' : 's'} ago`;
+}
+
+// "Sign out everywhere" (#347) in three steps, in this order on purpose. 1. End every OTHER browser's session now: a copied
+// cookie then stops working, so nobody can add a way back in while the person looks. 2. Look at ALL the sign-in methods with
+// their dates (the ones added in the last day are marked) and remove what is not theirs. 3. Done, or sign this browser out too.
+// What can be removed is the server's answer (`removable`, `removable_reason`): the page never decides.
+const WHY_NOT = {
+  only_method: 'Your only way to sign in. Add your own passkey first (Add a passkey, above), then this can be removed.',
+  provider_too_old: "Linked more than 24 hours ago: it can't be unlinked here yet. A recent-sign-in check that would allow it is proposed, not built (issue #347).",
+  needs_older_method: "Can't be removed yet: no other sign-in is more than 24 hours old, so it can't be told from one someone else added. Try again when another is a day old.",
+};
+
+function SignOutEverywhere({ onCancel, onRemoved }) {
+  const api = window.VaultApi;
+  const [step, setStep] = useStateAcc('start'); // start | ending | review
+  const [ended, setEnded] = useStateAcc(null); // what step 1 ended, as the server counted it
+  const [found, setFound] = useStateAcc(null); // review: null while loading, false if it failed, else the server's page
+  const [error, setError] = useStateAcc(null);
+  const [busy, setBusy] = useStateAcc(null);
+  const box = useRefAcc(null);
+  useEffectAcc(() => { if (box.current) box.current.focus(); }, [step]);
+  const load = () => api.signInMethods.all().then(setFound).catch(() => setFound(false));
+  const endOthers = async () => {
+    setError(null); setStep('ending');
+    try { setEnded(await api.signInMethods.signOutOthers()); setStep('review'); setFound(null); load(); }
+    catch (e) { setError(e.message); setStep('start'); }
+  };
+  const remove = async (m) => {
+    setError(null); setBusy(m.kind + m.id);
+    try { await api.signInMethods.remove(m); await load(); onRemoved && onRemoved(); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(null); }
+  };
+  const items = (found && found.items) || [];
+  const recent = items.filter((m) => m.recently_added);
+  const hours = (found && found.recent_hours) || 24;
+  const removeAllRecent = async () => {
+    const n = found.recent_count;
+    if (!window.confirm(`Remove the ${n} sign-in method${n === 1 ? '' : 's'} added in the last ${hours} hours? This includes any you added yourself.`)) return;
+    setError(null); setBusy('recent');
+    try { await api.signInMethods.removeRecent(); await load(); onRemoved && onRemoved(); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(null); }
+  };
+  const label = (m) => (m.kind === 'passkey' ? `Passkey: ${m.name}` : m.name);
+  const when = (m) => (m.recently_added
+    ? `${m.kind === 'passkey' ? 'added' : 'linked'} ${addedAgo(m.added_minutes_ago)} (${new Date(m.created_at).toLocaleString()})`
+    : `${m.kind === 'passkey' ? 'added' : 'linked'} ${new Date(m.created_at).toLocaleDateString()}`);
+  return (
+    <div className="signout-all" role="group" aria-labelledby="signout-all-title" ref={box} tabIndex={-1}>
+      <p id="signout-all-title" className="signout-all-title">Sign out everywhere</p>
+      {step !== 'review' && (
+        <>
+          <p className="label-mono">
+            Step 1 of 2. This ends every other browser signed in to your account, signs out every app you signed in to with
+            the Vault app (they will ask you to sign in again), and removes the personal access tokens and connected apps made in
+            the last 24 hours. This browser stays signed in. Older tokens and connected apps are not touched: check them under
+            Agents &amp; API and Connected apps. Anyone who copied your session stops here. Then you check your sign-in methods,
+            because they could have added a way back in.
+          </p>
+          {error && <p role="alert" style={{ color: 'var(--danger)' }}>{error}</p>}
+          <div className="signout-actions">
+            <button className="btn sm" disabled={step === 'ending'} onClick={endOthers}>
+              {step === 'ending' ? 'Signing out the others…' : 'Sign out the other browsers'}
+            </button>
+            <button className="btn sm ghost" onClick={onCancel}>Cancel</button>
+          </div>
+        </>
+      )}
+      {step === 'review' && (
+        <>
+          <p className="label-mono" role="status">
+            Every other browser is signed out. This one stays signed in.
+            {ended && ended.apps_signed_out > 0 && ` ${ended.apps_signed_out} app sign-in${ended.apps_signed_out === 1 ? '' : 's'} ended.`}
+            {ended && ended.tokens_removed > 0 && ` ${ended.tokens_removed} personal access token${ended.tokens_removed === 1 ? '' : 's'} made in the last 24 hours removed.`}
+            {ended && ended.connected_apps_removed > 0 && ` ${ended.connected_apps_removed} connected app${ended.connected_apps_removed === 1 ? '' : 's'} made in the last 24 hours removed.`}
+            {' '}Step 2 of 2: check every sign-in method is yours. Removing one signs the other browsers out again.
+          </p>
+          {found === null && <p className="label-mono" role="status">Loading your sign-in methods…</p>}
+          {found === false && (
+            <p className="label-mono" role="alert" style={{ color: 'var(--danger)' }}>
+              Couldn't load your sign-in methods. They are listed under Sign-in methods above; check them there.
+            </p>
+          )}
+          {found && recent.length > 0 && (
+            <p className="label-mono" role="status">
+              <strong>{recent.length} added in the last {hours} hours</strong> (first below). Not yours? Remove them.
+            </p>
+          )}
+          {found && recent.length === 0 && (
+            <p className="label-mono" role="status">
+              Nothing was added in the last {hours} hours. The older ones are listed too: a method added earlier would be here. Check each one is yours.
+            </p>
+          )}
+          {found && items.length > 0 && (
+            <ul className="signout-methods" aria-label="Your sign-in methods">
+              {items.map((m) => (
+                <li key={m.kind + m.id} className={'signout-method' + (m.recently_added ? ' signout-recent' : '')}>
+                  <span className="label-mono">
+                    <strong>{label(m)}</strong> · {when(m)}
+                    {m.recently_added && <span className="signout-flag"> · new</span>}
+                    {!m.removable && m.removable_reason && <span className="signout-why"><br />{WHY_NOT[m.removable_reason]}</span>}
+                  </span>
+                  {m.removable && (
+                    <button className="btn xs" disabled={busy !== null} onClick={() => remove(m)}
+                      aria-label={`Remove ${m.kind === 'passkey' ? 'passkey ' : ''}${m.name}, ${when(m)}`}>
+                      {busy === m.kind + m.id ? 'Removing…' : 'Remove'}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {found && found._links && found._links.next && (
+            <p className="label-mono" role="alert" style={{ color: 'var(--danger)' }}>
+              More than {items.length} sign-in methods: only the newest are shown. Remove the ones you don't recognise, then open this again.
+            </p>
+          )}
+          {error && <p role="alert" style={{ color: 'var(--danger)' }}>{error}</p>}
+          <div className="signout-actions">
+            {/* Only when the server says it can succeed (something recent and an older method stays) and this list is the whole list. */}
+            {found && found.recent_removable && !(found._links && found._links.next) && (
+              <button className="btn sm" disabled={busy !== null} onClick={removeAllRecent}>
+                {busy === 'recent' ? 'Removing…' : `Remove the ${found.recent_count} added in the last ${hours} hours`}
+              </button>
+            )}
+            <button className="btn sm" onClick={onCancel}>Done</button>
+            <button className="btn sm ghost" disabled={busy !== null} onClick={() => signOut({ everywhere: true })}>Also sign out of this browser</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // Passkeys and linked providers: add a passkey to this account, remove one, link another provider.
 function SignInMethods({ me, onChanged }) {
   const api = window.VaultApi;
   const [keys, setKeys] = useStateAcc([]);
   const [info, setInfo] = useStateAcc(null);
   const [error, setError] = useStateAcc(null);
+  const [leaving, setLeaving] = useStateAcc(false); // the "Sign out everywhere" check is open
   const reload = () => { api.passkeys.list().then(setKeys).catch(() => setKeys([])); };
   useEffectAcc(() => { reload(); api.providers().then(setInfo).catch(() => {}); }, []);
   const add = async () => {
@@ -928,9 +1071,10 @@ function SignInMethods({ me, onChanged }) {
         {linkable.map((p) => <a key={p} className="btn sm ghost" href={`/api/auth/login/${p}`}>Link {p[0].toUpperCase() + p.slice(1)}</a>)}
         {/* On a phone the top bar has no room for Sign out, so it is here (layout.css shows .m-only). */}
         <button className="btn sm m-only" onClick={() => signOut()}>Sign out</button>
-        <button className="btn sm ghost" title="Signs out every browser signed in to this account, including this one"
-                onClick={() => signOut({ everywhere: true })}>Sign out everywhere</button>
+        <button className="btn sm ghost" title="Opens a check: first signs out the other browsers (this one stays signed in), then lists your sign-in methods"
+                aria-expanded={leaving} onClick={() => setLeaving(true)}>Sign out everywhere</button>
       </div>
+      {leaving && <SignOutEverywhere onCancel={() => setLeaving(false)} onRemoved={() => { reload(); onChanged && onChanged(); }} />}
     </Section>
   );
 }

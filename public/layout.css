@@ -632,6 +632,20 @@ p.tag-note { margin: 0 0 14px; font-size: 12px; }
   .ideas-similar .btn { min-height: 44px; }
 }
 
+/* "Sign out everywhere" first lists the sign-in methods added in the last 24 hours (#347): rows and buttons are at least 44px tall at every width. */
+.signout-all { margin-top: 12px; padding: 12px; border: 1px solid var(--border-2); border-radius: var(--radius); display: flex; flex-direction: column; gap: 8px; }
+.signout-all:focus { outline: none; }
+.signout-all:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.signout-all-title { font-weight: 600; margin: 0; }
+.signout-methods { list-style: none; margin: 0; padding: 0; }
+.signout-method { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 4px 0; border-top: 1px solid var(--border); }
+.signout-method .btn { min-height: 44px; min-width: 44px; flex: none; }
+.signout-recent { border-left: 3px solid var(--gold); padding-left: 8px; }
+.signout-flag { color: var(--gold); }
+.signout-why { color: var(--text-2); font-size: 12px; text-transform: none; letter-spacing: 0; }
+.signout-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.signout-actions .btn { min-height: 44px; }
+
 /* ---- Value (#95): the ledger of months is a list on a phone, the summary leads ----
    The table (wider screens) and the list (phones) are both in the page; one of them is display: none. */
 .ledger-list, .ledger-more { display: none; }

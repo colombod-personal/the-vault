@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
+from .locks import lock_account
 from .models import OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, User
 from .tokens import PKCE_VERIFIER, _touch, s256
 
@@ -140,12 +141,16 @@ def exchange_code(db: Session, client_id: str, code: str, redirect_uri: str, ver
     row = db.scalar(select(OAuthCode).where(OAuthCode.code_hash == _hash(code or "")))
     if row is None:
         raise OAuthError("invalid_grant", "The authorization code is invalid, expired or already used")
-    claimed = db.execute(update(OAuthCode).where(OAuthCode.id == row.id, OAuthCode.used_at.is_(None))
+    # The account lock before the claim (#347): "Sign out the other browsers" takes it and deletes the unredeemed codes, so this
+    # redeem either finishes first (and the grant it made is deleted by step 1 when recent) or finds the code gone.
+    row_id = row.id  # (read before the lock: step 1 may delete the row while this waits, and a deleted row can't be read after the rollback)
+    lock_account(db, row.user_id)
+    claimed = db.execute(update(OAuthCode).where(OAuthCode.id == row_id, OAuthCode.used_at.is_(None))
                          .values(used_at=_now()).execution_options(synchronize_session=False)).rowcount
     if not claimed:
         # A code coming back means it was copied: what the first redemption issued is revoked.
         db.rollback()
-        revoke_grant(db, db.scalar(select(OAuthCode.grant_id).where(OAuthCode.id == row.id)))
+        revoke_grant(db, db.scalar(select(OAuthCode.grant_id).where(OAuthCode.id == row_id)))
         raise OAuthError("invalid_grant", "The authorization code is invalid, expired or already used")
     try:
         _check_code(row, client_id, redirect_uri, verifier, resource)

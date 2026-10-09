@@ -22,6 +22,7 @@ from urllib.parse import urlencode, urlsplit
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, UploadFile
 from fastapi.responses import Response
+from starlette.concurrency import run_in_threadpool
 from mtg_toolkits import decklist, delta, normalize_set_code
 from mtg_toolkits.formats import FORMATS
 from mtg_toolkits.archidekt import ArchidektClient
@@ -33,7 +34,8 @@ from sqlalchemy.orm import Session
 
 from .. import analytics, deck_text, lab, oauth_server, outbound, tags as card_tags, tokens
 from ..catalog import Catalog
-from ..auth import IdentityInUse, Profile, find_or_create
+from ..auth import (RECENT_SIGN_IN_METHOD_HOURS, IdentityInUse, Profile, find_or_create, remove_identity,
+                    remove_recent_methods, require_live_session, sign_in_methods as account_sign_in_methods, why_not_removable)
 from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, history_summary, import_days, view_version
 from .. import archidekt_cache, deck_import, deck_match, deck_overview, deck_refresh, deck_versions, experts, owned_changes
@@ -150,25 +152,33 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             raise HTTPException(401, str(exc)) from exc
         except ProviderUnavailable as exc:
             raise HTTPException(503, f"{exc}. Try again shortly.", headers={"Retry-After": "30"}) from exc
-        # Each ID token signs in once: the nonce inside it is recorded, and committed on its own
-        # so nothing later in the sign-in can roll it back, until the token can no longer be
-        # used (its expiry plus the clock leeway ``verify`` allows).
-        db.execute(delete(NativeNonce).where(NativeNonce.expires < time.time()))
-        db.add(NativeNonce(id=hashlib.sha256(f"{provider}:{claims['nonce']}".encode()).hexdigest(),
-                           expires=float(claims["exp"]) + NATIVE_LEEWAY))
-        try:
-            db.commit()
-        except IntegrityError:
-            db.rollback()
-            raise HTTPException(401, "This sign-in was already used; sign in again") from None
-        name = body.name if provider == "apple" else claims.get("name")
-        if "account" not in request.state.scopes:  # a personal access token can't add sign-in methods
-            current = None
-        try:
-            user = find_or_create(db, Profile(provider, str(claims["sub"]), claims.get("email"), name), current)
-        except IdentityInUse as exc:
-            raise HTTPException(409, str(exc)) from exc
-        return tokens.issue(db, user, "app", body.device_name)
+        account = current if "account" in request.state.scopes else None  # a personal access token can't add sign-in methods
+
+        def mint() -> dict:
+            """The database work, in a worker thread: it can wait for the account lock, which an async handler must not do on the
+            event loop (#347)."""
+            # Each ID token signs in once: the nonce inside it is recorded, and committed on its own
+            # so nothing later in the sign-in can roll it back, until the token can no longer be
+            # used (its expiry plus the clock leeway ``verify`` allows).
+            db.execute(delete(NativeNonce).where(NativeNonce.expires < time.time()))
+            db.add(NativeNonce(id=hashlib.sha256(f"{provider}:{claims['nonce']}".encode()).hexdigest(),
+                               expires=float(claims["exp"]) + NATIVE_LEEWAY))
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+                raise HTTPException(401, "This sign-in was already used; sign in again") from None
+            name = body.name if provider == "apple" else claims.get("name")
+            try:  # the caller's session (a cookie or an app's token) is held to its live state when it links a sign-in (#347)
+                user = find_or_create(db, Profile(provider, str(claims["sub"]), claims.get("email"), name), account,
+                                      request if account is not None else None)
+            except IdentityInUse as exc:
+                raise HTTPException(409, str(exc)) from exc
+            if account is not None and user.id == account.id:  # a copied cookie or an app session minting another app session (#347)
+                require_live_session(db, request, user.id)
+            return tokens.issue(db, user, "app", body.device_name)
+
+        return await run_in_threadpool(mint)
 
     @router.post("/auth/token", tags=["auth"], response_model=S.TokenResponse,
                  summary="Redeem a browser sign-in code (PKCE) or rotate a refresh token",
@@ -205,6 +215,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                        "apps": link(f"{V1}/me/apps", title="Apps connected with OAuth (ChatGPT, Claude, ...)"),
                        "tokens": link(f"{V1}/me/tokens", title="Personal access tokens for agents and scripts"),
                        "passkeys": link(f"{V1}/me/passkeys", title="Passkeys that can sign in to this account"),
+                       "sign_in_methods": link(f"{V1}/me/sign-in-methods",
+                                               title="Passkeys and linked providers, with when each was added"),
                        "export": link(f"{V1}/me/export", title="Download all my data (ZIP)"),
                        "collection": link(f"{V1}/collection")},
         }
@@ -303,8 +315,48 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return page_body(request, [_passkey(p) for p in page], nxt, len(rows), limit=limit)
 
     @router.delete("/me/passkeys/{passkey_id}", tags=["account"], summary="Remove a passkey")
-    def delete_passkey(passkey_id: Id, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
-        remove_passkey(db, user.id, passkey_id)
+    def delete_passkey(passkey_id: Id, request: Request, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+        remove_passkey(db, user.id, passkey_id, request)
+        db.commit()
+        return {"deleted": True}
+
+    # -- sign-in methods: passkeys and linked providers, with when each was added (#347) -------------------
+    @router.get("/me/sign-in-methods", tags=["account"], response_model=S.SignInMethodPage,
+                summary="Every way to sign in to this account (passkeys and linked providers), newest first; "
+                        "recent_only=true keeps those added in the last 24 hours (what \"Sign out everywhere\" offers to remove)")
+    def list_sign_in_methods(request: Request, recent_only: bool = False, cursor: str | None = None,
+                             limit: int | None = None, user: User = Depends(account_user),
+                             db: Session = Depends(get_db)) -> dict:
+        methods = account_sign_in_methods(db, user.id)
+        shown = [m for m in methods if m["recently_added"]] if recent_only else methods
+        page, nxt = paginate(shown, lambda m: (-m["created_at"].timestamp(), m["kind"]), lambda m: m["id"],
+                             cursor=cursor, limit=limit)
+        items = [{"id": m["id"], "kind": m["kind"], "provider": m["provider"], "name": m["name"],
+                  "created_at": _iso(m["created_at"]), "last_used_at": _iso(m["last_used_at"]),
+                  "recently_added": m["recently_added"], "added_minutes_ago": m["added_minutes_ago"],
+                  "removable": why_not_removable(m, methods) is None, "removable_reason": why_not_removable(m, methods),
+                  "_links": {"self": link(f"{V1}/me/passkeys/{m['id']}" if m["kind"] == "passkey"
+                                          else f"{V1}/me/identities/{m['id']}")}} for m in page]
+        body = page_body(request, items, nxt, len(shown), limit=limit, **({"recent_only": "true"} if recent_only else {}))
+        recent = [m for m in methods if m["recently_added"]]
+        # "Remove everything added in the last 24 hours" is offered only when it can succeed: something recent, and a method older
+        # than the window staying (the endpoint refuses otherwise), and it removes ALL the recent ones, on every page.
+        return {**body, "recent_hours": RECENT_SIGN_IN_METHOD_HOURS, "recent_count": len(recent),
+                "recent_removable": bool(recent) and any(not m["recently_added"] for m in methods)}
+
+    @router.delete("/me/sign-in-methods/recent", tags=["account"],
+                   summary="Remove every sign-in method added in the last 24 hours (never the last way to sign in: "
+                           "a method older than 24 hours must remain)")
+    def delete_recent_sign_in_methods(request: Request, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+        removed = remove_recent_methods(db, user.id, request)
+        db.commit()
+        return {"deleted": removed}
+
+    @router.delete("/me/identities/{identity_id}", tags=["account"],
+                   summary="Unlink a provider (Google, Microsoft, Apple, Facebook) linked in the last 24 hours; "
+                           "your last way to sign in can't be removed")
+    def delete_identity(identity_id: Id, request: Request, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+        remove_identity(db, user.id, identity_id, request)
         db.commit()
         return {"deleted": True}
 
@@ -319,6 +371,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     def create_token(request: Request, body: S.AccessTokenIn, user: User = Depends(account_user),
                      db: Session = Depends(get_db)):
         def run() -> dict:
+            require_live_session(db, request, user.id)  # not after "Sign out the other browsers" ended this session (#347)
             row, token = tokens.create_pat(db, user, body.name.strip() or "Agent", body.scopes, body.expires_in_days)
             return {**_token(row), "token": token, "mcp_url": f"{settings.base_url}/api/mcp"}
 

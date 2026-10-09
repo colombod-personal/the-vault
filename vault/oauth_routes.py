@@ -32,7 +32,7 @@ from starlette.datastructures import QueryParams
 from . import client_auth
 from . import oauth_clients as clients
 from . import oauth_server as server
-from .auth import PKCE_CHALLENGE as PKCE_CHALLENGE_RE, session_user
+from .auth import PKCE_CHALLENGE as PKCE_CHALLENGE_RE, SessionEnded, require_live_session, session_user
 from .config import Settings
 from .models import OAuthClient, User
 from .ratelimit import client_ip, limited
@@ -379,6 +379,10 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
         if decision != "allow":
             return redirect(req.redirect_uri, {"error": "access_denied", "state": req.state}, settings)
         granted = ["read"] + (["write"] if write == "on" and "write" in req.scopes else [])
+        try:
+            require_live_session(db, request, user.id)  # "Sign out the other browsers" may have ended this session meanwhile (#347)
+        except SessionEnded:
+            return error_page("Your session ended while you were deciding. Start again from the app.")
         code = server.issue_code(db, user, req.client.client_id, req.redirect_uri, req.code_challenge, req.resource, granted)
         clients.mark_used(db, req.client)
         return redirect(req.redirect_uri, {"code": code, "state": req.state}, settings)
