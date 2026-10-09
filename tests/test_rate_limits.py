@@ -7,7 +7,7 @@ import time
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from twins.authenticator import SoftAuthenticator
 from vault import ratelimit
@@ -112,20 +112,33 @@ def test_hits_are_counted_exactly_under_concurrency(database_url):
     db.engine.dispose()
 
 
-def test_pending_passkey_challenges_are_capped(settings):
-    with limited_client(settings, auth_rate_limit=100, passkey_challenge_cap=2) as c:
-        assert [c.post("/api/auth/passkey/login/options").status_code for _ in range(3)] == [200, 200, 429]
-        res = c.post("/api/auth/passkey/signup/options", json={})
-        assert res.status_code == 429 and res.headers["retry-after"]
-        with c.app.state.db.sessions() as s:  # expired challenges make room again
+def test_a_flood_of_passkey_options_writes_nothing_and_never_blocks_another_persons_sign_in(settings):  # #346
+    with limited_client(settings, auth_rate_limit=1000) as c:
+        for _ in range(60):  # far more than the old cap of 2 used in this test, and the old default would be 10,000
+            assert c.post("/api/auth/passkey/login/options").status_code == 200
+        with c.app.state.db.sessions() as s:
+            assert s.scalar(select(func.count()).select_from(PasskeyChallenge)) == 0  # options costs the server no rows
+        other = TestClient(c.app)  # someone else, with no cookie of the flooder's
+        options = other.post("/api/auth/passkey/signup/options", json={}).json()
+        res = other.post("/api/auth/passkey/signup/verify",
+                         json={"credential": SoftAuthenticator().create(options, "http://localhost")})
+        assert res.status_code == 200  # still able to sign up
+        with c.app.state.db.sessions() as s:  # one row: the ceremony just spent
+            assert s.scalar(select(func.count()).select_from(PasskeyChallenge)) == 1
             s.execute(PasskeyChallenge.__table__.update().values(expires=time.time() - 1))
             s.commit()
-        options = c.post("/api/auth/passkey/signup/options", json={}).json()
-        res = c.post("/api/auth/passkey/signup/verify",
-                     json={"credential": SoftAuthenticator().create(options, "http://localhost")})
-        assert res.status_code == 200
+        again = other.post("/api/auth/passkey/signup/options", json={}).json()  # a spent, expired row is tidied up by the next verify
+        other.post("/api/auth/passkey/signup/verify", json={"credential": SoftAuthenticator().create(again, "http://localhost")})
         with c.app.state.db.sessions() as s:
-            assert s.scalar(select(PasskeyChallenge.id)) is None  # the expired ones were deleted
+            assert s.scalar(select(func.count()).select_from(PasskeyChallenge)) == 1
+
+
+def test_a_challenge_cookie_that_has_expired_or_is_for_another_ceremony_is_refused(settings):  # #346
+    with limited_client(settings, auth_rate_limit=1000) as c:
+        options = c.post("/api/auth/passkey/signup/options", json={}).json()
+        credential = SoftAuthenticator().create(options, "http://localhost")
+        wrong_kind = c.post("/api/auth/passkey/login/verify", json={"credential": credential})
+        assert wrong_kind.status_code == 400  # a sign-up challenge can't finish a sign-in
 
 
 def test_each_provider_has_its_own_counter_but_made_up_ones_share_one(settings):
