@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-24.04  # pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19 (#180); move deliberately
     services:
       postgres:  # the Vault runs on Postgres only (Neon in production): so do the tests
-        image: postgres:16
+        image: public.ecr.aws/docker/library/postgres:16  # the official image from AWS public ECR: Docker Hub rate-limits anonymous runners (#424)
         env:
           POSTGRES_USER: vault
           POSTGRES_PASSWORD: vault
