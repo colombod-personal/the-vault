@@ -69,7 +69,7 @@ import and keeps the edits made here.
    at a time, in their words, with copies at the last import, in their app and here. If they do not choose, the edit
    made here is kept. Send their answers as `use_app_value` (the conflict `id`s where they want their app's value),
    or `conflicts` for all of them.
-3. Import with `confirm` (`import_collection_csv`, or `confirm_staged_upload`) only after they say yes. If they want
+3. Import with `confirm` (`import_collection_csv`, or `confirm_staged_upload` with the preview's `content_hash`, so only the file they saw is imported) only after they say yes. If they want
    the file to replace everything, use `replace_everything` and say first how many edits made here it discards.
 4. Say what the import kept and what it asked, as the preview showed it; do not describe changes it did not make.
 
