@@ -1,6 +1,6 @@
 # Collections: inventory, buckets, tags and metadata (decision doc for #118)
 
-Status: agreed by the owner on 2026-10-08 (#287: decisions 1 to 4, all as recommended). Not built yet: building starts with #121. It is the root of the Collections epic (#117): #119 (metadata), #120 (tags), #121 (schema), #122 to #130 wait on it.
+Status: agreed by the owner on 2026-10-08 (#287: decisions 1 to 4, all as recommended; the owner's "all as recommended" on 2026-10-09 covers the sub-designs below). It is the root of the Collections epic (#117): the schema (#121), buckets (#123) and tags (#127) are built (see "What is built" at the end); #122, #124, #125, #128, #129 and #130 follow.
 
 ## What exists today (checked in the code, 2026-10-06)
 
@@ -41,6 +41,8 @@ Tags versus roles: a tag is the person's own opinion or plan (`trade`, `commande
 - **Unmatched copies are not tags.** An entry the importer could not match has neither a Scryfall id nor an oracle id (`vault/importer.py`), so it cannot take an `(person, oracle_id, tag)` key. "Unmatched" stays derived per entry from the missing printing, as today, and is shown as a status, never stored as a tag. If the card is matched later, the person's tags can be added then.
 - Namespaces are plain text with a colon (`deck:sliver`, `trade:sell`); no curated list in v1. Slug rules: lower case, letters, digits, `-`, `:`; at most 40 characters.
 - Limits: at most 50 tags per card and 500 distinct tags per person, so no response grows with the collection (cursor paging everywhere).
+- **Tags an assistant wrote (#120).** An assistant's tag is an assignment with `source = assistant` and the app's name in `source_detail`; it is listed and shown as the assistant's, never as the person's own. The person **accepts** it by tagging the same card with the same tag themselves (the assignment is then the person's: `source` becomes `person`) and **rejects** it by removing the tag (a removal is explicit and deliberate; the assistant is not told to re-add it, and the skills say so). Pinning an assistant's tag, and a confidence or reason per tag, are not in v1: the reason an assistant gives for a suggestion belongs in its own namespace of the card's notes (section 7), not in the tag. This was decided without a question to the owner because it changes nothing already agreed and is reversible by a later column; say so on #120 to change it.
+- **Namespaces and the roles that already exist (#120).** `deck:`, `trade:` and similar prefixes are only a convention in the name (a colon), with no hierarchy and no curated list in v1. A Scryfall Tagger role is shown by its own tools and fields (`role` data with its provenance) and is never a tag: a person may tag a card `ramp`, which says nothing about the card's role.
 
 ### 3. Decks and buckets: related by name, not linked, in v1
 
@@ -103,6 +105,16 @@ integer `version`, at most 8 KB), the tag check (`^[a-z0-9:-]{1,40}$`) and the `
 (`purge_user`) and export (`buckets.json`, `tags.json`, `card_annotations.json`); `docs/gdpr.md` and `public/privacy.html`. Tests:
 `tests/test_buckets.py`.
 
-Not built yet (they are #123, #124, #127 and the issues after them): the REST routes and MCP tools; the limits of 100 buckets a person
-creates, 50 tags per card and 500 distinct tags (enforced where they are written, not in the schema); the `bucket` filter and field
-in the collection answers; importing into one bucket; the web app.
+Built since (#123): the buckets REST routes and MCP tools (list, make, rename, delete when empty, move copies), the limit of 100 buckets
+a person makes by hand, and the `bucket` filter on the collection answers and exports.
+
+Built since (#127, tags): `/api/v1/collection/tags` and the MCP tools `list_tags`, `tag_cards`, `untag_cards`, `rename_tag`, `delete_tag`.
+A tag exists while a card has it (tagging makes it; there is no separate "create"), tagging by a printing's id tags the card, a copy the
+importer could not match can't take a tag (422), and the limits of 50 tags per card and 500 distinct tags are enforced where they are
+written (409). Who wrote an assignment is decided by how the caller is signed in (`vault/tags.py`, `writer_of`): the web and native apps
+are the person; an OAuth app or a personal access token is an assistant, recorded with its name and shown so. More than 25 cards in one
+tagging or untagging is shown first and applied only with confirm. `/collection/cards` takes `tag` and lists each card's `tags` (own
+collection only; the ETag includes the person's tags so a change shows). Tests: `tests/test_tags_api.py`, `tests/test_tag_tools.py`.
+
+Not built yet: the `vault_metadata` routes and tools (rest of #127), importing into one bucket (#124), the tag and bucket filters on the
+analytics (#130), the web app (#125, #128).

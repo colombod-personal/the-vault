@@ -31,7 +31,7 @@ from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .. import analytics, deck_text, oauth_server, outbound, tokens
+from .. import analytics, deck_text, oauth_server, outbound, tags as card_tags, tokens
 from ..catalog import Catalog
 from ..auth import IdentityInUse, Profile, find_or_create
 from ..deck_tools import loose_name
@@ -418,7 +418,9 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                                                  description=f"Mana value bucket, as in the breakdowns: {', '.join(analytics.MANA_VALUES)}. "
                                                              "Printings whose card data is not stored yet are left out"),
                   bucket: int | None = Query(None, ge=1, le=S.MAX_ID, description="Only the copies in this bucket "
-                                             "(GET /collection/buckets); not on a shared collection")):
+                                             "(GET /collection/buckets); not on a shared collection"),
+                  tag: str | None = Query(None, max_length=40, description="Only cards you tagged with this (GET /collection/tags); "
+                                          "not on a shared collection")):
             if sort not in SORTS:
                 raise HTTPException(400, f"sort must be one of {sorted(SORTS)}")
             if card_type is not None:
@@ -428,21 +430,34 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             if mana_value is not None and mana_value not in analytics.MANA_VALUES:
                 raise HTTPException(400, f"mana_value must be one of {', '.join(analytics.MANA_VALUES)}")
             view = ctx.view(ctx.bucket(bucket))
+            if tag is not None:
+                try:
+                    tag = card_tags.normalize(tag)
+                except card_tags.TagError as exc:
+                    raise HTTPException(400, str(exc)) from None
+                if not ctx.own:
+                    raise HTTPException(404, "Tag not found")  # tags are the owner's own, not part of what a share shows
 
             def body():
                 items = filtered(view, q=q, set_code=set, finish=finish, condition=condition, name=name,
                                  card_type=card_type, mana_value=mana_value)
                 items = filtered_printing(items, printing)
+                if tag is not None:  # the tag is on the card: every printing of a tagged card matches
+                    tagged = card_tags.oracle_ids_for(ctx.db, ctx.owner, tag)
+                    printings = {*ctx.db.scalars(select(Card.scryfall_id).where(Card.oracle_id.in_(tagged)))} if tagged else frozenset()  # (`set` is a parameter here)
+                    items = [g for g in items if g.scryfall_id in printings]
                 page, nxt = paginate(items, SORTS[sort], lambda g: g.id, cursor=cursor, limit=limit)
                 cards = view.cards(page)  # card data for the whole page in one query
-                out = [{**view.item(g), "card": card_out(cards.get(g.scryfall_id)), "_links": card_links(ctx, g)}
+                mine = card_tags.tags_of(ctx.db, ctx.owner, {c["oracle_id"] for c in cards.values() if c["oracle_id"]}) if ctx.own else None
+                out = [{**view.item(g), "card": card_out(cards.get(g.scryfall_id)), "_links": card_links(ctx, g),
+                        **({"tags": mine.get((cards.get(g.scryfall_id) or {}).get("oracle_id"), [])} if mine is not None else {})}
                        for g in page]
                 return {**page_body(request, out, nxt, len(items), q=q, set=set, name=name, finish=finish,
                                     condition=condition, printing=printing, type=card_type, mana_value=mana_value,
-                                    bucket=bucket, sort=None if sort == "name" else sort, limit=limit),
+                                    bucket=bucket, tag=tag, sort=None if sort == "name" else sort, limit=limit),
                         "value_total": round(sum(g.value for g in items), 2)}
 
-            return etag_response(request, view.version, body)
+            return etag_response(request, view.version + (f".{card_tags.stamp(ctx.db, ctx.owner)}" if ctx.own else ""), body)
 
         @r.get("/cards/{card_id}", response_model=S.CardDetail, summary="One printing, with card data and price history")
         def card(request: Request, card_id: str, ctx: Ctx = Depends(ctx_dep)):
@@ -460,10 +475,13 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 card_data = card_out(view.card_data(g))
                 if card_data and card_data.get("scryfall_uri"):
                     links["scryfall"] = link(card_data["scryfall_uri"], title="View on Scryfall")
+                oracle_id = (view.card_data(g) or {}).get("oracle_id")
+                mine = card_tags.tags_of(ctx.db, ctx.owner, {oracle_id}).get(oracle_id, []) if ctx.own and oracle_id else None
                 return {**view.item(g), "card": card_data, "price_history": view.price_history(g),
-                        "copies": copies, "copies_total": len(g.copies), "_links": links}
+                        "copies": copies, "copies_total": len(g.copies), "_links": links,
+                        **({"tags": mine} if mine is not None else {})}
 
-            return etag_response(request, view.version, body)
+            return etag_response(request, view.version + (f".{card_tags.stamp(ctx.db, ctx.owner)}" if ctx.own else ""), body)
 
         @r.get("/sets", response_model=S.SetPage, summary="Value by set, with each set's colour mix")
         def sets(request: Request, cursor: str | None = None, limit: int | None = None, ctx: Ctx = Depends(ctx_dep),

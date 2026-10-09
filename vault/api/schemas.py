@@ -118,6 +118,8 @@ class CardItem(Hal):
     scryfall_id: str | None = None
     card: CardData | None = Field(None, description="Scryfall's data for the printing, kept by the daily sync; "
                                   "null until the printing is matched and synced")
+    tags: list[str] | None = Field(None, description="Your tags on the card (GET /collection/tags); left out of a shared collection, "
+                                   "where tags are private")
 
 
 class PricePoint(BaseModel):
