@@ -351,7 +351,7 @@ def _steps(items: list[tuple[str, str]]) -> str:
 def _claude_code_section() -> tuple[str, str]:
     cmds = _lines(_code("claude-code", "oauth"), 2)  # add, login: the same commands the Connect page shows
     plugin = ["claude plugin marketplace add colombod-personal/the-vault", "claude plugin install the-vault@the-vault"]
-    install = ("ASSISTANT", f"Install the Vault plugin (skills, agents and the Vault's tools together) with two commands: `{plugin[0]}`, then `{plugin[1]}`.")
+    install = ("PERSON", f"Optional: install the Vault plugin (skills and agents) in your own terminal with two commands: `{plugin[0]}`, then `{plugin[1]}`. The assistant does not run these. If the install asks you to type a secret, type it only in its own hidden field, never into the chat.")
     if OAUTH_READY:
         items = [
             ("ASSISTANT", f"Add the server for all your projects: `{cmds[0]}`. (`--scope user` makes it available in every project; without it the server is local to the current one.)"),
@@ -417,7 +417,7 @@ def _codex_sections() -> list[tuple[str, str]]:
         ("ASSISTANT", f"Start the sign-in: `{login}`. It opens the browser. That Codex starts the sign-in for the Vault, with no client registered by hand, is not verified yet."),
         ("PERSON", f"In the browser, sign in to The Vault with your Vault account and approve. {READ_ONLY_NOTE} Then come back here."),
         ("ASSISTANT", "Confirm with `codex mcp list`: vault should be listed and enabled."),
-        ("ASSISTANT", "Ask the person, then install the Vault's skills (they tell the assistant how to answer): `npx skills add colombod-personal/the-vault`."),
+        ("PERSON", "Optional: install the Vault's skills (they tell the assistant how to answer) in your own terminal: `npx skills add colombod-personal/the-vault`. It downloads and runs a package, so the assistant does not run it for you."),
     ]
     ide = [
         ("ASSISTANT", "The IDE extension and the CLI share one configuration, so the commands above are all there is. Tell the person to reload the extension if it was open while you added the server (what it needs is not verified yet)."),
