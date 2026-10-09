@@ -676,9 +676,10 @@ SCRYFALL_DATA = {"list_decks",  # the commanders' colour identity is Scryfall's 
                  "check_decklist", "lookup_cards", "get_deck", "get_shared_deck",
                  "get_deck_overlap",  # prices (#165): Scryfall's cheapest, dated
                  "get_deck_ideas", "get_card_alternatives",  # roles, colour identity and prices (#163): Scryfall's, dated
-                 "update_owned_cards", "show_owned_printings"}  # these carry Scryfall's card images
+                 "update_owned_cards", "show_owned_printings",  # these carry Scryfall's card images
+                 "reset_collection"}  # its preview totals the market value (Scryfall's prices) of what a reset removes
 OWN_DATA_ONLY = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucket", "move_cards",
-                 "reset_collection", "undo_collection_reset",
+                 "undo_collection_reset",
                  "list_tags", "tag_cards", "untag_cards", "rename_tag", "delete_tag",
                  "get_card_metadata", "set_card_metadata", "get_bucket_metadata", "set_bucket_metadata",
                  "get_acquisition_timeline", "parse_decklist", "save_deck", "update_deck", "list_imports",

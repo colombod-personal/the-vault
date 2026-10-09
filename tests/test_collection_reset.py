@@ -416,7 +416,8 @@ def test_the_tools_are_listed_classified_and_destructive(agent, bot):
     from test_agents import rpc
     from vault.api import mcp
 
-    assert {"reset_collection", "undo_collection_reset"} <= set(mcp.BY_NAME) and {"reset_collection", "undo_collection_reset"} <= mcp.OWN_DATA_ONLY
+    assert {"reset_collection", "undo_collection_reset"} <= set(mcp.BY_NAME)
+    assert "undo_collection_reset" in mcp.OWN_DATA_ONLY and "reset_collection" in mcp.SCRYFALL_DATA  # the preview totals the market value
     tools = {t["name"]: t for t in rpc(bot, "tools/list", token=make_token(agent, scopes=["read", "write"])).json()["result"]["tools"]}
     for name in ("reset_collection", "undo_collection_reset"):
         assert tools[name]["annotations"]["destructiveHint"] is True and tools[name]["annotations"]["readOnlyHint"] is False
