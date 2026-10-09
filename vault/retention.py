@@ -14,12 +14,12 @@ The daily job runs this after writing the day's prices. It is idempotent: runnin
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import delete, text
 from sqlalchemy.orm import Session
 
-from .models import CollectionValue
+from .models import CollectionValue, StagedUpload
 
 DAILY_DAYS = 90
 WEEKLY_UNTIL = DAILY_DAYS + 182  # six months of weekly points
@@ -60,7 +60,14 @@ def prune_collection_values(db: Session, today: date | None = None) -> int:
     return db.execute(delete(CollectionValue).where(CollectionValue.day < today - timedelta(days=MAX_DAYS))).rowcount or 0
 
 
+def prune_staged_uploads(db: Session) -> int:
+    """Files people uploaded for an assistant (vault.uploads) that nobody applied: a full collection with prices paid must not
+    outlive its hour (#352). They are also dropped when someone starts another link, but only the daily job covers a quiet week."""
+    return db.execute(delete(StagedUpload).where(StagedUpload.expires_at <= datetime.now(timezone.utc))).rowcount or 0
+
+
 def apply(db: Session, today: date | None = None) -> dict:
-    report = {"prices_deleted": prune_price_snapshots(db, today), "values_deleted": prune_collection_values(db, today)}
+    report = {"prices_deleted": prune_price_snapshots(db, today), "values_deleted": prune_collection_values(db, today),
+              "uploads_deleted": prune_staged_uploads(db)}
     db.commit()
     return report
