@@ -15,12 +15,15 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Request, UploadFile
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from .api.idempotency import idempotent
 from .api.import_params import import_options
+from .api.schemas import MAX_ID
 from .importer import MAX_UPLOAD_BYTES, ImportConflict, ImportError_, ImportOptions, import_collection, preview_import
 from .models import Import, StagedUpload, User
 from .oauth_routes import esc, page
@@ -71,6 +74,9 @@ def _preview_html(preview: dict) -> str:
             + (f"<ul>{rows}</ul>" + (f"<p>and {more} more.</p>" if more > 0 else "") if rows else ""))
 
 
+UploadId = Annotated[int, Path(ge=1, le=MAX_ID)]  # a bigger number can't exist (and would overflow the column)
+
+
 def build_router(get_db, current_user, settings) -> APIRouter:
     router = APIRouter()
 
@@ -93,7 +99,7 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         return staged
 
     @router.get(f"{V1}/uploads/{{upload_id}}", tags=["imports"], summary="A staged upload: waiting, or its preview")
-    def get_upload(upload_id: int, user: User = Depends(current_user), db: Session = Depends(get_db),
+    def get_upload(upload_id: UploadId, user: User = Depends(current_user), db: Session = Depends(get_db),
                    options: ImportOptions = Depends(import_options)) -> dict:
         staged = owned(db, user, upload_id)
         if staged.content is None:
@@ -107,7 +113,7 @@ def build_router(get_db, current_user, settings) -> APIRouter:
     @router.post(f"{V1}/uploads/{{upload_id}}/apply", tags=["imports"], status_code=201,
                  summary="Import a staged upload (applies what changed in the person's app, keeps edits made in the Vault), "
                          "then delete the staged file")
-    def apply_upload(request: Request, upload_id: int, user: User = Depends(current_user),
+    def apply_upload(request: Request, upload_id: UploadId, user: User = Depends(current_user),
                      db: Session = Depends(get_db), options: ImportOptions = Depends(import_options)):
         def run():
             staged = owned(db, user, upload_id)

@@ -715,7 +715,18 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     def _source_kind(url: str | None) -> str:
         host = (urlsplit(url).hostname or "").lower() if url else ""
-        return "archidekt" if host.endswith("archidekt.com") else "moxfield" if host.endswith("moxfield.com") else "link" if url else "pasted"
+        def is_site(domain: str) -> bool:  # the domain or a subdomain of it: "evilarchidekt.com" is neither (#350)
+            return host == domain or host.endswith("." + domain)
+
+        return "archidekt" if is_site("archidekt.com") else "moxfield" if is_site("moxfield.com") else "link" if url else "pasted"
+
+    def _deck_number(found: tuple) -> int:
+        """The number of an Archidekt deck link. The parser takes anything ``str.isdigit`` calls a digit (a superscript two
+        is one), which ``int`` then refuses: that was a 500 (#350)."""
+        number = found[1]
+        if not (number.isascii() and number.isdigit()) or len(number) > 12:
+            raise HTTPException(400, "That is not an Archidekt deck number (archidekt.com/decks/<number>)")
+        return int(number)
 
     def _deck(d: Deck, coverage: dict | None = None, known: dict | None = None, brief: bool = False) -> dict:
         """A deck answer: what it is at a glance (format, commanders: vault.deck_overview) first, then the list."""
@@ -1009,7 +1020,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         if found is None or found[0] != "archidekt":
             raise HTTPException(400, "Only Archidekt deck links can be fetched (archidekt.com/decks/<number>). For another site, "
                                      "export the list as text and save it with save_deck.")
-        deck_id = int(found[1])
+        deck_id = _deck_number(found)
 
         def run():
             parsed = deck_import.to_decklist(archidekt_cache.read(db, deck_id, fetch_archidekt,
@@ -1066,7 +1077,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             raise HTTPException(400, "Only Archidekt links can be read by the Vault. For Moxfield and other sites (their terms do "
                                      "not allow automated reading), export the current list there and paste it to update the deck.")
         # the preview asks Archidekt again (unless the copy is under a minute old); the confirm uses that same copy
-        parsed = deck_import.to_decklist(archidekt_cache.read(db, int(found[1]), fetch_archidekt, refresh=not body.confirm))
+        parsed = deck_import.to_decklist(archidekt_cache.read(db, _deck_number(found), fetch_archidekt, refresh=not body.confirm))
         if not parsed["text"] or not _parse(parsed["text"]).lines:
             raise HTTPException(400, "The deck on Archidekt has no cards now: nothing was changed")
         if not body.confirm:
