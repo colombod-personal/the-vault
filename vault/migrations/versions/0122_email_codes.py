@@ -9,7 +9,7 @@ minutes as codes and two days as the record the send caps count; the daily reten
 the account. No data changes.
 
 Revision ID: 0122
-Revises: 0118
+Revises: 0120
 Create Date: 2026-10-09 18:00:00
 """
 
@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = '0122'
-down_revision = '0118'
+down_revision = '0120'
 branch_labels = None
 depends_on = None
 
