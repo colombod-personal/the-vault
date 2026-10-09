@@ -1,6 +1,6 @@
 # Limited data: per-card aggregates from 17Lands public datasets (design for #178)
 
-Status: **design, not built.** Written 2026-10-09 for [#178](https://github.com/colombod-personal/the-vault/issues/178)
+Status: **design; slice 1 is built (section 14), the rest is not.** Written 2026-10-09 for [#178](https://github.com/colombod-personal/the-vault/issues/178)
 (status `needs-refinement` until the owner has seen the decisions at the end). It blocks the Limited part of #106
 (learning help). Nothing here is ingested, downloaded or served: the 17Lands pages were read and their files were only
 asked about with HEAD requests (size, date, tag). This document is the "design written down before the build" and the
@@ -438,3 +438,32 @@ Slices become sub-issues of #178 when the owner has answered section 13.
 
 Left to the build, not the owner: the migration number, the exact thresholds' constants, the run-time measurement and the choice of a faster reader
 if the first run is too slow.
+
+## 14. Slice 1 as built (the owner approved the recommended defaults of section 13 on 2026-10-09)
+
+What exists: the three tables and migration `0120` (the design said 0119 or the next free number; this branch was assigned 0120 so that it does not clash with another branch),
+`vault/limited_stats.py` (the counters, Wilson interval, levels, exact warnings, attribution, sanity checks), `vault/limited_data.py`
+(writing a file's rows in one transaction, and the answer), `jobs/sync_limited.py` and `.github/workflows/sync-limited.yml`, the S3 twin
+(`twins/seventeenlands.py`) and its conformance check, the gate row, `GET /api/v1/catalog/limited/{set}` and `get_limited_card_stats`, the
+credits card, the `vault-attribution` and `expert-council` skills, the Limited expert, `whoami` (the loaded sets and dates), and their tests.
+**Nothing has been downloaded or run against production.** The first real run is the Action `sync-limited`, started by hand with
+`workflow_dispatch` once the repository variable `CATALOG_SOURCES` names `limited_17lands` (the only manual step; the workflow never sets it).
+
+Decisions made while building (the design left them to the build or was silent):
+
+| Point | As built |
+|---|---|
+| Which sets and formats the job reads | The ones it is given (`--sets`, `--formats`, or the workflow inputs); default `DEFAULT_SETS = ("HOB",)` and `DEFAULT_FORMATS = ("PremierDraft",)`, slice 1's scope. `TradDraft` works the same way. Finding the eight most recent sets with HEAD, the 14-day wait after a release, and deleting a set that leaves the window are slice 2 |
+| Limits | All of section 4's limits are in: one download at a time, the User-Agent, 400 MB a file from `Content-Length`, 800 MB a run (the rest is `deferred`), three retries (2, 8, 30 s, `Retry-After` wins) for connection errors, 429 and 5xx only, the 85% and 70% budget checks, a 120-minute cap. Smallest file first |
+| Extra column | `limited_sources.first_picks` and `empty_first_picks` (pick-1 rows, and those with an empty pack): the design says the answer repeats 17Lands' caveat about missing P1P1 "when the file shows missing first picks", and that needs a stored count. The caveat is added at 1% or more of the first picks |
+| Sample floors | `SHOW_FLOOR = 200` and `RANK_FLOOR = 1000` in `vault/limited_stats.py`. A sorted list contains the cards from 200 games in hand, each with its `level`; the exact "left out" sentence counts those under 200. The position sorts use the same floor on packs seen or picks, with the sentence's noun changed ("packs in which they were seen", "picks") |
+| `{width}` in the small-sample warning | The width of the 95% range in points (high minus low), one decimal: two cards whose ranges overlap are not told apart |
+| Rates under the floor | `win_rate_in_hand` is always given when there are games (flagged, with its range); the opening-hand, drawn and played rates, and the two position averages, are null under 200 of their own sample (their counts are always given) |
+| Sort direction | `win_rate_in_hand` and `games_in_hand` highest first; `avg_last_seen_pick` and `avg_taken_at` earliest first |
+| Draft-file memory | Drafts already read are remembered as hashes (to refuse a file whose drafts are not contiguous); one pack round's last-seen picks are held at a time |
+| What a run keeps of a game | The first and last game time of the games used, nothing else; a game with a missing or unreadable `won` is counted as skipped |
+| Source key | `limited_17lands` is in `sync_catalog.OTHER_JOBS` (the catalog job skips it), in `provenance.CATALOG_SOURCES` (so `whoami` carries its notice) and in the gate; a `catalog_sources` row is written with each file |
+
+Not in slice 1: the 8-set window and its discovery, the 14-day embargo, deleting sets that left the window, Sealed formats, colour-pair
+slices, the 90-day terms reminder issue and the job's refusal after 120 days, and the Limited expert's real-app evidence after deploy (section 11,
+last bullet).

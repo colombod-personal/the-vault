@@ -47,7 +47,7 @@ no Pioneer, Modern or Limited voice. A second format expert joins only when the 
 | Brawl / Standard Brawl | 60/100-card variants, rotation |
 | Standard, Pioneer, Modern, Legacy, Vintage | 60-card constructed: curve, interaction, sideboard plans, rotation and bans |
 | Pauper | Commons only; format-specific staples |
-| Limited (draft and sealed) | Curve, removal count, two-colour discipline, signals, set mechanics |
+| Limited (draft and sealed) | Curve, removal count, two-colour discipline, signals, set mechanics; win rates and pick positions from 17Lands' data through `get_limited_card_stats` (Arena, CC BY 4.0, with sample sizes), for the sets the Vault has loaded |
 | Two-Headed Giant | Shared turns and life total (30), team attacks, which effects scale with two opponents, team synergies |
 | Cube | Cube design and drafting: balance across colours and archetypes, power level, pick orders inside a cube |
 | Oathbreaker and other variants | The variant's own rules (`deck_legality` lists what it checks) |

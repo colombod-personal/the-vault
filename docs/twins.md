@@ -3,7 +3,7 @@
 The Vault depends on these outside services: Google, Microsoft, Apple and Facebook for sign-in,
 Scryfall for card data and prices, Archidekt for decks, Vercel's API for the setup job
 (`jobs/vercel_setup.py`), Commander Spellbook for combos, Wizards of the Coast's site for the Comprehensive Rules, GitHub's issues API
-for the budget guard's alerts (`jobs/budget_alert.py`) and Neon's console API for compute-hour tracking (`jobs/neon_usage.py`). `twins/` contains a **behavioural
+for the budget guard's alerts (`jobs/budget_alert.py`), Neon's console API for compute-hour tracking (`jobs/neon_usage.py`) and 17Lands' public data files on S3 (`jobs/sync_limited.py`). `twins/` contains a **behavioural
 clone** ("digital twin") of each one. The idea comes from StrongDM's Digital Twin Universe and
 Microsoft's `amplifier-bundle-digital-twin-universe`.
 
@@ -32,6 +32,11 @@ Microsoft's `amplifier-bundle-digital-twin-universe`.
   flags tool descriptions that steer the approver (`flagged`). `tests/test_chatgpt_twin.py` runs it, and the nightly
   conformance run compares its document and keys with the real ones. A twin simpler than the real client is how
   ChatGPT could not connect while every OAuth test passed (#210).
+- **17Lands' files, as the S3 host really answers** (`twins/seventeenlands.py`, HEAD requests of 2026-10-09; no file was downloaded): a file
+  that exists answers 200 with `Content-Length`, `Last-Modified`, a quoted `ETag`, `Accept-Ranges: bytes` and `Content-Type: text/csv` (the body is
+  gzip); one that does not exist answers **403**, not 404, so "not published" and "withdrawn" are told apart by a HEAD per set code. The twin
+  also serves a truncated or corrupt body and a `Content-Length` larger than any real file (`publish_raw`), so the job's refusals are tested without
+  such a file existing. `tests/conformance` checks the two answers with one HEAD each; the tests never reach the host.
 - **Archidekt is never contacted by a schedule**: the live Archidekt conformance checks run by hand only
   (`TWINS_LIVE_ARCHIDEKT=1`), fetch one named public deck and never search (docs/compliance.md).
 - **Archidekt decks are as heavy as real ones**: the twin sends every field of the real API (captured 2026-10-06 in

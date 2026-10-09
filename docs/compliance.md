@@ -10,7 +10,8 @@ The Vault depends on other people's data and says so, always. Two rules sit abov
 
 Status of this document: written 2026-10-04 from public pages that were reachable then; Scryfall's terms read first-hand on 2026-10-05;
 Moxfield's terms, Card Kingdom's, Magic Madhouse's and Archidekt's read first-hand on 2026-10-07 and Cardmarket's General
-Terms (version of 20/02/2026) read in a browser on 2026-10-07, see `docs/data-sources.md`. Anything marked unverified may not be relied on
+Terms (version of 20/02/2026) read in a browser on 2026-10-07, see `docs/data-sources.md`; 17Lands' public data sets page, terms of
+service, usage guidelines, FAQ, metrics definitions, `robots.txt` and the CC BY 4.0 legal code read first-hand on 2026-10-09 (see "17Lands" below). Anything marked unverified may not be relied on
 until someone has read the primary text. This is engineering diligence, not legal advice.
 
 ## Source gate (enforced)
@@ -29,6 +30,7 @@ list, so production can only enable sources the test has checked.
 | `oracle_tags` | Scryfall Tagger tags | read | 2026-10-05 | https://scryfall.com/docs/api/tags | Track by id, be able to hide tags (`HIDDEN_TAGS`), labelled community opinion |
 | `oracle_prices` | Scryfall prices (TCGplayer, Cardmarket via Scryfall) | read | 2026-10-05 | https://scryfall.com/docs/api | Shown as Scryfall's, with date and marketplace |
 | `oracle_printings` | Scryfall bulk `default_cards`: one priced paper printing per row | read | 2026-10-05 | https://scryfall.com/docs/api | Same terms as the prices it carries: shown as Scryfall's with date and marketplace; used to pick the cheapest acceptable printing, never a shop's price; off until `CATALOG_SOURCES` lists it |
+| `limited_17lands` | 17Lands public data sets (game and draft files of recent sets): reduced to per-card counts, the files themselves never stored | read | 2026-10-09 | https://www.17lands.com/public_datasets | CC BY 4.0: credit 17Lands, name the licence and link it, say what the Vault changed, no endorsement; every figure shown with its sample size and as Arena data (see "17Lands" below). Off until `CATALOG_SOURCES` names it; read by `jobs/sync_limited.py`, run only by the `sync-limited` Action |
 | `rules` | Wizards' Comprehensive Rules | read | 2026-10-04 | https://company.wizards.com/en/legal/fancontentpolicy | Read live, nothing stored (#142); Fan Content notice shown |
 
 Sources the Vault does **not** load, recorded so the next person does not have to find out again:
@@ -165,6 +167,31 @@ Planned (#94): listing a person's **own** public decks by their Archidekt userna
 request, paced and cached. It is not built. Today's support is the single deck a person gives or has saved, and the
 `archidekt-deck-helper` skill (and its generated plugin copy) tells agents to fetch only that one deck; they will need
 updating together with #94.
+
+### 17Lands (public data sets, CC BY 4.0; read 2026-10-09)
+
+Design and evidence: `docs/limited-data-design.md` (what was read, the licence clauses, what is not verified). Read in a browser on 2026-10-09:
+[the public datasets page](https://www.17lands.com/public_datasets) ("Unless otherwise noted, these data sets are licensed under a Creative
+Commons Attribution 4.0 International License"), the terms of service, the usage guidelines, the FAQ, the metrics definitions, `robots.txt`
+(disallows only `/card_data/details` and `/data/card_based_performance`) and the [CC BY 4.0 legal code](https://creativecommons.org/licenses/by/4.0/legalcode.en).
+The files live on `17lands-public.s3.amazonaws.com`. The job asks that host only for the game and draft files of the sets it is given.
+
+| Requirement | Where it comes from | What it means for us |
+|---|---|---|
+| Credit the creator, name the licence and link it, link the material | CC BY 4.0 section 3(a)(1) | The `attribution` string and the `provenance` source block of every answer with these figures, `public/credits.html`, `whoami` |
+| Say that the material was changed | section 3(a)(1)(B) | "Changed by the Vault: the per-game and per-pick rows were reduced to per-card counts, and the percentages, intervals and sample-size warnings were computed by the Vault, so they can differ from the figures on 17lands.com" (`changes` in the source block) |
+| The warranty notice | section 3(a)(1)(A)(iv) | "which also states that it is provided without warranty (section 5)" |
+| No implied endorsement | section 2(a)(6); usage guidelines | "Not produced or endorsed by 17Lands." Never "17Lands says"; "According to data from 17Lands (set, format, date)" is their own suggested wording |
+| Removal on request | section 3(a)(3) | If 17Lands asks, the data is switched off at once (remove `limited_17lands` from `CATALOG_SOURCES`), as for a Wizards takedown |
+| Be kind to a volunteer-run host (their guidelines discourage scraping the API and welcome the data dumps) | usage guidelines, FAQ | One download at a time, descriptive User-Agent, no file over 400 MB, 800 MB a run, three retries only for connection errors, 429 and 5xx; the replay files are never touched; a version already loaded is not read again (ETag) |
+
+The credit text is in `vault/provenance.py` (`GENERIC_17LANDS_NOTICE`) and `vault/limited_stats.py` (`ATTRIBUTION`, with the set, format and
+dates filled in); `tests/test_limited_tool.py` and `tests/test_limited_credits.py` pin it, and that the credits page, the `vault-attribution` skill,
+the Limited expert and the server instructions carry it. What the Vault must not claim: that 17Lands endorses or produced it; that a figure *is*
+17Lands' number (the percentages are the Vault's, labelled `computed`); a "Vault rating", grade or tier; that a card is a best pick or that a gap is real
+below the sample floor (200 games in hand to show a number flagged, 1,000 to be called `ok`); that the data describes paper Magic or all players.
+The terms were read on 2026-10-09: re-read them at least every 90 days and whenever 17Lands changes them (the reminder issue and the job's
+refusal after 120 days are slice 2 of #178).
 
 ### Other sources (read 2026-10-07)
 

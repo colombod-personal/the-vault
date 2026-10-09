@@ -90,6 +90,10 @@ Limits that matter on the free plan (source: Neon's FAQ above):
 | Restore history | 6 hours, capped at 1 GB of change data | Daily jobs that rewrite whole tables create a lot of change data. **Unverified:** whether this counts toward storage; treat as a risk | Prefer upserts that touch only changed rows; check after the first real run |
 | Branches / projects | 10 branches, 100 projects | Not a constraint today | Nothing |
 
+The 17Lands tables (`limited_game_stats`, `limited_pick_stats`, `limited_sources`, #178) hold per-card counts only: about 400 cards a set
+and format in each of two tables, measured at about 4 MB for the design's whole eight-set, two-format window (0.4% of the 1,024 MB), with
+current rows only and no history. The job ends with the same 70% and 85% checks.
+
 Neon's history (point-in-time restore) is a separate billing meter, not part of the 1 GB storage line: on the free plan the window is 6 hours, capped at 1 GB-month of change history, and the plans page does not say that history counts toward the storage cap (read 2026-10-09, [Neon plans](https://neon.com/docs/introduction/plans)). The console read of 2026-10-09 (the owner's signed-in console, read only; organization usage since 1 October) shows the meters apart: compute 14.37 of 100 CU-hours, storage 0.31 GB, **History 0 GB**, network transfer 1.25 GB of 5; the-vault-db 241.34 MB of 1 GB, after the catalog loads and the price syncs of the month. So history is not counted in the storage figure and added nothing (#64).
 
 Guardrails, built (#64) in `jobs/db_budget.py`, `jobs/neon_usage.py` and `jobs/budget_alert.py`, with the workflows that call them:

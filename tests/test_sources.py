@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 KEYS = {"Wizards of the Coast": "Wizards of the Coast", "Scryfall": "Scryfall", "Scryfall Tagger contributors": "Tagger",
         "Commander Spellbook": "Commander Spellbook", "Archidekt": "Archidekt", "Moxfield": "Moxfield",
         "Dragon Shield (Card Manager)": "Dragon Shield", "TCGplayer, Cardmarket and Cardhoarder": "Cardhoarder", "EDHREC": "EDHREC",
-        "Card illustrators": "illustrat", "Google, Microsoft, Apple and Facebook sign-in, and passkeys": "Facebook",
+        "17Lands": "17Lands", "Card illustrators": "illustrat", "Google, Microsoft, Apple and Facebook sign-in, and passkeys": "Facebook",
         "Vercel, Neon and GitHub": "Neon", "Open source software": "open source"}
 
 

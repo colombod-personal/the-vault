@@ -1,0 +1,8 @@
+expansion,event_type,draft_id,game_time,won,main_colors,deck_Test Bear,sideboard_Test Bear,opening_hand_Test Bear,drawn_Test Bear,tutored_Test Bear,deck_Test Bolt,sideboard_Test Bolt,opening_hand_Test Bolt,drawn_Test Bolt,tutored_Test Bolt,deck_Test Elf,sideboard_Test Elf,opening_hand_Test Elf,drawn_Test Elf,tutored_Test Elf,deck_Front Face // Back Face,sideboard_Front Face // Back Face,opening_hand_Front Face // Back Face,drawn_Front Face // Back Face,tutored_Front Face // Back Face
+TST,PremierDraft,game-draft-1,2026-09-10 10:00:00,True,WU,2,0,1,1,0,1,0,0,1,0,1,0,1,0,0,0,0,0,0,0
+TST,PremierDraft,game-draft-2,2026-09-11 11:00:00,False,WU,2,0,0,1,0,1,0,1,0,0,1,0,0,0,0,1,0,0,1,0
+TST,PremierDraft,game-draft-3,2026-09-12 12:00:00,True,WU,2,0,2,0,0,1,0,0,0,0,1,0,0,1,0,1,0,1,0,0
+TST,PremierDraft,game-draft-4,2026-09-13 13:00:00,True,WU,2,0,0,0,0,1,0,0,1,0,0,1,0,0,0,1,0,0,0,0
+TST,PremierDraft,game-draft-5,2026-09-13 14:00:00,True,WU,2,0,0,0,0,1,0,1,1,0,1,0,0,0,0,0,0,0,0,0
+TST,PremierDraft,game-draft-6,2026-09-13 15:00:00,False,WU,2,0,0,1,1,1,0,0,0,0,1,0,0,0,0,1,0,0,0,0
+TST,PremierDraft,game-draft-7,2026-09-14 16:00:00,True,WU,2,0,1,0,0,0,1,0,0,0,1,0,0,0,0,1,0,0,1,0

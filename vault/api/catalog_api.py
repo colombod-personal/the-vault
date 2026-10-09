@@ -16,14 +16,14 @@ import hmac
 import math
 import time
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from .. import catalog_queries as q
-from .. import deck_tools, role_rules
+from .. import deck_tools, limited_data, role_rules
 from .. import provenance as prov
 from ..models import User
 from ..ratelimit import WINDOW, hit
@@ -136,12 +136,38 @@ class WalkthroughOut(BaseModel):
     links: dict = Field(default_factory=dict, alias="_links")
 
 
+class LimitedOut(BaseModel):
+    attribution: str = Field(description="17Lands' CC BY 4.0 credit for these figures, with the set, format and dates: repeat it in the first sentence that uses a number")
+    set: str
+    format: str
+    platform: str = Field(description="Always 'MTG Arena': the data is from Arena players who run the 17Lands tracker, not from paper Magic")
+    data_window: dict = Field(description="The games and drafts the counts cover (first and last time), the set's baseline win rate and the version (date, ETag) of each file read")
+    sort: str | None = Field(description="The metric the list is sorted by; null when `cards` named the cards")
+    total: int = Field(description="Cards in the whole list (those at or above the sample floor for the sort, or the cards asked for)")
+    count: int
+    cards: list[dict] = Field(description="Per card: games in hand with its win rate and 95% range, opening-hand, drawn and played figures, where it is last seen and taken, "
+                                          "and `sample` (level too_few, low or ok, the number behind it and the exact warning)")
+    not_found: list[str] = Field(default_factory=list, description="Names asked for that are not in this set's data")
+    left_out: dict = Field(description="How many cards were left out of the sorted list for being under the sample floor, and the sentence that says so")
+    caveats: list[str]
+    next_cursor: str | None = None
+    provenance: list[prov.Provenance]
+    links: dict = Field(default_factory=dict, alias="_links")
+
+
 class StatusOut(BaseModel):
     sources: dict[str, dict]
     rules_version: str | None
     provenance: list[prov.Provenance]
     notice: str = prov.FAN_CONTENT_NOTICE
     links: dict = Field(default_factory=dict, alias="_links")
+
+
+def _query(params: dict, cards: list[str], cursor: str | None) -> str:
+    from urllib.parse import urlencode
+
+    pairs = [(k, v) for k, v in params.items() if v is not None] + [("cards", c) for c in cards] + ([("cursor", cursor)] if cursor else [])
+    return "?" + urlencode(pairs) if pairs else ""
 
 
 def throttle(request: Request, settings, bucket: str, who: str, allowed: int, db: Session | None = None) -> None:
@@ -208,6 +234,10 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
     def status_body(db: Session) -> dict:
         rows = q.sources(db)
         out = {n: {"version": s.version, "as_of": s.fetched_at.date().isoformat(), "rows": s.rows} for n, s in rows.items()}
+        if limited_data.SOURCE_NAME in out:  # each loaded set and format, with the date of each 17Lands file (design section 6)
+            out[limited_data.SOURCE_NAME]["sets"] = [
+                f"{e['set']} {e['format']}: " + ", ".join(f"{k} file {v['last_modified']}" for k, v in e["files"].items())
+                for e in limited_data.loaded_sets(db)]
         version = live_rules.cached_version
         if version is None:  # a cold server instance: read the current edition now (cached for hours, as any rules tool would)
             try:
@@ -233,6 +263,22 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
                 "guidance": "Answer rules and card questions from the tools, quote only verified text, and repeat each result's provenance. "
                             "Material from Scryfall and Wizards of the Coast is theirs, not the Vault's.",
                 "_links": {"self": link(f"{V1}/agent/whoami"), "catalog": link(f"{V1}/catalog/status")}}
+
+    @router.get("/limited/{set_code}", response_model=LimitedOut, response_model_by_alias=True,
+                summary="Win rates and pick positions of a Limited set's cards, from 17Lands' public data (Magic Arena, CC BY 4.0), each with its sample size")
+    def limited(request: Request, set_code: Annotated[str, Path(min_length=2, max_length=10, pattern="^[A-Za-z0-9]+$")],
+                fmt: Literal["PremierDraft", "TradDraft"] = Query(default="PremierDraft", alias="format"),
+                cards: list[Annotated[str, Field(min_length=1, max_length=300)]] = Query(default=[], max_length=limited_data.MAX_CARDS),
+                sort: Literal["win_rate_in_hand", "games_in_hand", "avg_last_seen_pick", "avg_taken_at"] = "win_rate_in_hand",
+                limit: int = Query(default=20, ge=1, le=limited_data.MAX_LIMIT), cursor: str | None = Query(default=None, max_length=200),
+                user=Depends(access), db: Session = Depends(get_db)) -> dict:
+        """Global data, no user id: whatever the person asks about, nothing of theirs is read."""
+        body = limited_data.card_stats(db, set_code, fmt, cards=cards, sort=sort, limit=limit, cursor=cursor)
+        params = {"format": fmt, "sort": None if cards else sort, "limit": limit}
+        links = {"self": link(f"{V1}/catalog/limited/{body['set']}" + _query(params, cards, cursor))}
+        if body.get("next_cursor"):
+            links["next"] = link(f"{V1}/catalog/limited/{body['set']}" + _query(params, cards, body["next_cursor"]))
+        return body | {"_links": links}
 
     @router.get("/cards", response_model=CardOut, response_model_by_alias=True,
                 summary="A card's Oracle text, types, legalities and tags, by exact name or Oracle id")
