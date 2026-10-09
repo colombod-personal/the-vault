@@ -205,7 +205,7 @@ so an app cannot revoke or list its siblings.
 
 ### 10. SSRF through Client ID Metadata Documents
 A stranger sets `client_id=https://x/...` and the Vault fetches it. Mitigations in `vault.oauth_clients.ClientFetcher`:
-- https, port 443 only, a path, no credentials or fragment, no IP literals, no dot segments, no `.local`/`.internal`/single-label names, 512 characters (C `test_client_id_urls_that_could_aim_the_fetch_are_refused`).
+- https, port 443 only, a path, no credentials or fragment, no IP literals, no dot segments (a segment that is `.` or `..`, also percent-encoded once or twice; a name that only starts with a dot is fine: `/.well-known/mcp-client.json` is the standard place for a client metadata document and is what Perplexity uses, #363; the fetch is made safe by the address check below, not by the shape of the path), no `.local`/`.internal`/single-label names, 512 characters (C `test_client_id_urls_that_could_aim_the_fetch_are_refused`).
 - The name is resolved first and **every** address must be public: private, loopback, link-local (cloud
   metadata), shared (100.64/10), multicast, reserved and unspecified are refused, as are IPv4-mapped, NAT64
   and 6to4 forms carrying such an address, and Teredo (C `test_only_public_addresses_are_public`,
