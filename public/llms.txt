@@ -178,7 +178,8 @@ be revoked (Account → Connected apps for OAuth).
     `get_collection_stats`, `get_value_history`, `get_acquisition_timeline`
   - buckets (the places copies live in: binders, deck boxes, trade boxes): `list_buckets`, `create_bucket`,
     `rename_bucket`, `move_cards` (moves copies between buckets, splitting a stack; a big move is shown first),
-    `delete_bucket` (an empty one, asks first); `search_cards` takes a `bucket` to list what is in one
+    `delete_bucket` (an empty one, asks first); `search_cards` takes a `bucket` to list what is in one, and so do the
+    analytics tools (`get_collection_summary`, `get_valuation`, ...) to total one
   - tags (the person's own labels on cards, on the card so every printing has them): `list_tags`, `tag_cards`,
     `untag_cards`, `rename_tag`, `delete_tag` (asks first); a tag you write is recorded as written by your app and shown
     so, never as the person's own; more than 25 cards at once is shown first; `search_cards` takes a `tag` and lists each
@@ -276,11 +277,17 @@ property of Wizards of the Coast. ©Wizards of the Coast LLC.
 - `GET /api/v1/collection` includes P&L: `pnl`, `pnl_pct`, `known_cost_paid`, `known_cost_market`,
   `known_cost_copies`, `unknown_cost_copies`. Only copies with a recorded price paid count.
 - `GET /api/v1/collection/breakdowns`: by colour identity, main type, mana value, rarity, colour x type.
+- Bucket and tag filters: the summary, `stats`, `sets`, `timeline`, `history`, `breakdowns`, `valuation` and `names` above take
+  `?bucket=<id>` and `?tag=<tag>` ("what is my trade binder worth?", "my commander staples by colour"). Copies, value and cost of
+  all buckets add up to the whole collection; distinct counts (cards, printings, sets) do not (a printing in two buckets counts in
+  each). Your own collection only (404 on a shared one); an unknown tag gives an empty answer.
 - `GET /api/v1/collection/valuation`: value, cost and gain by purchase month, peak month, last 12 months.
 - `GET /api/v1/collection/names?sort=-value&limit=50`: the collection rolled up by card name (top N).
 - `GET /api/v1/collection/sets?q=&sort=release`: each set has its colour mix.
 - `POST /api/v1/collection/refresh` (write scope): today's prices from Scryfall, 300 printings per call;
   repeat with the returned `cursor` until `remaining` is 0.
-- MCP tools: `get_collection_breakdowns`, `get_valuation`, `list_card_names`, `refresh_prices`.
+- MCP tools: `get_collection_breakdowns`, `get_valuation`, `list_card_names`, `refresh_prices`; the analytics tools
+  (`get_collection_summary`, `get_collection_stats`, `get_collection_breakdowns`, `get_valuation`, `get_value_history`,
+  `get_acquisition_timeline`, `list_card_names`, `list_sets`) take `bucket` and `tag` like `search_cards`.
 - [Connect an assistant, step by step](/connect.html)
 - [Skills and the plugin](https://github.com/colombod-personal/the-vault/blob/main/docs/skills.md)

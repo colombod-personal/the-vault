@@ -55,7 +55,7 @@ Tags versus roles: a tag is the person's own opinion or plan (`trade`, `commande
 
 ### 5. Analytics take a `bucket` and a `tag` filter
 
-- `summary`, `breakdowns`, `valuation`, `names` and `stats` accept `bucket` and `tag` (default: the whole inventory). Additive metrics (copies, market value, paid) summed across buckets equal the inventory total (a test); distinct counts (cards, printings, sets) do **not** add up, because one printing split across two buckets counts once in each bucket but once inventory-wide, so they are computed over the combined inventory (`vault/collection_view.py`, `vault/analytics.py` already count distinct values). The test includes that split-stack case. Detailed in #130.
+- `summary`, `breakdowns`, `valuation`, `names`, `stats`, `sets`, `timeline` and `history` accept `bucket` and `tag` (default: the whole inventory). Additive metrics (copies, market value, paid) summed across buckets equal the inventory total (a test); distinct counts (cards, printings, sets) do **not** add up, because one printing split across two buckets counts once in each bucket but once inventory-wide, so they are computed over the combined inventory (`vault/collection_view.py`, `vault/analytics.py` already count distinct values). The test includes that split-stack case. Detailed in #130.
 
 ### 6. One import path (with #193 and #194)
 
@@ -116,5 +116,14 @@ are the person; an OAuth app or a personal access token is an assistant, recorde
 tagging or untagging is shown first and applied only with confirm. `/collection/cards` takes `tag` and lists each card's `tags` (own
 collection only; the ETag includes the person's tags so a change shows). Tests: `tests/test_tags_api.py`, `tests/test_tag_tools.py`.
 
-Not built yet: the `vault_metadata` routes and tools (rest of #127), importing into one bucket (#124), the tag and bucket filters on the
-analytics (#130), the web app (#125, #128).
+Built since (#130, backend and MCP): `bucket` and `tag` on `/collection` (summary and P&L), `/stats`, `/sets`, `/timeline`, `/history`,
+`/breakdowns`, `/valuation` and `/names`, and on the MCP tools `get_collection_summary`, `get_collection_stats`, `list_sets`,
+`get_collection_breakdowns`, `get_valuation`, `list_card_names`, `get_value_history` and `get_acquisition_timeline`. Computed in
+`vault/analytics.py` (one `scope` clause on the same CTE) and `CollectionView(bucket_id, tag)`; own collection only (404 on a share and
+for another person's bucket, 400 for a malformed tag, an empty answer for an unknown tag). The view cache key and the ETag carry the
+bucket and, for a tag, the person's tags stamp, so a tag change never serves a stale answer. Additive figures add up across buckets,
+distinct counts do not (the section 5 rule; `tests/test_analytics_filters.py`). The daily value history is recorded for the whole
+inventory only, so a filtered `/history` prices the copies held now in the selection at each recorded day's prices.
+
+Not built yet: the `vault_metadata` routes and tools (rest of #127), importing into one bucket (#124), the web app (#125, #128) and the
+web part of #130 (analytics that follow the selected bucket or tag).
