@@ -154,10 +154,13 @@ characters divided by 4, an estimate, not a tokenizer's count.
 
 ## Keeping experts current (link to #107)
 
-Every council answer records the rules edition (`whoami` returns `rules_version`) and the card data date. When a new
-Comprehensive Rules edition, rulings or legality changes arrive, the reconciler (#107) produces a change brief; the
-experts' instructions cite rules by number and are re-checked against the new edition; answers given under an older
-edition say so if asked again.
+Every council answer records the rules edition (`whoami` returns `rules_version`) and the card data date. Every member that can open
+a rule is told to cite each rule number with the edition (`version`) a rules tool returned, and the judge and the chair to call
+`rules_changes` when a rule may have changed lately. The reconciler (#107, `docs/reconciler-design.md`) makes that checkable: the MCP tool
+`rules_changes` produces the change brief (rules added, removed, renumbered and changed between the previous and the current Comprehensive
+Rules edition, plus rulings and legality changes since), and a weekly job lists every rule number cited in `skills/` and `agents/` that
+the current edition no longer has (a failure) or that now says something else (a warning). Answers given under an older edition say so
+if asked again.
 
 ## What #104 builds (acceptance)
 

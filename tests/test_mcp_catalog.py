@@ -68,7 +68,7 @@ def test_the_catalog_tools_are_listed_and_read_only(agent, bot):
 SAMPLE_ARGS = {
     "whoami": {}, "get_card_oracle": {"name": "Lightning Bolt"}, "get_rulings": {"oracle_id": BOLT},
     "search_rules": {"query": "sample rule"}, "get_rule": {"number": "100.1"}, "rules_outline": {"under": "1"},
-    "find_rules_term": {"name": "sample term"},
+    "find_rules_term": {"name": "sample term"}, "rules_changes": {"limit": 5},
     "verify_citation": {"kind": "rule", "ref": "100.1", "quote": "First sample rule."},
     "present_steps": {"steps": [{"text": "A thing happens.", "rules": ["100.1", "999.9"]}]},
     "deck_stats": {"text": VALID}, "deck_legality": {"text": VALID, "format": "commander"},
