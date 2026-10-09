@@ -206,6 +206,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                        "tokens": link(f"{V1}/me/tokens", title="Personal access tokens for agents and scripts"),
                        "passkeys": link(f"{V1}/me/passkeys", title="Passkeys that can sign in to this account"),
                        "export": link(f"{V1}/me/export", title="Download all my data (ZIP)"),
+                       "buy_settings": link(f"{V1}/me/buy-settings", title="Where I buy: my country and the stores I typed"),
                        "collection": link(f"{V1}/collection")},
         }
 

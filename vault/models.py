@@ -257,6 +257,20 @@ class ResetSnapshot(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
+class BuySettings(Base):
+    """Where a person buys (#212, docs/where-to-buy-design.md): one row per person. ``country`` is an ISO 3166-1 alpha-2 code they chose
+    (never guessed from an address), ``stores`` up to three shops they typed, each ``{name, url, search_url}`` (shown as links, never
+    requested). No postcode, address, coordinates, IP address or device language is stored. It says roughly where the person lives, so it
+    is personal data: exported, and erased with the account."""
+
+    __tablename__ = "buy_settings"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    country: Mapped[str | None] = mapped_column(String(2))
+    stores: Mapped[list] = mapped_column(JSON, default=list)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Deck(Base):
     """A saved decklist (plain text, any common format)."""
 

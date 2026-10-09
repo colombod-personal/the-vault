@@ -294,6 +294,7 @@ function LabBuy({ overlap, dated, api, openCard, onOpenDeck, onAddDeck }) {
                         {p.move && <span className="lab-opt">move: {p.move.from_deck.name} to {p.move.to_deck.name}</span>}
                         <span className="lab-opt buy">{Text.purchaseBuy(p, dated)}</span>
                       </div>
+                      <BuyMenu card={p.card} />
                       {p.move && <p className="lab-item-note">{p.move.effect}</p>}
                     </li>
                   ))}

@@ -85,7 +85,7 @@ listings are marked as such. The Vault fetches no shop page and no shop feed (se
 
 What this means:
 
-- **Now:** per-card search links only (as the skills do), no fetching of shop pages, prices stay Scryfall's and dated.
+- **Now:** per-card search links only (as the skills do and as the web app's "Where to buy" menu does since #212, `vault/buy_links.py`: the same three formats, re-measured for Card Kingdom and Magic Madhouse on 2026-10-09, Cardmarket's last checked 2026-10-07), no fetching of shop pages, prices stay Scryfall's and dated. The Wizards Store & Event Locator is linked to by its front page only (`docs/compliance.md`, "Where to buy links").
 - **Card Kingdom:** no automated use of its site or price list without written permission; the Vault does not use them.
   Asking is the owner's decision (draft not written yet: add to `docs/outreach-drafts.md` if wanted).
 - **Magic Madhouse:** the only shop with a documented, legitimate feed. Joining is the owner's decision. Before joining,

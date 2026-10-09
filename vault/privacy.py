@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from .importer import export_collection
 from .sharing import display_name
-from .models import AccessToken, ApiSession, Bucket, BucketBaseline, CardAnnotation, TagAssignment, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionBaseline, ResetSnapshot, CollectionValue, Deck, DeckVersion, Entry, Identity, Import, Share, StagedUpload, User
+from .models import AccessToken, ApiSession, Bucket, BucketBaseline, BuySettings, CardAnnotation, TagAssignment, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionBaseline, ResetSnapshot, CollectionValue, Deck, DeckVersion, Entry, Identity, Import, Share, StagedUpload, User
 from .prices import history
 from .collection_view import CollectionView
 
@@ -48,6 +48,7 @@ connected_apps.json  apps you connected with OAuth, such as ChatGPT or Claude (n
 buckets.json         the places your copies are grouped in (one per folder of your file, and Unsorted), with how many copies each holds
 tags.json            the tags you (or an assistant you allowed) put on cards, and who wrote each
 card_annotations.json   notes about cards written by you or an assistant
+buy_settings.json    where you buy: the country you chose and the shops you typed for the "Where to buy" menu
 last_reset.json      if you reset your collection in the last 7 days: what it removed (the undo copy), until it is deleted
 
 Card data, images and prices come from Scryfall (https://scryfall.com), which sources prices
@@ -79,6 +80,14 @@ def _buckets(db: Session, user: User) -> list[dict]:
     return [{"name": b.name, "kind": b.kind, "position": b.position, "copies": int(copies.get(b.id, 0)),
              "metadata": b.vault_metadata, "created_at": b.created_at}
             for b in db.scalars(select(Bucket).where(Bucket.user_id == user.id).order_by(Bucket.position, Bucket.id))]
+
+
+def _buy_settings(db: Session, user: User) -> dict:
+    """Where the person buys (#212): the country they chose and the shops they typed, as typed. Nothing else is held."""
+    row = db.get(BuySettings, user.id)
+    return {"country": row.country if row else None,
+            "stores": [{"name": s["name"], "web_address": s["url"], "search_address": s.get("search_url")} for s in (row.stores if row else [])],
+            "updated_at": row.updated_at if row else None}
 
 
 def _last_reset(db: Session, user: User) -> dict | None:
@@ -167,6 +176,7 @@ def export_archive(db: Session, user: User) -> bytes:
                                                     "updated_at": a.updated_at}
                                                    for a in db.scalars(select(CardAnnotation).where(CardAnnotation.user_id == user.id)
                                                                        .order_by(CardAnnotation.id))]))
+        z.writestr("buy_settings.json", _json(_buy_settings(db, user)))
         z.writestr("last_reset.json", _json(_last_reset(db, user)))
         z.writestr("decks.json", _json([
             {"id": d.id, "name": d.name, "source_url": d.source_url, "source_author": d.source_author,
@@ -239,6 +249,7 @@ def personal_data(user_id: int) -> dict:
         "imports": delete(Import).where(Import.user_id == user_id),
         "collection_values": delete(CollectionValue).where(CollectionValue.user_id == user_id),
         "identities": delete(Identity).where(Identity.user_id == user_id),
+        "buy_settings": delete(BuySettings).where(BuySettings.user_id == user_id),  # the country and the shops the person typed
         "users": delete(User).where(User.id == user_id),
     }
 

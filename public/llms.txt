@@ -238,6 +238,9 @@ be revoked (Account → Connected apps for OAuth).
   - deck analysis, computed by the Vault: `deck_stats` (with a Commander Bracket floor from Wizards' published rules;
     pass `include_combos` to add Commander Spellbook's two-card combos), `simulate_draws`, `deck_legality`, `find_upgrades`,
     `validate_deck_changes`, `find_combos`, `shopping_list`
+  - where to buy a card: `where_to_buy` (plain links to shops in the order for the person's country, the stores they typed, the Wizards
+    store locator and Scryfall; the Vault contacts no shop and has no price or stock, so it names none the cheapest; the country and the
+    stores are set by the person in the web app, Account, "Where I buy")
 - MCP prompts (`prompts/list`): `vault_start` (the read-only first tour), `rules_judge`, `explain_interaction`, `upgrade_deck`, `shopping_help`, `council_review`.
 - A read-only token doesn't list the write tools; all of the above are read-only.
 

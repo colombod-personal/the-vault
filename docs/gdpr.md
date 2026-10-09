@@ -30,6 +30,7 @@ This is an engineering document, not legal advice: have the privacy notice
 | `tag_assignments` | yes | tags you, or an assistant you allowed, put on cards (keyed by the card, not a printing): the card's id, the tag, who wrote it (person, assistant or system, and which app) and notes (`vault_metadata`) | `tags.json` | `purge_user` |
 | `card_annotations` | yes | notes about a card written by you or an assistant (`vault_metadata`, at most 8 KB), keyed by the card | `card_annotations.json` | `purge_user` |
 | `reset_snapshots` | yes | the undo of the latest reset of the collection or of one bucket (#129): the copies it removed (every column of each row, with its bucket and folder), the baselines of that scope and, when the reset cleared them, the tags, notes and import history it removed, as zlib-compressed JSON; one per person (the next reset replaces it), at most 20 MB of JSON, **valid 7 days** | `last_reset.json` (the removed rows readable, while it exists) | deleted by the daily retention job when its 7 days are over, when the undo is used, when the next reset replaces it, and by `purge_user` |
+| `buy_settings` | yes | where you buy (#212): the country you chose (two letters) and up to three shops you typed for the "Where to buy" menu (a name, a web address and, if you pasted one, a search address). Shown as links and never requested. Nothing else: no postcode, address, coordinates, IP address or browser language. It can say roughly where you live, so it is personal data | `buy_settings.json` (the country and the shops as typed) | `purge_user`, and Account → Where I buy → Remove (`DELETE /api/v1/me/buy-settings`) |
 | `decks` | yes | saved decklists, with the link and author of the deck they came from | `decks.json`, `decks/*.txt` | `purge_user` |
 | `deck_versions` | via its deck | each saved deck's earlier lists (at most 20 a deck): the decklist text, when and from what | `decks.json` (`versions` of each deck) | deleted with the deck (`ON DELETE CASCADE`), so with the account |
 | `shares` | yes | who shared what with whom | `shares.json` (given and received) | `purge_user` (both directions) |
@@ -58,6 +59,18 @@ per-user table:
 - add it to `personal_data` (erasure)
 - add it to `export_archive` (access and portability)
 - add it to the table above and to the privacy notice
+
+## Where to buy: what is held, and what is not (#212)
+
+The "Where to buy" menu (`docs/where-to-buy-design.md`) builds plain links to shops. Everything it keeps is in `buy_settings` (the table above):
+the **country** the person chose and **up to three shops they typed**. A country is one of 249 values and is never taken from the request's
+IP address or the browser: before one is set, the browser picks the order of the shops from its own language and tells the server nothing
+(`tests/test_buy_links.py` fails if the server reads an address or a language header for this). A typed address is checked for shape
+(https only, a real host name, no user name or password, at most 300 characters) and only ever shown as a link: the Vault never requests it,
+and no shop or the Wizards store locator is ever contacted. No postcode or place is stored or typed in the Vault at all: the menu opens the
+locator's own page and the person types their town there. The setting is read and changed only from the person's own signed-in session
+(`GET`, `PUT` and `DELETE /api/v1/me/buy-settings`: a personal token or a connected app cannot, and an assistant's `where_to_buy` tool only
+reads the order it produces), is exported as `buy_settings.json`, can be removed on its own, and is erased with the account.
 
 ## Resetting the collection versus erasing the account
 

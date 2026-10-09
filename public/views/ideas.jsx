@@ -579,8 +579,11 @@ function IdeasPanel({ deck, deckId, cardName, format, data, rowCard, onGo, onUp,
             </div>
           )}
           {lacking && t.buy && (
-            <p className="ideas-or">Or buy {name}: {Text.buyPlain(t.buy)}. <a href={scryfall} target="_blank" rel="noopener noreferrer">Open on Scryfall ↗</a>{' '}
-              <a href="#/lab" onClick={ideasLink(() => onGo({ view: 'lab' }))}>Your buy list in the Lab</a></p>
+            <div className="ideas-or">
+              <p>Or buy {name}: {Text.buyPlain(t.buy)}. <a href={scryfall} target="_blank" rel="noopener noreferrer">Open on Scryfall ↗</a>{' '}
+                <a href="#/lab" onClick={ideasLink(() => onGo({ view: 'lab' }))}>Your buy list in the Lab</a></p>
+              <BuyMenu card={name} />
+            </div>
           )}
         </>
       )}
@@ -591,6 +594,7 @@ function IdeasPanel({ deck, deckId, cardName, format, data, rowCard, onGo, onUp,
           <div className="ideas-actions">
             {lacking && t.buy && <a className="btn primary" href={scryfall} target="_blank" rel="noopener noreferrer">{Text.buyLabel(t.buy).replace(/^Buy /, 'Buy for ')}<span className="ideas-sr"> on Scryfall</span></a>}
             <a className="btn" href={scryfall} target="_blank" rel="noopener noreferrer">Open on Scryfall ↗</a>
+            {lacking && <BuyMenu card={name} />}
             <a className="btn" href={`#/decks/${encodeURIComponent(deckId)}`} onClick={ideasLink(() => onGo(deckRoute()))}>See upgrades on the deck page</a>
           </div>
         </div>

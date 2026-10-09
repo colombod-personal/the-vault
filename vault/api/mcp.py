@@ -660,6 +660,12 @@ TOOLS = [
          method=lambda a: "DELETE" if a.get("confirm") is True else "GET",
          path=lambda a: f"{V1}/shares/{int(a['share_id'])}" if a.get("confirm") is True else f"{V1}/shares",
          write=True, destructive=True),
+    Tool("where_to_buy", "Plain links to shops for one card, in the order for the country the person set (shops, then the stores they "
+         "typed, the Wizards store locator and Scryfall). Each link opens a shop's own search; the Vault contacts no shop and has "
+         "no price, stock or shipping, so none is given and none is the cheapest. Reading only: the person's country and stores are "
+         "set by them in the web app.",
+         {"card": {"type": "string", "minLength": 1, "maxLength": 300, "description": "The card's name (a double-faced card is searched by its front face)"}},
+         ["card"], path=lambda a: f"{V1}/buy/menu", query=("card",), title="Where to buy a card", provenance=("computed",)),
 ]
 TOOLS.extend(catalog_tools(Tool, ID, PAGING))
 INSTRUCTIONS += "\n" + GROUNDING

@@ -466,3 +466,32 @@ Residual: a connected app with write scope can reset the copies after a confirm,
 `replace_everything`; a hostile one can also follow it with another write and so end the undo (above), leaving the export and the
 person's own app file as the way back. It cannot clear tags, notes or history, nor drop the snapshot. The snapshot holds the same personal data as the copies it removed, so
 it is in the data map, the export (`last_reset.json`), erasure and the daily retention job (`docs/gdpr.md`).
+
+## Where to buy settings (#212, 2026-10-09)
+
+The "Where to buy" menu keeps one small per-person record, `buy_settings`: a country the person chose and up to three shops they typed
+(`vault/buy_links.py`, `vault/api/buy_api.py`). It touches `vault/privacy.py` only to add that table to erasure and export. What it
+exposes, and what stops misuse:
+
+- **A typed address is a link, never a request.** The server stores the text and renders it; nothing fetches it, so there is no SSRF
+  and no way to make the Vault call a host (a test with the twin universe asserts no outbound call is made when settings are saved and
+  menus built, and `tests/test_no_shop_calls.py` records a call to any of these hosts as an escape). The shape is checked on save:
+  `https` only (never `http:`, `javascript:`, `data:` or a protocol-relative address), a real host name with a dot and not an IP
+  address, no user name, password or non-standard port, at most 300 characters, no spaces or control characters, and `{card}` (the
+  one place the card's name goes) only in the path or query, never in the host, so a card name can never choose where a link goes. The
+  card's name is percent-encoded (`quote_plus`), so it cannot add a parameter or end the path. React renders the link; every external link
+  has `target="_blank" rel="noopener noreferrer"`; an address is never a redirect target on the Vault's own domain.
+- **Only the person writes it.** `GET`, `PUT` and `DELETE /me/buy-settings` use `account_user`: a personal token or a connected app gets 403
+  (`tests/test_buy_api.py`), and there is no MCP tool that writes the settings, so a prompt-injected assistant cannot plant a phishing
+  link in a menu or change the country. Another person's settings have no id to guess (the record is keyed by the caller); the menu of
+  one person never shows another's stores (`test_each_person_has_their_own_settings`).
+- **Where the person is.** The country is chosen, never derived: the server reads no IP address, `Accept-Language` or geo header for this (a
+  test sends them and checks the answer is unchanged, and a source scan forbids them in the two modules). The browser orders the shops
+  from its own language while no country is saved and tells the server nothing; there is no geolocation call, no place typed in the
+  Vault and nothing in browser storage (`tests/test_buy_menu_page.py`, `tests/js/buy.test.mjs`). Residual: a connected assistant with
+  read scope that calls `where_to_buy` sees the person's country and the stores they typed (it is what puts them first). That is coarse
+  (a country, shop names the person chose to enter), the person controls whether any is set, and it is a read of their own data like
+  the collection tools.
+- **Storage and lifetime.** The record holds only `country`, `stores` and `updated_at`; it is in the data map and export
+  (`buy_settings.json`) and erased with the account, and a `PUT`'s stored answer (24 hours, `idempotent_requests`) is erased with it.
+  Writes are limited to 30 a minute per person.

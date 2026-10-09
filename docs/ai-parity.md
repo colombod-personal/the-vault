@@ -64,6 +64,7 @@ All collection tools also read a collection someone shared with you (`share_id`,
 | Check a decklist against the collection | “Decks” tab: “Paste a list”, then “Open list” (“Cards” tab) | `POST /decks/coverage`, `/decks/parse` | `check_decklist`, `parse_decklist` | read | no |
 | Stats, legality, upgrades, combos | A deck's page tabs: “Stats”, “Legality”, “Upgrades” (“Find upgrades”), “Combos” | `POST /decks/stats`, `/legality`, `/upgrades`, `/validate-changes`, `/combos` | `deck_stats`, `deck_legality`, `find_upgrades`, `validate_deck_changes`, `find_combos` (each takes a saved `deck_id` or pasted text) | read | no (the check of a proposed change is in “Change this deck”, above) |
 | Shopping list | A deck's page: “Buy list” tab (“Copy list”) | `POST /decks/shopping-list` | `shopping_list` (`format`: plain, cardkingdom, tcgplayer, cardmarket, csv; `finish`, `language`, `sets`, `condition`) | read | partly: the web tab copies the plain list; store formats and printing rules are assistant-side (#55) |
+| Open a menu of shops for a card you do not own (#212): plain links in the order for your country, the stores you typed, the Wizards store locator and Scryfall; no prices | Ideas: a missing card's panel (the “Where to buy” menu, also on the “Lab” tab's “Buy” rows and a deck page's “Need” cards) | `GET /buy/menu?card=` | `where_to_buy` | read | no |
 | Simulate the first turns of a deck (mana curve odds) | none yet: the web visual is #138 | `POST /decks/simulate` | `simulate_draws` (takes a saved `deck_id` or pasted text) | read | yes: no web view of it (#138) |
 | Check the connection (who, scopes, data versions) | none: assistants only | `GET /agent/whoami`, `/catalog/status` | `whoami` | read | no |
 
@@ -93,6 +94,7 @@ Shown on the consent screen as "It will never be able to". These stay web-only.
 | Change my name | Account panel, “Profile” (“Save”) | `PATCH /me` | Account data (right to rectification is done by the person) |
 | Export all my data | Account panel, “Your data” (“Download my data (.zip)”) | `GET /me/export` | Bulk personal data; the person downloads it themselves |
 | Delete my account | Account panel, “Your data” (the delete button) | `DELETE /me` | Irreversible |
+| Choose where I buy, and the stores I typed (#212) | Account panel, “Where I buy” (“Save”, “Remove”) | `GET`, `PUT` and `DELETE /me/buy-settings`, `GET /buy/countries` | A setting that says roughly where a person lives is changed by the person, not an assistant (`where_to_buy` only reads the order it produces) |
 | Tokens, passkeys, sessions, connected apps, sign-in methods | Account panel: “Agents & API” (“Create token”), “Connected apps” (“Disconnect”), “Sign-in methods” (“Add a passkey”), “Sign out” | `/me/tokens`, `/me/passkeys`, `/me/sessions`, `/me/apps`, `/login/*` | Would let an app grant itself more access or lock the person out |
 
 ## Gaps (to close in #101)
