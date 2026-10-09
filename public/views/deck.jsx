@@ -344,7 +344,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved, sw
     catch (e) { setError('Removing failed: ' + e.message); }
   }
 
-  const TABS = [['cards', 'Cards'], ['stats', 'Stats'], ['legality', 'Legality'], ['upgrades', 'Upgrades'], ['combos', 'Combos'], ['buy', 'Buy list'],
+  const TABS = [['cards', 'Cards'], ['stats', 'Stats'], ['opening', 'Opening turns'], ['legality', 'Legality'], ['upgrades', 'Upgrades'], ['combos', 'Combos'], ['buy', 'Buy list'],
     ...(savedId ? [['history', 'History']] : [])];
 
   return (
@@ -426,7 +426,8 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved, sw
             ))}
           </div>
           {tab === 'cards' && <DeckCards rows={rows} summary={summary} filter={filter} setFilter={setFilter} openCard={openCard} />}
-          {tab === 'stats' && <DeckStats text={text} />}
+          {tab === 'stats' && <DeckStats text={text} onOpening={() => setTab('opening')} />}
+          {tab === 'opening' && <DeckOpening text={text} title={deck.title} format={format || 'commander'} setFormat={setFormat} />}
           {tab === 'legality' && <DeckLegality text={text} format={format} setFormat={setFormat} />}
           {tab === 'upgrades' && <DeckUpgrades text={text} format={format} setFormat={setFormat} />}
           {tab === 'combos' && <DeckCombos text={text} />}
@@ -580,11 +581,42 @@ function DeckCards({ rows, summary, filter, setFilter, openCard }) {
 
 // -- Stats --------------------------------------------------------------------------------------
 
-function DeckStats({ text }) {
+// The mana curve (cards that are not lands, by mana value) from POST /decks/stats: the Stats tab and the Opening turns tab draw this one
+// component from the same field, so they cannot disagree. The bars are drawn from the answer's numbers, `role="img"` lists every value,
+// and with `full` the caption and a table of the same numbers (reachable by keyboard) go under it.
+function DeckCurve({ stats, full }) {
+  const c = window.VaultDeckSim.curve(stats);
+  return (
+    <>
+      <div className="deck-curve" role="img" aria-label={c.label}>
+        {c.bars.map((b) => (
+          <div key={b.mv} className="deck-curve-col" aria-hidden="true">
+            <span className="label-mono">{b.n || ''}</span>
+            <div style={{ height: `${b.height}%` }}></div>
+            <span className="label-mono">{b.mv}</span>
+          </div>
+        ))}
+      </div>
+      {full && (
+        <>
+          <p className="ds-sub">{c.caption}</p>
+          <details className="ds-numbers">
+            <summary>Show the curve as a table</summary>
+            <table className="ds-small">
+              <thead><tr><th scope="col">Mana value</th><th scope="col">Cards</th></tr></thead>
+              <tbody>{c.bars.map((b) => <tr key={b.mv}><th scope="row">{b.mv}</th><td>{b.n}</td></tr>)}</tbody>
+            </table>
+          </details>
+        </>
+      )}
+    </>
+  );
+}
+
+function DeckStats({ text, onOpening }) {
   const s = useDeckAnswer(() => window.VaultApi.deckStats(text), text);
   if (!s.result) return <Waiting state={s} what="the deck's stats" />;
   const r = s.result;
-  const curveMax = Math.max(1, ...Object.values(r.curve));
   const roles = Object.entries(r.roles).filter(([, v]) => v.count > 0).sort((a, b) => b[1].count - a[1].count);
   return (
     <div className="deck-panels">
@@ -602,15 +634,8 @@ function DeckStats({ text }) {
       </div>
       <div className="panel">
         <p className="eyebrow">Mana curve <span className="muted">(non-land cards)</span></p>
-        <div className="deck-curve">
-          {Object.entries(r.curve).map(([mv, n]) => (
-            <div key={mv} className="deck-curve-col">
-              <span className="label-mono">{n || ''}</span>
-              <div style={{ height: `${(n / curveMax) * 100}%` }}></div>
-              <span className="label-mono">{mv}</span>
-            </div>
-          ))}
-        </div>
+        <DeckCurve stats={r} />
+        <p style={{ marginTop: 10 }}><button className="btn sm ghost" onClick={onOpening}>See how this curve plays: Opening turns</button></p>
       </div>
       <div className="panel">
         <p className="eyebrow">Card types</p>

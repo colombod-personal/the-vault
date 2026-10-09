@@ -547,6 +547,10 @@ window.VaultApi = (() => {
     deckSeen: (id, text) => call(V1 + '/decks/' + id + '/seen', { method: 'POST', json: text ? { text } : {} }),
     // deck analysis, computed by the server from the card catalog (each answer is { result, provenance })
     deckStats: (text) => call(V1 + '/decks/stats', { method: 'POST', json: { text } }),
+    // how the list plays (#138): the odds over `games` games and `samples` of them turn by turn; the same seed gives the same answer, and
+    // without one the server takes it from the list. A POST without an Idempotency-Key is not retried, so a refusal (429) reaches the page.
+    deckSimulate: (text, { format, on_the_play, turns, games, samples, seed }) => call(V1 + '/decks/simulate', { method: 'POST',
+      json: { text, format, on_the_play, turns, games, samples, ...(seed != null ? { seed } : {}) } }),
     // the deck page's change flow (#163): a saved deck with cuts and adds checked, applying nothing; `result.deck_text` is the list the
     // check ran on, which updateDeck then saves. A card name is looked up in the card catalog (an exact name, else near names).
     deckValidateChanges: (deck_id, format, cuts, adds) => call(V1 + '/decks/validate-changes', { method: 'POST', json: { deck_id, format, cuts, adds, include_text: true } }),

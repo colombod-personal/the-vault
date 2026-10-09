@@ -128,3 +128,16 @@ def test_more_lands_means_fewer_missed_drops():
     for turn in range(2, 6):
         assert thirty[turn]["all_land_drops_so_far"] < forty[turn]["all_land_drops_so_far"] < hundred[turn]["all_land_drops_so_far"] + 0.001
     assert hundred[5]["all_land_drops_so_far"] == 100.0  # 100 lands: every drop, which is all the old test showed
+
+
+def test_the_margin_is_what_a_percentage_can_be_off_at_this_many_games():
+    """#138: the page prints 'good to about 3 points either way' from this field instead of computing it (95%, worst case)."""
+    from vault.simulate import margin_points
+    assert margin_points(1000) == 3.1 and margin_points(200) == 6.9 and margin_points(5000) == 1.4 and margin_points(1) == 98.0
+    d = deck(37, [SimCard("Ogre", cmc=3)] * 20, 100)
+    for games in (200, 1000):
+        out = simulate(d, multiplayer=True, games=games, seed=3)
+        assert out["margin_points"] == margin_points(games)
+        # the claim itself: two runs of the same deck differ by no more than twice the margin (each is within it of the truth)
+        other = simulate(d, multiplayer=True, games=games, seed=4)
+        assert abs(out["headline"]["five_mana_by_turn_5"] - other["headline"]["five_mana_by_turn_5"]) <= 2 * out["margin_points"]
