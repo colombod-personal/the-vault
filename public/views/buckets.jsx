@@ -1,7 +1,7 @@
 // Buckets in the app (#125, docs/collections.md): the places a person's copies live in (a binder, a deck box, a trade box).
 // The server groups and counts them (GET /collection/buckets) and moves copies (POST /collection/buckets/{id}/move);
 // this file shows them: the switcher above Browse, the manager, the move controls of the card drawer and of a bucket's list.
-const { useEffect: useEffectBk, useState: useStateBk } = React;
+const { useEffect: useEffectBk, useRef: useRefBk, useState: useStateBk } = React;
 
 // The signed-in person's buckets, asked again when the collection's version changes or reload() is called.
 function useBuckets(version, enabled = true) {
@@ -32,6 +32,85 @@ async function moveBucketLines(from, to, lines, onProgress) {
 
 const bkPlural = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
+// "Import file..." on a bucket (#122, #124): the file is read by the server's preview first, which names the bucket and totals what
+// the import leaves alone; nothing is written until the person confirms. The browser adds nothing up: every figure is the answer's.
+function importedLine(res, name) {
+  const merge = res.merge || {};
+  const kept = (merge.kept_vault_edits && merge.kept_vault_edits.count) || 0;
+  const both = (merge.conflicts && merge.conflicts.count) || 0;
+  const edits = kept + both ? ` Kept ${bkPlural(kept + both, 'card', 'cards')} you changed here` + (both ? ` (${both.toLocaleString()} also changed in the file: your change was kept)` : '') + '.' : '';
+  return `Imported into ${name}: ${window.describeChanges(res.changes)}. ${name} now holds ${bkPlural(res.copies, 'copy', 'copies')}.${edits}`;
+}
+
+function confirmLabel(p) {
+  const left = (p.untouched && p.untouched.copies) || 0;
+  const rest = left ? ` ${bkPlural(left, 'copy', 'copies')} elsewhere ${left === 1 ? 'stays as it is' : 'stay as they are'}.` : '';
+  return `Import into ${p.bucket.name}: ${window.describeChanges(p.changes)}.${rest}`;
+}
+
+const UNMATCHED_SHOWN = 5;
+
+function ImportPreview({ file, preview: p, busy, onConfirm, onCancel }) {
+  const box = useRefBk(null);
+  useEffectBk(() => { if (box.current) box.current.focus(); }, [!!p]);
+  const c = p ? p.changes || {} : {};
+  const merge = p ? p.merge || {} : {};
+  const kept = (merge.kept_vault_edits && merge.kept_vault_edits.count) || 0;
+  const both = (merge.conflicts && merge.conflicts.count) || 0;
+  const left = p && p.untouched;
+  return (
+    <div className="panel bucket-import" role="group" tabIndex={-1} ref={box}
+         aria-label={p ? `Import ${file.name} into ${p.bucket.name}` : `Reading ${file.name}`}>
+      {!p ? (
+        <p role="status" style={{ fontSize: 13 }}>Reading {file.name}…</p>
+      ) : (
+        <>
+          <p className="eyebrow" style={{ marginBottom: 8 }}>Nothing is changed until you confirm</p>
+          <p style={{ fontSize: 13, marginBottom: 8 }}>
+            <strong>{file.name}</strong> has {bkPlural(p.rows, 'row', 'rows')} ({bkPlural(p.copies, 'copy', 'copies')}) and goes into{' '}
+            <strong>{p.bucket.name}</strong> only, which holds {bkPlural(p.bucket.rows, 'row', 'rows')} ({bkPlural(p.bucket.copies, 'copy', 'copies')}) now.
+          </p>
+          {merge.how && <p style={{ fontSize: 13, marginBottom: 10 }}>{merge.how}</p>}
+          <ul className="bucket-holds" aria-label={`What the file changes in ${p.bucket.name}`}>
+            <li><span>New cards</span><span className="muted">{(c.added || 0).toLocaleString()}</span></li>
+            <li><span>Cards gone</span><span className="muted">{(c.removed || 0).toLocaleString()}</span></li>
+            <li><span>Cards with more copies</span><span className="muted">{(c.increased || 0).toLocaleString()}</span></li>
+            <li><span>Cards with fewer copies</span><span className="muted">{(c.decreased || 0).toLocaleString()}</span></li>
+            <li><span>Cards unchanged</span><span className="muted">{(c.unchanged || 0).toLocaleString()}</span></li>
+            <li><span>Copies in / out</span><span className="muted">+{(c.copies_in || 0).toLocaleString()} / −{(c.copies_out || 0).toLocaleString()}</span></li>
+          </ul>
+          {kept > 0 && <p style={{ fontSize: 13, marginTop: 10 }}>{bkPlural(kept, 'card', 'cards')} you changed here since the last import {kept === 1 ? 'is' : 'are'} kept.</p>}
+          {both > 0 && <p style={{ fontSize: 13, marginTop: 10 }}>{bkPlural(both, 'card', 'cards')} changed both in the file and here: your change here is kept.</p>}
+          {p.unmatched_rows > 0 && (
+            <div style={{ fontSize: 13, marginTop: 10 }}>
+              <p>{bkPlural(p.unmatched_rows, 'row has', 'rows have')} no printing the Vault can identify (set code or number missing or unknown). They are kept and matched later by name.</p>
+              <ul className="bucket-holds" aria-label="Rows without a known printing">
+                {(p.unmatched || []).slice(0, UNMATCHED_SHOWN).map((u) => (
+                  <li key={u.row}><span>Row {u.row}: {u.name}</span><span className="muted">{(u.set || '?').toUpperCase()} {u.number || '?'}</span></li>
+                ))}
+              </ul>
+              {p.unmatched_rows > UNMATCHED_SHOWN && <p className="muted" style={{ fontSize: 12 }}>The first {UNMATCHED_SHOWN} are listed.</p>}
+            </div>
+          )}
+          {left && (
+            <p style={{ fontSize: 13, marginTop: 10 }}>
+              <strong>Left as they are:</strong>{' '}
+              {left.copies > 0
+                ? `${bkPlural(left.copies, 'copy', 'copies')} (${bkPlural(left.rows, 'row', 'rows')}) in ${bkPlural(left.buckets, 'other bucket', 'other buckets')}.`
+                : 'no other bucket holds copies.'}
+              {left.note && <span className="muted" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>{left.note}</span>}
+            </p>
+          )}
+          <div className="bucket-import-actions">
+            <button type="button" className="btn xs confirm" disabled={busy} onClick={onConfirm}>{busy ? 'Importing…' : confirmLabel(p)}</button>
+            <button type="button" className="btn xs ghost" disabled={busy} onClick={onCancel}>Cancel</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function BucketBar({ buckets, value, onChange, onManage, totalCopies, disabled }) {
   return (
     <div className="bucket-bar">
@@ -56,6 +135,12 @@ function BucketManager({ buckets, cardsApi, onClose, onChanged }) {
   const [busy, setBusy] = useStateBk(false);
   const [progress, setProgress] = useStateBk(null);
   const [error, setError] = useStateBk(null);
+  const fileInput = useRefBk(null);
+  const importFor = useRefBk(null);               // the bucket the next picked file goes into
+  const [importing, setImporting] = useStateBk(null);  // { bucket, file, preview }: preview is null while the server reads the file
+  const [imported, setImported] = useStateBk(null);    // the result line of the last import
+  const importedBox = useRefBk(null);
+  useEffectBk(() => { if (imported && importedBox.current) importedBox.current.focus(); }, [imported]);  // the panel is gone: keep the focus in the dialog
 
   const run = async (fn) => {
     setBusy(true); setError(null);
@@ -86,6 +171,33 @@ function BucketManager({ buckets, cardsApi, onClose, onChanged }) {
     setDeleting(null);
   });
 
+  const pickFile = (b) => {
+    setError(null); setImported(null); setDeleting(null); setRenaming(null); setImporting(null);
+    importFor.current = b;
+    fileInput.current.click();
+  };
+  const onFile = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';  // the same file can be picked again
+    const bucket = importFor.current;
+    if (!file || !bucket) return;
+    setBusy(true); setError(null); setImported(null);
+    setImporting({ bucket, file, preview: null });
+    try {
+      const preview = await api.importPreview(file, bucket.id);
+      setImporting({ bucket, file, preview });
+    } catch (err) { setImporting(null); setError(err.message); } finally { setBusy(false); }
+  };
+  const confirmImport = async () => {
+    const { bucket, file, preview } = importing;
+    setBusy(true); setError(null);
+    let res;
+    try { res = await api.importInto(file, bucket.id); } catch (err) { setError(err.message); setBusy(false); return; }
+    setImporting(null);
+    setImported(importedLine(res, preview.bucket.name));
+    try { await onChanged(); } catch (err) { setError(err.message); } finally { setBusy(false); }
+  };
+
   const others = deleting ? buckets.filter((b) => b.id !== deleting.bucket.id) : [];
   return (
     <Modal title="Manage buckets" onClose={onClose}>
@@ -108,10 +220,12 @@ function BucketManager({ buckets, cardsApi, onClose, onChanged }) {
                 <span className="bucket-name">{b.name}</span>
                 <span className="muted bucket-count">{bkPlural(b.copies, 'copy', 'copies')}</span>
                 <span className="bucket-actions">
-                  <button type="button" className="btn xs ghost" disabled={busy} onClick={() => { setDeleting(null); setRenaming({ id: b.id, name: b.name }); }}
+                  <button type="button" className="btn xs ghost" disabled={busy} onClick={() => pickFile(b)}
+                          aria-label={`Import a file into ${b.name}`}>Import file…</button>
+                  <button type="button" className="btn xs ghost" disabled={busy} onClick={() => { setDeleting(null); setImporting(null); setRenaming({ id: b.id, name: b.name }); }}
                           aria-label={`Rename ${b.name}`}>Rename</button>
                   <button type="button" className="btn xs ghost" disabled={busy || buckets.length < 2 && b.copies > 0}
-                          onClick={() => { setRenaming(null); setDeleting({ bucket: b, to: (buckets.find((o) => o.id !== b.id) || {}).id }); }}
+                          onClick={() => { setRenaming(null); setImporting(null); setDeleting({ bucket: b, to: (buckets.find((o) => o.id !== b.id) || {}).id }); }}
                           aria-label={`Delete ${b.name}`}>Delete</button>
                 </span>
               </>
@@ -120,6 +234,10 @@ function BucketManager({ buckets, cardsApi, onClose, onChanged }) {
         ))}
         {buckets.length === 0 && <li className="muted" style={{ fontSize: 13 }}>No buckets yet: import your collection, or make one below.</li>}
       </ul>
+
+      <input ref={fileInput} type="file" accept=".csv,text/csv" style={{ display: 'none' }} tabIndex={-1} aria-hidden="true" onChange={onFile} />
+      {importing && <ImportPreview file={importing.file} preview={importing.preview} busy={busy} onConfirm={confirmImport} onCancel={() => setImporting(null)} />}
+      {imported && <p role="status" className="bucket-imported" tabIndex={-1} ref={importedBox}>{imported}</p>}
 
       {deleting && (
         <div className="panel bucket-delete" role="group" aria-label={`Delete ${deleting.bucket.name}`}>

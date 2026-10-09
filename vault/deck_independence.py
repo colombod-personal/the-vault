@@ -28,9 +28,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from mtg_toolkits import delta
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import analytics, deck_text
+from .models import Entry
 
 BASICS = {"plains", "island", "swamp", "mountain", "forest", "wastes", "snow-covered plains", "snow-covered island",
           "snow-covered swamp", "snow-covered mountain", "snow-covered forest", "snow-covered wastes"}
@@ -122,6 +124,48 @@ def order_decks(ready: list[ReadDeck], have: dict, priority: list[int]) -> list[
     return named + [r for r in default if r.deck.id not in taken]
 
 
+@dataclass
+class Allocation:
+    """Who gets which copies, before any price is looked up: the readable decks in allocation order and the cards they need."""
+
+    ready: list  # ReadDeck, in name order as given
+    skipped: list  # saved Deck rows that could not be read
+    order: list  # ReadDeck, in allocation order
+    cards: dict  # card key -> Card (what each deck wants and gets)
+    have: dict  # card key -> copies owned
+
+
+def owned_counts(db: Session, user_id: int) -> dict[tuple, int]:
+    """Copies owned per card key (the key ``delta.BY_CARD`` makes: the front face, case-folded), added up in the database so the
+    person's whole collection never has to be loaded as rows. The same numbers ``analyse`` gets from the entries."""
+    rows = db.execute(select(Entry.name, func.sum(Entry.quantity)).where(Entry.user_id == user_id).group_by(Entry.name)).all()
+    have: dict[tuple, int] = {}
+    for name, copies in rows:
+        key = (name.split(" // ")[0].strip().casefold(),)
+        have[key] = have.get(key, 0) + int(copies or 0)
+    return have
+
+
+def allocate(decks: list, have: dict, priority: list[int] | None = None) -> Allocation:
+    """The allocation of ``have`` (copies owned per card key) to ``decks`` (the person's saved decks, in name order)."""
+    ready, skipped = read_decks(decks)
+    order = order_decks(ready, have, list(priority or []))
+    cards: dict[tuple, Card] = {}
+    for r in order:
+        for key, (name, q) in r.needs.items():
+            if q > 0:
+                cards.setdefault(key, Card(key, name, have.get(key, 0))).wants.append((r, q))
+    for c in cards.values():
+        c.need_all = sum(q for _, q in c.wants)
+        c.deficit = max(0, c.need_all - c.have)
+        c.contested = len(c.wants) >= 2 and 0 < c.have < c.need_all
+        left = c.have
+        for r, q in c.wants:
+            c.gets[r.deck.id] = min(q, left)
+            left -= c.gets[r.deck.id]
+    return Allocation(ready, skipped, order, cards, have)
+
+
 def _price_all(db: Session, user_id: int, cards: list[Card]) -> None:
     short = [c for c in cards if c.deficit > 0]
     if not short:
@@ -169,22 +213,8 @@ def analyse(db: Session, user_id: int, decks: list, owned_entries, priority: lis
     priority = list(priority or [])
     have_entries = delta.aggregate([r.to_collection_entry() for r in owned_entries], delta.BY_CARD)
     have = {k: e.quantity for k, e in have_entries.items()}
-    ready, skipped = read_decks(decks)
-    order = order_decks(ready, have, priority)
-
-    cards: dict[tuple, Card] = {}
-    for r in order:
-        for key, (name, q) in r.needs.items():
-            if q > 0:
-                cards.setdefault(key, Card(key, name, have.get(key, 0))).wants.append((r, q))
-    for c in cards.values():
-        c.need_all = sum(q for _, q in c.wants)
-        c.deficit = max(0, c.need_all - c.have)
-        c.contested = len(c.wants) >= 2 and 0 < c.have < c.need_all
-        left = c.have
-        for r, q in c.wants:
-            c.gets[r.deck.id] = min(q, left)
-            left -= c.gets[r.deck.id]
+    allocation = allocate(decks, have, priority)
+    ready, skipped, order, cards = allocation.ready, allocation.skipped, allocation.order, allocation.cards
     _price_all(db, user_id, list(cards.values()))
 
     records, lacking_by_other = [], {}  # lacking_by_other: card key -> {deck id: held_by_other_deck copies}

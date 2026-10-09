@@ -194,7 +194,8 @@ be revoked (Account → Connected apps for OAuth).
   - notes on a card or bucket (free-form `vault_metadata`, split by writer): `get_card_metadata`, `set_card_metadata`,
     `get_bucket_metadata`, `set_bucket_metadata`; you write only your own namespace (`ai.<your app>`), never the
     person's `user` one, and the answer says who wrote what and when; at most 8 KB in all per card or bucket
-  - decks: `check_decklist`, `parse_decklist`, `list_decks`, `get_deck`, `get_deck_overlap`, `save_deck`,
+  - decks: `check_decklist`, `parse_decklist`, `list_decks`, `get_deck`, `get_deck_overlap`, `get_deck_ideas`,
+    `get_card_alternatives`, `save_deck`,
     `update_deck`, `delete_deck` (asks first), `get_archidekt_deck`, `import_deck_from_link`,
     `refresh_deck` (shows what changed on Archidekt, replaces only with the preview's fingerprint)
   - can the saved decks all be built at the same time? `get_deck_overlap`: per deck what it holds and what it lacks
@@ -202,6 +203,12 @@ be revoked (Account → Connected apps for OAuth).
     owned, fewer than the decks need together) with their `move` and `buy` options, and what finishing every deck costs, each
     card counted once; `priority` (deck ids) says which deck takes contested copies first, `list` pages `decks`, `contested` or
     `purchases` (cheapest first; `format` text is a paste-ready list); prices are Scryfall's, dated
+  - what a saved deck needs, and what could stand in for a card? `get_deck_ideas`: the deck's cards in role lanes (ramp, draw, removal,
+    sweeper, counterspell, tutor, recursion, sacrifice outlet, other, lands), what is missing (`not_owned`, buy) and what another deck holds
+    (`held_by_other_deck`, move), counted by the same allocation as `get_deck_overlap`; each lane pages on its own. `get_card_alternatives`:
+    owned cards sharing a core role with a card, inside the deck's colours, legal in `format` and under the copy limit, with `move` only
+    when another deck holds a copy and Scryfall's dated price for a copy to buy. The roles are the eight coarse ones, a community's opinion;
+    say so. Read-only; changing a deck is `validate_deck_changes` then `update_deck`
   - any card, owned or not: `lookup_cards`
   - edit the cards owned (bought, sold, traded): `update_owned_cards` (preview; asks which printing),
     `confirm_owned_cards_update` (after the person says yes), `undo_owned_cards_update`; pictures of the
