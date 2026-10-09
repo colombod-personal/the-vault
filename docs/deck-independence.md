@@ -1,6 +1,6 @@
 # Deck independence: can each deck stand on its own? (design for #165)
 
-Status: agreed by the owner on 2026-10-08 (#287: decisions 17 to 19, all as recommended). The server side is built (#165: `vault/deck_independence.py`, `vault/api/independence_api.py`, the `get_deck_overlap` tool; "As built" below); the web view goes into the Lab (#164), and the check on the owner's four real decks is still to do.
+Status: agreed by the owner on 2026-10-08 (#287: decisions 17 to 19, all as recommended). The server side is built (#165: `vault/deck_independence.py`, `vault/api/independence_api.py`, the `get_deck_overlap` tool; "As built" below); the web view is the Lab's Buy section (#164, `docs/lab-design.md`, "Web implementation notes"), and the check on the owner's four real decks is still to do.
 
 ## The question
 

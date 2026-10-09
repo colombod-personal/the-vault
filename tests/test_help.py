@@ -124,7 +124,11 @@ def test_the_lab_section_names_the_lab_sections_it_has():
     lab = (PUBLIC / "views" / "lab.jsx").read_text(encoding="utf-8").replace("&amp;", "&")
     for name in quoted(sections()["lab"]):
         assert name.lower() in lab.lower(), name
-    assert "Cards by P&L" in lab and "Biggest stockpiles" in lab and "Acquisition spend by month" in lab
+    for section in ("Buy", "Spare copies", "Profit and loss", "Winners", "Losers", "Value over time", "Copy shopping list"):
+        assert section in quoted(sections()["lab"]), section
+        assert f">{section}" in lab or f"'{section}'" in lab, section
+    for gone in ("Biggest stockpiles", "Acquisition spend by month", "Cards by P&L", "Color, type and curve"):  # cut by the design (#164)
+        assert gone not in lab and gone not in sections()["lab"], gone
 
 
 def test_the_decks_section_matches_how_archidekt_is_used():

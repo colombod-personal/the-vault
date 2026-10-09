@@ -1,6 +1,6 @@
 # The Lab: decide what to buy, sell, trade or keep (design for #162, epic #158)
 
-Status: agreed by the owner on 2026-10-08 (#287: decisions 10 to 16, all as recommended). Implementation is #164. Built so far: the server side of tasks 1 and 2 (`GET /collection/spare`, `/collection/spare/printings`, `GET /collection/pnl`, the market-only `summary` of `GET /collection/history`, the tools `list_spare_copies` and `get_collection_pnl`; code in `vault/lab.py`, tests in `tests/test_lab_server.py`, see "Server implementation notes" at the end). Task 3 (#165) and the web page are not built.
+Status: agreed by the owner on 2026-10-08 (#287: decisions 10 to 16, all as recommended). Implementation is #164. Built so far: the server side of tasks 1 and 2 (`GET /collection/spare`, `/collection/spare/printings`, `GET /collection/pnl`, the market-only `summary` of `GET /collection/history`, the tools `list_spare_copies` and `get_collection_pnl`; code in `vault/lab.py`, tests in `tests/test_lab_server.py`, see "Server implementation notes" at the end). Task 3 (#165) is built too (`docs/deck-independence.md`, "As built"). The web page (task 4) is built: see "Web implementation notes" at the end.
 
 Owner direction (2026-10-05, `docs/graph-and-lab-review.md`): **the Lab helps with decisions about buying and selling.** Decks are a view; what matters is whether each deck can stand on its own, and whether a card should move or be bought. This page turns that into sections, data, wireframes and tests.
 
@@ -241,3 +241,17 @@ Where the design left a choice, the server does this (change here and in `vault/
 - **Profit and loss.** A holding is a printing group; its counted copies are the ones with a price paid (`copies`). `net_gain` is null while no holding is counted. `summary.reason` carries the one-line reason from the design when `covered_copies` is 0 (plus "the collection is empty"). `side` defaults to `winners`.
 - **Links.** `scryfall_link` is the printing's `scryfall_uri` from the card table, null when the Vault holds no card data for it; `scryfall_search` is always given (a search by card name).
 - **Limits.** `LAB_LIMIT` (120 a minute per person) covers the three routes, which each read the whole collection.
+
+## Web implementation notes (task 4)
+
+Where the design left a choice, the page does this (`public/views/lab.jsx` lays it out, `public/lib/lab.js` words and formats the server's answers, `tests/test_lab_page.py` and `tests/js/lab.test.mjs` pin it):
+
+- **Heading.** The page and its screen label say "Lab" (decision 1). The old sections are gone with their code (decision 3).
+- **Counters** are buttons that scroll to their section and move focus to its heading. Money always shows cents, so a figure reconciles with the rows it sums.
+- **Buy** reads `GET /decks/overlap` (the counter, the deck rows, the first page of decks), `GET /decks/overlap/purchases` (cards to buy, cheapest first, each page on "Show more") and `purchases?format=text` (pages joined for "Copy shopping list"; if the browser refuses to copy, the list is shown to select). A deck row opens to the cards it lacks and holds (from the server's per-deck answer); its name opens the deck page.
+- **Spare copies** reads `GET /collection/spare` (cursor-paged, "Show more cards") and, for "Which copies", the server's preview of ten printings, then `/collection/spare/printings` (all of them, paged). A card opens the card drawer on its first spare printing. Hidden with one line and "Add a deck" when no deck is saved.
+- **Profit and loss** reads `GET /collection/pnl` once per side (own cursor each), as a tablist ("Winners", "Losers"). Hidden with the server's `summary.reason` when no holding is counted.
+- **Value over time** reads `GET /collection/history?since=` (a year back) and draws the market line only, with the server's `summary` sentence: history's market value covers every holding while the cost exists only for copies with a price paid, so drawing both would mix two populations (the profit and loss list compares one). The action is chosen from `pnl.summary.net_gain`.
+- **Stale prices** (the prices' day is more than one day old): the header says "(N days old)", offers "Update now", and every price and total carries its date.
+- **No Lab on a shared collection**: the navigation entry is not rendered (the phone tab bar fills five tabs, its icons now follow `data-nav`, not the position) and the page says so if its address is opened. **Empty collection** and **offline** are one panel each. A failed section says so with "Try again" and does not stop the others.
+- **Not in the web view**: the `priority` override of the allocation (the tool accepts it), and a link from a deck row to the deck page's Buy list tab (the row lists what the deck lacks itself).

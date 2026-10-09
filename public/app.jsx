@@ -405,7 +405,10 @@ function App() {
         {noticeBanner}
         {welcomeBanner}
         <main>
-          {route.view === 'help' ? <Help section={route.section} /> : viewing ? (
+          {route.view === 'help' ? <Help section={route.section} /> : route.view === 'lab' ? (
+            // nothing imported: the Lab is one panel that asks for the import (a shared collection says it has no Lab)
+            <Lab data={data} openCard={openCard} readOnly={!!viewing} onImported={onImported} />
+          ) : viewing ? (
             // Someone else's collection, shared but empty: nothing to import here.
             <><div className="help-row"><HelpHint view="dashboard" shared /></div><div style={{ display: 'grid', placeItems: 'center', minHeight: '60vh' }}>
               <div className="panel" style={{ width: 'min(460px, 100%)', textAlign: 'center' }}>
@@ -451,12 +454,13 @@ function App() {
             <span className="subtitle">MTG Collection</span>
           </button>
           <nav className="nav" aria-label="Sections">
-            <button aria-current={route.view === 'dashboard' ? 'page' : undefined} className={route.view === 'dashboard' ? 'active' : ''} onClick={() => nav('dashboard')}>Vault</button>
-            <button aria-current={route.view === 'browse' ? 'page' : undefined} className={route.view === 'browse' ? 'active' : ''} onClick={() => nav('browse')}>Browse</button>
-            <button aria-current={route.view === 'sets' || route.view === 'setdetail' ? 'page' : undefined} className={route.view === 'sets' || route.view === 'setdetail' ? 'active' : ''} onClick={() => nav('sets')}>Sets</button>
-            <button aria-current={route.view === 'decks' ? 'page' : undefined} className={route.view === 'decks' ? 'active' : ''} onClick={() => { setDeckText(null); nav('decks'); }}>Decks</button>
-            <button aria-current={route.view === 'lab' ? 'page' : undefined} className={route.view === 'lab' ? 'active' : ''} onClick={() => nav('lab')}>Lab</button>
-            <button aria-current={route.view === 'graph' ? 'page' : undefined} className={route.view === 'graph' ? 'active' : ''} onClick={() => nav('graph')}>Graph</button>
+            <button data-nav="vault" aria-current={route.view === 'dashboard' ? 'page' : undefined} className={route.view === 'dashboard' ? 'active' : ''} onClick={() => nav('dashboard')}>Vault</button>
+            <button data-nav="browse" aria-current={route.view === 'browse' ? 'page' : undefined} className={route.view === 'browse' ? 'active' : ''} onClick={() => nav('browse')}>Browse</button>
+            <button data-nav="sets" aria-current={route.view === 'sets' || route.view === 'setdetail' ? 'page' : undefined} className={route.view === 'sets' || route.view === 'setdetail' ? 'active' : ''} onClick={() => nav('sets')}>Sets</button>
+            <button data-nav="decks" aria-current={route.view === 'decks' ? 'page' : undefined} className={route.view === 'decks' ? 'active' : ''} onClick={() => { setDeckText(null); nav('decks'); }}>Decks</button>
+            {/* the Lab is built from your own decks and what you paid: a shared collection has none (docs/lab-design.md) */}
+            {!viewing && <button data-nav="lab" aria-current={route.view === 'lab' ? 'page' : undefined} className={route.view === 'lab' ? 'active' : ''} onClick={() => nav('lab')}>Lab</button>}
+            <button data-nav="graph" aria-current={route.view === 'graph' ? 'page' : undefined} className={route.view === 'graph' ? 'active' : ''} onClick={() => nav('graph')}>Graph</button>
           </nav>
           {refreshing && refreshProgress && refreshProgress.auto && (
             // the automatic refresh after an import or on a new day: a quiet note, no prompt
@@ -504,7 +508,8 @@ function App() {
               deckId={route.deckId} onOpenDeckId={(id) => { setDeckText(null); nav('decks', id ? { deckId: String(id) } : {}); }} />
           )}
           {route.view === 'lab' && (
-            <Lab data={data} openCard={openCard} />
+            <Lab data={data} openCard={openCard} readOnly={!!viewing} onImported={onImported} onOpenDeck={openDeck}
+                 onAddDeck={() => { setDeckText(null); nav('decks'); }} onRefresh={() => runRefresh(false)} refreshing={refreshing} />
           )}
           {route.view === 'graph' && (
             <GraphView data={data} openCard={openCard} />
