@@ -1,6 +1,6 @@
 # Card roles: what each card does, and what can stand in for it (design for #166, epic #174)
 
-Status: agreed by the owner on 2026-10-08 (#287: decisions 23 to 25, all as recommended). The larger design below (a role vocabulary, a `card_roles` table, review pipelines) is not built. One part of it is: **Oracle-text rules as a fallback for the eight roles** (#18), described in the next section.
+Status: agreed by the owner on 2026-10-08 (#287: decisions 23 to 25, all as recommended). The larger design below (a role vocabulary, a `card_roles` table, review pipelines) is not built as tables. One slice of it is built for #166 (2026-10-09): the 22-role vocabulary as code, found by rules over the Oracle text and computed on request (`vault/equivalents.py`, `docs/functional-equivalents.md` section 12), used by `get_card_alternatives`; no tag is read there. One part of it is: **Oracle-text rules as a fallback for the eight roles** (#18), described in the next section.
 
 ## Why
 

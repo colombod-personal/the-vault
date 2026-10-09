@@ -127,7 +127,7 @@ Tools (the `share_id` argument reads a collection someone shared with you):
 | `list_spare_copies` (name, limit, cursor), `get_collection_pnl` (side, limit, cursor): the person's own collection only, no `share_id` | `GET /collection/spare` (`/collection/spare/printings` with `name`), `GET /collection/pnl` |
 | `list_card_names` (sort, colors, type, min_value, limit, cursor) | `GET /collection/names` |
 | `refresh_prices`* (cursor, force) | `POST /collection/refresh` |
-| `get_deck_ideas` (deck_id, lane, include_combos, limit, cursor), `get_card_alternatives` (deck_id, card, format, limit, cursor): the person's own saved decks only | `GET /decks/{id}/ideas`, `GET /decks/{id}/ideas/alternatives` |
+| `get_deck_ideas` (deck_id, lane, include_combos, limit, cursor), `get_card_alternatives` (deck_id, card, format, limit, cursor): the person's own saved decks only; the jobs are the Vault's own roles, in two tiers (same job, similar) | `GET /decks/{id}/ideas`, `GET /decks/{id}/ideas/alternatives` |
 | `check_decklist`, `parse_decklist` | `POST /decks/coverage`, `/decks/parse` |
 | `list_decks`, `get_deck`, `save_deck`*, `update_deck`* | `/decks` |
 | `get_archidekt_deck` | `/archidekt/decks/{id}` |
