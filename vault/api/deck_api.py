@@ -75,6 +75,8 @@ class ChangesIn(FormatIn):
     cuts: list[Annotated[str, Field(max_length=300)]] = Field(default_factory=list, max_length=60,
                                                               description="Card names to cut (a quantity such as 2x repeats one)")
     budget_usd: float | None = Field(default=None, ge=0, le=100_000, description="The most the adds may cost in total")
+    include_text: bool = Field(default=False, description="Also return `deck_text`, the list after the cuts and adds (the main deck gets "
+                               "the adds, cards named as the catalog names them), ready for update_deck: what is saved is what was checked")
 
 
 class SimulateIn(FormatIn):
@@ -266,7 +268,8 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
     def deck_validate(request: Request, body: ChangesIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         prepared(request, db, user, text_of(db, user, body))
         try:
-            result = dt.validate_changes(db, text_of(db, user, body), body.format, body.adds, body.cuts, body.budget_usd)
+            result = dt.validate_changes(db, text_of(db, user, body), body.format, body.adds, body.cuts, body.budget_usd,
+                                       body.include_text)
         except dt.DeckError as exc:
             failing(exc)
         return answer(db, "validation of proposed changes", result, ("oracle_cards", "oracle_prices"), "validate-changes",

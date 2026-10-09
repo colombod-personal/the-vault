@@ -61,7 +61,7 @@ const primaryType = (r) => {
 
 // A saved deck has its own address (#/decks/{id}), so refresh, bookmarks and Back work; a deck
 // opened from a link or a pasted list lives on screen until it's saved.
-function DeckView({ data, openCard, initialText, deckId, onOpenDeckId }) {
+function DeckView({ data, openCard, initialText, deckId, onOpenDeckId, swap }) {
   const [myDecks, setMyDecks] = useStateD(null); // your saved decks, with summaries (null while loading, 'error' if that failed)
   // A pasted list, or a shared deck ({ text, credit: { name, url, author } }) shown with its source's credit.
   const [local, setLocalRaw] = useStateD(initialText ? (typeof initialText === 'string' ? { text: initialText, key: 1 }
@@ -97,7 +97,7 @@ function DeckView({ data, openCard, initialText, deckId, onOpenDeckId }) {
     if (routed === null) return <DeckLibrary myDecks={myDecks} onRetry={refreshDecks} onOpen={(o) => { if (o.saved) onOpenDeckId(o.saved.id); else { setLocal(o); onOpenDeckId(null); } }} notice="That deck isn't in your decks any more." />;
     return <DeckPage key={'saved' + routed.id} source={{ saved: routed, url: routed.source_url || null, text: routed.source_url ? null : routed.text }}
       myDecks={myDecks} refreshDecks={refreshDecks} openCard={openCard} onBack={() => onOpenDeckId(null)}
-      onSaved={(d) => setRouted((r) => ({ ...r, ...d }))} />;
+      onSaved={(d) => setRouted((r) => ({ ...r, ...d }))} swap={swap} />;
   }
   if (local) {
     return <DeckPage key={local.key} source={local} myDecks={myDecks} refreshDecks={refreshDecks} openCard={openCard}
@@ -219,7 +219,7 @@ function DeckLibrary({ myDecks, onOpen, onRetry, notice }) {
 
 // -- a deck's page ----------------------------------------------------------------------------------
 
-function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) {
+function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved, swap }) {
   const [deck, setDeck] = useStateD(null);
   const [rows, setRows] = useStateD(null);
   const [coverage, setCoverage] = useStateD(null);
@@ -233,6 +233,9 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
   const [reload, setReload] = useStateD(0);
   const [since, setSince] = useStateD(null); // what changed since the person last looked at this saved deck (#93)
   const askAgain = useRefD(false); // the Refresh button asks the site again; opening the page may use the Vault's ten-minute copy
+  const [changing, setChanging] = useStateD(false); // the change flow (cut and add cards; deck_change.jsx) is open
+  const swapRead = useRefD(undefined); // the swap in the address (the Ideas view's "Swap into the deck"), read once
+  const changeButton = useRefD(null);
 
   async function load() {
     setError(''); setLoading(true); setRows(null); setCoverage(null);
@@ -289,6 +292,29 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
     window.VaultApi.deckSeen(savedId, text).then((a) => { if (!stop) setSince(a.since_last_looked || null); }).catch(() => {});
     return () => { stop = true; };
   }, [savedId, text]);
+  // A swap in the address opens the change flow with its cards, once the deck is shown and only for a deck of the person's own.
+  useEffectD(() => {
+    if (swap && swapRead.current === undefined && rows && source.saved && savedId) {
+      swapRead.current = window.VaultDeckChange.parseSwap(swap);
+      setChanging(true);
+      try { // the swap is spent once read: a refresh or Back does not fill the flow in again
+        const s = history.state || {};
+        if (s.route && s.route.swap) history.replaceState({ ...s, route: { ...s.route, swap: undefined } }, '', location.pathname + location.search + location.hash.split('?')[0]);
+      } catch {}
+    }
+  }, [swap, rows, savedId]);
+  const closeChange = () => {
+    setChanging(false);
+    swapRead.current = null;
+    setTimeout(() => changeButton.current && changeButton.current.focus(), 0);
+  };
+  // The change was saved: the Vault marks the new list as seen (it is the person's own change), and the page reads the saved deck again,
+  // unless the page reads its list from the deck's site, which this change does not touch.
+  async function changeApplied(d, newText) {
+    try { await window.VaultApi.deckSeen(d.id, newText); } catch {}
+    onSaved(d);
+    if (!source.url) { setSince(null); setJustSaved(false); setReload((n) => n + 1); }
+  }
   const summary = useMemoD(() => {
     if (!rows || !coverage) return null;
     let total = 0, ownedQty = 0, missingQty = 0, ownedFully = 0, ownedPartial = 0, missingAll = 0;
@@ -342,6 +368,9 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
               {justSaved ? 'Saved ✓' : saved ? 'Update saved copy' : 'Save to your decks'}
             </button>
             {deck.url && <button className="btn sm" onClick={() => { setJustSaved(false); askAgain.current = true; setReload((n) => n + 1); }} disabled={loading}>Refresh</button>}
+            {saved && source.saved && rows && (
+              <button ref={changeButton} className="btn sm" aria-expanded={changing} onClick={() => (changing ? closeChange() : setChanging(true))}>Change this deck</button>
+            )}
             {saved && <button className="btn sm ghost" onClick={remove}>Remove</button>}
           </div>
         )}
@@ -369,6 +398,11 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved }) 
           <ChangeList changes={since.changes} />
           <button className="btn xs" onClick={() => setSince(null)}>Got it</button>
         </div>
+      )}
+
+      {changing && source.saved && (
+        <DeckChange deckId={savedId} deckName={saved.name} rows={rows} format={format || 'commander'} setFormat={setFormat} archidekt={!!source.url}
+          initial={swapRead.current} onClose={closeChange} onApplied={changeApplied} onShowHistory={() => { setTab('history'); }} />
       )}
 
       {summary && (

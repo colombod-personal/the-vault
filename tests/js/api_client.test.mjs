@@ -319,3 +319,15 @@ test('a scoped client passes the bucket and tag on every analytics call and keep
   assert.equal(await asked(() => bucketOnly.api.valuation()), '/api/v1/collection/valuation?bucket=3');
   assert.equal(await asked(() => whole.api.valuation()), '/api/v1/collection/valuation', 'the inventory client is unchanged');
 });
+
+test("the deck page's change flow: check a proposal against the saved deck (applying nothing), look a card up, save the checked list", async () => {
+  const { api, calls } = load(async (url) => json(200, url.includes('/catalog/cards') ? { card: { name: 'Sol Ring' }, suggestions: [] } : { result: {}, _links: {} }));
+  await api.deckValidateChanges(7, 'commander', ['Dull Bear', 'Dull Bear'], ['Sol Ring']);
+  assert.deepEqual(calls.at(-1), { url: '/api/v1/decks/validate-changes', method: 'POST',
+    body: { deck_id: 7, format: 'commander', cuts: ['Dull Bear', 'Dull Bear'], adds: ['Sol Ring'], include_text: true } });
+  await api.catalogCard('sol ring (c21)');
+  assert.deepEqual([calls.at(-1).url, calls.at(-1).method], ['/api/v1/catalog/cards?name=sol+ring+%28c21%29', 'GET']);
+  // saving sends the name and the list only: the deck's link, author and format are left as they are (omitted, not cleared)
+  await api.updateDeck(7, 'Sliver Swarm', 'Commander\n1 Sol Ring');
+  assert.deepEqual(calls.at(-1), { url: '/api/v1/decks/7', method: 'PUT', body: { name: 'Sliver Swarm', text: 'Commander\n1 Sol Ring' } });
+});

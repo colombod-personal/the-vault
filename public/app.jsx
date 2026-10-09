@@ -85,11 +85,17 @@ function vaultScopeFromSearch(search) {
   const bucket = Number(q.get('bucket')), tag = q.get('tag') || '';
   return { ...(Number.isInteger(bucket) && bucket > 0 ? { bucket } : {}), ...(VAULT_TAG.test(tag) ? { tag } : {}) };
 }
+// #/decks/7?swap=<url-encoded JSON {"cut":[...],"add":[...]}> opens the deck's change flow with those cards (the Ideas view's "Swap into the
+// deck"): the route carries the JSON as written; the deck page reads it, and drops it from the address once the flow is done.
+function vaultSwapFromSearch(search) {
+  const swap = new URLSearchParams(search || '').get('swap');
+  return swap ? { swap } : {};
+}
 function vaultRouteFromHash(fallback) {
   const [path, search] = location.hash.replace(/^#\/?/, '').split('?');
   const [view, arg] = path.split('/').map((p) => decodeURIComponent(p || ''));
   if (view === 'sets' && arg) return { view: 'setdetail', code: arg, ...vaultScopeFromSearch(search) };
-  if (view === 'decks' && arg) return { view: 'decks', deckId: arg };
+  if (view === 'decks' && arg) return { view: 'decks', deckId: arg, ...vaultSwapFromSearch(search) };
   if (view === 'help') return { view: 'help', section: arg || '' };
   const known = VAULT_VIEWS.includes(view) ? view : fallback;
   return { view: known, ...(VAULT_SCOPED.has(known) ? vaultScopeFromSearch(search) : {}) };
@@ -97,7 +103,7 @@ function vaultRouteFromHash(fallback) {
 function vaultHashFor(route) {
   let hash;
   if (route.view === 'setdetail') hash = `#/sets/${encodeURIComponent(route.code)}`;
-  else if (route.view === 'decks' && route.deckId) return `#/decks/${encodeURIComponent(route.deckId)}`;
+  else if (route.view === 'decks' && route.deckId) return `#/decks/${encodeURIComponent(route.deckId)}` + (route.swap ? `?swap=${encodeURIComponent(route.swap)}` : '');
   else if (route.view === 'help') return helpHashFor(route.section);
   else hash = `#/${route.view}`;
   if (!VAULT_SCOPED.has(route.view)) return hash;
@@ -545,7 +551,7 @@ function App() {
           )}
           {route.view === 'decks' && (
             <DeckView key={deckText && deckText.shareId ? 'share' + deckText.shareId : deckText || 'deck'} data={data} openCard={openCard} initialText={deckText}
-              deckId={route.deckId} onOpenDeckId={(id) => { setDeckText(null); nav('decks', id ? { deckId: String(id) } : {}); }} />
+              deckId={route.deckId} swap={viewing ? undefined : route.swap} onOpenDeckId={(id) => { setDeckText(null); nav('decks', id ? { deckId: String(id) } : {}); }} />
           )}
           {route.view === 'lab' && (
             <Lab data={data} openCard={openCard} readOnly={!!viewing} onImported={onImported} onOpenDeck={openDeck}

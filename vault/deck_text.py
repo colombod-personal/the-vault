@@ -34,3 +34,29 @@ def parse_text(text: str) -> decklist.Decklist:
         return decklist.parse_text("\n".join(lines))
     rest = [line for line in lines if not CMDR.search(line)]
     return decklist.parse_text("\n".join(["Commander", *marked, "", "Deck", *rest]))
+
+
+SECTION_HEADERS = {"commander": "Commander", "companion": "Companion", "main": "Deck", "sideboard": "Sideboard", "maybeboard": "Maybeboard"}
+
+
+def render_line(line: decklist.DeckLine) -> str:
+    """One card as a decklist line the parser reads back to the same line: ``1 Sol Ring (C21) 263 *F* [Ramp, Mana rock]``."""
+    out = f"{line.quantity} {line.name}"
+    if line.set_code:
+        out += f" ({line.set_code.upper()})" + (f" {line.collector_number}" if line.collector_number else "")
+    out += {"foil": " *F*", "etched": " *E*"}.get(getattr(line.finish, "value", line.finish), "")
+    if line.categories:
+        out += " [" + ", ".join(line.categories) + "]"
+    return out
+
+
+def render(lines: list[decklist.DeckLine]) -> str:
+    """The cards as a decklist text, a section at a time (Commander, Companion, Deck, Sideboard, Maybeboard); a list that is
+    all main-deck cards has no header. ``parse_text(render(lines))`` gives the same cards in the same sections (#163)."""
+    groups: dict[str, list[str]] = {}
+    for line in lines:
+        groups.setdefault(line.section or decklist.MAIN, []).append(render_line(line))
+    if set(groups) <= {decklist.MAIN}:
+        return "\n".join(groups.get(decklist.MAIN, []))
+    order = [s for s in SECTION_HEADERS if s in groups] + [s for s in groups if s not in SECTION_HEADERS]
+    return ("\n" * 2).join(SECTION_HEADERS.get(s, s.title()) + "\n" + "\n".join(groups[s]) for s in order)

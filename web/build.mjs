@@ -26,6 +26,7 @@ export const SOURCES = [
   'views/browse.jsx',
   'views/sets.jsx',
   'views/deck.jsx',
+  'views/deck_change.jsx',
   'views/lab.jsx',
   'views/graph.jsx',
   'views/valuation.jsx',
