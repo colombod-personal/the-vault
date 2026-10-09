@@ -145,7 +145,7 @@ def untouched(db: Session, user: User, scope: Bucket) -> dict:
 
 def _prepare(db: Session, user: User, source: str, entries: list[CollectionEntry], options: ImportOptions,
              scope: Bucket | None = None) -> Prepared:
-    old_rows = user_entries(db, user, scope.id if scope else None)
+    old_rows = user_entries(db, user, scope.id) if scope is not None else user_entries(db, user)
     old = [r.to_collection_entry() for r in old_rows]
     row_keys, entry_keys = [merge.key_string(e) for e in old], [merge.key_string(e) for e in entries]
     ours, theirs = merge.snapshot(old, row_keys), merge.snapshot(entries, entry_keys)
