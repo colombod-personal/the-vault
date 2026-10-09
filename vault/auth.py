@@ -286,7 +286,7 @@ def sign_in_methods(db: Session, user_id: int) -> list[dict]:
              for p in db.scalars(select(Passkey).where(Passkey.user_id == user_id))]
     for r in rows:
         r["recently_added"] = r["created_at"] >= since
-        r["added_minutes_ago"] = max(0, int((now - r["created_at"]).total_seconds() // 60))
+        r["added_minutes_ago"] = max(0, int((now - r["created_at"]).total_seconds() / 60))
     return rows
 
 
