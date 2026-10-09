@@ -360,3 +360,25 @@ test("the deck page's change flow: check a proposal against the saved deck (appl
   await api.updateDeck(7, 'Sliver Swarm', 'Commander\n1 Sol Ring');
   assert.deepEqual(calls.at(-1), { url: '/api/v1/decks/7', method: 'PUT', body: { name: 'Sliver Swarm', text: 'Commander\n1 Sol Ring' } });
 });
+
+test('the web app resets in two steps: a preview with no key and no confirmation, then the same options with the preview\'s confirmation and a fresh key (#129)', async () => {
+  const seen = { applied: false, confirmation: 'tok-123456', removes: { copies: 5 } };
+  const { api, calls, headers } = load((url, init) => (url === '/api/v1/collection/reset' && init.method === 'POST' && !JSON.parse(init.body).confirmation)
+    ? json(200, seen) : json(200, { applied: true, removed: { copies: 5 }, undo: { available: true } }));
+  const options = { bucket_id: 7, keep_tags: true, keep_history: true, no_undo: false };
+  assert.deepEqual(await api.resetPreview(options), seen);
+  assert.deepEqual(calls[0], { url: '/api/v1/collection/reset', method: 'POST', body: options });
+  assert.equal(headers[0]['Idempotency-Key'], undefined);  // a preview writes nothing
+  await api.resetApply(options, 'tok-123456', 'RESET');
+  await api.resetApply(options, 'tok-123456', 'RESET');
+  assert.deepEqual(calls[1].body, { ...options, confirmation: 'tok-123456', typed: 'RESET' });  // the word the person typed goes with it
+  assert.deepEqual([headers[1]['Idempotency-Key'], headers[2]['Idempotency-Key']], ['uuid-1', 'uuid-2']);  // each confirm is its own request
+});
+
+test('the web app asks for the undo of a reset, treats "no reset" (404) as nothing to show and shows the server\'s words for a refusal (#129)', async () => {
+  const { api, calls } = load((url, init) => url === '/api/v1/collection/reset' && (init.method || 'GET') === 'GET'
+    ? json(404, { detail: 'There is no reset to undo' }) : json(409, { detail: 'The collection changed since the reset' }));
+  assert.equal(await api.resetInfo(), null);
+  await assert.rejects(api.resetUndo(), (e) => e.status === 409 && e.message === 'The collection changed since the reset');
+  assert.deepEqual(calls[1], { url: '/api/v1/collection/reset/undo', method: 'POST', body: { confirm: true } });
+});

@@ -29,6 +29,7 @@ This is an engineering document, not legal advice: have the privacy notice
 | `buckets` | yes | the places your copies are grouped in (#121): one per folder of your files, and "Unsorted"; the name, its kind and position, and notes (`vault_metadata`) written by you or an assistant | `buckets.json` (with how many copies each holds) | `purge_user` (after the entries) |
 | `tag_assignments` | yes | tags you, or an assistant you allowed, put on cards (keyed by the card, not a printing): the card's id, the tag, who wrote it (person, assistant or system, and which app) and notes (`vault_metadata`) | `tags.json` | `purge_user` |
 | `card_annotations` | yes | notes about a card written by you or an assistant (`vault_metadata`, at most 8 KB), keyed by the card | `card_annotations.json` | `purge_user` |
+| `reset_snapshots` | yes | the undo of the latest reset of the collection or of one bucket (#129): the copies it removed (every column of each row, with its bucket and folder), the baselines of that scope and, when the reset cleared them, the tags, notes and import history it removed, as zlib-compressed JSON; one per person (the next reset replaces it), at most 20 MB of JSON, **valid 7 days** | `last_reset.json` (the removed rows readable, while it exists) | deleted by the daily retention job when its 7 days are over, when the undo is used, when the next reset replaces it, and by `purge_user` |
 | `decks` | yes | saved decklists, with the link and author of the deck they came from | `decks.json`, `decks/*.txt` | `purge_user` |
 | `deck_versions` | via its deck | each saved deck's earlier lists (at most 20 a deck): the decklist text, when and from what | `decks.json` (`versions` of each deck) | deleted with the deck (`ON DELETE CASCADE`), so with the account |
 | `shares` | yes | who shared what with whom | `shares.json` (given and received) | `purge_user` (both directions) |
@@ -57,6 +58,21 @@ per-user table:
 - add it to `personal_data` (erasure)
 - add it to `export_archive` (access and portability)
 - add it to the table above and to the privacy notice
+
+## Resetting the collection versus erasing the account
+
+A **reset** (Account → Reset collection, `POST /api/v1/collection/reset`, the MCP tool `reset_collection`; #129) empties the whole
+inventory or one bucket. It is not erasure: the account, the buckets (left empty), the saved decks, the shares, the sign-in methods and
+the connected apps stay; tags, notes and the import history stay unless the person asks to clear them (they are the person's own work).
+What it removes is the copies (`entries`) of its scope, and their baseline: it is an import with an empty target in replace mode
+(`docs/collections.md`, decision 6), added to the import history as an entry of its own kind (`reset`).
+
+To make that undoable the reset keeps **one snapshot per person** in `reset_snapshots`, for **7 days**, and only the latest (the next
+reset replaces it; the undo uses it up). The snapshot holds the same personal data the removed copies held, so it is listed in the data map,
+exported (`last_reset.json`), erased with the account, and deleted by the daily retention job (`vault/retention.py`) when its 7 days
+are over, whether or not anyone asked. A person who wants the copies gone at once uses `no_undo` (nothing is kept) or deletes the
+account; the 7 days are stated in the privacy notice. Database backups (Neon point-in-time restore) still hold deleted rows for their
+own window, as for any deletion (see the checklist below). **Erasure** (`DELETE /api/v1/me`) removes every row, the snapshot included.
 
 ## Tenant isolation
 

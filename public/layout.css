@@ -283,6 +283,22 @@ html, body { max-width: 100%; overflow-x: clip; }
   .bucket-edit .input { min-height: 44px; }
 }
 
+/* ---- Reset collection in the account panel (#129) ---- */
+.reset-options { display: grid; gap: 10px; justify-items: start; }
+.reset-options .select { width: 100%; max-width: 420px; }
+.reset-check { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 13px; cursor: pointer; }
+.reset-check input { width: 18px; height: 18px; flex: none; accent-color: var(--gold); }
+.reset-confirm { margin-top: 14px; background: var(--bg-2); }
+.reset-undo { margin: 0 0 12px; background: var(--bg-2); border-color: var(--gold); }
+.reset-facts { list-style: none; margin: 0; padding: 0; font-size: 13px; display: grid; gap: 6px; }
+.reset-facts li { padding-left: 14px; position: relative; overflow-wrap: anywhere; }
+.reset-facts li::before { content: "\00b7"; position: absolute; left: 3px; color: var(--gold); }
+.reset-typed { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.reset-typed .input { flex: 1 1 140px; min-width: 0; }
+@media (max-width: 760px) {
+  .reset-options .select, .reset-typed .input { min-height: 44px; max-width: none; }
+}
+
 /* ---- The Lab (#164, docs/lab-design.md): buy, sell or keep ---- */
 .lab { display: grid; gap: 28px; min-width: 0; }
 .lab > * { min-width: 0; }

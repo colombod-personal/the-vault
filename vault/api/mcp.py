@@ -60,6 +60,11 @@ priced daily from Scryfall, plus their saved decks and what others have shared w
 - Collections shared with the person: list_shared_with_me, then pass share_id to the
   collection tools.
 - Card data and images come from Scryfall. When you show a card, credit its artist and Scryfall.
+- reset_collection empties the whole inventory or one bucket. Call it without a confirmation first, give the person the numbers
+  (copies, market value, what was added only in the Vault, tags and notes) and the export link, and send the confirmation it
+  returned only when they clearly asked for that exact reset. Never reset to make an import or an edit easier. A reset can be
+  undone for 7 days with undo_collection_reset, but only until anything else changes the collection: it is best-effort, so offer
+  the export first. Clearing tags, notes or history and resetting with no undo are the person's, in the web app.
 """
 
 
@@ -335,6 +340,24 @@ TOOLS = [
          {"bucket_id": ID, "confirm": CONFIRM}, ["bucket_id"],
          method=lambda a: "DELETE" if a.get("confirm") is True else "GET",
          path=lambda a: f"{V1}/collection/buckets/{int(a['bucket_id'])}", write=True, destructive=True),
+    Tool("reset_collection", "Resets the collection: empties the whole inventory, or one bucket (bucket_id). Buckets, tags, "
+         "notes (shown as not owned) and the import history stay. Without a confirmation it returns what would be removed (rows, copies, printings, market "
+         "value, how many copies were added in the Vault only, the tags and notes affected), a link to the export of that scope "
+         "and a confirmation, and changes nothing. With that confirmation it resets, records it in the import history and keeps a "
+         "snapshot for 7 days (undo_collection_reset), which lasts only while nothing else changes the collection. Clearing tags, "
+         "notes or the import history, and resetting without an undo, are not offered here: the person does those in the web app.",
+         {"bucket_id": {**ID, "description": "Reset this bucket only (from list_buckets); omit for the whole inventory"},
+          "confirmation": {"type": "string", "minLength": 8, "maxLength": 600, "description": "From this tool's preview for the same "
+                           "arguments"}}, [],
+         method="POST", path=lambda a: f"{V1}/collection/reset",
+         body=lambda a: {k: a[k] for k in ("bucket_id", "confirmation") if a.get(k) is not None},
+         write=True, destructive=True),
+    Tool("undo_collection_reset", "Puts back what the latest reset removed (the copies with their buckets, folders and baselines, and "
+         "the tags, notes and history the reset cleared), within 7 days of the reset and while nothing else has changed the "
+         "collection or the reset scope. Without confirm it returns what it would restore; with confirm true it restores it and "
+         "records the undo in the import history. Also tells when there is nothing to undo.",
+         {"confirm": CONFIRM}, [], method="POST", path=lambda a: f"{V1}/collection/reset/undo",
+         body=lambda a: {"confirm": a.get("confirm") is True}, write=True, destructive=True),
     Tool("get_card", "One printing in detail: every copy (condition, language, folder, price paid, date), "
          "Scryfall card data (type, text, image with artist credit) and 90 days of prices.",
          {"card_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$", "description": "The id from search_cards"},
@@ -650,8 +673,10 @@ SCRYFALL_DATA = {"list_decks",  # the commanders' colour identity is Scryfall's 
                  "check_decklist", "lookup_cards", "get_deck", "get_shared_deck",
                  "get_deck_overlap",  # prices (#165): Scryfall's cheapest, dated
                  "get_deck_ideas", "get_card_alternatives",  # roles, colour identity and prices (#163): Scryfall's, dated
-                 "update_owned_cards", "show_owned_printings"}  # these carry Scryfall's card images
+                 "update_owned_cards", "show_owned_printings",  # these carry Scryfall's card images
+                 "reset_collection"}  # its preview totals the market value (Scryfall's prices) of what a reset removes
 OWN_DATA_ONLY = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucket", "move_cards",
+                 "undo_collection_reset",
                  "list_tags", "tag_cards", "untag_cards", "rename_tag", "delete_tag",
                  "get_card_metadata", "set_card_metadata", "get_bucket_metadata", "set_bucket_metadata",
                  "get_acquisition_timeline", "parse_decklist", "save_deck", "update_deck", "list_imports",
