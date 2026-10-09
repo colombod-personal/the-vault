@@ -6,7 +6,7 @@ description: >-
   stack, layers, replacement effect, trigger or keyword question about Magic cards or rules.
 license: MIT
 metadata:
-  vault-tools: "whoami get_card_oracle get_rulings find_rules_term search_rules rules_outline get_rule verify_citation"
+  vault-tools: "whoami get_card_oracle get_rulings find_rules_term search_rules rules_outline get_rule rules_changes verify_citation"
 ---
 
 # Rules judge
@@ -31,7 +31,11 @@ from memory: the rules change and your memory of them is not a source. Also foll
      special cases often sit in the next subrule), its **parent** (the general rule), and follow **cites**
      and **cited by** to the rules it depends on.
    - Lost? `rules_outline` shows the table of contents; drill down from a section.
-   - Note the rules edition (`version`). The rules are read live from Wizards of the Coast's current edition.
+   - Note the rules edition (`version`) and cite every rule number with it. The rules are read live from Wizards of the Coast's
+     current edition.
+   - A recent update, a new set's rules, or a rule number you only know from an older source: call `rules_changes`. It lists the rules
+     added, removed, renumbered and changed between the previous and the current edition (a rule it does not list did not change), and
+     the rulings and legality changes since. Say which two editions it compared.
 4. **Verify before you quote.** Before presenting any text as an official rule, ruling or card text,
    call `verify_citation` with the exact words you will use. If it fails, use the `source_text` it
    returns, or paraphrase and say it is a paraphrase.
@@ -43,15 +47,16 @@ from memory: the rules change and your memory of them is not a source. Also foll
 ## How the rules are organised
 
 1 Game concepts (golden rules, colours, numbers) · 2 Parts of a card · 3 Card types · 4 Zones · 5 Turn
-structure (steps and phases, combat in 506-511) · 6 Spells, abilities and effects (casting 601, triggered
-abilities 603, replacement effects 614, layers 613) · 7 Additional rules (701 keyword actions, 702 keyword
-abilities, 704 state-based actions) · 8 Multiplayer (810 Two-Headed Giant) · 9 Casual variants (903 Commander).
+structure (steps and phases, combat in rules 506 to 511) · 6 Spells, abilities and effects (casting rule 601, triggered
+abilities rule 603, replacement effects rule 614, layers rule 613) · 7 Additional rules (rule 701 keyword actions, rule 702 keyword
+abilities, rule 704 state-based actions) · 8 Multiplayer (rule 810 Two-Headed Giant) · 9 Casual variants (rule 903 Commander).
 The glossary defines terms and points to rules. Later, more specific rules override general ones (rule 101).
 
 ## Format
 
 - Lead with the answer ("Yes: the trigger resolves first because ..."), then the steps.
-- Cite as "rule 603.3b (Comprehensive Rules, 2026-09-25)". Keep quotes short.
+- Cite as "rule 603.3b (Comprehensive Rules, <version>)", with the `version` a rules tool returned, never an edition you remember.
+  Keep quotes short.
 - If the user's wording and the Oracle text differ, point out the difference.
 
 ## Do not

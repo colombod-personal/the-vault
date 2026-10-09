@@ -83,6 +83,7 @@ All collection tools also read a collection someone shared with you (`share_id`,
 |---|---|---|---|---|---|
 | Card details, rulings | The card drawer (click a card in Browse, the Vault tab or a deck): image, oracle text, artist credit; rulings are not shown in the web app | `/catalog/cards`, `/cards/{id}/rulings`, `/cards/lookup` | `get_card_oracle`, `get_rulings`, `lookup_cards` | read | partly: no rulings in the web app |
 | Rules search, a rule | none: the web app has no rules view (“Help” explains the app, not the rules) | `/rules/search`, `/rules`, `/rules/term/{name}`, `/rules/{n}` | `search_rules`, `rules_outline`, `find_rules_term`, `get_rule`, `verify_citation`, `present_steps` | read | partly: assistants only |
+| What changed in the rules, rulings and legality since the previous edition (#107) | none: assistants only | `/rules/changes` | `rules_changes` | read | partly: assistants only |
 
 ## Account: kept out of AI apps on purpose
 

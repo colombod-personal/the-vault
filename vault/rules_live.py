@@ -17,13 +17,15 @@ import re
 import threading
 import time
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
+from types import SimpleNamespace
 
 import httpx
 
 from . import provenance as prov
-from . import rules_parser
+from . import rules_changes, rules_parser
 
 RULES_PAGE = "https://magic.wizards.com/en/rules"
 USER_AGENT = "the-vault/0.1 (+https://github.com/colombod-personal/the-vault)"
@@ -34,6 +36,11 @@ log = logging.getLogger("vault.access")
 TXT_LINK = re.compile(r'https://media\.wizards\.com/[^"\'<>]+?MagicCompRules[^"\'<>]*?\.txt', re.IGNORECASE)
 REF = re.compile(r"\b(\d{3}\.\d+[a-z]?|\d{3})\b")
 WORD = re.compile(r"[a-z0-9']+")
+PROBE_DAYS = 150  # how far back from the current file's date to look for the previous edition (the longest gap seen between editions: 63 days)
+PROBE_BATCH = 15  # dates asked at once; a round of 15 HEADs takes about as long as one
+PROBE_TIMEOUT = httpx.Timeout(8, connect=4)
+COMPARE_TTL = 6 * 3600  # a brief is kept in memory this long (the previous edition's file does not change)
+NO_PREVIOUS_TTL = 600  # and "no earlier edition found" this long
 STOP = {"the", "and", "for", "that", "with", "this", "from", "are", "can", "does", "what", "when", "how", "its", "has",
         "have", "was", "will", "you", "your", "into", "onto", "any", "all", "not", "but", "they", "their", "then", "than"}
 
@@ -179,6 +186,42 @@ class Edition:
                             url=self.url, as_of=date.today(), version=self.version, wizards_material=True)]
 
 
+@dataclass(frozen=True)
+class Side:
+    """One of the two editions a brief compares."""
+
+    version: str  # the edition's own "effective as of" date
+    url: str
+    file_date: str  # the date in the file's name (the day it was published), YYYY-MM-DD
+
+    @property
+    def in_force(self) -> bool:
+        return date.fromisoformat(self.version) <= date.today()
+
+
+@dataclass
+class Comparison:
+    """The current edition against the previous one: what is kept (in memory only) of reading both."""
+
+    current: Side
+    previous: Side | None
+    changes: "rules_changes.Changes | None"
+    same_effective_date: list[Side] = field(default_factory=list)  # earlier files with the current edition's own date: corrections, skipped
+    looked_back_days: int = 0
+    note: str | None = None
+
+
+def file_date(url: str) -> date | None:
+    m = rules_changes.DATED_NAME.match(url)
+    return rules_changes.parse_date(m.group("date")) if m else None
+
+
+def dated_url(like: str, day: date) -> str:
+    """The URL of the file dated ``day`` in the same place and spelling as ``like`` (another edition's file)."""
+    m = rules_changes.DATED_NAME.match(like)
+    return f"{m.group('head')}{day.year}/downloads/{m.group('stem')}{m.group('sep')}{day:%Y%m%d}.txt"
+
+
 class LiveRules:
     """The current edition, fetched from Wizards when needed and cached in memory per instance.
 
@@ -196,11 +239,14 @@ class LiveRules:
         self._failed_until = -math.inf
         self._failure = ""
         self._lock = threading.Lock()
+        self._comparisons: dict[tuple, tuple[float, Comparison]] = {}  # the small result of comparing two editions; never the rules
+        self._compare_lock = threading.Lock()
 
     def reset(self, transport: httpx.BaseTransport | None = None) -> None:
         """Forget the cached edition (and use ``transport`` from now on): the next call reads Wizards again."""
         with self._lock:
             self.transport, self._edition, self._checked, self._failed_until = transport, None, -math.inf, -math.inf
+            self._comparisons = {}
 
     @property
     def cached_version(self) -> str | None:
@@ -261,3 +307,88 @@ class LiveRules:
             return self._edition
         finally:
             self._lock.release()
+
+    # -- the previous edition (#107): read when asked, compared, and only the small result is kept --------------------------------
+    def compare(self, previous: str | None = None) -> Comparison:
+        """The current edition against the previous one, as a :class:`Comparison`.
+
+        Wizards' rules page links only the current edition, but its CDN keeps every earlier file under its dated name
+        (``MagicCompRules 20260819.txt``). So the previous edition is found by asking, with ``HEAD``, for the file dated each day
+        before the current file's date, ``PROBE_BATCH`` days at a time, until one answers: nothing about it is stored, and the
+        answer is kept in memory for ``COMPARE_TTL`` (the rules text of neither edition is). ``previous`` (a date, as in a file
+        name) skips the search. An earlier file that carries the current edition's own "effective as of" date is a correction of
+        it, not the previous edition: it is noted and the search goes on past it. ``ValueError`` for a date that is not one."""
+        current = self.edition()
+        wanted = rules_changes.parse_date(previous)
+        key = (current.url, current.validator, wanted)
+
+        def fresh(hit):
+            return hit is not None and self.clock() - hit[0] < (COMPARE_TTL if hit[1].previous else NO_PREVIOUS_TTL)
+        hit = self._comparisons.get(key)
+        if fresh(hit):
+            return hit[1]
+        with self._compare_lock:
+            hit = self._comparisons.get(key)
+            if fresh(hit):
+                return hit[1]
+            result = self._compare(current, wanted)
+            self._comparisons[key] = (self.clock(), result)
+            for old in sorted(self._comparisons, key=lambda k: self._comparisons[k][0])[:-4]:  # a few at most
+                del self._comparisons[old]
+            return result
+
+    def _status(self, client: httpx.Client, url: str) -> int:
+        """200 or 404; anything else (an error, a refusal, a timeout) means the answer is not known, so it is raised."""
+        code = client.head(url, timeout=PROBE_TIMEOUT).status_code
+        if code not in (200, 404):
+            raise RulesUnavailable(f"Wizards' CDN answered {code} when asked for an earlier edition")
+        return code
+
+    def _earlier_file(self, client: httpx.Client, like: str, start: date) -> date | None:
+        """The latest date before ``start`` with a file on the CDN, looking back at most ``PROBE_DAYS`` days."""
+        for offset in range(1, PROBE_DAYS + 1, PROBE_BATCH):
+            days = [start - timedelta(days=i) for i in range(offset, min(offset + PROBE_BATCH, PROBE_DAYS + 1))]
+            with ThreadPoolExecutor(max_workers=len(days)) as pool:
+                codes = list(pool.map(lambda day: self._status(client, dated_url(like, day)), days))
+            found = [day for day, code in zip(days, codes) if code == 200]
+            if found:
+                return found[0]  # the days run backwards: the first hit is the latest
+        return None
+
+    def _compare(self, current: Edition, wanted: date | None) -> Comparison:
+        here_day = file_date(current.url)
+        here = Side(current.version, current.url, here_day.isoformat() if here_day else "")
+        if here_day is None:
+            return Comparison(here, None, None, note="The current edition's file name carries no date, so the previous edition cannot be "
+                                                     "looked for. Name it with `previous` (the date in its file name).")
+        corrections: list[Side] = []
+        start = here_day
+        try:
+            with self._client() as client:
+                for _ in range(3):
+                    day = wanted if wanted else self._earlier_file(client, current.url, start)
+                    if day is None:
+                        break
+                    url = dated_url(current.url, day)
+                    if wanted and (day == here_day or self._status(client, url) == 404):
+                        return Comparison(here, None, None, note=f"Wizards' CDN has no earlier edition dated {day.isoformat()}"
+                                                                 if day != here_day else "That is the current edition's own date.")
+                    res = client.get(url)
+                    res.raise_for_status()
+                    parsed = rules_parser.parse(res.content.decode("utf-8-sig"))
+                    if parsed.version == current.version and not wanted:  # the current edition, published again under a new name
+                        corrections.append(Side(parsed.version, url, day.isoformat()))
+                        start = day
+                        continue
+                    old = SimpleNamespace(version=parsed.version, rows={r["number"]: r for r in parsed.rules})
+                    return Comparison(here, Side(parsed.version, url, day.isoformat()), rules_changes.diff(old, current), corrections,
+                                      (here_day - day).days)
+        except RulesUnavailable:
+            raise
+        except Exception as exc:  # a download, an encoding, a format we do not know: whatever went wrong on Wizards' side
+            log.warning(json.dumps({"event": "rules_compare_failed", "error_class": type(exc).__name__}))
+            raise RulesUnavailable("The previous edition of the Comprehensive Rules could not be read from Wizards of the Coast just now. "
+                                   "Try again shortly.") from exc
+        return Comparison(here, None, None, corrections, PROBE_DAYS,
+                          note=f"No earlier edition was found on Wizards' CDN within {PROBE_DAYS} days before {here.file_date}"
+                               + (" (apart from corrections of the current one)" if corrections else "") + ". Name one with `previous`.")

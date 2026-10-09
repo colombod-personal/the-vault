@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import date
 
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
@@ -101,6 +102,35 @@ def legality_changes(db: Session, oracle_ids: list[str], fmt: str | None = None,
     rows = db.execute(query.order_by(LegalityChange.observed_on.desc(), LegalityChange.id.desc()).limit(max(1, min(limit, 100)))).all()
     return [{"card": name, "oracle_id": c.oracle_id, "format": c.format, "old": c.old, "new": c.new, "observed_on": c.observed_on.isoformat()}
             for c, name in rows]
+
+
+MAX_SINCE_ITEMS = 50
+SINCE_TEXT = 240  # characters of a ruling shown in a change brief: it is a pointer to the ruling, not a copy of it
+
+
+def rulings_since(db: Session, since: date, limit: int = 25) -> tuple[list[dict], int, dict]:
+    """Rulings published on or after ``since``, newest first and capped, with the number published and how many each source wrote.
+    Wizards' text via Scryfall; ``source`` says who wrote each one."""
+    limit = max(1, min(limit, MAX_SINCE_ITEMS))
+    where = Ruling.published_at >= since
+    total = db.scalar(select(func.count()).select_from(Ruling).where(where)) or 0
+    by_source = dict(db.execute(select(Ruling.source, func.count()).where(where).group_by(Ruling.source).order_by(Ruling.source)).all())
+    rows = db.execute(select(Ruling, OracleCard.name).join(OracleCard, OracleCard.oracle_id == Ruling.oracle_id).where(where)
+                      .order_by(Ruling.published_at.desc(), OracleCard.name, Ruling.id).limit(limit)).all()
+    return [{"card": name, "oracle_id": r.oracle_id, "published_at": r.published_at.isoformat(), "source": r.source,
+             "comment": r.comment if len(r.comment) <= SINCE_TEXT else r.comment[: SINCE_TEXT - 1].rstrip() + "…"}
+            for r, name in rows], total, by_source
+
+
+def legality_changes_since(db: Session, since: date, limit: int = 25) -> tuple[list[dict], int]:
+    """Legality changes the Vault saw on or after ``since`` (a ban, an unban, a restriction), newest first and capped, and how many."""
+    limit = max(1, min(limit, MAX_SINCE_ITEMS))
+    where = LegalityChange.observed_on >= since
+    total = db.scalar(select(func.count()).select_from(LegalityChange).where(where)) or 0
+    rows = db.execute(select(LegalityChange, OracleCard.name).join(OracleCard, OracleCard.oracle_id == LegalityChange.oracle_id).where(where)
+                      .order_by(LegalityChange.observed_on.desc(), OracleCard.name, LegalityChange.format, LegalityChange.id).limit(limit)).all()
+    return [{"card": name, "oracle_id": c.oracle_id, "format": c.format, "old": c.old, "new": c.new, "observed_on": c.observed_on.isoformat()}
+            for c, name in rows], total
 
 
 def card_tags(db: Session, oracle_id: str) -> list[dict]:

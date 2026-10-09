@@ -17,7 +17,9 @@ Rules, cards and prices - how to answer:
 - Never answer a rules or card question from memory. Call get_card_oracle (and get_rulings), then
   find the rules: find_rules_term for a named game term, search_rules for a question, rules_outline to
   browse; open each with get_rule and read its children, siblings and references. Say which rule number
-  and which edition (version) you used. The rules are read live from Wizards of the Coast.
+  and which edition (version) you used. The rules are read live from Wizards of the Coast. For a recent
+  update, or a rule you only know from an older source, call rules_changes: it compares the previous
+  edition with the current one.
 - Quote only text a tool returned. Before you present a quote as an official rule, ruling or card
   text, call verify_citation; if it fails, use the source_text it returns instead of your wording.
 - If the sources do not settle a question, say you are not sure and point to the official rules or a judge.
@@ -103,6 +105,18 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              "from memory: only text returned by the rules tools is the current edition's.",
              {"name": {"type": "string", "minLength": 2, "maxLength": 120}}, ["name"],
              path=lambda a: f"{V1}/catalog/rules/term/{quote(a['name'], safe='')}", provenance=("catalog",)),
+        Tool("rules_changes", "What changed in the Comprehensive Rules between the previous edition and the current one, read live from "
+             "Wizards of the Coast (the Vault stores neither): both editions' dates, the rule numbers added, removed, renumbered and "
+             "changed, each changed rule with its first changed sentence, in rule order and capped, plus the rulings published and the "
+             "legality changes the Vault recorded since the previous edition took effect. Call it when a rule you rely on may be new or "
+             "different, when the question is about a recent rules change, or to check a rule number you remember is still the same "
+             "rule. A rule not listed did not change. Say which two editions you compared.",
+             {"previous": {"type": "string", "format": "date", "maxLength": 10, "description": "The date in the previous edition's file name (YYYY-MM-DD); "
+                           "by default it is found on Wizards' CDN, which keeps earlier files"},
+              "since": {"type": "string", "format": "date", "maxLength": 10, "description": "First day of the rulings and legality window (YYYY-MM-DD); "
+                        "by default the day the previous edition took effect"},
+              "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 25, "description": "At most this many of each list"}},
+             path=lambda a: f"{V1}/catalog/rules/changes", query=("previous", "since", "limit"), provenance=("catalog",)),
         Tool("get_rule", "One rule by number (e.g. '613.1a') or a glossary term ('glossary:Trample'), with where it sits: its "
              "parent, children, previous and next rule, the rules it cites and the rules that cite it. This is the only source for "
              "a rule's wording: when a rule is asked for or quoted, call it, and never quote a rule from memory (the rules change "
