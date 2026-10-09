@@ -1,7 +1,17 @@
 # An optional "possible loops" note, drawn from card text (design for the third criterion of #172)
 
-Status: **proposed, waiting for the owner's agreement** (criterion 3 of #172: "A design for an optional 'possible loops' note drawn
-from card text, written and agreed"). This page is the design only; no product code changes in the pull request that adds it.
+Status: **agreed by the owner on 2026-10-09 ("take the recommendations") and the first slice built** (criterion 3 of #172: "A design for
+an optional 'possible loops' note drawn from card text, written and agreed"). Built: section 8's slice with the recommended defaults of
+section 9 (a flag on `find_combos`, off by default; pattern P1 only; two levels; no web change; the Commander Bracket hint does not use it):
+`vault/possible_loops.py`, `include_possible_loops` on `POST /decks/combos` and `find_combos`, the council skill and the synergy analyst,
+devil's advocate and casual table agents, the tests of section 7 (`tests/test_possible_loops.py`), `docs/api.md`, `docs/agents.md`,
+`docs/ai-parity.md`. Differences from the text below, all on the side of saying less: a token ability with a count other than one is
+read as not priced (the design's "N" is left for a later slice); the cost reducers and the mana doubler are the only closers (the
+Heartstone and Mana Reflection shapes, one of each at a time, never added to each other); a reading is dropped unless the net is -1 or
+better by the matched facts alone or with a named closer; `closed_by` lists alternatives (each alone sufficient) as `{cards, how, net}`;
+and the answer also names, under `not_read`, a token ability it saw and could not price. Still open, each its own pull request: P2 to P5,
+the Combos tab section (it closes the parity gap), the measured run over saved decks and a real council run on production (section 6
+and 8), a third confidence level only if the measured false-positive rate allows it.
 Criteria 1 and 2 of #172 (the answer says it lists only Spellbook's combos; the council skill and agents never say "no infinite
 combos" from `find_combos` alone) are merged and verified (#310).
 
