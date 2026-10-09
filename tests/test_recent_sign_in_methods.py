@@ -833,3 +833,71 @@ def test_the_account_lock_does_not_block_a_refresh_of_an_app_session(client):
         step_1.commit()
     with db.sessions() as s:
         assert s.scalar(select(func.count(ApiSession.id))) == 0
+
+
+# -- sixth round: the review threads on #407 (Copilot, 2026-10-09) ---------------------------------------------------------------
+
+
+def test_the_bulk_removal_is_offered_only_when_it_can_succeed(veteran):
+    """Thread on account.jsx: 'Remove everything added in the last 24 hours' came with two recent rows even when the endpoint
+    would answer 409 (a young account), and counted the first page's rows. The server now says whether it can succeed and counts
+    every recent row, on every page."""
+    me = veteran.get(f"{V1}/me").json()["id"]
+    page = methods(veteran)
+    assert page["recent_count"] == 0 and page["recent_removable"] is False  # nothing recent: nothing to offer
+    for i in range(3):
+        add_passkey(veteran, me, f"New {i}", hours_ago=i + 1)
+    page = methods(veteran, limit=1)  # one row on this page; the count and the answer are for all of them
+    assert page["count"] == 1 and page["recent_count"] == 3 and page["recent_removable"] is True
+    assert veteran.delete(f"{V1}/me/sign-in-methods/recent").json() == {"deleted": 3}  # and it does what was offered
+
+    with sessions(veteran) as db:  # a young account: every method new, so the endpoint would refuse
+        db.execute(text("UPDATE identities SET created_at = now() - interval '1 hour'"))
+        db.commit()
+    add_passkey(veteran, me, "Newer", hours_ago=0)
+    page = methods(veteran)
+    assert page["recent_count"] == 2 and page["recent_removable"] is False
+    assert veteran.delete(f"{V1}/me/sign-in-methods/recent").status_code == 409
+
+
+def test_the_account_page_offers_the_bulk_removal_only_from_the_servers_answer():
+    """The page renders the server's answer: it does not count rows itself, it does not call a first page 'all', and the
+    retained tooltip no longer says this browser is signed out too (the new flow keeps it signed in)."""
+    from pathlib import Path
+
+    source = (Path(__file__).parent.parent / "public" / "views" / "account.jsx").read_text(encoding="utf-8")
+    assert "found.recent_removable" in source and "found.recent_count" in source
+    assert "recent.length > 1" not in source and "Remove all ${" not in source
+    assert "including this one\"" not in source and "this one stays signed in" in source
+
+
+def test_a_provider_claim_takes_its_locks_with_the_timeout_and_the_shared_mode(client, monkeypatch):
+    """Thread on _claim_identity: the two-row lock was FOR UPDATE and asked for before the lock timeout was set. Now the timeout
+    comes first and the mode is FOR NO KEY UPDATE: a claim waits at most the timeout (a 503) and does not conflict with the
+    FOR KEY SHARE a refresh takes on the user row (which with FOR UPDATE could deadlock with the claim's later delete)."""
+    from sqlalchemy.exc import OperationalError
+
+    from vault import locks
+    from vault.locks import lock_account, lock_accounts
+
+    owner = login(client, "owner@example.com")
+    donor, (_, _) = make_user(client, [("passkey", 24 * 5), ("google", 24 * 5)])
+    db = client.app.state.db
+    monkeypatch.setattr(locks, "LOCK_TIMEOUT", "300ms")
+
+    with db.sessions() as refresh:  # a refresh inserting a retired token holds FOR KEY SHARE on the donor's user row
+        refresh.execute(select(User.id).where(User.id == donor).with_for_update(key_share=True, read=True))
+        with db.sessions() as claim:
+            started = time.time()
+            lock_accounts(claim, [donor, owner])  # not made to wait for it
+            assert time.time() - started < 2
+            claim.rollback()
+
+    with db.sessions() as holder:  # another request of the donor holds the account: the claim gives up after the timeout
+        lock_account(holder, donor)
+        with db.sessions() as claim:
+            started = time.time()
+            with pytest.raises(OperationalError):
+                find_or_create(claim, Profile("google", f"google-{donor}-1", None, None), current=claim.get(User, owner))
+            assert time.time() - started < 5
+        holder.rollback()

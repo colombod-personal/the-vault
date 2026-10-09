@@ -917,7 +917,8 @@ function SignOutEverywhere({ onCancel, onRemoved }) {
   const recent = items.filter((m) => m.recently_added);
   const hours = (found && found.recent_hours) || 24;
   const removeAllRecent = async () => {
-    if (!window.confirm(`Remove ${recent.length} sign-in method${recent.length === 1 ? '' : 's'} added in the last ${hours} hours? This includes any you added yourself.`)) return;
+    const n = found.recent_count;
+    if (!window.confirm(`Remove the ${n} sign-in method${n === 1 ? '' : 's'} added in the last ${hours} hours? This includes any you added yourself.`)) return;
     setError(null); setBusy('recent');
     try { await api.signInMethods.removeRecent(); await load(); onRemoved && onRemoved(); }
     catch (e) { setError(e.message); }
@@ -999,9 +1000,10 @@ function SignOutEverywhere({ onCancel, onRemoved }) {
           )}
           {error && <p role="alert" style={{ color: 'var(--danger)' }}>{error}</p>}
           <div className="signout-actions">
-            {recent.length > 1 && (
+            {/* Only when the server says it can succeed (something recent and an older method stays) and this list is the whole list. */}
+            {found && found.recent_removable && !(found._links && found._links.next) && (
               <button className="btn sm" disabled={busy !== null} onClick={removeAllRecent}>
-                {busy === 'recent' ? 'Removing…' : `Remove all ${recent.length} added in the last ${hours} hours`}
+                {busy === 'recent' ? 'Removing…' : `Remove the ${found.recent_count} added in the last ${hours} hours`}
               </button>
             )}
             <button className="btn sm" onClick={onCancel}>Done</button>
@@ -1069,7 +1071,7 @@ function SignInMethods({ me, onChanged }) {
         {linkable.map((p) => <a key={p} className="btn sm ghost" href={`/api/auth/login/${p}`}>Link {p[0].toUpperCase() + p.slice(1)}</a>)}
         {/* On a phone the top bar has no room for Sign out, so it is here (layout.css shows .m-only). */}
         <button className="btn sm m-only" onClick={() => signOut()}>Sign out</button>
-        <button className="btn sm ghost" title="Signs out every browser signed in to this account, including this one"
+        <button className="btn sm ghost" title="Opens a check: first signs out the other browsers (this one stays signed in), then lists your sign-in methods"
                 aria-expanded={leaving} onClick={() => setLeaving(true)}>Sign out everywhere</button>
       </div>
       {leaving && <SignOutEverywhere onCancel={() => setLeaving(false)} onRemoved={() => { reload(); onChanged && onChanged(); }} />}

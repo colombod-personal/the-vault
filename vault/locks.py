@@ -23,6 +23,15 @@ from .models import User
 LOCK_TIMEOUT = "5s"
 
 
+def lock_accounts(db: Session, user_ids: list[int]) -> None:
+    """Lock several user rows at once, in id order (two links the other way round can't deadlock), with the same mode and the same
+    timeout as :func:`lock_account`: the timeout is set BEFORE the first lock is asked for, and ``FOR NO KEY UPDATE`` does not
+    conflict with the ``FOR KEY SHARE`` a refresh or a consent takes on the user row. (A claim that goes on to delete the other
+    account asks for the stronger lock only at that DELETE, after everything else it holds is a plain row lock.)"""
+    db.execute(text(f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'"))
+    db.execute(select(User.id).where(User.id.in_(user_ids)).order_by(User.id).with_for_update(key_share=True))
+
+
 def lock_account(db: Session, user_id: int) -> str | None:
     """Lock the user row (FOR NO KEY UPDATE, until the transaction ends) and return its session key (None: no such account or no
     key). Raises the database's ``LockNotAvailable`` (an ``OperationalError``, answered 503 with Retry-After) after the timeout."""

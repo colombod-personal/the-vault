@@ -338,7 +338,11 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                   "_links": {"self": link(f"{V1}/me/passkeys/{m['id']}" if m["kind"] == "passkey"
                                           else f"{V1}/me/identities/{m['id']}")}} for m in page]
         body = page_body(request, items, nxt, len(shown), limit=limit, **({"recent_only": "true"} if recent_only else {}))
-        return {**body, "recent_hours": RECENT_SIGN_IN_METHOD_HOURS}
+        recent = [m for m in methods if m["recently_added"]]
+        # "Remove everything added in the last 24 hours" is offered only when it can succeed: something recent, and a method older
+        # than the window staying (the endpoint refuses otherwise), and it removes ALL the recent ones, on every page.
+        return {**body, "recent_hours": RECENT_SIGN_IN_METHOD_HOURS, "recent_count": len(recent),
+                "recent_removable": bool(recent) and any(not m["recently_added"] for m in methods)}
 
     @router.delete("/me/sign-in-methods/recent", tags=["account"],
                    summary="Remove every sign-in method added in the last 24 hours (never the last way to sign in: "

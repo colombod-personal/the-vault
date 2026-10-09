@@ -684,6 +684,9 @@ class SignInMethodItem(Hal):
 class SignInMethodPage(Page):
     items: list[SignInMethodItem]
     recent_hours: int = Field(description="The window `recently_added` and `recent_only` use")
+    recent_count: int = Field(description="How many sign-in methods were added inside that window, on every page")
+    recent_removable: bool = Field(description="True when DELETE /me/sign-in-methods/recent would succeed: something recent, and a "
+                                               "method older than the window would stay")
 
 
 # -- card catalog (Scryfall data served by the Vault) ---------------------------------------------
