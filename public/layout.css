@@ -758,6 +758,37 @@ p.tag-note { margin: 0 0 14px; font-size: 12px; }
   .ds-field .select { flex: 1; min-width: 0; }
   .ds-v { font-size: 26px; }
 }
+/* ---- Where to buy (#212, docs/where-to-buy-design.md): a text-only menu of plain links, opened in place (no pop-over, so nothing is clipped on a phone) ---- */
+.buy { display: block; margin: 6px 0 0; min-width: 0; max-width: 100%; }
+.ideas-or p { margin: 0 0 6px; }
+.buy-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.buy-chev { margin-left: 8px; color: var(--gold); }
+.buy-menu { display: grid; gap: 8px; margin-top: 8px; padding: 10px 12px; max-width: 460px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); }
+.buy-menu p, .buy-menu ul { margin: 0; }
+.buy-line { font-size: 13px; line-height: 1.5; color: var(--text); }
+.buy-change { margin-left: 4px; }
+.buy-list { list-style: none; padding: 0; display: grid; gap: 0; }
+.buy-list > li { border-top: 1px solid var(--border); }
+.buy-list > li:first-child { border-top: 0; }
+.buy-link { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; box-sizing: border-box; min-height: 44px; padding: 8px 4px; color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
+.buy a.buy-link { color: var(--text); text-decoration: none; }
+.buy-link:hover { background: var(--surface); }
+.buy-link:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+.buy-link-name { font-weight: 600; font-size: 14px; }
+.buy-link-name::after { content: ' ↗'; color: var(--gold); font-weight: 400; }
+.buy-link-note { font-family: var(--mono); font-size: 12px; color: var(--text-2); }
+.buy-scry { border-top: 1px solid var(--border); }
+.buy-fine { font-size: 12px; line-height: 1.6; color: var(--text-2); }
+.buy-fine summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; }
+.buy-fine a { color: var(--gold); text-decoration: underline; }
+.buy-about { padding-left: 18px; }
+.buy-error { color: var(--danger); font-size: 13px; line-height: 1.5; }
+.buy-picker, .buy-form { display: grid; gap: 8px; }
+.buy-label { font-family: var(--mono); font-size: 12px; color: var(--text-2); }
+.buy-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.buy-store { display: grid; gap: 6px; margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); min-width: 0; }
+.buy-hint { font-size: 12px; line-height: 1.5; }
+.buy-more { justify-self: start; }
 
 /* ==== Phone layout (up to 760px wide) ====
    Everything from here to the end of the file is inside phone-width media queries (only .m-only,

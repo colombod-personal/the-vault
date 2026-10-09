@@ -1,7 +1,7 @@
 # Where to buy: a menu for a missing card, regional shops and your local store (design for #212, epic #158)
 
-Status: **draft for owner review.** Written 2026-10-09. Design only: no code, no shop was contacted by the Vault, no account setting exists yet. #212 is
-`status:needs-refinement`, so this is the refinement the issue asks for (research and a design page), not an implementation.
+Status: **approved by the owner on 2026-10-09 ("take the recommendations") and built: see "As built" at the end.** Written 2026-10-09. The text below is the design as approved; where the build differs, the last section says so.
+No shop was contacted by the Vault, and none is.
 
 Owner request (2026-10-06, in the issue): when a card is missing, besides owned alternatives, offer a compact **"Where to buy" menu** that sends the person to a
 shop; make it **location aware** (a UK person gets Magic Madhouse); if possible point to **local official retailers**.
@@ -265,3 +265,25 @@ Each with a recommended default, so "as recommended" is a complete answer.
 1. Owner decisions above. 2. The `buy_links` module with the templates and their format tests (and the "no network" test). 3. Migration, `buy_settings`, erasure, export, `docs/gdpr.md`,
 `public/privacy.html`, `public/credits.html`. 4. REST, the account panel and the `where_to_buy` tool (`docs/ai-parity.md`, `public/llms.txt`). 5. The menu in the Ideas view, the Lab and the deck page,
 with screenshots at 1400 and 390 px. 6. One real click through each shop link by a person, dated in section 2 (and Cardmarket's in a browser that passes its check).
+
+## 10. As built (2026-10-09, #212)
+
+Built as designed (option A, the seven recommended defaults), in `vault/buy_links.py` (templates, countries, orders, typed-store checks),
+`vault/api/buy_api.py` (`GET /buy/menu`, `GET /buy/countries`, `GET`/`PUT`/`DELETE /me/buy-settings`), migration `0121_buy_settings` (0119 was the number first assigned; main took 0119 and 0120 meanwhile), the
+MCP tool `where_to_buy` (read only), `public/lib/buy.js` and `public/views/buy.jsx` (the menu on the Ideas panel, the Lab's Buy rows and a
+deck page's needed cards, and Account, "Where I buy"). Screenshots at 1400 and 390 px are in `docs/screenshots/where-to-buy-*.jpg`.
+
+Where the build differs from the sections above, on purpose, on the conservative reading the owner asked for (`docs/compliance.md`, "Where to buy links"):
+
+- **The locator link has no place in it (section 4.4, decision 1).** Whether Wizards' clause 2.2(ii) reaches a hyperlink that deep-links into
+  its search is unclear, so the menu opens `https://locator.wizards.com/` only and says "type your town or postcode there". There is therefore no
+  place box in the menu and no `locator_template` anywhere; the mockup's "Place: [ ... ] [Open]" row does not exist. The issue comment's "Use my
+  location" button is not built either: the locator's page is not known to take coordinates, and turning a position into a place would need a
+  third party. Both are in follow-up issue #413, blocked on the owner's reading of clause 2.2 (asked in #412, which also holds the Cardmarket reading and the click-through of each link).
+- **Cardmarket stays in the lists** (decision 4) on the 2026-10-07 reading of its terms, marked in the menu as last checked 2026-10-07 because its
+  pages answered a bot check on 2026-10-09 and the check was not tried to get past. The owner reading its terms is still open.
+- **Browser-language ordering (section 4.5)** is done in the browser from four orders the server sends only while no country is saved
+  (`region_orders`, `europe_countries`); a saved country is ordered by the server. The country picker is a plain select in the menu
+  ("Change", "Set where you buy", "Not now") and in Account.
+- The Scryfall row is the card's Scryfall search (`!"name"`), the link the app already used in the Ideas view, the Lab and the deck page.
+- `GET /buy/countries` and `DELETE /me/buy-settings` were added to the design's `GET`/`PUT`: the first feeds the picker, the second is "Remove".

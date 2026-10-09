@@ -10,6 +10,7 @@ vault-tools:
   - get_deck_overlap
   - find_upgrades
   - shopping_list
+  - where_to_buy
   - list_decks
   - get_deck
   - validate_deck_changes

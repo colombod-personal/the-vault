@@ -39,9 +39,10 @@ Sources the Vault does **not** load, recorded so the next person does not have t
 |---|---|---|---|---|---|
 | `moxfield` | Moxfield decks | read: automation forbidden | 2026-10-07 | https://moxfield.com/help/terms | Not used for fetching; see "Moxfield" below |
 | `archidekt` | Archidekt public decks | read: not clear, owner position recorded | 2026-10-07 | https://archidekt.com/terms | One public deck per person's request only; see "Archidekt" below |
-| `cardkingdom` | Card Kingdom site and price list | read: automation forbidden | 2026-10-07 | https://www.cardkingdom.com/static/tos | Not used; ask first (`docs/data-sources.md`) |
-| `magicmadhouse` | Magic Madhouse site and affiliate feed | read: written permission needed | 2026-10-07 | https://magicmadhouse.co.uk/terms-conditions/ | Not used; the affiliate feed is the legitimate route (`docs/data-sources.md`) |
-| `cardmarket` | Cardmarket site | read | 2026-10-07 | https://www.cardmarket.com/en/Magic/Policies/GeneralTermsAndConditions | Not used: showing its cards and prices needs its prior written agreement (clause 9); its prices reach the Vault only as Scryfall's |
+| `cardkingdom` | Card Kingdom site and price list | read: automation forbidden | 2026-10-07 | https://www.cardkingdom.com/static/tos | Not used for data; ask first (`docs/data-sources.md`). A plain search link only, named as the shop's, "not affiliated" beside it (#212, "Where to buy links") |
+| `magicmadhouse` | Magic Madhouse site and affiliate feed | read: written permission needed | 2026-10-07 | https://magicmadhouse.co.uk/terms-conditions/ | Not used for data; the affiliate feed is the legitimate route (`docs/data-sources.md`). A plain search link only, no content shown, no affiliate link (#212) |
+| `cardmarket` | Cardmarket site | read | 2026-10-07 | https://www.cardmarket.com/en/Magic/Policies/GeneralTermsAndConditions | Not used for data: showing its cards and prices needs its prior written agreement (clause 9); its prices reach the Vault only as Scryfall's. A plain search link only, on the conservative reading recorded under "Where to buy links" (#212) |
+| `wizards_locator` | Wizards Store & Event Locator (locator.wizards.com) | read: clause 2.2 unclear on links | 2026-10-09 | https://company.wizards.com/tou | Never fetched, copied or cached. One hyperlink to its front page, opened by the person (#212, "Where to buy links") |
 | `commander_spellbook` | Commander Spellbook API | not read: no data licence found | n/a | https://commanderspellbook.com | On demand per request, nothing stored |
 
 The questions we planned to put to the sources' owners are **not part of this test** and are still open owner actions:
@@ -204,6 +205,38 @@ Still unread: Commander Spellbook's data licence (none found; on demand only, no
 rules on monetisation**, which must be read before the owner joins any affiliate programme. Neon and Vercel limits are in
 `catalog-design.md`.
 
+### Where to buy links (#212, decided 2026-10-09)
+
+The "Where to buy" menu (`docs/where-to-buy-design.md`) builds plain hyperlinks and nothing else: no page of any shop or of the Wizards
+locator is fetched, copied or cached, no price, stock or image of a shop is shown, no link earns the Vault anything, and a typed store's
+address is rendered and never requested. The owner approved the design's recommended defaults on 2026-10-09. Two points the design
+called unclear, and what was built on the conservative reading of each:
+
+- **Wizards, Terms of Use clause 2.2** ([company.wizards.com/tou](https://company.wizards.com/tou), "Last Updated: December 10, 2025", read
+  2026-10-09): you may not "data scrape" and may not "create derivative works ... including links or frames to content, images or artwork
+  (except as expressly authorized by Wizards)". Whether that reaches a plain hyperlink to the locator is not clear. **Reading taken:**
+  the safer one. The menu links to the locator's front page, `https://locator.wizards.com/`, and to nothing deeper: no search address
+  with a place in it (which the design's section 4.4 would have built), no postcode or town typed in the Vault, no "use my location".
+  The person types their town on Wizards' own page. If the owner reads clause 2.2 more loosely, a deep link with the place is a
+  one-line template and a browser-side box, listed as follow-up work; until then it does not exist. The locator's `robots.txt`
+  disallows `/api/` and `/auth/` only; the Vault touches neither (it touches nothing).
+- **Cardmarket, General Terms** (version of 20/02/2026, read in a browser on 2026-10-07): no sentence about links or crawling was
+  found; clause 9 (API: showing cards and prices needs prior written agreement) and clause 10 (no public reproduction of the platform's
+  content) are about content. On 2026-10-09 its pages answered a "Performing security verification" bot check and the check was **not**
+  tried to get past, so the terms and the search-link format were not re-read. **Reading taken:** the same plain link and nothing from
+  Cardmarket shown, listed after the regional shop where there is one, with the link format marked as last checked 2026-10-07 in the
+  menu's "About these links" and in `vault.buy_links.SHOPS`. It stays open (below) for the owner to read the terms and for a person to
+  click each link once. To take Cardmarket out, delete its entry in `vault.buy_links.SHOPS` and in the shop orders of `_ORDERS`; the
+  tests say what else follows.
+- **Magic Madhouse** (terms read 2026-10-07 and the clauses on links searched again 2026-10-09: nothing on links; users may not reproduce or
+  exploit "any portion of the application"): a link carrying only the card name shows none of its content. Its affiliate feed is the
+  licensed route and is not used. **Card Kingdom** (terms of service, linking clause): the link is named as the shop's and the menu says the
+  shops are not affiliated, so nothing suggests endorsement.
+- **Scryfall's `purchase_uris`** are Scryfall's affiliate links; they are not used. The menu's Scryfall row is the card's Scryfall search
+  that the app already linked to, whose page carries Scryfall's own buy links.
+- **Provenance:** every menu answer carries a `computed` block (the Vault built the links from the card's name; nothing was fetched) with each
+  shop and the locator as sources, and the day each link format was checked. The web menu shows the same under "About these links".
+
 ## The two real risks
 
 ### 1. Registration
@@ -290,6 +323,7 @@ sends them.
 | Wizards: Fan Content Policy (optional since #142) | The rules are read live and nothing is stored, so nothing needs their permission today | Not sent, optional | Only if the owner wants it in writing |
 | Cardmarket's terms | Read in a browser on 2026-10-07 (the earlier "bot check" was a wrong address) | **Read** | Recorded in `docs/data-sources.md`: showing Cardmarket's own prices needs its prior written agreement (clause 9); nothing from Cardmarket is stored or shown today |
 | Fan Content monetisation terms | Needed before joining an affiliate programme | Not read | Read https://company.wizards.com/en/legal/fancontentpolicy before joining |
+| Where to buy: Cardmarket's terms and link, Wizards clause 2.2 (#212) | Built on the conservative readings in "Where to buy links"; the terms behind Cardmarket's bot check were not re-read on 2026-10-09 | **Built, owner read pending** | Read Cardmarket's General Terms and say whether the plain search link is acceptable; say whether the locator may be linked with a place in the address (#412 holds both questions; #413 is the work that follows a yes) |
 
 The gate (the table at the top) is met for what the Vault loads today, because the terms of those sources have been read.
 The asks above are **not** a technical precondition that the code checks; they are the owner's commitments from #62, and
@@ -301,6 +335,9 @@ are cited live from Wizards with no copy kept (see Decisions).
 
 ## Decisions
 
+- **Plain links to shops, no affiliate links (owner, 2026-10-09, #212):** the "Where to buy" menu links to a fixed list of shops per country, to the
+  Wizards locator's front page and to the stores a person typed; the Vault contacts none of them, shows no shop price, and earns nothing from a click.
+  Details and the two conservative readings are under "Where to buy links".
 - **Free accounts, no anonymous catalog (owner, 2026-10-06, #62).** The Vault stays free; every feature needs a free
   account because it serves the person's own collection, decks and questions. There is no anonymous card or rules API:
   it would add nothing beyond Scryfall's own data and would amount to the "repackage, republish, or proxy" that

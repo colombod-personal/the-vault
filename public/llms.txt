@@ -249,6 +249,9 @@ be revoked (Account → Connected apps for OAuth).
     `validate_deck_changes`, `find_combos` (pass `include_possible_loops` to add `possible_loops`: the Vault's own reading of the card
     text for a possible loop Commander Spellbook does not list, labelled as the Vault's and not Spellbook's; it shows its arithmetic and
     assumptions, and `one_short` is an engine one mana short of a loop, never a loop), `shopping_list`
+  - where to buy a card: `where_to_buy` (plain links to shops in the order for the person's country, the stores they typed, the Wizards
+    store locator and Scryfall; the Vault contacts no shop and has no price or stock, so it names none the cheapest; the country and the
+    stores are set by the person in the web app, Account, "Where I buy")
 - MCP prompts (`prompts/list`): `vault_start` (the read-only first tour), `rules_judge`, `explain_interaction`, `upgrade_deck`, `shopping_help`, `council_review`, `evaluate_deck`, `import_collection`, `organise_collection`, `reset_or_undo` (the last three start with a preview and change nothing until the person says yes).
 - A read-only token doesn't list the write tools; all of the above are read-only.
 
