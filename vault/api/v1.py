@@ -819,37 +819,6 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     def deck_coverage(body: S.TextIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         return analytics.price_coverage(db, user.id, _coverage(body.text, user_entries(db, user)))
 
-    BASICS = {"plains", "island", "swamp", "mountain", "forest", "wastes", "snow-covered plains", "snow-covered island",
-              "snow-covered swamp", "snow-covered mountain", "snow-covered forest", "snow-covered wastes"}
-
-    @router.get("/decks/overlap", tags=["decks"],
-                summary="Cards in more than one saved deck, and whether you own enough copies to build them all at once")
-    def deck_overlap(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-        decks = list(db.scalars(select(Deck).where(Deck.user_id == user.id).order_by(Deck.name)))
-        owned = delta.aggregate([r.to_collection_entry() for r in user_entries(db, user)], delta.BY_CARD)
-        uses: dict = {}
-        for d in decks:
-            try:
-                needed = delta.aggregate(deck_text.parse_text(d.text).to_entries(), delta.BY_CARD)
-            except (ValueError, OverflowError):
-                continue  # an unreadable saved deck is skipped, not an error for the others
-            for key, entry in needed.items():
-                if entry.name.strip().lower() not in BASICS:
-                    uses.setdefault(key, (entry.name, []))[1].append({"deck_id": d.id, "deck": d.name,
-                                                                       "quantity": entry.quantity})
-        shared = []
-        for key, (name, in_decks) in uses.items():
-            if len(in_decks) < 2:
-                continue
-            need, have = sum(u["quantity"] for u in in_decks), owned[key].quantity if key in owned else 0
-            shared.append({"name": name, "decks": in_decks, "need_for_all": need, "have": have,
-                           "short": max(0, need - have)})
-        shared.sort(key=lambda s: (-s["short"], -len(s["decks"]), s["name"].lower()))
-        return {"decks_checked": len(decks), "shared_cards": len(shared),
-                "short_cards": sum(1 for s in shared if s["short"]), "cards": shared[:200],
-                "note": "Basic lands are left out. 'short' is how many more copies you need to have every deck "
-                        "built at the same time; any printing you own counts."}
-
     @router.get("/decks", tags=["decks"], response_model=S.DeckPage)
     def list_decks(request: Request, cursor: str | None = None, limit: int | None = None, summary: bool = False,
                    brief: bool = Query(False, description="Leave each deck's card text out: name, format, commanders, counts"),

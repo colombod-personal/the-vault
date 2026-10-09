@@ -26,7 +26,7 @@ from starlette.requests import ClientDisconnect
 from . import auth as auth_module
 from . import observability
 from . import oauth_clients, oauth_routes, oauth_server, outbound, passkeys, reviewer_routes, rules_live, tokens, uploads
-from .api import buckets_api, catalog_api, deck_api, mcp, meta, metadata_api, tags_api, v1
+from .api import buckets_api, catalog_api, deck_api, independence_api, mcp, meta, metadata_api, tags_api, v1
 from .api.hal import problem
 from .config import Settings
 from .db import Database
@@ -255,6 +255,7 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
         return user
 
     app.include_router(auth_module.build_router(auth, get_db))
+    app.include_router(independence_api.build_router(get_db, current_user))  # before v1: /decks/overlap is not a /decks/{deck_id}
     app.include_router(v1.build_router(get_db, current_user, optional_user, settings, verifier,
                                        lambda: auth.offered, transport, account_user))
     app.state.rules_live = rules_live.LiveRules(transport=transport)  # the rules, read live from Wizards: nothing stored
