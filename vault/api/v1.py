@@ -784,6 +784,10 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                "created_at": _iso(i.created_at), "_links": {"self": link(f"{V1}/imports/{i.id}")}}
         if i.kind in ("assistant", "undo"):
             out |= {"app": i.app, "lines": (i.changes or {}).get("lines")}
+        elif i.kind in ("reset", "reset_undo"):  # a reset of the collection or one bucket, or its undo (#129)
+            out |= {"app": i.app, "reset": (i.changes or {}).get("reset"), "undone": bool((i.changes or {}).get("undone_by"))}
+            if (i.changes or {}).get("bucket"):
+                out["bucket"] = i.changes["bucket"]
         elif (i.changes or {}).get("merge"):
             out["merge"] = i.changes["merge"]  # what the app changed, which Vault edits were kept, the conflicts
             if i.changes.get("bucket"):

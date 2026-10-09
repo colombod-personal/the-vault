@@ -428,3 +428,41 @@ would also lump in neighbours on the same ISP delegation (a whole site's users s
 /48 can already rotate through 65,536 /64s. The /64 is kept: it stops the cheap case, and a determined attacker with a /48 is the
 same problem as one with many IPv4 addresses, which the per-IP limit never claimed to stop. With the challenge stateless, the limit
 no longer protects other people's sign-in, only the server's work.
+
+## Resetting the collection (#129, 2026-10-09)
+
+A reset (`POST /collection/reset`, the MCP tool `reset_collection`) empties the whole inventory or one bucket: an account-level
+destructive action that is reachable by an OAuth app or a personal token **with the write scope**, because it is a collection
+operation like an import with `replace_everything` (which such a caller can already do), not an account power (`account_user`, section 5:
+creating tokens, deleting the account). It touches `vault/privacy.py` only to add the snapshot table to erasure and export.
+
+What stops an assistant resetting without the person:
+
+- **Scope.** A read-only token and a read-only grant are refused (403), the preview included: the preview is step one of a destructive
+  action, so `POST /collection/reset` is not in `READ_ONLY_POSTS` (`tests/test_collection_reset.py`). The MCP tools are not listed
+  without the write scope, and are marked destructive so a host asks first.
+- **Two steps, bound to the preview.** Without a `confirmation` the call only previews. The confirmation is an HMAC over the person, the
+  scope, the options (keep tags, keep history, no undo), the collection version, a digest of the rows (and tags) it would remove and its
+  expiry (15 minutes); apply recomputes the preview and refuses (409) anything that differs, so a changed collection, other options or
+  another scope are stale. An assistant that previews and confirms in one go is still a write-scope app doing what it was allowed: the
+  protection against that is the one every write tool has (the host's approval of a destructive tool, the server instructions and the
+  skill that say to show the numbers and the export link and to wait for the person's exact yes). **The person's own session** (the
+  web or a native app: the `account` scope, which no OAuth app or token has) must also send `typed: "RESET"` exactly with the
+  confirmation, and the server refuses (422) without it, as account deletion asks for `DELETE`.
+- **What an app cannot choose** (review of 2026-10-09: a prompt-injected assistant with write scope could preview, take the token and
+  apply in one turn). An OAuth app or a personal token is refused (422, preview and apply) when it asks for `no_undo`, `keep_tags: false`
+  or `keep_history: false`, and the MCP tool does not offer them: making a reset permanent, or wiping the person's tags, notes and
+  history, is the person's choice in the Account panel. Tests: `tests/test_collection_reset.py`.
+- **The undo is best-effort, not a guarantee.** For 7 days the latest reset keeps a snapshot (`reset_snapshots`) and
+  `undo_collection_reset` restores the same rows, buckets, folders and baselines, **but only while nothing else has changed the
+  collection**: any later write that moves the collection version (an import, an edit, a move) ends the undo, which is then refused
+  rather than guessed. A hostile assistant that resets and then writes once more has therefore made the reset permanent as far as the
+  undo goes; the export the preview links, and the person's own app file, are the real backup. The answer says so in one sentence. The
+  reset is recorded in the import history under the app's name (`imports.kind = reset`).
+- **Tenancy.** The scope is the caller's: another person's `bucket_id` is a 404, as is another person's snapshot (the snapshot is
+  keyed by the caller's id, there is no id to guess). Rate limit 10 a minute per person; `Idempotency-Key` honoured.
+
+Residual: a connected app with write scope can reset the copies after a confirm, as it can already import a file with
+`replace_everything`; a hostile one can also follow it with another write and so end the undo (above), leaving the export and the
+person's own app file as the way back. It cannot clear tags, notes or history, nor drop the snapshot. The snapshot holds the same personal data as the copies it removed, so
+it is in the data map, the export (`last_reset.json`), erasure and the daily retention job (`docs/gdpr.md`).

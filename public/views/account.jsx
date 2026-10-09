@@ -429,6 +429,8 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged, onCo
 
       <CollectionHistorySection onCollectionChanged={onCollectionChanged} />
 
+      <ResetSection onCollectionChanged={onCollectionChanged} />
+
       <AgentsSection />
 
       <ConnectedAppsSection />
@@ -592,7 +594,8 @@ function CollectionHistorySection({ onCollectionChanged }) {
   const [note, setNote] = useStateAcc(null);
   const reload = () => api.recentImports().then(setItems).catch((e) => setError(e.message));
   useEffectAcc(() => { reload(); }, []);
-  const kindText = (i) => i.kind === 'assistant' ? `Change by ${i.app || 'an assistant'}` : i.kind === 'undo' ? 'Undo of an assistant change' : `Import: ${i.filename}`;
+  const kindText = (i) => i.kind === 'assistant' ? `Change by ${i.app || 'an assistant'}` : i.kind === 'undo' ? 'Undo of an assistant change'
+    : i.kind === 'reset' ? `Reset: ${(i.reset && i.reset.scope) || 'the collection'}` : i.kind === 'reset_undo' ? 'Undo of a reset' : `Import: ${i.filename}`;
   const lineText = (l) => `${l.card}${l.set ? ` (${String(l.set).toUpperCase()} ${l.number})` : ''}: ${l.before} → ${l.after}`;
   const ask = async () => {
     setError(null); setNote(null); setBusy(true);
@@ -660,6 +663,144 @@ function CollectionHistorySection({ onCollectionChanged }) {
           )}
         </div>
       ))}
+    </Section>
+  );
+}
+
+
+// Reset collection (#129): the whole inventory or one bucket. Preview first (the server says what goes: the browser adds nothing up),
+// the download of the export, a typed RESET, then the reset; for 7 days afterwards the section offers the undo.
+const rsPlural = (n, one, many) => `${(n || 0).toLocaleString()} ${n === 1 ? one : many}`;
+const rsMoney = (v) => '$' + (Math.round((v || 0) * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const RS_WORD = 'RESET';
+
+function ResetPreview({ p }) {
+  const r = p.removes, v = r.added_in_the_vault_only, e = r.edited_in_the_vault;
+  const where = p.scope.bucket ? `the bucket ${p.scope.bucket.name}` : 'the whole inventory';
+  return (
+    <div className="reset-preview" role="group" aria-label={`What resetting ${where} would remove`}>
+      <p style={{ fontSize: 13, marginBottom: 8 }}>
+        Resetting <strong>{where}</strong> removes <strong>{rsPlural(r.copies, 'copy', 'copies')}</strong> in {rsPlural(r.rows, 'row', 'rows')}
+        {' '}({rsPlural(r.printings, 'printing', 'printings')}, {rsPlural(r.cards, 'card', 'cards')}), worth <strong>{rsMoney(r.market_value_usd)}</strong> at market prices.
+      </p>
+      <ul className="reset-facts">
+        {v && v.known && v.cards > 0 && <li><strong>{rsPlural(v.cards, 'card', 'cards')} ({rsPlural(v.copies, 'copy', 'copies')})</strong> were added here only: they are in no file you imported, so only the export below or the undo gets them back.</li>}
+        {v && !v.known && <li>{v.note}</li>}
+        {e && e.cards > 0 && <li>{rsPlural(e.cards, 'card', 'cards')} you changed here since the last import go too.</li>}
+        {r.unmatched_rows > 0 && <li>{rsPlural(r.unmatched_rows, 'row has', 'rows have')} no known printing.</li>}
+        <li>{p.buckets}</li>
+        <li>{p.tags.keep
+          ? (p.tags.cards_left_not_owned > 0
+            ? `${rsPlural(p.tags.cards_left_not_owned, 'tagged card keeps its tags', 'tagged cards keep their tags')}, shown as “not owned”` + (p.notes.cards > 0 ? `, and ${rsPlural(p.notes.cards, 'note stays', 'notes stay')}.` : '.')
+            : 'No tags or notes are affected.')
+          : `${rsPlural(p.tags.removed, 'tag', 'tags')} and ${rsPlural(p.notes.removed, 'note', 'notes')} are removed.`}</li>
+        <li>{p.history.keep ? 'The import history stays, with an entry for the reset.' : `${rsPlural(p.history.removed, 'history entry', 'history entries')} are cleared.`}</li>
+        {p.leaves && <li>Left as they are: {rsPlural(p.leaves.copies, 'copy', 'copies')} in {rsPlural(p.leaves.buckets, 'other bucket', 'other buckets')}.</li>}
+      </ul>
+      <p style={{ margin: '10px 0' }}>
+        <a className="btn xs" href={p.backup.download} download>Download the export of this ({p.backup.format})</a>
+      </p>
+      <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+        {p.undo.available ? `You can undo this for ${p.undo.days} days, until anything else changes your collection.` : p.undo.note}
+      </p>
+      {p.refused && <p role="alert" style={{ color: 'var(--danger)', fontSize: 13 }}>{p.refused}</p>}
+    </div>
+  );
+}
+
+function ResetSection({ onCollectionChanged }) {
+  const api = window.VaultApi;
+  const [buckets, setBuckets] = useStateAcc([]);
+  const [bucketId, setBucketId] = useStateAcc('');
+  const [clearTags, setClearTags] = useStateAcc(false);
+  const [clearHistory, setClearHistory] = useStateAcc(false);
+  const [noUndo, setNoUndo] = useStateAcc(false);
+  const [preview, setPreview] = useStateAcc(null);
+  const [typed, setTyped] = useStateAcc('');
+  const [busy, setBusy] = useStateAcc(false);
+  const [error, setError] = useStateAcc(null);
+  const [note, setNote] = useStateAcc(null);
+  const [info, setInfo] = useStateAcc(null);
+  const options = { bucket_id: bucketId ? Number(bucketId) : null, keep_tags: !clearTags, keep_history: !(clearHistory && !bucketId), no_undo: noUndo };
+  const body = Object.fromEntries(Object.entries(options).filter(([, v]) => v !== null));
+  const reload = () => {
+    api.buckets().then(setBuckets, () => {});
+    api.resetInfo().then(setInfo, () => setInfo(null));
+  };
+  useEffectAcc(reload, []);
+  const changed = (set) => (e) => { set(e.target.type === 'checkbox' ? e.target.checked : e.target.value); setPreview(null); setTyped(''); setNote(null); setError(null); };
+  const run = async (fn) => {
+    setError(null); setBusy(true);
+    try { await fn(); } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+  const ask = () => run(async () => { setNote(null); setPreview(await api.resetPreview(body)); setTyped(''); });
+  const doReset = () => run(async () => {
+    const res = await api.resetApply(body, preview.confirmation, typed);
+    setPreview(null); setTyped('');
+    setNote(`Reset: ${rsPlural(res.removed.copies, 'copy', 'copies')} removed from ${res.scope.bucket ? res.scope.bucket.name : 'the whole inventory'}. ` +
+            (res.undo.available ? `You can undo it until ${new Date(res.undo.until).toLocaleDateString()}.` : 'It cannot be undone.'));
+    onCollectionChanged && onCollectionChanged();
+    reload();
+  });
+  const doUndo = () => run(async () => {
+    const res = await api.resetUndo();
+    setNote(`Undone: ${rsPlural(res.restores.copies, 'copy is', 'copies are')} back as before the reset.`);
+    onCollectionChanged && onCollectionChanged();
+    reload();
+  });
+  return (
+    <Section title="Reset collection">
+      <p className="label-mono" style={{ marginBottom: 8 }}>
+        Start over: empty the whole inventory or one bucket. You see what goes first and can download an export; your buckets, tags and notes
+        stay unless you clear them. A reset can be undone for 7 days, until anything else changes your collection.
+      </p>
+      {error && <p role="alert" style={{ color: 'var(--danger)' }}>{error}</p>}
+      {note && <p role="status" className="label-mono" style={{ color: 'var(--good)', marginBottom: 8 }}>{note}</p>}
+      {info && (
+        <div className="panel panel-tight reset-undo" role="group" aria-label="Undo the last reset">
+          <p style={{ fontSize: 13, marginBottom: 8 }}>
+            Last reset: <strong>{info.scope}</strong>, {rsPlural(info.removed.copies, 'copy', 'copies')} ({rsMoney(info.removed.market_value_usd)}),
+            {' '}{new Date(info.created_at).toLocaleString()}. It can be undone until {new Date(info.expires_at).toLocaleString()}.
+          </p>
+          {info.can_undo
+            ? <button type="button" className="btn sm" disabled={busy} onClick={doUndo}>Undo the reset</button>
+            : <p className="muted" style={{ fontSize: 12 }}>{info.why_not}</p>}
+        </div>
+      )}
+      <div className="reset-options">
+        <label className="label-mono" htmlFor="reset-scope">What to reset</label>
+        <select id="reset-scope" className="select" value={bucketId} onChange={changed(setBucketId)}>
+          <option value="">The whole inventory</option>
+          {buckets.map((b) => <option key={b.id} value={b.id}>{b.name} ({rsPlural(b.copies, 'copy', 'copies')})</option>)}
+        </select>
+        <label className="reset-check"><input type="checkbox" checked={clearTags} onChange={changed(setClearTags)} />
+          <span>Also clear my tags and notes{bucketId ? ' on the cards that leave the inventory' : ''}</span></label>
+        <label className="reset-check"><input type="checkbox" checked={clearHistory && !bucketId} disabled={!!bucketId} onChange={changed(setClearHistory)} />
+          <span>Also clear my import history{bucketId ? ' (whole inventory only)' : ''}</span></label>
+        <label className="reset-check"><input type="checkbox" checked={noUndo} onChange={changed(setNoUndo)} />
+          <span>Keep no undo copy (the reset cannot be undone)</span></label>
+        <div><button type="button" className="btn sm" disabled={busy} onClick={ask}>{busy && !preview ? 'Reading…' : 'Preview what would be removed'}</button></div>
+      </div>
+      {preview && (
+        <div className="panel reset-confirm" style={{ borderColor: 'var(--danger)' }}>
+          <p className="eyebrow" style={{ marginBottom: 8 }}>Nothing is changed until you type {RS_WORD}</p>
+          <ResetPreview p={preview} />
+          {preview.ready && (
+            <>
+              <label className="label-mono" htmlFor="reset-typed" style={{ display: 'block', marginBottom: 6 }}>Type {RS_WORD} to confirm:</label>
+              <div className="reset-typed">
+                <input id="reset-typed" className="input" value={typed} autoComplete="off" autoCapitalize="characters" spellCheck="false"
+                       onChange={(e) => setTyped(e.target.value)} />
+                <button type="button" className="btn sm" disabled={busy || typed !== RS_WORD} style={{ color: 'var(--danger)' }} onClick={doReset}>
+                  {busy ? 'Resetting…' : 'Reset'}
+                </button>
+                <button type="button" className="btn sm ghost" disabled={busy} onClick={() => { setPreview(null); setTyped(''); }}>Cancel</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </Section>
   );
 }

@@ -185,7 +185,9 @@ be revoked (Account → Connected apps for OAuth).
     `get_collection_stats`, `get_value_history`, `get_acquisition_timeline`
   - buckets (the places copies live in: binders, deck boxes, trade boxes): `list_buckets`, `create_bucket`,
     `rename_bucket`, `move_cards` (moves copies between buckets, splitting a stack; a big move is shown first),
-    `delete_bucket` (an empty one, asks first); `search_cards` takes a `bucket` to list what is in one, and so do the
+    `delete_bucket` (an empty one, asks first), `reset_collection` (empties the whole inventory or one bucket: preview first, the
+    person's exact yes, then the confirmation; tags, notes and history stay; undo kept 7 days while nothing else changes the collection) and `undo_collection_reset`;
+    `search_cards` takes a `bucket` to list what is in one, and so do the
     analytics tools (`get_collection_summary`, `get_valuation`, ...) to total one
   - tags (the person's own labels on cards, on the card so every printing has them): `list_tags`, `tag_cards`,
     `untag_cards`, `rename_tag`, `delete_tag` (asks first); a tag you write is recorded as written by your app and shown

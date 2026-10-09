@@ -26,7 +26,7 @@ from starlette.requests import ClientDisconnect
 from . import auth as auth_module
 from . import observability
 from . import oauth_clients, oauth_routes, oauth_server, outbound, passkeys, reviewer_routes, rules_live, tokens, uploads
-from .api import buckets_api, catalog_api, deck_api, ideas_api, independence_api, mcp, meta, metadata_api, tags_api, v1
+from .api import buckets_api, catalog_api, deck_api, ideas_api, independence_api, mcp, meta, metadata_api, reset_api, tags_api, v1
 from .api.hal import problem
 from .config import Settings
 from .db import Database
@@ -263,6 +263,7 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
     app.include_router(catalog_api.build_router(get_db, optional_user, current_user, settings, app.state.rules_live))
     app.include_router(deck_api.build_router(get_db, current_user, settings, transport))
     app.include_router(buckets_api.build_router(get_db, current_user))
+    app.include_router(reset_api.build_router(get_db, current_user, settings))
     app.include_router(tags_api.build_router(get_db, current_user))
     app.include_router(metadata_api.build_router(get_db, current_user))
     app.include_router(passkeys.build_router(settings, get_db, auth_module.sign_in, account_user))

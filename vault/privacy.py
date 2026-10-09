@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from .importer import export_collection
 from .sharing import display_name
-from .models import AccessToken, ApiSession, Bucket, BucketBaseline, CardAnnotation, TagAssignment, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionBaseline, CollectionValue, Deck, DeckVersion, Entry, Identity, Import, Share, StagedUpload, User
+from .models import AccessToken, ApiSession, Bucket, BucketBaseline, CardAnnotation, TagAssignment, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionBaseline, ResetSnapshot, CollectionValue, Deck, DeckVersion, Entry, Identity, Import, Share, StagedUpload, User
 from .prices import history
 from .collection_view import CollectionView
 
@@ -48,6 +48,7 @@ connected_apps.json  apps you connected with OAuth, such as ChatGPT or Claude (n
 buckets.json         the places your copies are grouped in (one per folder of your file, and Unsorted), with how many copies each holds
 tags.json            the tags you (or an assistant you allowed) put on cards, and who wrote each
 card_annotations.json   notes about cards written by you or an assistant
+last_reset.json      if you reset your collection in the last 7 days: what it removed (the undo copy), until it is deleted
 
 Card data, images and prices come from Scryfall (https://scryfall.com), which sources prices
 from TCGplayer and Cardmarket. They are not personal data. Thank you, Scryfall.
@@ -78,6 +79,25 @@ def _buckets(db: Session, user: User) -> list[dict]:
     return [{"name": b.name, "kind": b.kind, "position": b.position, "copies": int(copies.get(b.id, 0)),
              "metadata": b.vault_metadata, "created_at": b.created_at}
             for b in db.scalars(select(Bucket).where(Bucket.user_id == user.id).order_by(Bucket.position, Bucket.id))]
+
+
+def _last_reset(db: Session, user: User) -> dict | None:
+    """The undo copy of a reset (#129) while it exists: what it says and the rows it holds, one object per row."""
+    from . import collection_reset
+
+    snap = db.get(ResetSnapshot, user.id)
+    if snap is None:
+        return None
+    try:
+        payload = collection_reset._load(snap)
+    except collection_reset.SnapshotUnreadable as exc:  # corrupt or of a format this code does not know: say so, never fail the export
+        return {"reset_at": snap.created_at, "can_be_undone_until": snap.expires_at, "what": snap.summary, "readable": False,
+                "note": str(exc)}
+    columns = payload["entry_columns"]
+    return {"reset_at": snap.created_at, "can_be_undone_until": snap.expires_at, "what": snap.summary, "readable": True,
+            "removed_rows": [dict(zip(columns, row)) for row in payload["entries"]],
+            "removed_tags": [dict(zip(payload.get("tag_columns", []), row)) for row in payload.get("tags", [])],
+            "removed_notes": [dict(zip(payload.get("note_columns", []), row)) for row in payload.get("notes", [])]}
 
 
 def export_archive(db: Session, user: User) -> bytes:
@@ -147,6 +167,7 @@ def export_archive(db: Session, user: User) -> bytes:
                                                     "updated_at": a.updated_at}
                                                    for a in db.scalars(select(CardAnnotation).where(CardAnnotation.user_id == user.id)
                                                                        .order_by(CardAnnotation.id))]))
+        z.writestr("last_reset.json", _json(_last_reset(db, user)))
         z.writestr("decks.json", _json([
             {"id": d.id, "name": d.name, "source_url": d.source_url, "source_author": d.source_author,
              "source_fetched_at": d.source_fetched_at, "created_at": d.created_at,
@@ -214,6 +235,7 @@ def personal_data(user_id: int) -> dict:
         "bucket_baselines": delete(BucketBaseline).where(BucketBaseline.user_id == user_id),  # before the buckets they belong to
         "buckets": delete(Bucket).where(Bucket.user_id == user_id),  # after the entries: a bucket with copies can't be deleted
         "collection_baselines": delete(CollectionBaseline).where(CollectionBaseline.user_id == user_id),
+        "reset_snapshots": delete(ResetSnapshot).where(ResetSnapshot.user_id == user_id),  # the undo of a reset: copies the person removed
         "imports": delete(Import).where(Import.user_id == user_id),
         "collection_values": delete(CollectionValue).where(CollectionValue.user_id == user_id),
         "identities": delete(Identity).where(Identity.user_id == user_id),

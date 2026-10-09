@@ -357,3 +357,25 @@ def test_deck_ideas_answer_404_for_another_persons_deck(client):
         res = client.get(f"/api/v1/decks/{deck_id}/{path}")
         missing = client.get(f"/api/v1/decks/999999/{path}")
         assert res.status_code == 404 and missing.status_code == 404 and missing.text == res.text, path
+
+
+def test_reset_answers_404_for_another_persons_bucket_and_snapshot(client):
+    """#129: the reset's scope is the caller's; another person's bucket id and their undo snapshot are 404, never 403."""
+    def sign_in(email):
+        client.cookies.clear()
+        assert client.post("/api/auth/dev-login", params={"email": email}).status_code == 200
+
+    csv = ("Folder Name,Quantity,Trade Quantity,Card Name,Set Code,Set Name,Card Number,Condition,Printing,Language,Price Bought,Date Bought,LOW,MID,MARKET\n"
+           "Binder,3,0,Sol Ring,C21,Commander 2021,263,Mint,Normal,English,1.00,2024-02-17,1.00,2.00,2.30\n").encode()
+    sign_in("owner@localhost")
+    client.post("/api/v1/imports", files={"file": ("c.csv", csv, "text/csv")})
+    bucket = client.get("/api/v1/collection/buckets").json()["items"][0]["id"]
+    seen = client.post("/api/v1/collection/reset", json={"bucket_id": bucket}).json()
+    assert client.post("/api/v1/collection/reset", json={"bucket_id": bucket, "typed": "RESET", "confirmation": seen["confirmation"]}).status_code == 200
+    sign_in("other@localhost")
+    client.post("/api/v1/imports", files={"file": ("c.csv", csv, "text/csv")})
+    assert client.post("/api/v1/collection/reset", json={"bucket_id": bucket}).status_code == 404
+    assert client.post("/api/v1/collection/reset", json={"bucket_id": bucket, "typed": "RESET", "confirmation": seen["confirmation"]}).status_code == 404
+    assert client.get("/api/v1/collection/reset").status_code == 404
+    assert client.post("/api/v1/collection/reset/undo", json={"confirm": True}).status_code == 404
+    assert client.get("/api/v1/collection").json()["copies"] == 3  # their own copies were never touched
