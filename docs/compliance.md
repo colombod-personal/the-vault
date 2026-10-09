@@ -132,7 +132,7 @@ Sources (re-read 2026-10-05):
   API for whatever you want", asking only that it not be hammered
   ([thread 2832338](https://archidekt.com/forum/thread/2832338)). In early 2026 the same developer wrote "I believe we
   start rate limiting people at 40 requests per minute" ([thread 19112643](https://archidekt.com/forum/thread/19112643)):
-  the cache (#133) cuts repeat reads of the same deck, but a cache miss is fetched at once, so a burst of different decks can still reach Archidekt; the logged counts show whether a cap is needed.
+  the cache (#133) cuts repeat reads of the same deck, but a cache miss is fetched through one throttle for the whole process (one read a second, #353) and each person is limited to 30 Archidekt calls a minute; the logged counts show whether a tighter cap is needed.
 - **Writing:** there is no API for other apps to change a person's deck, so the Vault does not write.
 
 What the Vault does:

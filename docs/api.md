@@ -143,6 +143,13 @@ is stored). Over the limit they answer `429` (problem+json) with `Retry-After` i
 | `POST /api/auth/passkey/{signup,register,login}/options`, `GET /api/auth/login/{provider}`, `GET\|POST /api/auth/callback/{provider}`, `POST /api/facebook/data-deletion`, `GET /api/facebook/deletion-status` | 30 | `AUTH_RATE_LIMIT` |
 | `POST /api/auth/passkey/{signup,register,login}/verify`, `POST /api/v1/auth/native/{provider}`, `POST /api/v1/auth/token` | 10 | `AUTH_VERIFY_RATE_LIMIT` |
 | `POST /api/v1/collection/refresh` (per signed-in user, not per IP) | 20 | `REFRESH_RATE_LIMIT` |
+| `POST /api/v1/cards/lookup` with `refresh: true` (per signed-in user; a call to Scryfall for up to 75 printings) | 20 | `LOOKUP_REFRESH_LIMIT` |
+| `GET /api/v1/archidekt/decks/{id}`, `POST /api/v1/decks/import-link` and `POST /api/v1/decks/{id}/refresh`: the calls that really go to Archidekt, together (per signed-in user; a read served from the cache is never limited, and over the limit the copy the Vault holds is served, only a deck it holds no copy of is refused) | 30 | `ARCHIDEKT_LIMIT` |
+| `POST /api/v1/imports` and `POST /api/v1/imports/preview` together (per signed-in user; up to 20 MB of parsing each) | 10 | `IMPORT_LIMIT` |
+
+Past a limit these answer `429` with `Retry-After`. Reads of different Archidekt decks that are not cached also share one interval for the whole
+process (`ARCHIDEKT_INTERVAL`, one second), so a walk over deck ids cannot reach Archidekt faster than `docs/compliance.md` promises. A person
+keeps at most 200 saved decks (`MAX_DECKS`); saving one more, by text or by link, answers `409` with "Delete one first".
 | `GET\|POST /oauth/authorize`, `POST /oauth/token`, `POST /oauth/revoke` | 120 | `OAUTH_RATE_LIMIT` |
 | `POST /oauth/register` | 20 | `OAUTH_REGISTER_RATE_LIMIT` |
 
