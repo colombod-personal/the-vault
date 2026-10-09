@@ -29,7 +29,7 @@ FORMATS = ("commander", "standard", "pioneer", "modern", "legacy", "vintage", "p
            "oldschool", "gladiator", "alchemy")
 SINGLETON = {"commander", "duel", "predh", "paupercommander", "brawl", "standardbrawl", "oathbreaker", "gladiator"}
 COMMANDER_STYLE = {"commander", "duel", "predh", "paupercommander", "brawl", "standardbrawl", "oathbreaker"}  # color identity applies
-SIZE_100 = {"commander", "duel", "predh", "paupercommander"}
+SIZE_100 = {"commander", "duel", "predh", "paupercommander", "brawl"}  # brawl: 100 cards, Wizards' Brawl page (read 2026-10-10)
 LEGAL = ("legal", "restricted")
 COLORS = ("W", "U", "B", "R", "G")
 
@@ -327,10 +327,15 @@ def legality(resolved: Resolved, fmt: str) -> dict:
             issues.append({"kind": "unknown_card", "card": e.line.name, "detail": "not found in the card catalog (misspelled, or not paper Magic)"})
         elif e.card.legalities.get(fmt) not in LEGAL:
             issues.append({"kind": "not_legal", "card": e.card.name, "detail": f"{e.card.legalities.get(fmt, 'unknown')} in {fmt}"})
+    # The companion starts outside the deck: it is not one of the 100 (Commander) or the 60 (constructed), it is one of the sideboard's
+    # 15, and in constructed the four-card limit counts the deck and the sideboard together (Comprehensive Rules 100.2a, 100.4a, 903.5a).
+    in_deck = [e for e in played if e.line.section != "companion"]
+    side_entries = resolved.section("sideboard") + resolved.section("companion")
+    counted = in_deck + (side_entries if fmt not in COMMANDER_STYLE else [])
     counts = Counter()
-    for e in played:
+    for e in counted:
         counts[e.name] += e.line.quantity
-    for e in played:
+    for e in counted:
         if e.card is None or counts[e.name] == 0:
             continue
         name, n = e.card.name, counts[e.card.name]
@@ -338,18 +343,20 @@ def legality(resolved: Resolved, fmt: str) -> dict:
         limit = copy_limit(e.card, fmt)
         if limit is not None and n > limit:
             own = f" (this card says a deck can have up to {limit})" if limit > 4 or (limit > 1 and fmt in SINGLETON) else ""
-            issues.append({"kind": "too_many_copies", "card": name, "detail": f"{n} copies, at most {limit} allowed in {fmt}{own}"})
-    total = sum(e.line.quantity for e in played)
+            together = " counting the sideboard" if fmt not in COMMANDER_STYLE and any(x.card and x.card.name == name for x in side_entries) else ""
+            issues.append({"kind": "too_many_copies", "card": name, "detail": f"{n} copies{together}, at most {limit} allowed in {fmt}{own}"})
+    total = sum(e.line.quantity for e in in_deck)
     if fmt in SIZE_100 and total != 100:
         issues.append({"kind": "deck_size", "card": None, "detail": f"{total} cards; {fmt} decks have exactly 100 (commander included)"})
     elif fmt not in SIZE_100 and fmt not in COMMANDER_STYLE and total < 60 and fmt not in ("gladiator",):
         issues.append({"kind": "deck_size", "card": None, "detail": f"{total} cards; {fmt} main decks have at least 60"})
-    side = sum(e.line.quantity for e in resolved.section("sideboard"))
+    side = sum(e.line.quantity for e in side_entries)
     if fmt not in COMMANDER_STYLE and side > 15:
-        issues.append({"kind": "sideboard_size", "card": None, "detail": f"{side} sideboard cards; at most 15"})
+        issues.append({"kind": "sideboard_size", "card": None, "detail": f"{side} sideboard cards (a companion counts as one); at most 15"})
     commanders = resolved.section("commander")
     ident = None
     if fmt in COMMANDER_STYLE:
+        issues.extend(commander_issues(commanders, fmt))
         if not commanders:
             issues.append({"kind": "no_commander", "card": None, "detail": "no Commander section found, so color identity was not checked"})
         else:
@@ -360,8 +367,92 @@ def legality(resolved: Resolved, fmt: str) -> dict:
                                    "detail": f"identity {''.join(e.card.color_identity) or 'colorless'} is outside the commander's {''.join(sorted(ident, key=COLORS.index)) or 'colorless'}"})
     return {"format": fmt, "legal": not issues, "issues": issues, "cards_checked": total,
             "commander_color_identity": sorted(ident, key=COLORS.index) if ident is not None else None,
-            "not_checked": ["commander eligibility (legendary creature or 'can be your commander')", "partner/companion rules",
-                            "cards named 'a deck can have up to N copies'", "sideboard legality of individual cards", "format-specific rules not listed here"]}
+            "not_checked": ["which partner ability fits which (only that each of two commanders has one is checked)", "the companion's own deck-building condition",
+                            "Standard Brawl, Oathbreaker, Gladiator and Pauper Commander: their deck sizes and commander rules (only copies and colour identity are checked)",
+                            "sideboard legality of individual cards", "format-specific rules not listed here"],
+            "checked": _checked_rules(fmt)}
+
+
+def _is_legendary(card) -> bool:
+    return "Legendary" in (card.type_line or "")
+
+
+def _can_be_commander(card, fmt: str) -> bool:
+    """Rule 903.3: a legendary creature, a legendary Vehicle, or a legendary Spacecraft with a power and toughness, or a card whose
+    text says it can be your commander (903.3a). Brawl (Wizards' Brawl page, 2026-10-10) also takes a legendary Planeswalker."""
+    text = all_text(card)
+    if "can be your commander" in text:
+        return True
+    if not _is_legendary(card):
+        return False
+    types = card.type_line or ""
+    if "Creature" in types or "Vehicle" in types or "Background" in types:  # a Background leads only beside a 'Choose a Background' commander (702.124)
+        return True
+    if "Spacecraft" in types:
+        return True  # only a Spacecraft with a power/toughness box may lead; that box is not in the text, so never called illegal on a guess
+    return fmt == "brawl" and "Planeswalker" in types
+
+
+def _partner_kind(card) -> set[str]:
+    """The partner abilities (rule 702.124a) a card's text carries."""
+    text = all_text(card)
+    kinds = set()
+    if "Partner with " in text:
+        kinds.add("partner_with")
+    elif any(line.strip().lower().startswith("partner") for line in text.splitlines()):
+        kinds.add("partner")
+    if "Choose a Background" in text:
+        kinds.add("choose_background")
+    if "Doctor's companion" in text:
+        kinds.add("doctors_companion")
+    if "Friends forever" in text:
+        kinds.add("friends_forever")
+    if "Background" in (card.type_line or ""):
+        kinds.add("background")
+    return kinds
+
+
+
+
+def commander_issues(commanders: list, fmt: str) -> list[dict]:
+    """Commander count and eligibility from the Comprehensive Rules (903.3 and 702.124): at most two commanders, two only when
+    each has a partner ability that fits the other, and each is eligible. Only formats that follow rule 903 get the eligibility
+    check (commander, duel, predh); Brawl takes a legendary creature or Planeswalker (Wizards' Brawl page). Anything this cannot
+    decide from the cards' text is left to ``not_checked`` and never called illegal."""
+    out: list[dict] = []
+    cards = [e.card for e in commanders if e.card is not None]
+    count = sum(e.line.quantity for e in commanders)
+    if count > 2:
+        out.append({"kind": "commander_count", "card": None, "detail": f"{count} commanders; a deck has one, or two with partner abilities (rule 702.124g)"})
+    if fmt in ("commander", "duel", "predh", "brawl"):
+        for card in cards:
+            if not _can_be_commander(card, fmt):
+                out.append({"kind": "commander_not_eligible", "card": card.name,
+                            "detail": "is not a legendary creature" + (" or Planeswalker" if fmt == "brawl" else ", Vehicle or Spacecraft")
+                                      + " and does not say it can be your commander (rule 903.3)"})
+    if fmt in ("commander", "duel", "predh") and len(cards) == 2 and count == 2:
+        a, b = cards
+        ka, kb = _partner_kind(a), _partner_kind(b)
+        if not (ka and kb):
+            lacking = [c.name for c, k in ((a, ka), (b, kb)) if not k]
+            out.append({"kind": "commander_pair", "card": lacking[0],
+                        "detail": f"two commanders need a partner ability on each ({', '.join(lacking)} has none; rule 702.124)"})
+    return out
+
+
+def _checked_rules(fmt: str) -> list[str]:
+    """What this answer applied, with the Comprehensive Rules number where Wizards publishes the rule, so a person can see
+    what 'legal' rests on (#428)."""
+    rules = ["each card's legality in the format, from Scryfall's data (banned, restricted, not legal)",
+             "copies per card: the format's limit (rule 100.2a: four; 903.5b: one in Commander), basic lands and cards that say "
+             "'any number' or 'up to N' excepted"]
+    if fmt in SIZE_100:
+        rules.append("exactly 100 cards including the commander, the companion not counted (rule 903.5a)")
+    elif fmt not in COMMANDER_STYLE:
+        rules.append("at least 60 cards (rule 100.2a); a sideboard of at most 15 and the copy limit counted over deck and sideboard (rule 100.4a)")
+    if fmt in COMMANDER_STYLE:
+        rules.append("colour identity within the commander's (rule 903.5c)")
+    return rules
 
 
 # -- upgrades -----------------------------------------------------------------------------------
