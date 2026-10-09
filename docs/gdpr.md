@@ -98,6 +98,10 @@ own window, as for any deletion (see the checklist below). **Erasure** (`DELETE 
   unused hand-over codes, and the personal access tokens and connected-app grants made in the last 24 hours (rows the person can already delete one by one); nothing new is stored. Only the
   person's own methods are read or removed, and another person's id is a 404 (`tests/test_recent_sign_in_methods.py`). #347.
 
+- **Decision for #347, not yet implemented:** account-level actions require a recent confirmation (10 minutes) using a one-time code sent
+  to the person's e-mail. They can follow the authorization link in the message or enter the code. Until that flow is built, the current
+  account-level actions still use the existing session checks; see the design and remaining risks in `docs/mcp-oauth-threat-model.md`.
+
 - OAuth grants are listed (grouped by app) and revoked by their owner only (`/api/v1/me/apps`, 404 otherwise) and, like personal access
   tokens, never carry account-level powers (`docs/mcp-oauth-threat-model.md`).
 

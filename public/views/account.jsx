@@ -999,7 +999,7 @@ function SignOutEverywhere({ onCancel, onRemoved }) {
           )}
           {error && <p role="alert" style={{ color: 'var(--danger)' }}>{error}</p>}
           <div className="signout-actions">
-            {recent.length > 1 && (
+            {recent.length > 1 && !(found._links && found._links.next) && recent.every((m) => m.removable) && (
               <button className="btn sm" disabled={busy !== null} onClick={removeAllRecent}>
                 {busy === 'recent' ? 'Removing…' : `Remove all ${recent.length} added in the last ${hours} hours`}
               </button>
@@ -1069,7 +1069,7 @@ function SignInMethods({ me, onChanged }) {
         {linkable.map((p) => <a key={p} className="btn sm ghost" href={`/api/auth/login/${p}`}>Link {p[0].toUpperCase() + p.slice(1)}</a>)}
         {/* On a phone the top bar has no room for Sign out, so it is here (layout.css shows .m-only). */}
         <button className="btn sm m-only" onClick={() => signOut()}>Sign out</button>
-        <button className="btn sm ghost" title="Signs out every browser signed in to this account, including this one"
+        <button className="btn sm ghost" title="Review sign-out everywhere; this browser stays signed in unless you choose to sign out"
                 aria-expanded={leaving} onClick={() => setLeaving(true)}>Sign out everywhere</button>
       </div>
       {leaving && <SignOutEverywhere onCancel={() => setLeaving(false)} onRemoved={() => { reload(); onChanged && onChanged(); }} />}

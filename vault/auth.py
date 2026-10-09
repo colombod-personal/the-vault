@@ -331,9 +331,11 @@ def _claim_identity(db: Session, identity: Identity, current: User, hold: Reques
     from .privacy import personal_data
 
     other_id = identity.user_id
-    # Both accounts locked (in id order, so two links the other way round can't deadlock): an
-    # import into the other account waits, and then sees it gone or no longer owning this sign-in.
-    db.execute(select(User.id).where(User.id.in_([other_id, current.id])).order_by(User.id).with_for_update())
+    # Both accounts locked in id order through the shared lock and timeout mechanism, so two links
+    # the other way round can't deadlock. An import into the other account waits, then sees it gone
+    # or no longer owning this sign-in.
+    for account_id in sorted({other_id, current.id}):
+        lock_account(db, account_id)
     if hold is not None:  # the caller's session was ended while this request ran: it may not take a sign-in method (#347)
         require_live_session(db, hold, current.id)
     identity_id = identity.id
