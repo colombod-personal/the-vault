@@ -113,17 +113,33 @@ priced AS (
 )"""
 
 
+def scope(bucket_id: int | None = None, tag: str | None = None) -> tuple[str, dict]:
+    """The SQL (for :func:`_priced`) and parameters limiting a person's rows to one bucket and/or the cards they tagged (#130).
+    The tag is on the card (its oracle id), so every printing of a tagged card counts, and a copy counts once however many other
+    tags its card has: the filter names one tag. Every analytics function takes the same two arguments."""
+    sql, params = "", {}
+    if bucket_id is not None:
+        sql += " AND bucket_id = :bid"
+        params["bid"] = bucket_id
+    if tag is not None:
+        sql += (" AND scryfall_id IN (SELECT c.scryfall_id FROM cards c JOIN tag_assignments t ON t.oracle_id = c.oracle_id "
+                "WHERE t.user_id = :uid AND t.tag = :tag)")
+        params["tag"] = tag
+    return sql, params
+
+
 def _money(value) -> float:
     return round(float(value or 0), 2)
 
 
 # -- P&L --------------------------------------------------------------------------------------
 
-def pnl(db: Session, user_id: int) -> dict:
+def pnl(db: Session, user_id: int, bucket_id: int | None = None, tag: str | None = None) -> dict:
     """Profit and loss over the copies with a known cost, per printing as the web app counts it:
     a printing's cost is known when its total paid is positive; its known copies are those with a
     price paid, valued at today's price."""
-    row = db.execute(text(_priced() + """,
+    scope_sql, scope_params = scope(bucket_id, tag)
+    row = db.execute(text(_priced(scope_sql) + """,
 groups AS (
   SELECT gkey, sum(quantity) AS qty, sum(coalesce(paid, 0) * quantity) AS paid_total,
          coalesce(sum(quantity) FILTER (WHERE paid <> 0), 0) AS paid_qty,
@@ -135,7 +151,7 @@ SELECT coalesce(sum(paid_total) FILTER (WHERE paid_total > 0 AND paid_qty > 0), 
        coalesce(sum(paid_qty) FILTER (WHERE paid_total > 0 AND paid_qty > 0), 0) AS known_copies,
        coalesce(sum(qty), 0) AS copies,
        count(*) FILTER (WHERE paid_total > 0 AND paid_qty > 0) AS known_printings
-FROM groups"""), {"uid": user_id}).one()
+FROM groups"""), {"uid": user_id, **scope_params}).one()
     paid, market = _money(row.paid), _money(row.market)
     gain = round(market - paid, 2) if row.known_printings else None
     return {"pnl": gain, "pnl_pct": round(gain / paid * 100, 2) if gain is not None and paid else None,
@@ -145,6 +161,31 @@ FROM groups"""), {"uid": user_id}).one()
 
 HIDDEN_PNL = {"pnl": None, "pnl_pct": None, "known_cost_paid": None, "known_cost_market": None,
               "known_cost_copies": None, "unknown_cost_copies": None}
+
+
+def scoped_history(db: Session, user_id: int, days: list[date], bucket_id: int | None = None,
+                   tag: str | None = None) -> dict[date, dict]:
+    """The value history of one bucket or tag (#130). The daily series the Vault records (``collection_values``) is a total of the
+    whole inventory and cannot be split afterwards, so for a bucket or a tag each recorded day is answered by pricing the copies
+    held now in that selection at the prices of that day (the latest snapshot on or before it, else the file's price, as
+    :func:`vault.prices.unit_price` does). Copies and cost are those held now; so the selection's days show how its present
+    contents moved in value, not what was in the bucket back then. Only ``days`` (one page) are computed."""
+    scope_sql, scope_params = scope(bucket_id, tag)
+    rows = db.execute(text(f"""
+WITH mine AS (SELECT * FROM entries WHERE user_id = :uid {scope_sql}),
+days AS (SELECT day FROM unnest(CAST(:days AS date[])) AS day),
+priced AS (
+  SELECT d.day, e.quantity, {SNAPSHOT_PRICE} AS snap, {FILE_PRICE} AS file, {_plausible("e.purchase_price")} AS paid
+  FROM days d CROSS JOIN mine e
+  LEFT JOIN LATERAL (
+    SELECT p.usd_cents / 100.0 AS usd, p.usd_foil_cents / 100.0 AS usd_foil, p.usd_etched_cents / 100.0 AS usd_etched
+    FROM price_snapshots p WHERE p.scryfall_id = {uuid_sql('e.scryfall_id')} AND p.day <= d.day
+    ORDER BY p.day DESC LIMIT 1) l ON true
+)
+SELECT day, sum(quantity) AS copies, coalesce(sum(quantity) FILTER (WHERE snap IS NOT NULL), 0) AS priced,
+       sum(coalesce(snap, file, 0) * quantity) AS market, sum(coalesce(paid, 0) * quantity) AS cost
+FROM priced GROUP BY day"""), {"uid": user_id, "days": list(days), **scope_params}).all()
+    return {r.day: {"market": _money(r.market), "cost": _money(r.cost), "copies": int(r.copies), "priced": int(r.priced)} for r in rows}
 
 
 # -- breakdowns -------------------------------------------------------------------------------
@@ -158,17 +199,18 @@ def _counts(row) -> dict:
             "market_value": _money(row.market) if row else 0.0}
 
 
-def breakdowns(db: Session, user_id: int) -> dict:
+def breakdowns(db: Session, user_id: int, bucket_id: int | None = None, tag: str | None = None) -> dict:
     """Copies, printings and market value by colour identity, main type, mana value, rarity and
     colour × type, in one grouping-sets query. Every bucket list is fixed (zeros included), plus
     ``unknown`` for printings not yet in the card table, so the answer's size never grows."""
-    rows = db.execute(text(_priced() + """
+    scope_sql, scope_params = scope(bucket_id, tag)
+    rows = db.execute(text(_priced(scope_sql) + """
 SELECT GROUPING(color) AS g_color, GROUPING(main_type) AS g_type, GROUPING(mana_value) AS g_mv,
        GROUPING(rarity) AS g_rarity, color, main_type, mana_value, rarity,
        sum(quantity) AS copies, count(DISTINCT gkey) AS printings, sum(price * quantity) AS market
 FROM priced
 GROUP BY GROUPING SETS ((color), (main_type), (mana_value), (rarity), (color, main_type), ())"""),
-                      {"uid": user_id}).all()
+                      {"uid": user_id, **scope_params}).all()
     by_color, by_type, by_mv, by_rarity, matrix, total = {}, {}, {}, {}, {}, None
     for r in rows:
         grouped = (r.g_color, r.g_type, r.g_mv, r.g_rarity)
@@ -208,15 +250,16 @@ def _month_index(month: str) -> int:
     return int(y) * 12 + int(m) - 1
 
 
-def valuation(db: Session, user_id: int, hide_costs: bool) -> dict:
+def valuation(db: Session, user_id: int, hide_costs: bool, bucket_id: int | None = None, tag: str | None = None) -> dict:
     """Month by month (by purchase date, as the timeline): copies bought, their market value today,
     what was paid, and the running totals; the month that added the most value; the change over
     the trailing 12 calendar months (ending with the latest month bought); undated copies."""
-    rows = db.execute(text(_priced() + """
+    scope_sql, scope_params = scope(bucket_id, tag)
+    rows = db.execute(text(_priced(scope_sql) + """
 SELECT to_char(purchase_date, 'YYYY-MM') AS month, sum(quantity) AS copies, sum(price * quantity) AS market,
        sum(coalesce(paid, 0) * quantity) AS spend,
        coalesce(sum(price * quantity) FILTER (WHERE paid <> 0), 0) AS known_market
-FROM priced GROUP BY 1 ORDER BY 1 NULLS LAST"""), {"uid": user_id}).all()
+FROM priced GROUP BY 1 ORDER BY 1 NULLS LAST"""), {"uid": user_id, **scope_params}).all()
     undated = next((r for r in rows if r.month is None), None)
     months, mc, cc, kc, qc = [], 0.0, 0.0, 0.0, 0
     for r in (r for r in rows if r.month is not None):
@@ -265,11 +308,12 @@ class BadCursor(ValueError):
 
 def names(db: Session, user_id: int, *, sort: str = "-value", colors: list[str] | None = None,
           type_: str | None = None, min_value: float | None = None, after: list | None = None,
-          limit: int = 100) -> tuple[list[dict], int, list | None]:
+          limit: int = 100, bucket_id: int | None = None, tag: str | None = None) -> tuple[list[dict], int, list | None]:
     """One row per card name (case-insensitive), paged with a keyset: (items, total, next key).
     The name's colour, type, mana value, rarity and image are its most valuable known printing's."""
     column, desc = NAME_SORTS[sort]
-    params: dict = {"uid": user_id, "lim": limit + 1}
+    scope_sql, scope_params = scope(bucket_id, tag)
+    params: dict = {"uid": user_id, "lim": limit + 1, **scope_params}
     where = ["true"]
     if colors:
         params["colors"] = colors
@@ -298,7 +342,7 @@ def names(db: Session, user_id: int, *, sort: str = "-value", colors: list[str] 
 
     def order(table: str) -> str:
         return f"{table}{column} {'DESC' if desc else 'ASC'}" + (f", {table}key ASC" if column != "key" else "")
-    rows = db.execute(text(_priced() + f""",
+    rows = db.execute(text(_priced(scope_sql) + f""",
 named AS (
   -- byte order (COLLATE "C"), so pages come in the same order on every database, whatever its locale
   SELECT lower(name) COLLATE "C" AS key, (array_agg(name ORDER BY has_card DESC, price DESC, id))[1] AS name,
@@ -338,11 +382,12 @@ ORDER BY {order('f.')}"""), params).all()
 
 # -- sets ---------------------------------------------------------------------------------------
 
-def set_colors(db: Session, user_id: int) -> dict[str, dict[str, int]]:
+def set_colors(db: Session, user_id: int, bucket_id: int | None = None, tag: str | None = None) -> dict[str, dict[str, int]]:
     """Copies per colour identity in each set (keyed like vault.collection_view's set codes)."""
     out: dict[str, dict[str, int]] = {}
-    for code, color, copies in db.execute(text(_priced() + """
-SELECT set_code, color, sum(quantity) FROM priced GROUP BY 1, 2"""), {"uid": user_id}):
+    scope_sql, scope_params = scope(bucket_id, tag)
+    for code, color, copies in db.execute(text(_priced(scope_sql) + """
+SELECT set_code, color, sum(quantity) FROM priced GROUP BY 1, 2"""), {"uid": user_id, **scope_params}):
         out.setdefault(code, {k: 0 for k in COLORS + (UNKNOWN,)})[color] = int(copies)
     return out
 

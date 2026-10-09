@@ -56,6 +56,11 @@ Id = Annotated[int, Path(ge=1, le=S.MAX_ID)]  # a row id: anything larger can't 
 DELETE_CONFIRMATION = "DELETE"
 MAX_COPY_ROWS = 500  # rows listed in one card's detail; copies_total says how many there are
 MAX_STATS = 50  # items per list in /collection/stats
+# The filters the collection's analytics take (#130): the person's own grouping, so not on a shared collection.
+BucketQ = Annotated[int | None, Query(ge=1, le=S.MAX_ID, description="Only the copies in this bucket (GET /collection/buckets); "
+                                      "not on a shared collection")]
+TagQ = Annotated[str | None, Query(max_length=40, description="Only cards you tagged with this (GET /collection/tags): every printing "
+                                   "of a tagged card counts, once; an unknown tag gives an empty answer; not on a shared collection")]
 
 
 def _scryfall_set(code: str) -> str:
@@ -76,6 +81,12 @@ SET_SORTS = {
     "release": lambda s: (_ordinal(s["released_at"]) or 10**7,),
     "-release": lambda s: (-(_ordinal(s["released_at"]) or -10**7),),
 }
+
+
+def scope_query(bucket_id: int | None, tag: str | None) -> str:
+    """``?bucket=3&tag=trade`` (or nothing): the selection an analytics answer was limited to, kept in its links."""
+    params = {**({"bucket": bucket_id} if bucket_id is not None else {}), **({"tag": tag} if tag is not None else {})}
+    return f"?{urlencode(params)}" if params else ""
 
 
 def _iso(dt) -> str | None:
@@ -347,8 +358,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         own: bool
         owner_name: str | None = None
 
-        def view(self, bucket_id: int | None = None) -> CollectionView:
-            return CollectionView(self.db, self.owner, hide_costs=self.hide_costs, bucket_id=bucket_id)
+        def view(self, bucket_id: int | None = None, tag: str | None = None) -> CollectionView:
+            return CollectionView(self.db, self.owner, hide_costs=self.hide_costs, bucket_id=bucket_id, tag=tag)
 
         def bucket(self, bucket_id: int | None) -> int | None:
             """The bucket a request names, if it is the caller's own: buckets are the person's own grouping, not part of
@@ -359,6 +370,20 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             if not found:
                 raise HTTPException(404, "Bucket not found")
             return bucket_id
+
+        def scope(self, bucket_id: int | None, tag: str | None) -> tuple[int | None, str | None]:
+            """The ``bucket`` and ``tag`` filters of a request, checked: another person's or an unknown bucket id is 404, a malformed
+            tag 400, and on a shared collection both are 404 (buckets and tags are the owner's own grouping). An unknown tag is not
+            an error: it matches nothing, as on /collection/cards."""
+            bucket_id = self.bucket(bucket_id)
+            if tag is not None:
+                try:
+                    tag = card_tags.normalize(tag)
+                except card_tags.TagError as exc:
+                    raise HTTPException(400, str(exc)) from None
+                if not self.own:
+                    raise HTTPException(404, "Tag not found")
+            return bucket_id, tag
 
     def own_ctx(db: Session = Depends(get_db), user: User = Depends(current_user)) -> Ctx:
         return Ctx(db, user, False, f"{V1}/collection", True)
@@ -384,20 +409,23 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             return data
 
         @r.get("", response_model=S.CollectionSummary, summary="Collection summary and links")
-        def summary(request: Request, ctx: Ctx = Depends(ctx_dep)):
-            view = ctx.view()
+        def summary(request: Request, ctx: Ctx = Depends(ctx_dep), bucket: BucketQ = None, tag: TagQ = None):
+            bucket_id, tag = ctx.scope(bucket, tag)
+            view = ctx.view(bucket_id, tag)
             # A tag change is a change a client caches by this version (the cards it lists carry their tags), so it moves the version too.
             tags_stamp = f".{card_tags.stamp(ctx.db, ctx.owner)}" if ctx.own else ""
+            qs = scope_query(bucket_id, tag)  # the links keep the selection
 
             def body():
                 links = {
-                    "self": link(ctx.base), "cards": link(f"{ctx.base}/cards"),
-                    "most_valuable": link(f"{ctx.base}/cards?sort=-value"), "sets": link(f"{ctx.base}/sets"),
-                    "timeline": link(f"{ctx.base}/timeline"), "history": link(f"{ctx.base}/history"),
-                    "stats": link(f"{ctx.base}/stats"),
-                    "breakdowns": link(f"{ctx.base}/breakdowns", title="By colour, type, mana value, rarity"),
-                    "valuation": link(f"{ctx.base}/valuation", title="Cumulative value and cost by month"),
-                    "names": link(f"{ctx.base}/names", title="One row per card name"),
+                    "self": link(f"{ctx.base}{qs}"), "cards": link(f"{ctx.base}/cards{qs}"),
+                    "most_valuable": link(f"{ctx.base}/cards?sort=-value" + qs.replace("?", "&")),
+                    "sets": link(f"{ctx.base}/sets{qs}"),
+                    "timeline": link(f"{ctx.base}/timeline{qs}"), "history": link(f"{ctx.base}/history{qs}"),
+                    "stats": link(f"{ctx.base}/stats{qs}"),
+                    "breakdowns": link(f"{ctx.base}/breakdowns{qs}", title="By colour, type, mana value, rarity"),
+                    "valuation": link(f"{ctx.base}/valuation{qs}", title="Cumulative value and cost by month"),
+                    "names": link(f"{ctx.base}/names{qs}", title="One row per card name"),
                 }
                 if ctx.own:
                     links |= {"imports": link(f"{V1}/imports"), "export": link(f"{ctx.base}/export.csv"),
@@ -406,7 +434,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                                               "prices from Scryfall, a chunk per call")}
                 version = hashlib.sha256((view.version + tags_stamp).encode()).hexdigest()[:16]  # changes whenever the data does
                 # P&L in SQL, over the copies with a known cost only (vault.analytics)
-                pnl = analytics.HIDDEN_PNL if ctx.hide_costs else analytics.pnl(ctx.db, ctx.owner.id)
+                pnl = analytics.HIDDEN_PNL if ctx.hide_costs else analytics.pnl(ctx.db, ctx.owner.id, bucket_id, tag)
                 return {**view.summary(), **pnl, "owner": ctx.owner_name, "version": version, "_links": links}
 
             return etag_response(request, view.version + tags_stamp, body)
@@ -434,14 +462,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                     raise HTTPException(400, f"type must be one of {', '.join(analytics.TYPES)}")
             if mana_value is not None and mana_value not in analytics.MANA_VALUES:
                 raise HTTPException(400, f"mana_value must be one of {', '.join(analytics.MANA_VALUES)}")
-            view = ctx.view(ctx.bucket(bucket))
-            if tag is not None:
-                try:
-                    tag = card_tags.normalize(tag)
-                except card_tags.TagError as exc:
-                    raise HTTPException(400, str(exc)) from None
-                if not ctx.own:
-                    raise HTTPException(404, "Tag not found")  # tags are the owner's own, not part of what a share shows
+            bucket_id, tag = ctx.scope(bucket, tag)
+            view = ctx.view(bucket_id)
 
             def body():
                 items = filtered(view, q=q, set_code=set, finish=finish, condition=condition, name=name,
@@ -491,10 +513,13 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         @r.get("/sets", response_model=S.SetPage, summary="Value by set, with each set's colour mix")
         def sets(request: Request, cursor: str | None = None, limit: int | None = None, ctx: Ctx = Depends(ctx_dep),
                  q: str | None = Query(None, description="Text in the set's code or name"),
-                 sort: str = Query("-value", description=f"One of {', '.join(SET_SORTS)}")):
+                 sort: str = Query("-value", description=f"One of {', '.join(SET_SORTS)}"),
+                 bucket: BucketQ = None, tag: TagQ = None):
             if sort not in SET_SORTS:
                 raise HTTPException(400, f"sort must be one of {sorted(SET_SORTS)}")
-            view = ctx.view()
+            bucket_id, tag = ctx.scope(bucket, tag)
+            view = ctx.view(bucket_id, tag)
+            qs = scope_query(bucket_id, tag)
             released = _release_dates(fetch=sort.lstrip("-") == "release")
 
             def body():
@@ -502,27 +527,28 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 if q:
                     needle = q.lower()
                     rows = [s for s in rows if needle in s["code"].lower() or needle in (s["name"] or "").lower()]
-                mix = analytics.set_colors(ctx.db, ctx.owner.id)
+                mix = analytics.set_colors(ctx.db, ctx.owner.id, bucket_id, tag)
                 empty = {k: 0 for k in analytics.COLORS + (analytics.UNKNOWN,)}
                 rows = [{**s, "colors": mix.get(s["code"], empty),
                          "released_at": released.get(_scryfall_set(s["code"]))} for s in rows]
                 page, nxt = paginate(rows, SET_SORTS[sort], lambda s: s["code"], cursor=cursor, limit=limit)
-                items = [{**s, "_links": {"cards": link(f"{ctx.base}/cards?set={s['code']}")}} for s in page]
+                items = [{**s, "_links": {"cards": link(f"{ctx.base}/cards?set={s['code']}" + qs.replace("?", "&"))}} for s in page]
                 return page_body(request, items, nxt, len(rows), q=q, sort=None if sort == "-value" else sort,
-                                 limit=limit)
+                                 bucket=bucket, tag=tag, limit=limit)
 
             return etag_response(request, f"{view.version}.{len(released)}", body)
 
         @r.get("/timeline", response_model=S.Timeline, summary="Copies acquired per month")
-        def timeline(request: Request, ctx: Ctx = Depends(ctx_dep)):
-            view = ctx.view()
-            return etag_response(request, view.version,
-                                 lambda: {"months": view.timeline(), "_links": {"self": link(f"{ctx.base}/timeline")}})
+        def timeline(request: Request, ctx: Ctx = Depends(ctx_dep), bucket: BucketQ = None, tag: TagQ = None):
+            bucket_id, tag = ctx.scope(bucket, tag)
+            view = ctx.view(bucket_id, tag)
+            return etag_response(request, view.version, lambda: {
+                "months": view.timeline(), "_links": {"self": link(f"{ctx.base}/timeline{scope_query(bucket_id, tag)}")}})
 
         @r.get("/history", response_model=S.HistoryPage, summary="Daily market value (and cost)")
         def history(request: Request, since: date | None = None, cursor: str | None = None,
-                    limit: int | None = None, ctx: Ctx = Depends(ctx_dep)):
-            view = ctx.view()
+                    limit: int | None = None, ctx: Ctx = Depends(ctx_dep), bucket: BucketQ = None, tag: TagQ = None):
+            bucket_id, tag = ctx.scope(bucket, tag)
 
             def body():
                 rows = history_days(ctx.db, ctx.owner, since)
@@ -531,14 +557,22 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 items = [{"day": v.day.isoformat(), "market": finite(v.market_usd) or 0.0,
                           "cost": None if ctx.hide_costs else finite(v.cost_usd), "copies": v.copies,
                           "priced": v.priced_copies, "imported": v.day in imported} for v in page]
-                return page_body(request, items, nxt, len(rows), since=since and since.isoformat(), limit=limit)
+                if bucket_id is not None or tag is not None:
+                    # the recorded totals are for the whole inventory: price the selection's copies on each day of this page
+                    priced = analytics.scoped_history(ctx.db, ctx.owner.id, [v.day for v in page], bucket_id, tag)
+                    zero = {"market": 0.0, "cost": 0.0, "copies": 0, "priced": 0}
+                    items = [{**i, **(priced.get(v.day) or zero), "cost": None if ctx.hide_costs else (priced.get(v.day) or zero)["cost"]}
+                             for i, v in zip(items, page)]
+                return page_body(request, items, nxt, len(rows), since=since and since.isoformat(), bucket=bucket, tag=tag, limit=limit)
 
-            return etag_response(request, view.version, body)
+            return etag_response(request, sql_version(ctx, bucket_id, tag), body)
 
         @r.get("/stats", summary="Highlights: most valuable, gains and losses, duplicates (stockpiles)")
         def stats(request: Request, ctx: Ctx = Depends(ctx_dep),
-                  limit: int = Query(8, ge=1, le=MAX_STATS, description="How many items in each list")):
-            view = ctx.view()
+                  limit: int = Query(8, ge=1, le=MAX_STATS, description="How many items in each list"),
+                  bucket: BucketQ = None, tag: TagQ = None):
+            bucket_id, tag = ctx.scope(bucket, tag)
+            view = ctx.view(bucket_id, tag)
 
             def body():
                 data = view.stats(top=limit)
@@ -553,28 +587,32 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 for item in data["most_copies"]:
                     item |= {"printings": prints[item["name"]], "market_value": round(worth[item["name"]], 2),
                              "_links": {"cards": link(f"{ctx.base}/cards?{urlencode({'name': item['name'].split(' // ')[0]})}")}}
-                return {**data, "_links": {"self": link(f"{ctx.base}/stats")}}
+                return {**data, "_links": {"self": link(f"{ctx.base}/stats{scope_query(bucket_id, tag)}")}}
 
             return etag_response(request, view.version, body)
 
         # -- analytics, aggregated in Postgres (vault.analytics) ------------------------------
-        def sql_version(ctx: Ctx) -> str:
-            return view_version(ctx.db, ctx.owner, hide_costs=ctx.hide_costs)
+        def sql_version(ctx: Ctx, bucket_id: int | None = None, tag: str | None = None) -> str:
+            return view_version(ctx.db, ctx.owner, hide_costs=ctx.hide_costs, bucket_id=bucket_id, tag=tag)
 
         @r.get("/breakdowns", response_model=S.Breakdowns,
                summary="Copies, printings and value by colour identity, main type, mana value, rarity, colour x type")
-        def breakdowns(request: Request, ctx: Ctx = Depends(ctx_dep)):
-            return etag_response(request, sql_version(ctx), lambda: {
-                **analytics.breakdowns(ctx.db, ctx.owner.id),
-                "_links": {"self": link(f"{ctx.base}/breakdowns"), "names": link(f"{ctx.base}/names")}})
+        def breakdowns(request: Request, ctx: Ctx = Depends(ctx_dep), bucket: BucketQ = None, tag: TagQ = None):
+            bucket_id, tag = ctx.scope(bucket, tag)
+            qs = scope_query(bucket_id, tag)
+            return etag_response(request, sql_version(ctx, bucket_id, tag), lambda: {
+                **analytics.breakdowns(ctx.db, ctx.owner.id, bucket_id, tag),
+                "_links": {"self": link(f"{ctx.base}/breakdowns{qs}"), "names": link(f"{ctx.base}/names{qs}")}})
 
         @r.get("/valuation", response_model=S.Valuation,
                summary="Cumulative market value, cost and gain by purchase month; peak month; last 12 months")
-        def valuation(request: Request, ctx: Ctx = Depends(ctx_dep)):
-            return etag_response(request, sql_version(ctx), lambda: {
-                **analytics.valuation(ctx.db, ctx.owner.id, ctx.hide_costs),
-                "_links": {"self": link(f"{ctx.base}/valuation"), "timeline": link(f"{ctx.base}/timeline"),
-                           "history": link(f"{ctx.base}/history")}})
+        def valuation(request: Request, ctx: Ctx = Depends(ctx_dep), bucket: BucketQ = None, tag: TagQ = None):
+            bucket_id, tag = ctx.scope(bucket, tag)
+            qs = scope_query(bucket_id, tag)
+            return etag_response(request, sql_version(ctx, bucket_id, tag), lambda: {
+                **analytics.valuation(ctx.db, ctx.owner.id, ctx.hide_costs, bucket_id, tag),
+                "_links": {"self": link(f"{ctx.base}/valuation{qs}"), "timeline": link(f"{ctx.base}/timeline{qs}"),
+                           "history": link(f"{ctx.base}/history{qs}")}})
 
         @r.get("/names", response_model=S.NamePage,
                summary="One row per card name: copies, value, printings, sets, colour, type (paged)")
@@ -584,9 +622,11 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                   colors: str | None = Query(None, description="Comma-separated W,U,B,R,G,M,C: a multicolour "
                                              "card matches any of its colours, and M matches every multicolour card"),
                   type: str | None = Query(None, description="Main type: Creature, Land, …, Other or unknown"),
-                  min_value: float | None = Query(None, ge=0, description="Only names worth at least this (USD)")):
+                  min_value: float | None = Query(None, ge=0, description="Only names worth at least this (USD)"),
+                  bucket: BucketQ = None, tag: TagQ = None):
             if sort not in analytics.NAME_SORTS:
                 raise HTTPException(400, f"sort must be one of {sorted(analytics.NAME_SORTS)}")
+            bucket_id, tag = ctx.scope(bucket, tag)
             wanted = [c.strip().upper() for c in (colors or "").split(",") if c.strip()]
             if any(c not in analytics.COLORS for c in wanted):
                 raise HTTPException(400, f"colors must be among {','.join(analytics.COLORS)}")
@@ -598,16 +638,16 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             def body():
                 try:
                     items, total, nxt = analytics.names(ctx.db, ctx.owner.id, sort=sort, colors=wanted, type_=type,
-                                                        min_value=min_value, after=after, limit=size)
+                                                        min_value=min_value, after=after, limit=size, bucket_id=bucket_id, tag=tag)
                 except analytics.BadCursor:
                     raise HTTPException(400, "Invalid cursor") from None
                 for item in items:
                     item["image"] = (card_out({"image": item["image"]}) or {}).get("image") if item["image"] else None
                     item["_links"] = {"cards": link(f"{ctx.base}/cards?{urlencode({'name': item['name'].split(' // ')[0]})}")}
                 return page_body(request, items, encode_cursor(nxt) if nxt else None, total, sort=None if sort == "-value" else sort,
-                                 colors=colors, type=type, min_value=min_value, limit=limit)
+                                 colors=colors, type=type, min_value=min_value, bucket=bucket, tag=tag, limit=limit)
 
-            return etag_response(request, sql_version(ctx), body)
+            return etag_response(request, sql_version(ctx, bucket_id, tag), body)
 
         return r
 
@@ -783,37 +823,6 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                  summary="Which cards of a decklist you own")
     def deck_coverage(body: S.TextIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         return analytics.price_coverage(db, user.id, _coverage(body.text, user_entries(db, user)))
-
-    BASICS = {"plains", "island", "swamp", "mountain", "forest", "wastes", "snow-covered plains", "snow-covered island",
-              "snow-covered swamp", "snow-covered mountain", "snow-covered forest", "snow-covered wastes"}
-
-    @router.get("/decks/overlap", tags=["decks"],
-                summary="Cards in more than one saved deck, and whether you own enough copies to build them all at once")
-    def deck_overlap(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-        decks = list(db.scalars(select(Deck).where(Deck.user_id == user.id).order_by(Deck.name)))
-        owned = delta.aggregate([r.to_collection_entry() for r in user_entries(db, user)], delta.BY_CARD)
-        uses: dict = {}
-        for d in decks:
-            try:
-                needed = delta.aggregate(deck_text.parse_text(d.text).to_entries(), delta.BY_CARD)
-            except (ValueError, OverflowError):
-                continue  # an unreadable saved deck is skipped, not an error for the others
-            for key, entry in needed.items():
-                if entry.name.strip().lower() not in BASICS:
-                    uses.setdefault(key, (entry.name, []))[1].append({"deck_id": d.id, "deck": d.name,
-                                                                       "quantity": entry.quantity})
-        shared = []
-        for key, (name, in_decks) in uses.items():
-            if len(in_decks) < 2:
-                continue
-            need, have = sum(u["quantity"] for u in in_decks), owned[key].quantity if key in owned else 0
-            shared.append({"name": name, "decks": in_decks, "need_for_all": need, "have": have,
-                           "short": max(0, need - have)})
-        shared.sort(key=lambda s: (-s["short"], -len(s["decks"]), s["name"].lower()))
-        return {"decks_checked": len(decks), "shared_cards": len(shared),
-                "short_cards": sum(1 for s in shared if s["short"]), "cards": shared[:200],
-                "note": "Basic lands are left out. 'short' is how many more copies you need to have every deck "
-                        "built at the same time; any printing you own counts."}
 
     @router.get("/decks", tags=["decks"], response_model=S.DeckPage)
     def list_decks(request: Request, cursor: str | None = None, limit: int | None = None, summary: bool = False,

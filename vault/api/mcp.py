@@ -176,6 +176,16 @@ CONFIRM = {"type": "boolean", "description": "true only after the person agreed 
 TAG_PATTERN = "^[a-z0-9:-]{1,40}$"
 TAG = {"type": "string", "pattern": TAG_PATTERN, "description": "A tag: 1 to 40 lower case letters, digits, '-' and ':' "
                                                                 "(trade, commander-staple, deck:sliver)"}
+# The filters the analytics tools take (#130): the same two search_cards has, on the person's own collection only.
+SCOPE = {"bucket": {"type": "integer", "minimum": 1, "maximum": MAX_ID,
+                    "description": "Only the copies in this bucket (from list_buckets): 'what is my trade binder worth?'. "
+                                   "Copies, value and cost of all buckets add up to the whole collection; distinct counts "
+                                   "(cards, printings, sets) do not, because a printing in two buckets counts in each. "
+                                   "Not on a shared collection"},
+         "tag": {"type": "string", "pattern": TAG_PATTERN, "maxLength": 40,
+                 "description": "Only cards the person tagged with this (from list_tags): every printing of a tagged card counts, once. "
+                                "An unknown tag gives an empty answer. Not on a shared collection"}}
+SCOPE_QUERY = ("bucket", "tag")
 CARD_IDS = {"type": "array", "minItems": 1, "maxItems": 200, "items": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"},
             "description": "Card ids from search_cards (a tag is on the card, so every printing of it gives the same tag)"}
 OWNED_LINES = {"type": "array", "minItems": 1, "maxItems": 50, "items": {
@@ -205,7 +215,8 @@ PAGING = {
 
 TOOLS = [
     Tool("get_collection_summary", "Totals for the collection: copies, printings, sets, market value, amount paid, "
-         "prices date, and breakdowns by condition and printing.", dict(SHARE), path=_base),
+         "prices date, and breakdowns by condition and printing. Takes `bucket` or `tag` for one bucket's or one tag's totals.",
+         {**SCOPE, **SHARE}, path=_base, query=SCOPE_QUERY),
     Tool("search_cards", "Find printings in the collection. Each item has name, set, collector number, finish, "
          "condition, language, quantity, price (market/low/mid), value, paid, acquisition dates and Scryfall card data "
          "(type, colours, mana cost, rarity, text, image with artist credit). Paged.",
@@ -328,19 +339,20 @@ TOOLS = [
           "sort": {"type": "string", "enum": SET_SORTS, "default": "-value",
                    "description": "'-value' = most valuable first; 'unique' = distinct printings; "
                                   "'release' = by release date"},
-          **PAGING, **SHARE},
-         path=lambda a: _base(a) + "/sets", query=("q", "sort", "limit", "cursor")),
+          **SCOPE, **PAGING, **SHARE},
+         path=lambda a: _base(a) + "/sets", query=("q", "sort", "limit", "cursor") + SCOPE_QUERY),
     Tool("get_collection_stats", "Highlights: most valuable printings, biggest price gains and losses, and the "
          "cards owned in the most copies (with how many printings of each).",
          {"limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 8, "description": "Items per list"},
-          **SHARE},
-         path=lambda a: _base(a) + "/stats", query=("limit",)),
+          **SCOPE, **SHARE},
+         path=lambda a: _base(a) + "/stats", query=("limit",) + SCOPE_QUERY),
     Tool("get_collection_breakdowns", "Copies, printings and market value by colour identity (W, U, B, R, G, "
          "multicolour, colourless), main card type, mana value (0-7, 8+), rarity, and colour x type. Printings "
-         "without card data yet count as 'unknown'.", dict(SHARE), path=lambda a: _base(a) + "/breakdowns"),
+         "without card data yet count as 'unknown'. Takes `bucket` or `tag`.", {**SCOPE, **SHARE},
+         path=lambda a: _base(a) + "/breakdowns", query=SCOPE_QUERY),
     Tool("get_valuation", "Month by month (by purchase date): copies bought, their market value today, what was "
-         "paid, running totals and gain; the month that added the most value; the last 12 months' change.",
-         dict(SHARE), path=lambda a: _base(a) + "/valuation"),
+         "paid, running totals and gain; the month that added the most value; the last 12 months' change. Takes `bucket` or `tag`.",
+         {**SCOPE, **SHARE}, path=lambda a: _base(a) + "/valuation", query=SCOPE_QUERY),
     Tool("list_card_names", "The collection rolled up by card name: copies, market value, unit price, printings, "
          "sets, colour, main type, mana value, rarity and an image (credit its artist). Paged; the first page "
          "sorted by -value is the top N.",
@@ -350,8 +362,8 @@ TOOLS = [
                      "description": "Comma-separated W,U,B,R,G,M,C; a multicolour card matches any of its colours"},
           "type": {"type": "string", "maxLength": 20, "description": "Main type, e.g. 'Creature'"},
           "min_value": {"type": "number", "minimum": 0, "description": "Only names worth at least this (USD)"},
-          **PAGING, **SHARE},
-         path=lambda a: _base(a) + "/names", query=("sort", "colors", "type", "min_value", "limit", "cursor")),
+          **SCOPE, **PAGING, **SHARE},
+         path=lambda a: _base(a) + "/names", query=("sort", "colors", "type", "min_value", "limit", "cursor") + SCOPE_QUERY),
     Tool("refresh_prices", "Fetch fresh card data and today's prices from Scryfall for the person's own "
          "printings, up to 300 per call, and recompute today's collection value. Each call returns a cursor and "
          "how many remain; passing the cursor continues until remaining is 0.",
@@ -360,11 +372,12 @@ TOOLS = [
                     "description": "Also refresh printings that already have today's price"}},
          method="POST", path=lambda a: f"{V1}/collection/refresh",
          body=lambda a: {"cursor": a.get("cursor"), "force": bool(a.get("force", False))}, write=True),
-    Tool("get_value_history", "The collection's market value (and cost) day by day. Paged.",
-         {"since": {"type": "string", "format": "date", "description": "YYYY-MM-DD"}, **PAGING, **SHARE},
-         path=lambda a: _base(a) + "/history", query=("since", "limit", "cursor")),
-    Tool("get_acquisition_timeline", "How many copies were bought each month.", dict(SHARE),
-         path=lambda a: _base(a) + "/timeline"),
+    Tool("get_value_history", "The collection's market value (and cost) day by day. Paged. With `bucket` or `tag` each day prices "
+         "the copies held now in that selection at that day's prices (the Vault records only whole-collection totals).",
+         {"since": {"type": "string", "format": "date", "description": "YYYY-MM-DD"}, **SCOPE, **PAGING, **SHARE},
+         path=lambda a: _base(a) + "/history", query=("since", "limit", "cursor") + SCOPE_QUERY),
+    Tool("get_acquisition_timeline", "How many copies were bought each month. Takes `bucket` or `tag`.", {**SCOPE, **SHARE},
+         path=lambda a: _base(a) + "/timeline", query=SCOPE_QUERY),
     Tool("check_decklist", "Which cards of a decklist the person owns, partly owns or is missing. Accepts "
          "Archidekt, Moxfield, Arena and MTGO text formats.",
          {"text": {**DECKLIST, "description": "The decklist, one card per line, e.g. '1 Sol Ring'"}}, ["text"],
@@ -391,9 +404,27 @@ TOOLS = [
          "lists near names. People name their decks; use this before asking for a link or an id.",
          {**PAGING, "query": {"type": "string", "maxLength": 200, "description": "Words from the deck's name"}},
          path=lambda a: f"{V1}/decks?brief=true", query=("limit", "cursor", "q")),  # no card text: get_deck has it
-    Tool("get_deck_overlap", "Cards that are in more than one of the person's saved decks, how many copies building "
-         "every deck at once needs, how many they own, and how many they are short. Basic lands are left out.",
-         path=lambda a: f"{V1}/decks/overlap"),
+    Tool("get_deck_overlap", "Whether the person's saved decks can all be built at the same time from the copies they own, and "
+         "what to buy or move if not. Counts copies by card name (any printing owned counts; basic lands are left out). `cards`: cards "
+         "in more than one deck with `need_for_all`, `have` and `short`. `decks`: per deck what it `need`s, the contested cards "
+         "it `holds` and `lacking` (each missing copy is `not_owned`, so it must be bought, or `held_by_other_deck`, so it can be "
+         "moved), `stands_alone` (complete under the allocation), `independent` (also holds no contested card) and "
+         "`cost_to_complete`. A card is contested when two or more decks use it and the person owns some copies, but fewer than the "
+         "decks need together; a card owned zero times is not contested (every deck that needs it lacks it). Contested copies go to "
+         "the decks in the `allocation` order (the deck closest to complete first, or `priority`, deck ids in order): say which rule "
+         "was used. `summary` has the decks needing a purchase and the cost to finish every deck, each card counted once. `list` "
+         "pages the full lists instead of the overview: `decks`, `contested` (each card with its `move` and `buy` options) or "
+         "`purchases` (cheapest first; `format` text is the paste-ready list, one page per call: join the pages). Prices are "
+         "Scryfall's cheapest, dated `prices_date`.",
+         {"priority": {"type": "array", "maxItems": 200, "items": ID,
+                       "description": "Deck ids (from list_decks), in the order they take contested copies; the others follow"},
+          "list": {"type": "string", "enum": ["decks", "contested", "purchases"],
+                   "description": "Page one full list (use next_cursor as cursor) instead of the overview"},
+          "format": {"type": "string", "enum": ["json", "text"], "default": "json",
+                     "description": "text: the purchases as a paste-ready list ('2 The World Tree' per line), one page per call"},
+          **PAGING},
+         path=lambda a: f"{V1}/decks/overlap" + (f"/{a['list']}" if a.get("list") else "/purchases" if a.get("format") == "text" else ""),
+         query=("priority", "limit", "cursor", "format")),
     Tool("get_deck", "A saved deck: its name, `overview` (format, commander(s), card count, colour identity), a `summary` "
          "of how much of it the person owns (copies needed, owned, missing, cost to finish), the cards not fully owned "
          "(the dearest 40, each with its Scryfall unit price and the `price_date` that price is from: the cheapest priced paper printing of the card, or the printing the list names, "
@@ -558,6 +589,7 @@ SCRYFALL_DATA = {"list_decks",  # the commanders' colour identity is Scryfall's 
                  "get_collection_summary", "search_cards", "get_card", "list_sets", "get_collection_stats",
                  "get_collection_breakdowns", "get_valuation", "get_value_history", "list_card_names", "refresh_prices",
                  "check_decklist", "lookup_cards", "get_deck", "get_shared_deck",
+                 "get_deck_overlap",  # prices (#165): Scryfall's cheapest, dated
                  "update_owned_cards", "show_owned_printings"}  # these carry Scryfall's card images
 OWN_DATA_ONLY = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucket", "move_cards",
                  "list_tags", "tag_cards", "untag_cards", "rename_tag", "delete_tag",
@@ -565,7 +597,7 @@ OWN_DATA_ONLY = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucke
                  "get_acquisition_timeline", "parse_decklist", "save_deck", "update_deck", "list_imports",
                  "import_collection_csv", "list_export_formats", "list_shared_with_me", "get_import", "delete_deck",
                  "list_my_shares", "accept_share", "stop_sharing", "start_collection_upload",
-                 "get_staged_upload", "confirm_staged_upload", "get_deck_overlap", "council_brief", "expert_brief",
+                 "get_staged_upload", "confirm_staged_upload", "council_brief", "expert_brief",
                  "confirm_owned_cards_update", "undo_owned_cards_update"}
 DECK_ANALYSIS = {"deck_stats", "simulate_draws", "deck_legality", "find_upgrades", "validate_deck_changes", "find_combos",
                  "shopping_list"}
