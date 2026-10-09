@@ -43,7 +43,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from joserfc import jwt
 from joserfc.jwk import ECKey
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, exists, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -295,6 +295,63 @@ def sign_in_methods(db: Session, user_id: int) -> list[dict]:
     return rows
 
 
+def established_methods(user_id: int, since, *, skip_identity: int | None = None, skip_passkey: int | None = None):
+    """A scalar subquery: how many sign-in methods of the account are older than ``since`` (a provider or a passkey; the
+    passkey identity row is the WebAuthn handle, not a method), not counting the one being removed. Every removal
+    (:func:`remove_identity`, :func:`vault.passkeys.remove_passkey`, :func:`remove_recent_methods`) needs this to be above zero
+    inside its own DELETE: in an account whose methods are all new, nothing tells the owner's methods from those a copied
+    session added, so none may be removed (#347)."""
+    from .models import Passkey
+
+    providers = select(func.count(Identity.id)).where(
+        Identity.user_id == user_id, Identity.provider != PASSKEY_IDENTITY, Identity.created_at < since)
+    passkeys = select(func.count(Passkey.id)).where(Passkey.user_id == user_id, Passkey.created_at < since)
+    if skip_identity is not None:
+        providers = providers.where(Identity.id != skip_identity)
+    if skip_passkey is not None:
+        passkeys = passkeys.where(Passkey.id != skip_passkey)
+    return providers.scalar_subquery() + passkeys.scalar_subquery()
+
+
+def why_not_removable(method: dict, methods: list[dict]) -> str | None:
+    """Why ``method`` (one of ``methods``, from :func:`sign_in_methods`) would be refused if the person tried to remove it, or
+    None. The same rules the removal routes apply, so the page shows a Remove button only where the route will say yes:
+    ``only_method`` (the last way to sign in), ``provider_too_old`` (a provider linked more than the window ago is not unlinked
+    here), ``needs_older_method`` (no OTHER method older than the window would remain)."""
+    if len(methods) <= 1:
+        return "only_method"
+    if method["kind"] == "provider" and not method["recently_added"]:
+        return "provider_too_old"
+    if all(o["recently_added"] for o in methods if o is not method):
+        return "needs_older_method"
+    return None
+
+
+def remove_recent_methods(db: Session, user_id: int) -> int:
+    """Remove every sign-in method added in the last :data:`RECENT_SIGN_IN_METHOD_HOURS` (providers and passkeys), for the
+    person who finds a flood of them after "Sign out everywhere" (#347). 409 unless a method older than the window stays, so
+    the account is never left with none and a young account (all methods new) removes nothing. Returns how many went. The
+    account row is locked first, as in :func:`remove_identity`; the caller commits."""
+    from .models import Passkey
+
+    db.execute(select(User.id).where(User.id == user_id).with_for_update())
+    since = utcnow() - timedelta(hours=RECENT_SIGN_IN_METHOD_HOURS)
+    if not db.scalar(select(established_methods(user_id, since))):
+        raise HTTPException(409, f"This account has no sign-in method older than {RECENT_SIGN_IN_METHOD_HOURS} hours, so "
+                                 "nothing can be removed yet: the new ones could not be told apart. Sign out other browsers first.")
+    gone = db.execute(delete(Passkey).where(Passkey.user_id == user_id, Passkey.created_at >= since)
+                      .execution_options(synchronize_session=False)).rowcount
+    gone += db.execute(delete(Identity).where(Identity.user_id == user_id, Identity.provider != PASSKEY_IDENTITY,
+                                              Identity.created_at >= since)
+                       .execution_options(synchronize_session=False)).rowcount
+    # No passkeys left: the passkey identity (the WebAuthn handle) goes too, as when the last passkey is removed.
+    db.execute(delete(Identity).where(Identity.user_id == user_id, Identity.provider == PASSKEY_IDENTITY,
+                                      ~exists().where(Passkey.user_id == user_id))
+               .execution_options(synchronize_session=False))
+    db.flush()
+    return gone
+
+
 def remove_identity(db: Session, user_id: int, identity_id: int) -> None:
     """Unlink one of the account's providers (Google, Microsoft, Apple, Facebook) that was added in the last
     :data:`RECENT_SIGN_IN_METHOD_HOURS` (409 for an older one), unless it is the last way to sign in (409). Another
@@ -323,10 +380,7 @@ def remove_identity(db: Session, user_id: int, identity_id: int) -> None:
     passkeys = select(func.count(Passkey.id)).where(Passkey.user_id == user_id).scalar_subquery()
     providers = select(func.count(Identity.id)).where(
         Identity.user_id == user_id, Identity.provider != PASSKEY_IDENTITY).scalar_subquery()
-    established = (select(func.count(Identity.id)).where(
-        Identity.user_id == user_id, Identity.provider != PASSKEY_IDENTITY, Identity.id != identity_id,
-        Identity.created_at < since).scalar_subquery()
-        + select(func.count(Passkey.id)).where(Passkey.user_id == user_id, Passkey.created_at < since).scalar_subquery())
+    established = established_methods(user_id, since, skip_identity=identity_id)
     removed = db.execute(
         delete(Identity).where(Identity.id == identity_id, Identity.user_id == user_id,
                                Identity.provider != PASSKEY_IDENTITY, Identity.created_at >= since,
@@ -555,6 +609,22 @@ def build_router(auth: Auth, get_db) -> APIRouter:
             user.session_key = new_session_key()
             db.commit()
         request.session.clear()
+        return {"ok": True}
+
+    @router.post("/sign-out-others")
+    def sign_out_others(request: Request, db: Session = Depends(get_db)) -> dict:
+        """End every other browser's session and keep this one (#347): the first step of Account, Sign out everywhere. The
+        account's session key is replaced and this browser's cookie is re-issued with the new one, so a copied cookie is dead
+        from now on and the person can then look at, and remove, the sign-in methods in a session nobody else holds. Apps
+        signed in with a token are ended under /me/sessions. A reviewer's demo session may not (the demo account is shared)."""
+        user = session_user(db, request)
+        if user is None:
+            raise HTTPException(401, "Sign in required")
+        if "rv" in request.session:
+            raise HTTPException(403, "The demo account's sessions can't be ended from here")
+        user.session_key = new_session_key()
+        db.commit()
+        request.session["sk"] = user.session_key
         return {"ok": True}
 
     @router.post("/dev-login")

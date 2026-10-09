@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import secrets
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -48,13 +48,14 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
 )
 
-from .auth import Profile
+from .auth import RECENT_SIGN_IN_METHOD_HOURS, Profile, established_methods
 from .config import Settings
-from .models import Identity, Passkey, PasskeyChallenge, User
+from .models import Identity, Passkey, PasskeyChallenge, User, utcnow
 from .ratelimit import limited
 
 RP_NAME = "The Vault"
 CHALLENGE_TTL = 300
+MAX_PASSKEYS = 20  # per account (#347): a copied session cannot bury the real ones under hundreds of its own
 SESSION_KEY = "passkey"
 PROVIDER = "passkey"
 WEBAUTHN_ERRORS = (InvalidRegistrationResponse, InvalidAuthenticationResponse, InvalidJSONStructure, ValueError, KeyError)
@@ -120,6 +121,9 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
     def require_enabled() -> None:
         if not enabled(settings):
             raise HTTPException(404, "Passkeys need an https BASE_URL (or localhost)")
+
+    def too_many() -> HTTPException:
+        return HTTPException(409, f"This account has {MAX_PASSKEYS} passkeys, the most it can hold. Remove one you no longer use first.")
 
     def registration_options(request: Request, db: Session, kind: str, handle: bytes, user_name: str, display: str,
                              exclude: list[Passkey], **extra) -> dict:
@@ -190,6 +194,8 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         identity = db.scalar(select(Identity).where(Identity.user_id == user.id, Identity.provider == PROVIDER))
         handle = base64url_to_bytes(identity.subject) if identity else secrets.token_bytes(32)
         existing = list(db.scalars(select(Passkey).where(Passkey.user_id == user.id)))
+        if len(existing) >= MAX_PASSKEYS:
+            raise too_many()
         label = user.email or user.name or "Vault account"
         return registration_options(request, db, "register", handle, label, user.name or label, existing, uid=user.id)
 
@@ -205,6 +211,8 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
         # while this request was open, its handle won: a passkey made with ours could never sign
         # in, so start again (the account row is locked so two of these can't both decide).
         db.execute(select(User.id).where(User.id == user.id).with_for_update())
+        if db.scalar(select(func.count(Passkey.id)).where(Passkey.user_id == user.id)) >= MAX_PASSKEYS:  # under the lock
+            raise too_many()
         identity = db.scalar(select(Identity).where(Identity.user_id == user.id, Identity.provider == PROVIDER))
         if identity is not None and identity.subject != pending["handle"]:
             raise HTTPException(409, "A passkey was just added to this account from another device. Please try again.")
@@ -259,7 +267,14 @@ def build_router(settings: Settings, get_db, sign_in, account_user) -> APIRouter
 
 
 def remove_passkey(db: Session, user_id: int, passkey_id: int) -> None:
-    """Delete one of the account's passkeys, unless it is the last way to sign in (409).
+    """Delete one of the account's passkeys, unless it is the last way to sign in (409), or unless no OTHER sign-in method
+    older than :data:`vault.auth.RECENT_SIGN_IN_METHOD_HOURS` would remain (409; #347).
+
+    The second rule is a behaviour change: before, any passkey could be removed while another way in remained. A copied session
+    could register a passkey of its own and delete the owner's old ones, leaving its own as the only method. Now a method
+    must stay that is older than a day, so what a copied session adds can never replace what the owner had, and an account
+    whose only old method is this passkey cannot remove it (add another passkey or sign-in, wait a day, then remove). The
+    recent-sign-in proposal in docs/mcp-oauth-threat-model.md is the way to lift it.
 
     Two removals running at the same time must not both pass the "another way to sign in is
     left" check. The account row is locked first (``SELECT … FOR UPDATE``), so they take turns,
@@ -273,11 +288,18 @@ def remove_passkey(db: Session, user_id: int, passkey_id: int) -> None:
     passkeys = select(func.count(Passkey.id)).where(Passkey.user_id == user_id).scalar_subquery()
     other_sign_ins = select(func.count(Identity.id)).where(
         Identity.user_id == user_id, Identity.provider != PROVIDER).scalar_subquery()
+    since = utcnow() - timedelta(hours=RECENT_SIGN_IN_METHOD_HOURS)
+    established = established_methods(user_id, since, skip_passkey=passkey_id)
     removed = db.execute(
-        delete(Passkey).where(Passkey.id == passkey_id, Passkey.user_id == user_id, passkeys + other_sign_ins > 1)
+        delete(Passkey).where(Passkey.id == passkey_id, Passkey.user_id == user_id, passkeys + other_sign_ins > 1,
+                              established > 0)
         .execution_options(synchronize_session=False)).rowcount
     if not removed:
-        raise HTTPException(409, "This is your only way to sign in. Add another passkey or sign-in method first.")
+        if db.scalar(select(passkeys + other_sign_ins)) <= 1:
+            raise HTTPException(409, "This is your only way to sign in. Add another passkey or sign-in method first.")
+        raise HTTPException(409, f"This account has no other sign-in method older than {RECENT_SIGN_IN_METHOD_HOURS} hours, so "
+                                 "this one can't be removed yet: if someone else had added the others, they could not be told "
+                                 "from yours. Sign out other browsers, and try again when another method is a day old.")
     # No passkeys left: the passkey identity goes too. Checked in the DELETE itself, so a passkey
     # registered at the same moment keeps the identity it needs to sign in.
     db.execute(delete(Identity).where(Identity.user_id == user_id, Identity.provider == PROVIDER,

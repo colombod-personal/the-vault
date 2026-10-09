@@ -125,8 +125,10 @@ the UV flag is refused (`400` when creating a passkey, `401` when signing in).
 | New account | `POST /api/auth/passkey/signup/options {"name"}`, then `.../signup/verify {"credential", "name"}` |
 | Sign in (discoverable credentials) | `POST /api/auth/passkey/login/options`, then `.../login/verify {"credential"}` |
 | Add a passkey to your account | `POST /api/auth/passkey/register/options`, then `.../register/verify {"credential", "name"}` |
-| List / remove | `GET /api/v1/me/passkeys`, `DELETE /api/v1/me/passkeys/{id}` (your last sign-in method can't be removed) |
-| Every sign-in method, with when it was added | `GET /api/v1/me/sign-in-methods` (passkeys and linked providers, newest first; `recent_only=true` keeps those added in the last 24 hours, the window "Sign out everywhere" shows), `DELETE /api/v1/me/identities/{id}` to unlink a provider linked in the last 24 hours (your last sign-in method can't be removed) |
+| List / remove | `GET /api/v1/me/passkeys`, `DELETE /api/v1/me/passkeys/{id}` (your last sign-in method can't be removed; nor one while no other method older than 24 hours would remain) |
+| Every sign-in method, with when it was added | `GET /api/v1/me/sign-in-methods` (passkeys and linked providers, newest first; `recent_only=true` keeps those added in the last 24 hours; each has `removable` and, when false, `removable_reason`), `DELETE /api/v1/me/identities/{id}` to unlink a provider linked in the last 24 hours, `DELETE /api/v1/me/sign-in-methods/recent` to remove everything added in the last 24 hours. Every removal needs another method **older than 24 hours** to remain (409 otherwise; also for `DELETE /me/passkeys/{id}`), so a copied session cannot replace your methods with its own; your last method is never removed |
+| End the other browsers' sessions | `POST /api/auth/sign-out-others` (this browser stays signed in on a re-issued cookie; the first step of Account, Sign out everywhere; a reviewer's demo session gets 403) |
+| Passkey limit | at most 20 per account (409 at `register/options` and `register/verify`) |
 
 `credential` is `PublicKeyCredential.toJSON()`. The relying-party id is `BASE_URL`'s host; on
 Vercel, a deployment without `BASE_URL` uses its own address. Personal access tokens can't add

@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 from .. import analytics, deck_text, lab, oauth_server, outbound, tags as card_tags, tokens
 from ..catalog import Catalog
 from ..auth import (RECENT_SIGN_IN_METHOD_HOURS, IdentityInUse, Profile, find_or_create, remove_identity,
-                    sign_in_methods as account_sign_in_methods)
+                    remove_recent_methods, sign_in_methods as account_sign_in_methods, why_not_removable)
 from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, history_summary, import_days, view_version
 from .. import archidekt_cache, deck_import, deck_match, deck_overview, deck_refresh, deck_versions, experts, owned_changes
@@ -319,18 +319,25 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                              limit: int | None = None, user: User = Depends(account_user),
                              db: Session = Depends(get_db)) -> dict:
         methods = account_sign_in_methods(db, user.id)
-        established = any(not m["recently_added"] for m in methods)  # unlinking needs an older method to remain
         shown = [m for m in methods if m["recently_added"]] if recent_only else methods
         page, nxt = paginate(shown, lambda m: (-m["created_at"].timestamp(), m["kind"]), lambda m: m["id"],
                              cursor=cursor, limit=limit)
         items = [{"id": m["id"], "kind": m["kind"], "provider": m["provider"], "name": m["name"],
                   "created_at": _iso(m["created_at"]), "last_used_at": _iso(m["last_used_at"]),
                   "recently_added": m["recently_added"], "added_minutes_ago": m["added_minutes_ago"],
-                  "removable": len(methods) > 1 and (m["kind"] == "passkey" or (m["recently_added"] and established)),
+                  "removable": why_not_removable(m, methods) is None, "removable_reason": why_not_removable(m, methods),
                   "_links": {"self": link(f"{V1}/me/passkeys/{m['id']}" if m["kind"] == "passkey"
                                           else f"{V1}/me/identities/{m['id']}")}} for m in page]
-        body = page_body(request, items, nxt, len(shown), **({"recent_only": "true"} if recent_only else {}))
+        body = page_body(request, items, nxt, len(shown), limit=limit, **({"recent_only": "true"} if recent_only else {}))
         return {**body, "recent_hours": RECENT_SIGN_IN_METHOD_HOURS}
+
+    @router.delete("/me/sign-in-methods/recent", tags=["account"],
+                   summary="Remove every sign-in method added in the last 24 hours (never the last way to sign in: "
+                           "a method older than 24 hours must remain)")
+    def delete_recent_sign_in_methods(user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+        removed = remove_recent_methods(db, user.id)
+        db.commit()
+        return {"deleted": removed}
 
     @router.delete("/me/identities/{identity_id}", tags=["account"],
                    summary="Unlink a provider (Google, Microsoft, Apple, Facebook) linked in the last 24 hours; "

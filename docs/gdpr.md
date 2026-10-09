@@ -88,9 +88,14 @@ own window, as for any deletion (see the checklist below). **Erasure** (`DELETE 
   endpoint that takes an id.
 
 - Sign-in methods are listed with the date each was added (`GET /api/v1/me/sign-in-methods`; nothing new is stored, `created_at` was
-  already kept and exported as `linked_at`), and one added in the last 24 hours can be removed from Account, Sign out everywhere
-  (`DELETE /api/v1/me/identities/{id}`, `DELETE /api/v1/me/passkeys/{id}`; the last sign-in method can't be removed). Only the person's own
-  methods are read or removed, and another person's id is a 404 (`tests/test_recent_sign_in_methods.py`). #347.
+  already kept and exported as `linked_at`). From Account, Sign out everywhere the person ends the other browsers' sessions, sees every
+  method with its date, and removes what is not theirs (`DELETE /api/v1/me/identities/{id}` for a provider linked in the last 24 hours,
+  `DELETE /api/v1/me/passkeys/{id}`, `DELETE /api/v1/me/sign-in-methods/recent` for everything added in the last 24 hours). The last
+  sign-in method can't be removed, and neither can a method while no OTHER method older than 24 hours would remain: a **change in what
+  the person can erase**, made so that a copied session cannot replace the owner's methods with its own. It means an account whose only
+  old method is one passkey, or an account whose methods were all added today, cannot remove it yet (the response says why); deleting
+  the whole account (`DELETE /api/v1/me`) is unchanged and erases every method. An account holds at most 20 passkeys. Only the
+  person's own methods are read or removed, and another person's id is a 404 (`tests/test_recent_sign_in_methods.py`). #347.
 
 - OAuth grants are listed (grouped by app) and revoked by their owner only (`/api/v1/me/apps`, 404 otherwise) and, like personal access
   tokens, never carry account-level powers (`docs/mcp-oauth-threat-model.md`).

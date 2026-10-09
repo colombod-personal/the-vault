@@ -482,41 +482,63 @@ not a sign-in method the holder added meanwhile** (their own passkey, their own 
 person has signed out everywhere. This needs a stolen cookie first, so it is a depth problem, not a way in. The issue splits the fix in
 four criteria; only the third is built, because the others wait for a decision from the owner.
 
-### Built: "Sign out everywhere" shows and removes what was added in the last 24 hours (criterion 3)
+### Built: "Sign out everywhere" ends the other sessions, then shows and removes sign-in methods (criterion 3)
 
-- **What the person sees.** Account, Sign-in methods, "Sign out everywhere" opens a panel before anything is signed out. It lists the
-  passkeys and linked providers added in the last 24 hours, each with how long ago (from the server: `added_minutes_ago`) and a Remove
-  button (44 px tall at every width), or says "Nothing was added in the last 24 hours". A method older than that is never listed there.
-  The person removes what is not theirs, then presses "Sign out everywhere". If the check cannot load, the panel says so and still signs
-  out. A method that is the only way to sign in is listed without a Remove button ("Your only way to sign in").
-- **API** (`docs/api.md`; the person only, through `account_user`, so a personal access token or a connected app gets 403):
-  `GET /api/v1/me/sign-in-methods[?recent_only=true]` (passkeys and linked providers, newest first, paged, with `recently_added` and
-  `removable`), `DELETE /api/v1/me/identities/{id}` (new: unlink a provider) and the existing `DELETE /api/v1/me/passkeys/{id}`. The
-  window is the server's constant `RECENT_SIGN_IN_METHOD_HOURS` (`vault/auth.py`); the page only renders it. No migration was needed:
-  `identities` and `passkeys` already had `created_at`.
+Two read-only agent reviews of this change (2026-10-09, before any merge; no human review yet) found the problems recorded
+below as "found by review"; each is fixed and tested. The first version listed only what was added in the last 24 hours and signed out last.
+
+- **What the person sees, in this order on purpose.** Account, Sign-in methods, "Sign out everywhere" opens a panel.
+  *Step 1*, "Sign out the other browsers": `POST /api/auth/sign-out-others` replaces the account's `session_key` and re-issues this
+  browser's cookie with the new one, so a copied cookie is dead from this moment and this browser stays signed in. *Step 2*: the panel
+  lists **all** the sign-in methods with their dates (the ones added in the last 24 hours first, marked "new"), each with Remove where the
+  server says it can be removed, and the reason where it cannot. Then "Done", or "Also sign out of this browser".
+  *Found by review:* the first version removed methods first and signed out last, so a live holder of the copied cookie could add a way
+  back in after the check; and it said "Nothing was added in the last 24 hours" about a method added two days ago (a false all-clear).
+  Now the other sessions end before anything is shown, and older methods are listed with their dates.
+- **API** (`docs/api.md`; the person only, through `account_user`, so a personal access token, a connected app and a reviewer's demo
+  session get 403): `GET /api/v1/me/sign-in-methods[?recent_only=true]` (passkeys and linked providers, newest first, paged, with
+  `recently_added`, `removable` and `removable_reason`: `only_method`, `provider_too_old` or `needs_older_method`),
+  `DELETE /api/v1/me/identities/{id}` (new: unlink a provider), `DELETE /api/v1/me/sign-in-methods/recent` (new: remove everything
+  added in the last 24 hours, in one request, after the page's confirmation), `POST /api/auth/sign-out-others` (new) and the existing
+  `DELETE /api/v1/me/passkeys/{id}`. The window is the server's constant `RECENT_SIGN_IN_METHOD_HOURS` (`vault/auth.py`); the page only
+  renders it. No migration: `identities` and `passkeys` already had `created_at`.
+- **The one rule for every removal: a method older than 24 hours must remain afterwards.** `established_methods` (`vault/auth.py`) counts
+  the OTHER providers and passkeys older than the window, and each removal (`remove_identity`, `remove_passkey`,
+  `remove_recent_methods`) has it inside its own `DELETE` statement after locking the account row, so two removals at once take turns
+  and the account is never left with none (`tests/test_recent_sign_in_methods.py`, with threads). The passkey identity row is the
+  WebAuthn handle, not a method: it is not counted and cannot be removed here (404). Another person's method is never listed, and
+  removing it is a 404. *Found by review:* the first version held only provider unlinking to this, so a copied session could register
+  its own passkey B and delete the owner's old passkeys, leaving B as the only method (a takeover). Now it cannot: the last old method
+  can never be removed while only new ones would remain.
+- **Behaviour change, stated plainly.** Before, any passkey could be removed while another way to sign in remained. Now a passkey (new
+  or old) is removed only while another method older than 24 hours remains. So an account whose only old method is one passkey cannot
+  remove it (add another passkey or sign-in, wait a day, then remove the first), and a young account (every method added today)
+  removes nothing: the owner's and a copied session's methods cannot be told apart, and the person is told so (with the reason). This is the cost of having no recent-sign-in
+  check; the proposal below is what lifts it.
+- **Unlinking a provider is also limited to one linked in the last 24 hours** (409 otherwise, `provider_too_old`): if any provider could
+  be unlinked, a copied session could add its own passkey and then unlink every provider the owner uses. An older provider is shown with
+  its date and the reason, and a pointer to the proposal below.
+- **Passkeys per account are capped at 20** (`MAX_PASSKEYS`, `vault/passkeys.py`; 409 with a message at the options step, and again
+  under the account lock when the credential is saved, so two devices cannot overshoot it). With "Remove everything added in the last 24
+  hours" (one request, 409 unless an older method stays) a flood of recent passkeys is bounded and removable. *Found by review:* the
+  panel showed only the first 100 and a copied session could add more.
 - **The date has to be the date it was added to this account.** `_claim_identity` moves a sign-in from an empty account of its own to
   the account that links it. Its `created_at` is now set to the move. Otherwise a sign-in made a week earlier on a throw-away account
-  and then linked with a copied session would look a week old and stay out of the list
-  (`test_a_sign_in_moved_over_from_an_older_empty_account_counts_from_the_move`, checked to fail without that line).
-- **The last way to sign in is never removed.** `remove_identity` is built like `remove_passkey`: the account row is locked and the
-  "another way to sign in is left" check is part of the `DELETE` statement itself, counting passkeys and providers. The passkey
-  identity row is the WebAuthn user handle, not a method: it is not counted and cannot be removed here (404). Another person's method
-  is never listed, and removing it is a 404.
-- **Unlinking a provider is limited to one linked in the last 24 hours (409 otherwise), on purpose.** Today a copied session can add a
-  passkey, but the owner's linked providers survive it. If any provider could be unlinked, the same session could add its own passkey
-  and then unlink every provider the owner uses: a takeover and a lock-out, not a nuisance. So the new route removes only what this
-  feature is for, and only while a method older than 24 hours remains: in an account whose methods are all new (signed up with Google
-  this morning), a copied session could add a passkey and unlink the owner's Google, and nothing tells whose is whose, so nothing can be
-  unlinked there yet (409; "Sign out everywhere" still works). A read-only security review of this change found that case (2026-10-09,
-  before the merge). Removing a passkey was already possible without a time limit and is unchanged. Widening unlinking belongs to the
-  owner's decision below.
-- **Tests:** `tests/test_recent_sign_in_methods.py`: a method added 2 hours ago is listed and removable; one added 3 days ago is not
-  highlighted; the last method is refused; another person's methods are never listed or removable; a token is refused; the 24-hour edge;
-  an old provider cannot be unlinked; the claim date; paging; removing and then signing out everywhere ends a copied cookie. Screenshots
-  at 1400 and 390 px: `docs/screenshots/signout-everywhere-recent-*.jpg`.
-- **What it does not do.** It does not stop a copied session adding the method in the first place, and it relies on the person looking
-  at the list: nobody is told when a method is added (the Vault holds an e-mail address only from some providers and sends no mail).
-  The proposal below is what would stop it.
+  and then linked with a copied session would look a week old (`test_a_sign_in_moved_over_from_an_older_empty_account_counts_from_the_move`,
+  checked to fail without that line). A claim racing an unlink answers `identity_in_use`, not a 500 (tested with a held lock).
+- **A passkey's name is the person's or the attacker's choice** (up to 80 characters, escaped by React): a passkey called "iPhone" can
+  look like the owner's. The page shows when it was added to the minute and, for new ones, the time of day.
+- **Tests:** `tests/test_recent_sign_in_methods.py` and `tests/test_passkeys.py` (the cap): a method added 2 hours ago is listed and
+  removable; 3 days ago is not highlighted; the last method is refused; another person's are never listed or removed; a token and a
+  reviewer session get 403 on every new route; the 24-hour edge; old providers, young accounts and passkey replacement are refused;
+  `removable_reason`; remove-everything-recent; the cap; next links keep `limit`; sign-out-others kills a second session's cookie
+  and keeps this one; concurrent removals and claim-versus-unlink. Screenshots at 1400 and 390 px:
+  `docs/screenshots/signout-everywhere-*.jpg`.
+- **What it does not do.** It does not stop a copied session adding a method in the first place, and the person has to open the panel:
+  nobody is told when a method is added (the Vault holds an e-mail address only from some providers and sends no mail). It does not
+  end a copied native access token, a personal access token or a connected app's grant (they are listed and revoked under the
+  Account panel's apps and tokens). A method an attacker added more than 24 hours ago is listed with its date but may not be
+  removable yet (the reason is shown). The proposal below is what would stop the adding.
 
 ### Proposed, waiting for the owner: a recent sign-in for account-level actions (criteria 1, 2 and 4)
 
@@ -544,9 +566,11 @@ with a method they already have.
   empty account). The callback must check, not only the start of the flow, because a copied session can open `/api/auth/login/google`
   directly; the Account page also sends `?intent=link` so a stale session is told before it is sent to the provider. **Left as they
   are:** `PATCH /me` (the name), shares, collection edits, disconnecting an app or a session, and "Sign out everywhere" (a person in a
-  hurry must always be able to cut every session, and an attacker gains nothing by signing the owner out). **Removing a method added in
-  the last 24 hours stays free**, so the panel built above works with a stale session: it can only remove what is new, never what the
-  owner has used for longer. Removing an older passkey, and unlinking an older provider (not possible today), need the recent sign-in.
+  hurry must always be able to cut every session, and an attacker gains nothing by signing the owner out). **Removals** keep the rule
+  built above (a method older than 24 hours must remain), and removing a method added in the last 24 hours stays free of the recent
+  sign-in, so the panel works with a stale session: it can only remove what is new next to something the owner has used for longer.
+  Removing an older passkey, and unlinking an older provider (not possible today), would need the recent sign-in; with it, the
+  "older method must remain" rule could be relaxed for a fresh session, which is how an account with one old passkey could replace it.
 - **What a person without a fresh session sees.** There is no new login route: signing in again with a method the account already
   has is the step. On `recent_sign_in_required` the Account page shows "Confirm it's you" with the methods the person has: "Use your
   passkey" (the passkey login ceremony; the page checks that `me.id` did not change, because a credential of another account would

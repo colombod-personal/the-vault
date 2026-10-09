@@ -628,6 +628,9 @@ p.tag-note { margin: 0 0 14px; font-size: 12px; }
 .signout-methods { list-style: none; margin: 0; padding: 0; }
 .signout-method { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 4px 0; border-top: 1px solid var(--border); }
 .signout-method .btn { min-height: 44px; min-width: 44px; flex: none; }
+.signout-recent { border-left: 3px solid var(--gold); padding-left: 8px; }
+.signout-flag { color: var(--gold); }
+.signout-why { color: var(--text-2); font-size: 12px; text-transform: none; letter-spacing: 0; }
 .signout-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .signout-actions .btn { min-height: 44px; }
 

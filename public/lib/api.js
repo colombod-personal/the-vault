@@ -438,7 +438,10 @@ window.VaultApi = (() => {
 
   // Every way to sign in (passkeys and linked providers), for "Sign out everywhere" (#347): the server decides what counts as recent.
   const signInMethods = {
-    recent: () => call(V1 + '/me/sign-in-methods?recent_only=true&limit=500'),
+    all: () => call(V1 + '/me/sign-in-methods?limit=500'),
+    // Ends every other browser's session and re-issues this browser's cookie (the first step of Sign out everywhere).
+    signOutOthers: () => call('/api/auth/sign-out-others', { method: 'POST' }),
+    removeRecent: () => call(V1 + '/me/sign-in-methods/recent', { method: 'DELETE' }),
     remove: (m) => call(V1 + (m.kind === 'passkey' ? '/me/passkeys/' : '/me/identities/') + m.id, { method: 'DELETE' }),
   };
 
