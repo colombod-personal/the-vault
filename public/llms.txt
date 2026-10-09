@@ -179,6 +179,10 @@ be revoked (Account → Connected apps for OAuth).
   - buckets (the places copies live in: binders, deck boxes, trade boxes): `list_buckets`, `create_bucket`,
     `rename_bucket`, `move_cards` (moves copies between buckets, splitting a stack; a big move is shown first),
     `delete_bucket` (an empty one, asks first); `search_cards` takes a `bucket` to list what is in one
+  - tags (the person's own labels on cards, on the card so every printing has them): `list_tags`, `tag_cards`,
+    `untag_cards`, `rename_tag`, `delete_tag` (asks first); a tag you write is recorded as written by your app and shown
+    so, never as the person's own; more than 25 cards at once is shown first; `search_cards` takes a `tag` and lists each
+    card's `tags`
   - decks: `check_decklist`, `parse_decklist`, `list_decks`, `get_deck`, `get_deck_overlap`, `save_deck`,
     `update_deck`, `delete_deck` (asks first), `get_archidekt_deck`, `import_deck_from_link`,
     `refresh_deck` (shows what changed on Archidekt, replaces only with the preview's fingerprint)
