@@ -76,7 +76,8 @@ def test_every_sentence_equals_the_field_of_the_answer_it_reads(loaded, app):
     # the address: the swap the Ideas view writes is read as is, and written back as is
     bare, plain, plus = said["routes"]
     assert bare == {"view": "decks", "deckId": "7"} and said["rebuilt"][0] == "#/decks/7"
-    assert plain == plus == {"view": "decks", "deckId": "7", "swap": swap} and said["rebuilt"][1] == "#/decks/7?swap=" + quote(swap, safe="")
+    assert plain == plus == {"view": "decks", "deckId": "7", "swap": {"cut": cuts, "add": adds}}  # read once by the Ideas helpers: an object
+    assert said["rebuilt"][1] == "#/decks/7?swap=" + quote(json.dumps({"cut": cuts, "add": adds}, separators=(",", ":")), safe="")
 
 
 @needs_node

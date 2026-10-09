@@ -21,7 +21,11 @@ const jsx = read('../../public/app.jsx').replace(/\r\n/g, '\n');
 const from = jsx.indexOf('const VAULT_VIEWS');
 const to = jsx.indexOf('const vaultUrlFor');
 if (from < 0 || to < from) throw new Error('app.jsx no longer has the route functions where the driver looks for them');
-const ctx = vm.createContext({ URLSearchParams, decodeURIComponent, encodeURIComponent, Number, Set, location: { hash: '' }, helpHashFor: (id) => '#/help' + (id ? '/' + id : '') });
+// the route code also reads the Ideas view's address helpers (public/lib/ideas.js), loaded the way the page loads them
+const ideasSandbox = {};
+ideasSandbox.window = ideasSandbox;
+vm.runInNewContext(read('../../public/lib/ideas.js'), ideasSandbox);
+const ctx = vm.createContext({ window: ideasSandbox.window, URLSearchParams, decodeURIComponent, encodeURIComponent, JSON, Number, Set, location: { hash: '' }, helpHashFor: (id) => '#/help' + (id ? '/' + id : '') });
 vm.runInContext(jsx.slice(from, to), ctx);
 const routes = input.hashes.map((hash) => { ctx.location.hash = hash; return J(vm.runInContext("vaultRouteFromHash('dashboard')", ctx)); });
 const rebuilt = routes.map((route) => { ctx.route = route; return vm.runInContext('vaultHashFor(route)', ctx); });
