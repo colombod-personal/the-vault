@@ -206,6 +206,24 @@ def test_a_read_only_token_may_read_tags_but_not_change_them_and_an_assistant_is
     assert detail["by_source"] == {"person": 0, "assistant": 1, "system": 0} and detail["assistants"] == ["token 'Claude helper'"]
 
 
+def test_the_person_accepts_an_assistants_tag_by_tagging_the_card_themselves(stocked):
+    ids = card_ids(stocked)
+    rw = stocked.post("/api/v1/me/tokens", json={"name": "Claude helper", "scopes": ["read", "write"]}).json()["token"]
+    mine = dict(stocked.cookies.items())
+    stocked.cookies.clear()
+    robot = {"Authorization": f"Bearer {rw}"}
+    stocked.post(f"{T_}/idea/cards", json={"card_ids": ids["Mountain"] + ids["Sol Ring"][:1]}, headers=robot)
+    again = stocked.post(f"{T_}/idea/cards", json={"card_ids": ids["Mountain"]}, headers=robot).json()
+    assert again["accepted"] == 0 and again["already_tagged"] == 1  # an assistant tagging again accepts nothing
+    for name, value in mine.items():
+        stocked.cookies.set(name, value)
+    assert stocked.get(f"{T_}/idea").json()["by_source"] == {"person": 0, "assistant": 2, "system": 0}
+    accepted = stocked.post(f"{T_}/idea/cards", json={"card_ids": ids["Mountain"]}).json()
+    assert accepted["added"] == 0 and accepted["accepted"] == 1 and accepted["written_by"] == "person"
+    detail = stocked.get(f"{T_}/idea").json()
+    assert detail["by_source"] == {"person": 1, "assistant": 1, "system": 0} and detail["assistants"] == ["token 'Claude helper'"]
+
+
 def test_a_retried_post_with_the_same_key_tags_once(stocked):
     ids = card_ids(stocked)
     headers = {"Idempotency-Key": "tag-mountain-1"}

@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from . import tokens
@@ -95,8 +95,9 @@ def stamp(db: Session, user: User) -> str:
     return f"t{count}.{newest}.{names}"
 
 
-def assign(db: Session, user: User, tag: str, cards: list[tuple[str, str, str]], writer: Writer) -> tuple[int, int]:
-    """Put ``tag`` on these cards; returns ``(added, already there)``. Enforces the limits where they are written."""
+def assign(db: Session, user: User, tag: str, cards: list[tuple[str, str, str]], writer: Writer) -> tuple[int, int, int]:
+    """Put ``tag`` on these cards; returns ``(added, already there, accepted)``. Enforces the limits where they are written.
+    When the person tags a card whose tag an assistant wrote, they accept it: the assignment becomes theirs (docs/collections.md)."""
     have = oracle_ids_for(db, user, tag)
     cards = list({c[1]: c for c in cards}.values())  # two printings of one card are one card
     new = [c for c in cards if c[1] not in have]
@@ -112,8 +113,13 @@ def assign(db: Session, user: User, tag: str, cards: list[tuple[str, str, str]],
             raise TagError(f"{full[0]} has {MAX_PER_CARD} tags already (the most a card can have); remove one first", 409)
     for _, oracle_id, _ in new:
         db.add(TagAssignment(user_id=user.id, oracle_id=oracle_id, tag=tag, source=writer.source, source_detail=writer.detail))
+    accepted = 0
+    if writer.source == "person" and len(new) < len(cards):
+        accepted = db.execute(update(TagAssignment).where(
+            TagAssignment.user_id == user.id, TagAssignment.tag == tag, TagAssignment.source == "assistant",
+            TagAssignment.oracle_id.in_([c[1] for c in cards if c[1] in have])).values(source="person", source_detail=None)).rowcount or 0
     db.flush()
-    return len(new), len(cards) - len(new)
+    return len(new), len(cards) - len(new), accepted
 
 
 def remove(db: Session, user: User, tag: str, oracle_ids: list[str]) -> int:

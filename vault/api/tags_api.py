@@ -136,10 +136,10 @@ def build_router(get_db, current_user) -> APIRouter:
                              "with confirm true to apply it.")
             who = T.writer_of(db, getattr(request.state, "bearer", None))
             try:
-                added, already = T.assign(db, user, tag, cards, who)
+                added, already, accepted = T.assign(db, user, tag, cards, who)
             except T.TagError as exc:
                 raise HTTPException(exc.status, str(exc)) from None
-            return shown(tag, cards, applied=True, added=added, already_tagged=already, written_by=who.source,
+            return shown(tag, cards, applied=True, added=added, already_tagged=already, accepted=accepted, written_by=who.source,
                          _links={"tag": link(f"{V1}/collection/tags/{tag}"), "cards": link(f"{V1}/collection/cards?tag={tag}")})
 
         return idempotent(request, db, user, 200, run)
