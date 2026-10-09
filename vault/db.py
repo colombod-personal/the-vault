@@ -86,6 +86,16 @@ def _retry_connects(engine: Engine) -> None:
                 time.sleep(delay * 2 ** (attempt - 1) * (0.5 + random.random()))
 
 
+def _knows(scripts, revision: str) -> bool:
+    """Whether this code's migration scripts include ``revision``."""
+    from alembic.util import CommandError
+
+    try:
+        return scripts.get_revision(revision) is not None
+    except CommandError:
+        return False
+
+
 class Database:
     def __init__(self, url: str):
         self.engine = make_engine(url)
@@ -129,13 +139,28 @@ class Database:
 
         config = Config()
         config.set_main_option("script_location", str(Path(__file__).parent / "migrations"))
-        head = ScriptDirectory.from_config(config).get_current_head()
+        scripts = ScriptDirectory.from_config(config)
+        head = scripts.get_current_head()
+
+        def settled(conn) -> bool:
+            """Nothing to do: the schema is at this code's head, or ahead of it (#169)."""
+            current = MigrationContext.configure(conn).get_current_revision()
+            if current == head:
+                return True
+            if current is not None and not _knows(scripts, current):
+                # A newer deploy migrated the database and this instance runs older code (a cold start of the previous
+                # deployment while a new one rolls out, or a rollback). Migrations only add, so the older code works on the
+                # newer schema; failing here was a 500 for every request this instance got.
+                log.warning(json.dumps({"event": "database_ahead_of_code", "database_revision": current, "code_head": head}))
+                return True
+            return False
+
         with self.engine.connect() as conn:
-            if MigrationContext.configure(conn).get_current_revision() == head:
+            if settled(conn):
                 return
         with self.engine.begin() as conn:
             conn.execute(text("SELECT pg_advisory_xact_lock(7261)"))  # 7261: the Vault's migration lock
-            if MigrationContext.configure(conn).get_current_revision() == head:
+            if settled(conn):
                 return  # another instance finished while we waited
             config.attributes["connection"] = conn
             command.upgrade(config, "head")
