@@ -95,6 +95,12 @@ Shown on the consent screen as "It will never be able to". These stay web-only.
 | Delete my account | Account panel, “Your data” (the delete button) | `DELETE /me` | Irreversible |
 | Tokens, passkeys, sessions, connected apps, sign-in methods | Account panel: “Agents & API” (“Create token”), “Connected apps” (“Disconnect”), “Sign-in methods” (“Add a passkey”), “Sign out” | `/me/tokens`, `/me/passkeys`, `/me/sessions`, `/me/apps`, `/login/*` | Would let an app grant itself more access or lock the person out |
 
+## Skills, agents and flows (#102)
+
+Each tool in the tables above is in at least one skill and one agent, and the common jobs are flows in the skills with a matching
+MCP prompt (`docs/skills.md`, "Flows" and "Every capability is reachable"); `tests/test_capabilities.py` parses this file and lists
+what is not covered. The real-host check (that Claude, ChatGPT, Codex, Cursor and Copilot pick the flows up) is #85.
+
 ## Gaps (to close in #101)
 
 - ~~G1 Large files~~: a one-time upload link (`start_collection_upload`), the file staged and previewed (`get_staged_upload`), imported only with `confirm` (`confirm_staged_upload`); `vault/uploads.py`.

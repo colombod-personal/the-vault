@@ -11,11 +11,14 @@ How you work:
    Get the format and the budget in USD.
 2. Read the deck with `deck_stats` and `deck_legality`. Report what they say, fix legality problems first, and
    ask what the deck is trying to do if the cards do not show it.
-3. Call `find_upgrades` with the budget. Choose swaps that serve the deck's plan and explain each in one
+3. Before suggesting a purchase, see what the collection already gives: `get_deck_ideas` shows the deck in role lanes with
+   what the person owns, what is missing and what another deck holds, and `get_card_alternatives` with `card` lists owned
+   cards that could stand in for one of the deck's. A free card comes first; say which deck holds a borrowed one.
+4. Call `find_upgrades` with the budget. Choose swaps that serve the deck's plan and explain each in one
    sentence. Popularity (EDHREC rank) is not power or fit; say so once.
-4. Call `validate_deck_changes` with your exact cuts, adds, format and budget. Present the plan only when
+5. Call `validate_deck_changes` with your exact cuts, adds, format and budget. Present the plan only when
    `valid` is true; otherwise fix it and validate again. Show the dated prices and the total against the budget.
-5. If asked, `find_combos` shows combos the new cards complete (Commander Spellbook's descriptions, attributed).
+6. If asked, `find_combos` shows combos the new cards complete (Commander Spellbook's descriptions, attributed).
 
 Say plainly: roles are Scryfall Tagger tags, a community's opinion; prices are Scryfall's cheapest printing on
 the date shown, not a store's price today. Every result has `provenance`; pass it on, and never present
@@ -28,4 +31,4 @@ If these skills are installed, follow them: deck-upgrader, archidekt-deck-helper
 
 [mcp_servers.vault]
 url = "https://mtgvault.cards/api/mcp"
-enabled_tools = ["whoami", "list_decks", "deck_stats", "deck_legality", "find_upgrades", "shopping_list", "get_archidekt_deck", "validate_deck_changes", "find_combos", "get_card_oracle", "get_deck", "simulate_draws"]
+enabled_tools = ["whoami", "list_decks", "deck_stats", "deck_legality", "find_upgrades", "shopping_list", "get_archidekt_deck", "validate_deck_changes", "find_combos", "get_card_oracle", "get_deck", "get_deck_ideas", "get_card_alternatives", "simulate_draws"]

@@ -112,16 +112,16 @@ Measured for a Commander deck review ("tune it on a budget"): the panel the seat
 
 | Who | Tool calls as its brief says | Tool calls if it reuses the chair's facts | Tool answers read (tokens) as briefed | Tool answers read (tokens) reusing the facts | Brief (tokens) |
 |---|---|---|---|---|---|
-| chair (`expert-council`) | 9 | 9 | 17495 | 17495 | 1199 |
-| `vault-commander-expert` | 4 | 0 | 4888 | 0 | 541 |
+| chair (`expert-council`) | 9 | 9 | 17503 | 17503 | 1610 |
+| `vault-commander-expert` | 4 | 0 | 4896 | 0 | 541 |
 | `vault-casual-table` | 5 | 3 | 3940 | 1622 | 452 |
 | `vault-synergy-analyst` | 7 | 4 | 7784 | 1769 | 270 |
 | `vault-collection-analyst` | 4 | 2 | 12384 | 3439 | 270 |
 | `vault-judge` (+ rules answers, not measured) | 5 | 5 | 541 | 541 | 321 |
 | `vault-devils-advocate` | 4 | 4 | 2128 | 2128 | 309 |
-| **Run** | **38** | **27** | **49159** | **26993** | **3362** |
+| **Run** | **38** | **27** | **49176** | **27002** | **3772** |
 
-Measured answers (tokens, one call each, on the fixture deck): `check_decklist` 3698, `deck_legality` 472, `deck_stats` 1803, `find_combos` 514, `find_upgrades` 840, `get_card_oracle` 541, `get_deck` 2868, `get_deck_overlap` 5248, `list_decks` 288, `search_cards` 147, `shopping_list` 2599, `simulate_draws` 2098, `validate_deck_changes` 505. The chair hands every member the shared facts (`deck_stats` to `get_deck_overlap`, together 13834 tokens), which each member's context then holds as well: 13834 tokens in each of the 6 members' contexts, 83004 across the run, on top of the table. The lists passed as arguments (`check_decklist` takes the whole deck list) are not counted. Commander Spellbook's answer (`find_combos`) is the twin's, so a real one can be longer.
+Measured answers (tokens, one call each, on the fixture deck): `check_decklist` 3698, `deck_legality` 472, `deck_stats` 1803, `find_combos` 514, `find_upgrades` 840, `get_card_oracle` 541, `get_deck` 2868, `get_deck_overlap` 5248, `list_decks` 288, `search_cards` 147, `shopping_list` 2599, `simulate_draws` 2107, `validate_deck_changes` 505. The chair hands every member the shared facts (`deck_stats` to `get_deck_overlap`, together 13842 tokens), which each member's context then holds as well: 13842 tokens in each of the 6 members' contexts, 83052 across the run, on top of the table. The lists passed as arguments (`check_decklist` takes the whole deck list) are not counted. Commander Spellbook's answer (`find_combos`) is the twin's, so a real one can be longer.
 
 Counting rules: a member's fixed calls are the tools named in its brief's "How you work"; members that look at cards (casual table, devil's advocate, synergy analyst) make at most 3 `get_card_oracle` lookups, one per point (they write at most three points), counted at the measured size of one answer. The judge's rules answers (`get_rulings`, `search_rules`, `get_rule`, `verify_citation`) are counted as calls but not sized: the rules are read live from Wizards and no copy exists to measure.
 
