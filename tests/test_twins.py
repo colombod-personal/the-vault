@@ -104,7 +104,8 @@ def test_archidekt_decks_through_the_twin(database_url, tmp_path, universe):
         client.post("/api/auth/dev-login")
         deck = client.get(f"/api/v1/archidekt/decks/{public['id']}").json()
         assert deck["deck"]["name"] == "Elves" and "1 Llanowar Elves" in deck["text"] and deck["deck"]["author"] == "ann"
-        assert client.get(f"/api/v1/archidekt/decks/{private['id']}").status_code == 404
+        hidden = client.get(f"/api/v1/archidekt/decks/{private['id']}")  # #94: private decks are explained, never asked for a login
+        assert hidden.status_code == 404 and "public or unlisted" in hidden.json()["detail"]
         universe.archidekt.outage = True
         again = client.get(f"/api/v1/archidekt/decks/{public['id']}")  # a recent copy is served: Archidekt is not asked
         assert again.status_code == 200 and again.json()["vault_cache"]["from_cache"] is True

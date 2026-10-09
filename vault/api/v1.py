@@ -1158,7 +1158,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 return client.get_deck(deck).raw
         except ApiError as exc:
             if exc.status_code == 404:
-                raise HTTPException(404, str(exc)) from exc
+                raise HTTPException(404, "Archidekt has no public deck with that number. If it is your deck and it is private, make it "
+                                         "public or unlisted on Archidekt, then try again. The Vault never asks for your Archidekt login.") from exc
             if exc.status_code == 429:
                 raise HTTPException(503, "Archidekt is limiting requests right now, so the deck cannot be read. Try again in a minute.",
                                     headers={"Retry-After": "60"}) from exc
