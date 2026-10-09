@@ -53,7 +53,7 @@ def test_every_label_the_table_quotes_exists_in_the_front_end():
 
 
 def test_the_tabs_it_names_are_the_tabs_the_app_has():
-    for tab in ("Vault", "Browse", "Sets", "Decks", "Lab", "Graph"):
+    for tab in ("Vault", "Browse", "Sets", "Decks", "Lab", "Ideas"):
         assert f">{tab}</button>" in FRONT_END or f">{tab}\n" in FRONT_END, tab
 
 

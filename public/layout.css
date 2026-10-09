@@ -110,8 +110,8 @@ main { padding-left: max(28px, env(safe-area-inset-left)); padding-right: max(28
 .panel .muted, .tbl td.muted { color: var(--text-2); }
 .panel .chip:not(.active), .tbl .chip:not(.active) { color: var(--text-2); }
 
-/* Scrollbars in the theme, for the page and every scrolling panel (the graph's Type roster,
-   tables, drawers): standard properties (Firefox, current Chromium), and the WebKit ones for
+/* Scrollbars in the theme, for the page and every scrolling panel (tables,
+   drawers): standard properties (Firefox, current Chromium), and the WebKit ones for
    Safari and older Chromium. Elements that hide their scrollbar (.nav) keep doing so. */
 * { scrollbar-color: var(--gold) var(--bg-2); scrollbar-width: thin; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -425,13 +425,153 @@ p.tag-note { margin: 0 0 14px; font-size: 12px; }
   .scope-bar .bucket-bar .select { flex: 1 1 100%; }
 }
 
+/* ---- Ideas (#163, docs/deck-ideas-lab-design.md): a saved deck in role lanes, and what could stand in for a card ----
+   Text first: plain rows (a dot, the name, a status word), small thumbnails only for the selected card and its alternatives. */
+.ideas { display: grid; gap: 18px; min-width: 0; }
+.ideas > * { min-width: 0; }
+.ideas-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.ideas [tabindex="-1"]:focus { outline: none; }
+.ideas [tabindex="-1"]:focus-visible { outline: 1px solid var(--gold); outline-offset: 4px; }
+.ideas-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; }
+.ideas-head .h1 { margin-top: 6px; overflow-wrap: anywhere; }
+.ideas-lede { margin: 6px 0 0; color: var(--text-2); font-size: 15px; }
+.ideas-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 6px 0 0; color: var(--text-2); font-size: 13px; }
+.ideas-colours { display: inline-flex; }
+.ideas-head-side { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px 14px; }
+.ideas-format { display: flex; align-items: center; gap: 8px; }
+.ideas-counts { margin: 0; font-family: var(--display); font-size: 24px; line-height: 1.2; }
+.ideas .gold { color: var(--gold); }
+.ideas .good { color: var(--good); }
+.ideas-note { display: grid; justify-items: start; gap: 14px; max-width: 560px; padding: 24px; }
+.ideas-note p { margin: 0; line-height: 1.55; }
+.ideas-note .ideas-note-text { font-family: var(--display); font-size: 26px; font-weight: 600; line-height: 1.2; }
+.ideas-fail { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0; padding: 10px 12px; font-size: 13px;
+  color: var(--danger); border: 1px solid var(--danger); border-radius: var(--radius); }
+.ideas-loading { display: flex; align-items: center; gap: 8px; margin: 10px 0; color: var(--text-2); font-size: 13px; }
+.ideas-inline-error { color: var(--danger); font-family: var(--mono); font-size: 12px; }
+.ideas-fine { margin: 6px 0 0; color: var(--text-2); font-size: 12px; line-height: 1.6; max-width: 760px; }
+.ideas-fine summary { cursor: pointer; padding: 6px 0; }
+.ideas-credit { margin: 8px 0 0; color: var(--text-2); font-size: 12px; }
+.ideas-h3 { margin: 4px 0 8px; font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); }
+.ideas-more { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 8px; }
+
+/* the start: one tile per saved deck */
+.ideas-decks { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.ideas-deck { display: grid; gap: 6px; height: 100%; padding: 16px; color: var(--text); text-decoration: none; }
+.ideas-deck:hover { border-color: var(--gold); }
+.ideas-deck:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.ideas-deck-name { font-weight: 600; font-size: 16px; overflow-wrap: anywhere; }
+.ideas-deck-facts { color: var(--text-2); font-size: 12px; overflow-wrap: anywhere; }
+.ideas-bar { display: block; height: 6px; margin-top: 4px; background: oklch(0.30 0.014 65); border-radius: 3px; overflow: hidden; }
+.ideas-bar > span { display: block; height: 100%; }
+.ideas-deck-owned { font-size: 13px; }
+.ideas-deck-open { color: var(--gold); font-family: var(--mono); font-size: 12px; }
+.ideas-add { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.ideas-add p { flex: 1 1 260px; margin: 0; line-height: 1.55; }
+
+/* a deck: the lanes on the left, what needs a decision (or the selected card) on the right */
+.ideas-covered { display: grid; gap: 12px; }
+.ideas-covered-text { margin: 0; font-size: 16px; line-height: 1.5; }
+.ideas-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ideas-main { display: grid; grid-template-columns: minmax(0, 1fr) 440px; gap: 28px; align-items: start; }
+.ideas-main.has-card.compact { grid-template-columns: minmax(0, 1fr); }
+.ideas-lanes-wrap { display: grid; gap: 14px; min-width: 0; }
+.ideas-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--text-2); font-size: 12px; }
+.ideas-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.ideas-lanes { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; align-items: start; }
+.ideas-lane { min-width: 0; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.ideas-lane-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 0 0 6px; font-family: var(--mono); font-size: 12px; font-weight: 500;
+  letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold); }
+.ideas-lane-note { font-size: 12px; letter-spacing: 0.02em; text-transform: none; color: var(--text-2); }
+.ideas-lane-toggle { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; width: 100%; padding: 0; text-align: left; background: none; border: 0; color: inherit; font: inherit;
+  letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.ideas-lane-toggle:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.ideas-chev { margin-left: auto; color: var(--gold); font-size: 18px; }
+.ideas-rows { list-style: none; margin: 0; padding: 0; }
+.ideas-rows > li { box-sizing: border-box; }
+.ideas-window { overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.ideas-row { display: flex; align-items: center; gap: 8px; box-sizing: border-box; width: 100%; height: 100%; padding: 0 6px; background: none; border: 0;
+  border-left: 2px solid transparent; border-radius: 3px; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.ideas-row:hover { background: var(--bg-2); }
+.ideas-row:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+.ideas-row.selected { background: var(--bg-2); border-left-color: var(--gold); }
+.ideas-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.ideas-state { flex: none; font-family: var(--mono); font-size: 12px; color: var(--text-2); }
+.ideas-state.missing { color: var(--danger); }
+.ideas-state.partial, .ideas-state.borrowed { color: var(--gold); }
+.ideas-tag { flex: none; padding: 0 6px; font-family: var(--mono); font-size: 11px; color: var(--gold); border: 1px solid var(--gold); border-radius: 999px; }
+.ideas-dot { flex: none; display: inline-block; width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; border: 2px solid var(--good); background: var(--good); }
+.ideas-dot.missing { border-color: var(--danger); background: transparent; }
+.ideas-dot.partial { border-color: var(--gold); background: linear-gradient(90deg, var(--gold) 50%, transparent 50%); }
+.ideas-dot.borrowed { border: 2px dashed var(--gold); background: transparent; }
+.ideas-list { min-width: 0; }
+.ideas-list .ideas-rows, .ideas-list .ideas-window { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 6px; }
+.ideas-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.ideas-combos { display: grid; gap: 8px; }
+.ideas-combo-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.7; }
+
+/* the selected card */
+.ideas-panel { display: grid; gap: 14px; padding: 18px; min-width: 0; }
+.ideas-panel-top { display: flex; }
+.ideas-target { display: flex; gap: 12px; }
+.ideas-target-body { min-width: 0; display: grid; gap: 4px; }
+.ideas-panel-h { margin: 0; font-family: var(--display); font-size: 28px; font-weight: 600; line-height: 1.15; overflow-wrap: anywhere; }
+.ideas-meta { margin: 0; color: var(--text-2); font-size: 13px; }
+.ideas-role { margin: 0; font-family: var(--mono); font-size: 12px; color: var(--gold); }
+.ideas-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 0; }
+.ideas-badge { padding: 1px 8px; font-family: var(--mono); font-size: 12px; color: var(--text-2); border: 1px solid var(--border-2); border-radius: 999px; }
+.ideas-badge.missing { color: var(--danger); border-color: var(--danger); }
+.ideas-badge.partial, .ideas-badge.borrowed { color: var(--gold); border-color: var(--gold); border-style: dashed; }
+.ideas-badge.owned { color: var(--good); border-color: var(--good); }
+.ideas-thumb { flex: none; align-self: flex-start; display: block; width: 44px; padding: 0; background: none; border: 0; cursor: zoom-in; }
+.ideas-thumb img { display: block; width: 40px; height: 56px; border: 1px solid var(--border-2); border-radius: 4px; background: var(--bg-2); }
+.ideas-thumb:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.ideas-alts { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--border); }
+.ideas-alt { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.ideas-alt-body { min-width: 0; display: grid; gap: 4px; flex: 1 1 auto; }
+.ideas-alt-body p { margin: 0; }
+.ideas-alt-name { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; font-weight: 600; }
+.ideas-copies { font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--text-2); }
+.ideas-why { color: var(--text); font-size: 13px; line-height: 1.5; }
+.ideas-or { margin: 0; font-size: 13px; line-height: 1.8; color: var(--text-2); }
+.ideas-or a, .ideas-fine a, .ideas-combo-list a { color: var(--gold); text-decoration: underline; }
+.ideas-none { display: grid; gap: 12px; padding: 12px 14px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); }
+.ideas-none-text { margin: 0; font-size: 15px; line-height: 1.5; }
+.ideas-move { flex: 1 1 100%; display: grid; gap: 8px; padding: 10px 12px; font-size: 13px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); }
+.ideas-move p { margin: 0; line-height: 1.5; }
+.ideas-zoom-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; overflow: auto; background: rgb(0 0 0 / 0.6); }
+.ideas-zoom { position: relative; display: grid; gap: 8px; width: min(360px, 100%); padding: 16px; outline: none; }
+.ideas-zoom img { display: block; width: 100%; height: auto; border-radius: 12px; }
+.ideas-zoom .close-x { position: absolute; top: 4px; right: 4px; }
+
+@media (max-width: 1000px) {
+  .ideas-main { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .ideas { gap: 14px; }
+  .ideas-head-side { justify-content: flex-start; }
+  .ideas-counts { font-size: 20px; }
+  .ideas-note { padding: 14px; }
+  .ideas-decks { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .ideas-deck { min-height: 44px; }
+  .ideas-lanes { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .ideas-lane { padding: 0 12px; }
+  .ideas-lane-h { margin: 0; }
+  .ideas-lane-toggle { min-height: 48px; align-items: center; }
+  .ideas-lane-toggle[aria-expanded="true"] { border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+  .ideas-panel { padding: 14px; }
+  .ideas-panel-h { font-size: 24px; }
+  .ideas-alt { gap: 10px; }
+  .ideas-more .btn, .ideas-actions .btn { min-height: 44px; }
+  .ideas-fine summary { display: flex; align-items: center; min-height: 44px; }
+}
+
 /* ==== Phone layout (up to 760px wide) ====
    Everything from here to the end of the file is inside phone-width media queries (only .m-only,
    phone-only elements, is hidden outside them), so wider screens render exactly as before; a test
    enforces it.
    Markup carries a few phone-only hooks: .page-head (a view's title row), .card-rail (a card row
-   that scrolls sideways), .m-stack / .m-2col / .m-3col / .m-4col (inline grids that reflow),
-   .m-matrix (a wide grid that scrolls inside its panel), .graph-stage, .graph-legend, .acct-menu. */
+   that scrolls sideways), .m-2col / .m-4col (inline grids that reflow), .acct-menu. */
 
 @media (max-width: 760px) {
   /* ---- Navigation: the sections become a bottom tab bar, in thumb reach ---- */
@@ -468,7 +608,7 @@ p.tag-note { margin: 0 0 14px; font-size: 12px; }
   .nav button[data-nav="sets"]::before { -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3l9 4.5-9 4.5-9-4.5z'/><path d='M3 12l9 4.5 9-4.5'/><path d='M3 16.5l9 4.5 9-4.5'/></svg>"); mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3l9 4.5-9 4.5-9-4.5z'/><path d='M3 12l9 4.5 9-4.5'/><path d='M3 16.5l9 4.5 9-4.5'/></svg>"); } /* Sets (stacked set layers) */
   .nav button[data-nav="decks"]::before { -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><rect x='3.5' y='6' width='10' height='14' rx='1.5' transform='rotate%28-10 8.5 13%29'/><rect x='10' y='4' width='10' height='14' rx='1.5' transform='rotate%288 15 11%29'/></svg>"); mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><rect x='3.5' y='6' width='10' height='14' rx='1.5' transform='rotate%28-10 8.5 13%29'/><rect x='10' y='4' width='10' height='14' rx='1.5' transform='rotate%288 15 11%29'/></svg>"); } /* Decks (two fanned cards) */
   .nav button[data-nav="lab"]::before { -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M9 3h6M10 3v6l-5.5 9.5A1.5 1.5 0 0 0 5.8 21h12.4a1.5 1.5 0 0 0 1.3-2.5L14 9V3'/><path d='M7.5 15h9'/></svg>"); mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M9 3h6M10 3v6l-5.5 9.5A1.5 1.5 0 0 0 5.8 21h12.4a1.5 1.5 0 0 0 1.3-2.5L14 9V3'/><path d='M7.5 15h9'/></svg>"); } /* Lab (flask) */
-  .nav button[data-nav="graph"]::before { -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><circle cx='6' cy='6' r='2.5'/><circle cx='18' cy='8' r='2.5'/><circle cx='10' cy='18' r='2.5'/><path d='M8.3 7l7.3.6M7 8.3l2 7.3M16.4 10l-4.6 6'/></svg>"); mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><circle cx='6' cy='6' r='2.5'/><circle cx='18' cy='8' r='2.5'/><circle cx='10' cy='18' r='2.5'/><path d='M8.3 7l7.3.6M7 8.3l2 7.3M16.4 10l-4.6 6'/></svg>"); } /* Graph (linked nodes) */
+  .nav button[data-nav="ideas"]::before { -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M9 18h6M10 21h4'/><path d='M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z'/></svg>"); mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M9 18h6M10 21h4'/><path d='M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z'/></svg>"); } /* Ideas (a light bulb) */
   .nav button.active { color: var(--gold); border-top-color: var(--gold); background: oklch(0.78 0.13 80 / 0.06); }
   main { padding: 14px max(12px, env(safe-area-inset-right)) 24px max(12px, env(safe-area-inset-left)); }
   /* Room for the tab bar after the last thing on the page (the footer). */
@@ -528,7 +668,7 @@ p.tag-note { margin: 0 0 14px; font-size: 12px; }
 
   /* ---- Panels, rows and tables ---- */
   .panel { padding: 14px; }
-  .panel.panel-flush { padding: 0; }   /* flush panels (tables, the graph) stay edge to edge */
+  .panel.panel-flush { padding: 0; }   /* flush panels (tables) stay edge to edge */
   .panel.panel-tight { padding: 10px; }
   .col-2 { grid-template-columns: 1fr; gap: 12px; }
   .bar-row { grid-template-columns: 44px minmax(0, 1fr) 54px 56px; gap: 8px; }
@@ -545,22 +685,12 @@ p.tag-note { margin: 0 0 14px; font-size: 12px; }
   .chip { min-height: 44px; padding: 6px 12px; font-size: 11px; }
   .input, .select { min-height: 44px; font-size: 16px !important; } /* 16px stops iOS zooming into a focused field */
   .pip { min-width: 28px; min-height: 28px; }
-  button.pip { min-width: 44px; min-height: 44px; }   /* the colour filters of the Graph are buttons */
   .row-link { display: inline-flex; align-items: center; min-height: 44px; }   /* a row's name opens the card */
   .row { flex-wrap: wrap; }
 
   /* ---- Inline grids that reflow ---- */
-  .m-stack { grid-template-columns: 1fr !important; }
   .m-2col { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
-  .m-3col { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
   .m-4col { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
-  .m-matrix { min-width: 720px; }
-
-  /* ---- Graph: the canvas fills the screen below the controls ---- */
-  /* At least 480px: tall enough for the affinity hover card with five links (about 445px). Set as the
-     height itself (not min-height) so the graph inside, sized 100% of it, grows with it. */
-  .graph-stage { height: max(64vh, 480px) !important; min-height: 0 !important; }
-  .graph-legend { left: 8px; right: 8px !important; bottom: 8px !important; }
 }
 
 /* Phone-only elements (hidden on wider screens). */
@@ -584,7 +714,6 @@ p.tag-note { margin: 0 0 14px; font-size: 12px; }
    wins over the sizes set above and in styles.css. SVG chart text scales with its chart and is not counted. */
 @media (max-width: 760px) {
   button.brand, .btn, .btn.sm, .btn.xs, .chip, .row-link, [role="button"], [role="tab"], .acct-menu .btn { min-height: 44px; }
-  button.pip { min-width: 44px; min-height: 44px; }
   .btn, .btn.sm, .btn.xs, .chip { font-size: 11px; }
   .acct-menu .btn { font-size: 11px; letter-spacing: 0.04em; padding: 8px 10px; }
   .nav button { font-size: 11px; letter-spacing: 0.02em; }
@@ -593,7 +722,7 @@ p.tag-note { margin: 0 0 14px; font-size: 12px; }
   .brand .subtitle { font-size: 11px; }
   td.muted, .tbl td.muted, .qty, .delta, .stat .delta, .card-tile .meta .sub { font-size: 12px !important; }
   .vault-footer, .vault-footer p, .vault-footer a, main p > a, .welcome a { font-size: 12px; }
-  .stat-link-cue, .ledger-foot, button.pip, .chip span { font-size: 11px !important; }
+  .stat-link-cue, .ledger-foot, .chip span { font-size: 11px !important; }
   .freshness, .freshness span, .placeholder, .placeholder span, .code, .code span, p.muted, .panel > p.muted { font-size: 12px !important; }
   .deck-row.head, .deck-row.head div { font-size: 11px !important; }
   span.pip.sm { width: 22px; height: 22px; font-size: 12px; }   /* the letter in a small colour pip */

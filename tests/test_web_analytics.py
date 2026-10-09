@@ -79,7 +79,7 @@ console.log(JSON.stringify({
 """ % json.dumps((WEB / "analytics" / "url.mjs").as_uri())
     done = subprocess.run(["node", "--input-type=module", "-e", script], capture_output=True, text=True, check=True, timeout=30)
     result = json.loads(done.stdout)
-    assert result["views"] == ["/dashboard", "/browse", "/sets", "/decks", "/lab", "/graph", "/valuation", "/help"]
+    assert result["views"] == ["/dashboard", "/browse", "/sets", "/decks", "/lab", "/ideas", "/valuation", "/help"]
     assert result["none"] == ["/", "/", "/", "/"]
     assert result["withArg"] == ["/decks", "/sets", "/help", "/browse"]  # the argument after the view is dropped
     assert result["hostile"] == ["/", "/", "/", "/", "/"]  # not on the list: the plain landing route

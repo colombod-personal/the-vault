@@ -60,7 +60,7 @@ def test_the_welcome_is_non_blocking_dismissible_and_remembered_safely():
 VIEW_FILES = [p for p in sorted((PUBLIC / "views").glob("*.jsx")) if p.name != "help.jsx"] + [PUBLIC / "app.jsx"]
 VIEW_TEXT = "\n".join(p.read_text(encoding="utf-8") for p in VIEW_FILES).replace("&amp;", "&")
 DECK = (PUBLIC / "views" / "deck.jsx").read_text(encoding="utf-8")
-GRAPH = (PUBLIC / "views" / "graph.jsx").read_text(encoding="utf-8")
+IDEAS = (PUBLIC / "views" / "ideas.jsx").read_text(encoding="utf-8")
 
 
 def sections() -> dict[str, str]:
@@ -96,7 +96,7 @@ def test_every_name_in_curly_quotes_is_a_label_the_app_shows():
 def test_the_checker_rejects_a_label_the_app_does_not_have():
     assert shown_in_app("Save to your decks") and shown_in_app("Update saved copy") and shown_in_app("Buy list")
     assert not shown_in_app("Save deck")  # what the help used to say; the button says "Save to your decks"
-    assert not shown_in_app("Deck ideas") and not shown_in_app("The Value view")
+    assert not shown_in_app("The Value view") and not shown_in_app("Deck ideas lab")
 
 
 def test_the_decks_section_names_every_tab_and_the_pills_and_buttons_of_a_deck():
@@ -108,16 +108,17 @@ def test_the_decks_section_names_every_tab_and_the_pills_and_buttons_of_a_deck()
     assert 'label="Have"' in DECK and 'label="Partial"' in DECK and 'label="Need"' in DECK
 
 
-def test_the_graph_section_names_every_mode_the_graph_has_and_does_not_claim_a_view_that_is_not_built():
-    modes = re.findall(r"setMode\('[a-z]+'\)\}>([^<]+)</button>", GRAPH)
-    assert len(modes) == 7, modes  # six modes and the Deck map: if a mode is cut or added, the help changes with it
-    text = sections()["graph"]
-    assert set(modes) <= set(quoted(text)), set(modes) - set(quoted(text))
-    assert {"Price tier", "Depth"} <= set(quoted(text))
-    # The deck ideas view (#161/#163) does not exist: no view, no route, no help link. The help says so.
-    assert "not built yet" in text and "is being replaced" not in text
-    assert not re.search(r"ideas", APP + HELP.split("const HELP_SECTIONS", 1)[0], re.I)
-    assert VIEWS == ["dashboard", "browse", "sets", "decks", "lab", "graph", "valuation", "help"]
+def test_the_ideas_section_replaces_the_graphs_and_names_the_controls_the_page_has():
+    """The Graph (seven modes) is gone (#163): its help section went with it and Ideas has its own, tied to the page's labels."""
+    assert "graph" not in sections() and "graph" not in VIEW_MAP and "graph" not in VIEWS
+    assert VIEWS == ["dashboard", "browse", "sets", "decks", "lab", "ideas", "valuation", "help"]
+    assert VIEW_MAP["ideas"] == "ideas"
+    text = sections()["ideas"]
+    named = set(quoted(text))
+    assert {"Missing", "Borrowed", "All", "Swap into the deck", "Move", "Clear", "Show combos you already own"} <= named, named
+    assert "A shared collection has no Ideas." in text and "not built yet" not in text
+    for label in named:
+        assert label in IDEAS, label
 
 
 def test_the_lab_section_names_the_lab_sections_it_has():
