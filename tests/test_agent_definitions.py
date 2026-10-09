@@ -33,7 +33,7 @@ COUNCIL = {"vault-devils-advocate", "vault-synergy-analyst", "vault-collection-a
 
 
 def test_the_agents_exist():
-    assert NAMES == {"vault-judge", "vault-deckbuilder", "vault-buyer"} | COUNCIL
+    assert NAMES == {"vault-judge", "vault-deckbuilder", "vault-buyer", "vault-curator"} | COUNCIL
 
 
 def test_council_members_stay_in_their_lane_and_cite_evidence():

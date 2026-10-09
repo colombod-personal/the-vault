@@ -21,6 +21,7 @@ CROSS_CUTTING = [
     "tests/test_mcp_catalog.py", "tests/test_chatgpt_twin.py", "tests/test_compliance_gate.py", "tests/test_council_cost.py",
     "tests/test_sources.py", "tests/test_legal_pages.py", "tests/test_ai_parity_doc.py", "tests/test_clock_is_frozen.py",
     "tests/test_help.py", "tests/test_onboarding_whoami.py", "tests/test_ai_smoke.py", "tests/test_privacy.py",
+    "tests/test_capabilities.py", "tests/test_tool_names.py",
 ]
 SECURITY_SENSITIVE = ("vault/oauth_", "vault/auth.py", "vault/client_auth.py", "vault/passkeys.py", "vault/tokens.py",
                       "vault/native.py", "vault/reviewer", "vault/privacy.py", "vault/sharing.py")

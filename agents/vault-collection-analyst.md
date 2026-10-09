@@ -14,6 +14,7 @@ vault-tools:
   - get_deck
   - validate_deck_changes
   - get_archidekt_deck
+  - parse_decklist
 skills:
   - shopping-assistant
   - vault-attribution

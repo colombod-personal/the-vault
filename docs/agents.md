@@ -127,7 +127,7 @@ Tools (the `share_id` argument reads a collection someone shared with you):
 | `list_spare_copies` (name, limit, cursor), `get_collection_pnl` (side, limit, cursor): the person's own collection only, no `share_id` | `GET /collection/spare` (`/collection/spare/printings` with `name`), `GET /collection/pnl` |
 | `list_card_names` (sort, colors, type, min_value, limit, cursor) | `GET /collection/names` |
 | `refresh_prices`* (cursor, force) | `POST /collection/refresh` |
-| `get_deck_ideas` (deck_id, lane, include_combos, limit, cursor), `get_card_alternatives` (deck_id, card, format, limit, cursor): the person's own saved decks only | `GET /decks/{id}/ideas`, `GET /decks/{id}/ideas/alternatives` |
+| `get_deck_ideas` (deck_id, lane, include_combos, limit, cursor), `get_card_alternatives` (deck_id, card, format, limit, cursor): the person's own saved decks only; the jobs are the Vault's own roles, in two tiers (same job, similar) | `GET /decks/{id}/ideas`, `GET /decks/{id}/ideas/alternatives` |
 | `check_decklist`, `parse_decklist` | `POST /decks/coverage`, `/decks/parse` |
 | `list_decks`, `get_deck`, `save_deck`*, `update_deck`* | `/decks` |
 | `get_archidekt_deck` | `/archidekt/decks/{id}` |
@@ -193,7 +193,9 @@ Nothing is dumped: a tool returns the card, rule or deck asked about, capped.
 | `shopping_list` | `POST /decks/shopping-list` | what you do not own, a dated Scryfall price, and a list to paste into a store's own tool: `format` = plain, cardkingdom (Deck Builder), tcgplayer (Mass Entry), cardmarket (want list), csv, all (syntax checked against each store's help page, `docs/data-sources.md`). With `finish`, `language`, `sets` or `condition` it picks the cheapest printing that fits and reports which one per line, or that none qualifies; needs the `oracle_printings` source. Scryfall's prices are not per condition |
 
 Prompts (`prompts/list`, `prompts/get`): `vault_start` (a read-only first tour from the person's own data, no arguments), `rules_judge`, `explain_interaction`, `upgrade_deck`,
-`shopping_help`. The server's `instructions` and every prompt carry the grounding rules: look things up,
+`shopping_help`, `council_review`, `evaluate_deck`, `import_collection`, `organise_collection`, `reset_or_undo`. Each prompt for a common job carries the steps of the
+matching flow in the skills (`## Flow: ...`, `docs/skills.md`), for hosts without skills; `tests/test_capabilities.py` checks they name the same tools.
+The prompts that can change data preview first and change nothing until the person says yes. The server's `instructions` and every prompt carry the grounding rules: look things up,
 quote only verified text, repeat provenance, never present source material as the Vault's own.
 
 Access: the catalog tools need a token like the rest; there is no anonymous access (an anonymous card-data API would

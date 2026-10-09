@@ -1135,6 +1135,17 @@ class IdeasRole(BaseModel):
     basis: Literal["scryfall_tagger", "computed"] = Field(description="A Scryfall Tagger tag, or a rule over the Oracle text (the Vault's, always marked)")
 
 
+class FineRole(BaseModel):
+    """One of the Vault's 22 roles on a card (docs/functional-equivalents.md section 5): found by a written rule over the Oracle text."""
+    role: str = Field(description="The stable slug, e.g. `token-doubler`, `draw-engine`, `free-counterspell`, `bounce`")
+    name: str = Field(description="The plain name a player recognises")
+    means: str = Field(description="What the role means, in the Vault's own words")
+    strength: Literal["core", "incidental"] = Field(description="`core`: the card exists to do this; `incidental`: it does it on the side")
+    basis: Literal["computed"] = Field(description="Always `computed`: a rule over the Oracle text, never a Scryfall tag and never an assistant's word")
+    rule: str = Field(description="The id of the rule that found it (documented in docs/functional-equivalents.md)")
+    repeatable: bool | None = Field(None, description="For `treasure` and `token-maker` only: does it happen again and again (true) or once (false)")
+
+
 class IdeasCard(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -1237,9 +1248,18 @@ class IdeasAlternative(BaseModel):
     borrowed: bool = Field(description="Every owned copy is another deck's: using it takes it from that deck")
     borrowed_from: str | None = None
     borrowed_from_deck_id: int | None = None
-    shared_roles: list[dict] = Field(description="[{role, target, candidate}]: the core roles both cards have")
+    tier: Literal["same_job", "similar"] = Field(description="`same_job`: it has the card's main job (and agrees on repeating or being free); "
+                                                 "`similar`: it shares another job or a neighbouring one, and `different`/`lacks` say what differs")
+    roles: list[FineRole] = Field(description="All the roles the Vault finds on this card, core and incidental")
+    shared_roles: list[dict] = Field(description="[{role, name, target, candidate, rule}]: the core roles both cards have; `rule` is the candidate's")
+    lacks: list[dict] = Field(description="[{role, name}]: core roles of the asked-for card this one does not have (\"Does not: counter doubler\")")
+    extra: list[dict] = Field(description="[{role, name}]: core roles this one has that the asked-for card does not")
+    different: list[dict] = Field(description="Why a `similar` card is only similar: [{kind: neighbour|lacks_refinement|repeats, target, candidate}], each a {role, name}")
+    type_note: dict | None = Field(None, description="{target, candidate}: the main card types when they differ (a creature for an enchantment)")
+    oracle_text: str | None = Field(None, description="Wizards of the Coast's Oracle text via Scryfall, shown beside the asked-for card's")
     why: str
     mana_value_difference: float
+    mana_value_change: float | None = Field(None, description="Its mana value minus the asked-for card's (negative: it costs less); ranked and shown, never a filter")
     legal: bool = Field(description="Always true: cards illegal in the format are filtered out before ranking")
     in_colours: bool = Field(description="Always true: cards outside the colour identity are filtered out before ranking")
     in_deck: int = Field(description="Copies of it the deck already lists")
@@ -1259,11 +1279,13 @@ class IdeasTarget(BaseModel):
     not_owned: int | None = None
     held_by_other_deck: int | None = None
     borrowed_from: str | None = None
-    roles: list[IdeasRole]
+    roles: list[FineRole]
     core_roles: list[str]
+    primary_role: str | None = Field(None, description="The first core role in vocabulary order: the main job a `same_job` candidate must have")
     type_line: str | None = None
     mana_cost: str | None = None
     mana_value: float | None = None
+    oracle_text: str | None = Field(None, description="Wizards of the Coast's Oracle text via Scryfall")
     image: dict | None = None
     scryfall_uri: str | None = None
     buy: IdeasBuy = Field(description="One copy at Scryfall's cheapest known price, dated")
@@ -1275,8 +1297,12 @@ class DeckAlternatives(Page):
     format: str
     format_from: Literal["request", "deck", "default"] = Field(description="Where the format came from: the request, the format set on the deck, or the default (commander)")
     color_identity: list[str] = Field(description="The colours alternatives must stay within")
-    reason: Literal["no_role", "none_found"] | None = Field(None, description="Why the list is empty: no coarse role for the card, or nothing owned fits")
+    reason: Literal["no_role", "none_found"] | None = Field(None, description="Why the list is empty: the Vault knows no role for the card (not the same as owning nothing like it), or nothing owned fits")
     message: str | None = None
+    tiers: dict[str, int] = Field(description="How many alternatives are `same_job` and how many `similar`, over the whole list (not the page)")
+    filtered_out: dict[str, int] = Field(description="Owned cards that do this job but were not offered: `colour_identity`, `format`, `in_deck` (the deck already holds as many as the format allows, or every copy is this deck's own)")
+    filtered_note: str | None = Field(None, description="The same counts in a sentence, null when nothing was filtered out")
+    roles_version: str = Field(description="The version of the Vault's role rules these roles come from (changes whenever a rule does)")
     roles_note: str
     items: list[IdeasAlternative]
     prices_date: str | None = None
