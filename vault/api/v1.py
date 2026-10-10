@@ -257,6 +257,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                   db: Session = Depends(get_db)) -> dict:
         if body.confirm != DELETE_CONFIRMATION:
             raise HTTPException(400, f'Send {{"confirm": "{DELETE_CONFIRMATION}"}} to delete your account')
+        require_live_session(db, request, user.id)  # "Sign out everywhere" may have ended this session since it was authenticated (#347)
         removed = purge_user(db, user.id)
         request.session.clear()
         return {"deleted": True, "removed": removed}

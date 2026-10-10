@@ -608,7 +608,7 @@ this diff, each before any merge (2026-10-09). Round 1 found, and these are fixe
 address a day old, below); a reused request id let a copy of the cookie share a later ask (now a new id on every ask); the withdrawn
 relaxation (below); the Approve button's `no-referrer` policy made browsers send `Origin: null`, which the cross-site-write guard refuses
 (now `same-origin`). It also found that the OAuth consent screen mints a 30-day credential with no recent sign-in; round 2 confirmed each
-fix and rated that one blocking against the owner's goal, so it is built too (below). What is left open is listed under "What this
+fix and rated that one blocking against the owner's goal, so it is built too (below). A third read on the pull request (Copilot's review) found that the account deletion did not re-check the live session between authentication and the purge (a request past the freshness check could delete after "Sign out everywhere"; now `require_live_session` runs before `purge_user`, tested) and that returning from a provider broke the browser's Back button (fixed). What is left open is listed under "What this
 resolves, and what it does not" and "Residual risks", and a follow-up issue holds it.
 
 **The claim.** `sign_in()` (`vault/auth.py`) writes `auth_at` (seconds since the epoch, the server's clock) into the signed session cookie

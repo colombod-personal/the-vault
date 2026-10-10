@@ -980,3 +980,25 @@ def test_a_held_vault_wide_cap_lock_does_not_stall_an_ask_for_ever(client, unive
         assert res.status_code == 503 and time.monotonic() - began < 4
         other.rollback()
     assert client.post(START).status_code == 200
+
+
+def test_an_account_deletion_already_past_authentication_deletes_nothing_after_the_session_ended(client, universe, monkeypatch):
+    """Review of #429: the freshness check ran at authentication; "Sign out everywhere" may commit before the purge. Deleting re-reads the
+    session key under the account lock, like every other thing that outlives a session."""
+    from vault.api import v1 as v1_module
+    from vault.models import new_session_key
+
+    uid = web_account(client, universe)
+    real = v1_module.require_live_session
+
+    def rotate_first(db, request, user_id):
+        with client.app.state.db.sessions() as other:
+            other.get(User, user_id).session_key = new_session_key()
+            other.commit()
+        return real(db, request, user_id)
+
+    monkeypatch.setattr(v1_module, "require_live_session", rotate_first)
+    res = client.request("DELETE", f"{V1}/me", json={"confirm": "DELETE"})
+    assert res.status_code == 401 and "session ended" in res.json()["detail"], res.text
+    with client.app.state.db.sessions() as db:
+        assert db.get(User, uid) is not None
