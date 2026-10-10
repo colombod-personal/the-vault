@@ -331,7 +331,7 @@ MOVED_RULES = [
     ("lead with the deck", "skills/deck-upgrader/SKILL.md", "Lead with the deck: its name, format, commander(s), card count and colour identity"),
     ("lead with the deck", "skills/expert-council/SKILL.md", "Open with the deck"),
     ("lead with the deck", "agents/vault-deckbuilder.md", "Open with the deck: its name, format, commander(s), card count"),
-    ("say when the format is read from the list", "GROUNDING", "say when the format was only read from the list (`format_from`)"),
+    ("say when the format is read from the list", "GROUNDING", "say when the format was only read from the list (format_from)"),
     ("quote numbers exactly", "GROUNDING", "report each number exactly as a tool returned it"),
     ("quote numbers exactly", "skills/expert-council/SKILL.md", "Numbers exactly as returned"),
     ("simulation numbers are a hint, in plain words", "GROUNDING", "Explain simulate_draws' numbers in plain words: they are a hint, not a promise"),
