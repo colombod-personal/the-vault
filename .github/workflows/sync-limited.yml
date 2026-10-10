@@ -3,20 +3,23 @@ name: sync-limited
 # docs/limited-data-design.md, #178). The job reads each game and draft file once as a stream, never writes it to disk, and keeps only
 # per-card counts. Nothing loads unless the repository variable CATALOG_SOURCES names `limited_17lands` (comma-separated, with the other
 # sources): that switch is the owner's, and it stays off until the first manual run has been checked. A run without it prints
-# "not enabled" and ends. `workflow_dispatch` takes the sets and formats to read (default: the job's DEFAULT_SETS and DEFAULT_FORMATS)
-# and `force` (read again a file whose version is already loaded). Runs only from main, in the "vercel-production" environment
-# (docs/developing.md → Security). Same database address logic as sync-catalog.
+# "not enabled" and ends. The weekly run needs no input: the job works out the rolling window itself (the 8 newest sets with a game file,
+# for PremierDraft and TradDraft, a set not read until 14 days after its release, a set that leaves the window deleted: #417) and refuses to
+# run when the 17Lands terms were last read more than 120 days ago (docs/compliance.md; the monthly limited-terms-monthly workflow reminds).
+# `workflow_dispatch` may name `sets` (a manual fill: exactly those, no discovery, nothing deleted) and `formats`, and `force` (read again a
+# file whose version is already loaded). Runs only from main, in the "vercel-production" environment (docs/developing.md → Security).
+# Same database address logic as sync-catalog.
 on:
   schedule:
     - cron: "17 11 * * 1"   # Mondays, after sync-catalog (10:47); 17Lands refreshes its files every few weeks, so most runs read nothing
   workflow_dispatch:
     inputs:
       sets:
-        description: "17Lands set codes, comma-separated (empty: the job's default)"
+        description: "17Lands set codes, comma-separated, to read exactly (empty, the usual: the rolling window of the 8 newest sets)"
         required: false
         default: ""
       formats:
-        description: "PremierDraft and/or TradDraft, comma-separated (empty: the job's default)"
+        description: "PremierDraft and/or TradDraft, comma-separated (empty: both)"
         required: false
         default: ""
       force:

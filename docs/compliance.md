@@ -191,8 +191,14 @@ dates filled in); `tests/test_limited_tool.py` and `tests/test_limited_credits.p
 the Limited expert and the server instructions carry it. What the Vault must not claim: that 17Lands endorses or produced it; that a figure *is*
 17Lands' number (the percentages are the Vault's, labelled `computed`); a "Vault rating", grade or tier; that a card is a best pick or that a gap is real
 below the sample floor (200 games in hand to show a number flagged, 1,000 to be called `ok`); that the data describes paper Magic or all players.
-The terms were read on 2026-10-09: re-read them at least every 90 days and whenever 17Lands changes them (the reminder issue and the job's
-refusal after 120 days are slice 2 of #178).
+
+**17Lands terms read on: 2026-10-09**
+
+That line is read by the job (`jobs/limited_terms.py`): re-read the pages at least every 90 days and whenever 17Lands changes them, then change the
+date. The monthly reminder issue (`.github/workflows/limited-terms-monthly.yml`, #417) lists the pages and the licence sentence ("Unless otherwise
+noted, these data sets are licensed under a Creative Commons Attribution 4.0 International License") and says how old the date is; **`jobs/sync_limited.py`
+refuses to run once the date is more than 120 days old** (or cannot be read), with no switch to skip the check. The date in the gate table above is the
+day the source was first read; this line is the day of the latest re-read.
 
 ### Other sources (read 2026-10-07)
 

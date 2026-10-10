@@ -1,6 +1,6 @@
 # Limited data: per-card aggregates from 17Lands public datasets (design for #178)
 
-Status: **design; slice 1 is built (section 14), the rest is not.** Written 2026-10-09 for [#178](https://github.com/colombod-personal/the-vault/issues/178)
+Status: **design; slices 1 and 2 are built (sections 14 and 15), slice 3 is not.** Written 2026-10-09 for [#178](https://github.com/colombod-personal/the-vault/issues/178)
 (status `needs-refinement` until the owner has seen the decisions at the end). It blocks the Limited part of #106
 (learning help). Nothing here is ingested, downloaded or served: the 17Lands pages were read and their files were only
 asked about with HEAD requests (size, date, tag). This document is the "design written down before the build" and the
@@ -38,6 +38,9 @@ agents or assistants.
   `Last-Modified` is 2026-10-01; ECL shows 2026-02-08, the file 2026-05-18 (consistent with the FAQ: older sets are
   refreshed when a new one is released). **The file's `Last-Modified` and ETag are what the Vault records**, not the page's date.
 - 17Lands' site numbers and ours will not match exactly (different weighting details, different exclusions): section 7.
+
+**What the first real run settled (2026-10-09):** the bullets above about the real file are answered in section 15, "The first real run",
+with what the run printed and what it could not.
 
 ## 2. The files
 
@@ -453,7 +456,7 @@ Decisions made while building (the design left them to the build or was silent):
 
 | Point | As built |
 |---|---|
-| Which sets and formats the job reads | The ones it is given (`--sets`, `--formats`, or the workflow inputs); default `DEFAULT_SETS = ("HOB",)` and `DEFAULT_FORMATS = ("PremierDraft",)`, slice 1's scope. `TradDraft` works the same way. Finding the eight most recent sets with HEAD, the 14-day wait after a release, and deleting a set that leaves the window are slice 2 |
+| Which sets and formats the job reads | Slice 1: the ones it is given (`--sets`, `--formats`, or the workflow inputs), `HOB` and `PremierDraft` by default. **Replaced by slice 2 (section 15):** no `--sets` means the rolling window, and both formats are the default |
 | Limits | All of section 4's limits are in: one download at a time, the User-Agent, 400 MB a file from `Content-Length`, 800 MB a run (the rest is `deferred`), three retries (2, 8, 30 s, `Retry-After` wins) for connection errors, 429 and 5xx only, the 85% and 70% budget checks, a 120-minute cap. Smallest file first |
 | Extra column | `limited_sources.first_picks` and `empty_first_picks` (pick-1 rows, and those with an empty pack): the design says the answer repeats 17Lands' caveat about missing P1P1 "when the file shows missing first picks", and that needs a stored count. The caveat is added at 1% or more of the first picks |
 | Sample floors | `SHOW_FLOOR = 200` and `RANK_FLOOR = 1000` in `vault/limited_stats.py`. A sorted list contains the cards from 200 games in hand, each with its `level`; the exact "left out" sentence counts those under 200. The position sorts use the same floor on packs seen or picks, with the sentence's noun changed ("packs in which they were seen", "picks") |
@@ -469,4 +472,41 @@ Decisions made while building (the design left them to the build or was silent):
 
 Not in slice 1: the 8-set window and its discovery, the 14-day embargo, deleting sets that left the window, Sealed formats, colour-pair
 slices, the 90-day terms reminder issue and the job's refusal after 120 days, and the Limited expert's real-app evidence after deploy (section 11,
-last bullet).
+last bullet). Slice 2 (section 15) built the first group and the terms re-read; Sealed and colour pairs are slice 3, and the real-app evidence is the
+owner's, after deploy.
+
+## 15. Slice 2 as built (#417), and the first real run
+
+**The first real run** (the Action `sync-limited`, started by hand with `workflow_dispatch` on 2026-10-09, run 37995531236, `CATALOG_SOURCES` naming
+`limited_17lands`, sets `HOB`, formats `PremierDraft`). It succeeded; the log is the only evidence, and the job printed counts, not headers. What it settled and what it
+could not:
+
+| Question of section 1 | Answer from the run |
+|---|---|
+| Size | HOB PremierDraft game file 22,072,331 bytes and draft file 75,309,805 bytes (`Content-Length`, both inside the 400 MB limit; the HEAD sizes of section 2 agree) |
+| Rows | game file: 316,629 games used and 6,485 skipped as inconsistent (2.0% of 323,114 rows); draft file: 2,436,691 picks used, none skipped; 193 cards in each file, **0 unmatched** to the catalog |
+| Run time | The game file took 26 s and the draft file 54 s to download and reduce (log lines 21:48:04, 21:48:30, 21:49:24); the step took about 86 s and the whole run 2 min 8 s. Python's `csv` reader on the wide rows is fast enough: **no faster reader is needed**, and the 120-minute cap is far above (the 32 files of eight sets in both formats are 15 times the bytes of these two files, so a full fill is roughly 20 minutes of reading across two runs) |
+| Rows of one draft contiguous | **Yes for this file**: the draft file was accepted, and the counter refuses a file whose draft ids come back (`PickCounter`). Not seen for other sets or formats; the refusal stays |
+| Column names | The job's required-column checks passed, so the names it relies on exist with those exact spellings: `won` and `expansion` and the `deck_`, `opening_hand_` and `drawn_` per-card columns in the game file; `expansion`, `draft_id`, `pack_number`, `pick_number`, `pick` and the `pack_card_` per-card columns in the draft file. The full header was **not printed** |
+| `pick_number` and `pack_number` start at 0 or 1 | **Not printed, so not settled by the log.** The counter accepts either (stored 1-based), and 17Lands' own data-types script is the only first-hand source so far. From the next run the report carries `pick_number starts at N` for every draft file |
+| Double-faced names | All 193 names matched the catalog (0 unmatched, which includes any double-faced cards, matched by full name or by either face); how the file spells them was not printed |
+| Uncompressed size | **Not measured** by that run. From the next run every file's report carries `N bytes after gunzip`, its column count and the names of the columns that are not per-card, and the seconds it took (never a value of a row) |
+| A licence note that differs from the page's | **Not determined.** A CSV has a header and rows and no place for a note; the S3 answers carry no licence header; the run could not see anything else. The page's "unless otherwise noted" stays the rule, and the monthly re-read below is where a change would be caught |
+
+The database grew by 0.3 MB (233.9 to 234.2 MB of the 1,024 MB budget) for these two files.
+
+**What slice 2 built** (`jobs/sync_limited.py`, `jobs/limited_window.py`, `jobs/limited_terms.py`, `jobs/budget_alert.py`, the two workflows):
+
+| Point | As built |
+|---|---|
+| The window | With no `--sets` the job asks Scryfall for its list of sets (one request) and keeps expansion, core, masters and draft-innovation sets released in the last 30 months, with an upper-case code of 2 to 6 letters or digits. Newest first, for each format, it asks the 17Lands bucket with HEAD for `game_data_public.<CODE>.<FORMAT>.csv.gz` and keeps the first 8 that answer 200; 403 means "not published (yet)" and the set is passed over; the walk stops at the eighth, so older sets are not even asked about. The window is per format: a set can be in one and not the other |
+| The wait | A set whose `released_at` is less than 14 days ago (or in the future) is neither read nor deleted; the report lists it under `waiting_after_release` |
+| Leaving | A stored `(set, format)` that is not in that format's window, and not waiting, is deleted with its game rows, pick rows and `limited_sources` rows in one transaction, before the files are read, and the `catalog_sources` row is refreshed. Only the formats this run looked at are touched |
+| What is never deleted on a doubt | A window that could not be fully worked out (a HEAD failed after its retries) deletes nothing and fails the run at its end; a Scryfall list that cannot be read stops the run before 17Lands is asked about anything; a format whose window came out empty deletes nothing; a stored set whose game file now answers 403 (withdrawn) keeps its place and its rows, as in slice 1 |
+| Manual runs | `--sets HOB,MSH` reads exactly those sets: no Scryfall request, no wait, nothing deleted. `--formats` narrows the formats of either mode |
+| Formats | `DEFAULT_FORMATS` is `PremierDraft` and `TradDraft`, and the weekly Action takes no input |
+| First fill | Smallest file first, at most 800 MB a run (every delivered byte counted), the rest `deferred`. With the sizes of section 2 and HOB PremierDraft already loaded, the first scheduled run reads 26 of the 32 files of the eight sets (about 715 MB) and the second run the four large PremierDraft draft files that were deferred (about 673 MB); nothing is read twice. Scryfall's list on 2026-10-10 puts HOB, MSH, SOS, TMT, ECL, TLA, SPM, OM1, EOE and FIN in that order among the candidates; the page of 17Lands lists no SPM or OM1, so those two are expected to answer 403 and the window to be the eight sets of section 2 (the first run's report says what S3 really answered) |
+| Terms re-read | The line `17Lands terms read on: 2026-10-09` of `docs/compliance.md` is read by the job, which refuses to run (before any request, also for a manual run) when it is more than 120 days old, missing or not a date. The workflow `limited-terms-monthly.yml` (1st of the month, the pattern of `neon-monthly-check.yml`, `issues: write` only) opens an issue listing the seven pages and the licence sentence, saying how old the date is and whether the reading is due (90 days) or the job is already refusing, and nags the open one the next month |
+| Report | Every loaded file reports `notes` (columns, the non-card column names, `pick_number starts at N`, bytes after gunzip) and `seconds`; the run reports the window per format, the sets that wait, what was removed, and how many days ago the terms were read |
+
+Not built: Sealed and TradSealed and the colour-pair slices (slice 3, a separate checkbox of #417); the real-app evidence after deploy (the owner's).

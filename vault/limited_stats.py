@@ -341,7 +341,8 @@ class PickCounter:
             cards[name] = [seen, self.last_sum.get(name, 0) + seen * offset, picked, self.picked_sum.get(name, 0) + picked * offset]
         first = self.by_number.get(self.low, [0, 0])
         return FileResult("draft", cards, self.records, 0, None, _time(self.first), _time(self.last_time),
-                          empty_first_picks=first[1], first_picks=first[0])
+                          empty_first_picks=first[1], first_picks=first[0],
+                          notes=[f"pick_number starts at {self.low}", f"first pick-number rows: {first[0]}, with an empty pack: {first[1]}"])
 
 
 def sanity_problems(result: FileResult, previous: dict | None = None) -> tuple[list[str], list[str]]:

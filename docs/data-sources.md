@@ -115,5 +115,5 @@ What this means:
 
 Consequences for the council (docs/expert-council.md):
 - **Competitive metagame:** no licensed source found; format experts keep labelling metagame statements as opinion.
-- **Limited:** 17Lands aggregates can ground draft help (what a card's win rate in hand is, by set), with attribution; built as `jobs/sync_limited.py` and the `get_limited_card_stats` tool (#178, slice 1: one set and format asked for by hand, the job off until `CATALOG_SOURCES` names `limited_17lands`; the rolling window of eight sets and the weekly discovery are slice 2; design in `docs/limited-data-design.md`).
+- **Limited:** 17Lands aggregates can ground draft help (what a card's win rate in hand is, by set), with attribution; built as `jobs/sync_limited.py` and the `get_limited_card_stats` tool (#178 and #417: the job is off until `CATALOG_SOURCES` names `limited_17lands`; the weekly run keeps a rolling window of the eight newest sets with a game file, in PremierDraft and TradDraft, and refuses to run when the 17Lands terms were last read more than 120 days ago; design in `docs/limited-data-design.md`).
 - **Do not scrape** MTGGoldfish, MTGTop8 or EDHREC; ask for permission or an API if a source is wanted.

@@ -61,6 +61,21 @@ def previous(db: Session, set_code: str, fmt: str, kind: str) -> dict | None:
     return None if row is None else {"etag": row.etag, "last_modified": row.last_modified, "cards": row.cards, "records": row.records}
 
 
+def stored_pairs(db: Session) -> set[tuple[str, str]]:
+    """The ``(set, format)`` pairs that have at least one stored file."""
+    return {(r.set_code, r.format) for r in db.execute(select(LimitedSource.set_code, LimitedSource.format)).all()}
+
+
+def delete_set(db: Session, set_code: str, fmt: str) -> dict:
+    """Remove everything stored for one set and format (a set that left the rolling window): the game and pick rows and the
+    ``limited_sources`` rows, in the caller's transaction. Returns how many rows went."""
+    gone = {"game_rows": 0, "pick_rows": 0, "files": 0}
+    for key, model in (("game_rows", LimitedGameStat), ("pick_rows", LimitedPickStat), ("files", LimitedSource)):
+        gone[key] = db.execute(delete(model).where(model.set_code == set_code, model.format == fmt)).rowcount or 0
+    db.flush()
+    return gone
+
+
 def replace_file(db: Session, set_code: str, fmt: str, result: ls.FileResult, *, etag: str | None, last_modified: datetime | None,
                  content_length: int | None, index: dict[str, str]) -> dict:
     """Replace the stored rows of one (set, format, kind) with a reduced file, and write its ``limited_sources`` row, in the

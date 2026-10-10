@@ -6,13 +6,14 @@ that runs these tests."""
 
 import builtins
 import gzip
+from datetime import date
 from pathlib import Path
 
 import httpx
 import pytest
 from sqlalchemy import func, select
 
-from jobs import sync_limited
+from jobs import limited_terms, sync_limited
 from tests.test_catalog_api import card
 from tests.test_limited_stats import DRAFTS, GAMES, rewrite
 from twins import Universe
@@ -21,7 +22,7 @@ from vault import limited_stats as ls
 from vault.db import Database
 from vault.models import CatalogSource, LimitedGameStat, LimitedPickStat, LimitedSource
 
-ARGS = ["--sources", "limited_17lands", "--sets", "TST"]
+ARGS = ["--sources", "limited_17lands", "--sets", "TST", "--formats", "PremierDraft"]  # (tests/test_limited_window.py: the default is both formats)
 BEAR, DFC = "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444"
 
 
@@ -52,6 +53,7 @@ def env(database_url, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.delenv("CATALOG_SOURCES", raising=False)
     monkeypatch.delenv("NEON_STORAGE_LIMIT_MB", raising=False)
+    monkeypatch.setattr(limited_terms, "today", lambda: date(2026, 10, 10))  # the job's clock: the terms were read on 2026-10-09 (docs/compliance.md)
     return database_url
 
 

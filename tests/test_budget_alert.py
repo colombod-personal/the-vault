@@ -6,11 +6,12 @@ one GitHub issue per kind. What is not automated, and says so: compute hours and
 Neon API key; without one, `jobs.neon_usage` says so and the monthly reminder issue asks a person to look."""
 
 import json
+from datetime import date
 
 import httpx
 import pytest
 
-from jobs import budget_alert, db_budget, neon_usage
+from jobs import budget_alert, db_budget, limited_terms, neon_usage
 from twins import Universe
 from vault.db import Database
 
@@ -29,7 +30,7 @@ def actions(monkeypatch, tmp_path):
     """The environment a workflow gives the alert job: the run's token and repository."""
     monkeypatch.setenv("GITHUB_TOKEN", "twin-issues-write")
     monkeypatch.setenv("GITHUB_REPOSITORY", REPO)
-    for name in ("ALERT_KIND", "ALERT_MESSAGE", "STORAGE_ALERT", "USAGE_ALERT", "MONTHLY"):
+    for name in ("ALERT_KIND", "ALERT_MESSAGE", "STORAGE_ALERT", "USAGE_ALERT", "MONTHLY", "TERMS_REMINDER"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out"))
     return tmp_path / "out"
@@ -88,6 +89,29 @@ def test_the_monthly_reminder_opens_a_checklist_and_nags_when_last_months_is_sti
     assert "CU-hours used this month" in body and "Network transfer" in body and "Restore history" in body and "console" in body
     [second] = budget_alert.main(["--from-env"], transport=universe.transport)
     assert second["action"] == "updated" and "still open" in universe.github.comments[(REPO, 1)][0]["body"]
+
+
+def test_the_17lands_terms_reminder_lists_the_pages_and_the_licence_sentence_and_says_how_old_the_reading_is(universe, actions, monkeypatch):
+    """#417: a monthly issue (limited-terms-monthly.yml), its own marker and label, separate from the Neon check."""
+    monkeypatch.setenv("TERMS_REMINDER", "yes")
+    monkeypatch.setenv("MONTHLY", "yes")
+    monkeypatch.setattr(limited_terms, "today", lambda: date(2026, 12, 1))  # the date recorded in docs/compliance.md is 2026-10-09
+    results = budget_alert.main(["--from-env"], transport=universe.transport)
+    assert [(r["kind"], r["action"]) for r in results] == [("monthly-check", "created"), ("limited-terms", "created")]  # two issues
+    issue = next(i for i in universe.github.open_issues(REPO) if i["title"] == budget_alert.TITLES["limited-terms"])
+    for _, url in limited_terms.PAGES:
+        assert url in issue["body"]
+    assert limited_terms.LICENCE_SENTENCE in issue["body"] and "<!-- vault-budget-alert:limited-terms -->" in issue["body"]
+    assert "**2026-10-09**, 53 days ago" in issue["body"] and "Not due yet" in issue["body"] and "docs/compliance.md" in issue["body"]
+    assert [label["name"] for label in issue["labels"]] == ["area:data"]
+    [again] = [r for r in budget_alert.main(["--from-env"], transport=universe.transport) if r["kind"] == "limited-terms"]
+    assert again["action"] == "updated" and "still open" in universe.github.comments[(REPO, issue["number"])][0]["body"]
+
+
+@pytest.mark.parametrize("day, words", [(date(2027, 1, 7), "**due**"), (date(2027, 3, 1), "The job is refusing to run")])
+def test_the_terms_reminder_says_when_a_reading_is_due_and_when_the_job_is_already_refusing(day, words):
+    text = limited_terms.reminder_body(now=day)
+    assert words in text and f"{(day - date(2026, 10, 9)).days} days ago" in text
 
 
 def test_a_token_that_cannot_write_issues_fails_with_the_permission_to_add(universe, actions, monkeypatch):
