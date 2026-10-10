@@ -8,7 +8,8 @@ import pytest
 
 from twins.universe import Universe
 
-SHOPS = ("cardmarket.com", "cardkingdom.com", "magicmadhouse.co.uk", "tcgplayer.com")
+SHOPS = ("cardmarket.com", "cardkingdom.com", "magicmadhouse.co.uk", "tcgplayer.com",
+         "locator.wizards.com")  # the Wizards store locator is linked to, never called (#212)
 
 
 def test_no_twin_answers_for_a_shop_so_the_vault_calls_none():
@@ -17,7 +18,10 @@ def test_no_twin_answers_for_a_shop_so_the_vault_calls_none():
 
 
 @pytest.mark.parametrize("url", ["https://www.cardmarket.com/en/Magic/Products/Search?searchString=Sol+Ring",
-                                 "https://www.cardkingdom.com/catalog/search?search=header&filter%5Bname%5D=Sol+Ring"])
+                                 "https://www.cardkingdom.com/catalog/search?search=header&filter%5Bname%5D=Sol+Ring",
+                                 "https://magicmadhouse.co.uk/search.php?search_query=Sol+Ring",
+                                 "https://locator.wizards.com/",
+                                 "https://aldershotgames.example.co.uk/search?q=Sol+Ring"])  # a store the person typed (#212)
 def test_a_call_to_a_shop_is_recorded_as_an_escape_that_fails_the_tests_that_watch_for_one(url):
     u = Universe()
     with httpx.Client(transport=u.transport) as client:

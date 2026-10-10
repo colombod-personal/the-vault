@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import delete, text
 from sqlalchemy.orm import Session
 
-from .models import CollectionValue, EmailCode, ResetSnapshot, StagedUpload
+from .models import CollectionValue, EmailCode, IdempotentRequest, ResetSnapshot, StagedUpload
 
 DAILY_DAYS = 90
 WEEKLY_UNTIL = DAILY_DAYS + 182  # six months of weekly points
@@ -82,9 +82,16 @@ def prune_email_codes(db: Session) -> int:
         EmailCode.created_at < datetime.now(timezone.utc) - timedelta(hours=EMAIL_CODE_KEEP_HOURS))).rowcount or 0
 
 
+def prune_idempotent_requests(db: Session) -> int:
+    """Stored answers to retried requests live 24 hours (vault.api.idempotency.TTL). They were only dropped when the same person made
+    another keyed request, so one made once stayed; the daily job removes every one past its day (docs/gdpr.md)."""
+    return db.execute(delete(IdempotentRequest).where(IdempotentRequest.created_at < datetime.now(timezone.utc) - timedelta(hours=24))).rowcount or 0
+
+
 def apply(db: Session, today: date | None = None) -> dict:
     report = {"prices_deleted": prune_price_snapshots(db, today), "values_deleted": prune_collection_values(db, today),
               "uploads_deleted": prune_staged_uploads(db), "reset_snapshots_deleted": prune_reset_snapshots(db),
-              "email_codes_deleted": prune_email_codes(db)}
+              "email_codes_deleted": prune_email_codes(db),
+              "idempotent_requests_deleted": prune_idempotent_requests(db)}
     db.commit()
     return report

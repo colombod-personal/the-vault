@@ -7,6 +7,7 @@ tools:
   - vault/get_deck_overlap
   - vault/find_upgrades
   - vault/shopping_list
+  - vault/where_to_buy
   - vault/list_decks
   - vault/get_deck
   - vault/validate_deck_changes

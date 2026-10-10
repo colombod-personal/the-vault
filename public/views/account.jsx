@@ -597,6 +597,8 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged, onCo
 
       <ResetSection onCollectionChanged={onCollectionChanged} />
 
+      <BuySettingsSection />
+
       <AgentsSection />
 
       <ConnectedAppsSection />

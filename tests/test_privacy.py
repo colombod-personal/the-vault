@@ -7,7 +7,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from vault.models import CollectionValue, Deck, Entry, Identity, Import, Share, User
+from vault.models import BuySettings, CollectionValue, Deck, Entry, Identity, Import, Share, User
 
 CSV = (Path(__file__).parent / "fixtures" / "collection.csv").read_bytes()
 DECK = "1 Sol Ring\n1 Rhystic Study\n"
@@ -30,7 +30,7 @@ def test_export_contains_all_personal_data(signed_in):
     z = zipfile.ZipFile(io.BytesIO(res.content))
     names = set(z.namelist())
     assert {"README.txt", "account.json", "collection.csv", "collection.json", "imports.json",
-            "value_history.json", "decks.json", "shares.json", "app_sessions.json"} <= names
+            "value_history.json", "decks.json", "shares.json", "app_sessions.json", "buy_settings.json"} <= names
     assert any(n.startswith("decks/") and n.endswith(".txt") for n in names)
     assert z.read("collection.csv") == CSV  # re-importable, byte-identical
     account = json.loads(z.read("account.json"))
@@ -42,7 +42,9 @@ def test_export_contains_all_personal_data(signed_in):
 def test_delete_requires_confirmation_and_removes_everything(client, app):
     setup_user(client, "bob@example.com")
     bob_share = client.post("/api/v1/shares", json={"kind": "collection"}).json()
+    client.put("/api/v1/me/buy-settings", json={"country": "US"})
     alice_deck = setup_user(client, "alice@example.com")
+    client.put("/api/v1/me/buy-settings", json={"country": "GB", "stores": [{"name": "Shop", "url": "https://shop.example.com/"}]})
     alice_share = client.post("/api/v1/shares", json={"kind": "deck", "deck_id": alice_deck}).json()
     client.post("/api/v1/shares/accept", json={"token": bob_share["url"].split("invite=")[1]})
     with app.state.db.sessions() as db:
@@ -63,6 +65,8 @@ def test_delete_requires_confirmation_and_removes_everything(client, app):
         # Alice's own share and the one she received from Bob are gone; Bob's data is untouched
         assert db.scalar(select(Share).where((Share.owner_id == alice_id) | (Share.grantee_id == alice_id))) is None
         assert db.get(User, alice_id) is None
+        assert db.get(BuySettings, alice_id) is None  # where she buys is erased with her; Bob's is untouched (#212)
+        assert [r.country for r in db.query(BuySettings)] == ["US"]
         assert db.query(Entry).count() == 5 and db.query(User).count() == 1
     assert alice_share  # (created before deletion)
 

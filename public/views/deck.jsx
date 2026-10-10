@@ -552,6 +552,7 @@ function DeckCards({ rows, summary, filter, setFilter, openCard }) {
                 <div className="qty">{r.qty}×</div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 600 }}>{r.name}</div>
+                  {r.need > 0 && <BuyMenu card={r.name} />}
                   {r.maybeOwned.length > 0 && <div style={{ fontSize: 11, color: 'var(--gold)', marginTop: 2 }}>You may own {r.maybeOwned.map((m) => `${m.quantity} as “${m.name}”`).join(', ')}</div>}
                   {r.ownEntries.length > 0 && (
                     <div className="muted" style={{ fontSize: 10, fontFamily: 'var(--mono)', marginTop: 2 }}>

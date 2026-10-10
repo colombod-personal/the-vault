@@ -6,7 +6,7 @@ description: >-
   them, or wants a list to paste into Card Kingdom, Cardmarket or another store.
 license: MIT
 metadata:
-  vault-tools: "whoami list_decks get_deck import_deck_from_link get_archidekt_deck parse_decklist shopping_list validate_deck_changes update_owned_cards confirm_owned_cards_update"
+  vault-tools: "whoami list_decks get_deck import_deck_from_link get_archidekt_deck parse_decklist shopping_list where_to_buy validate_deck_changes update_owned_cards confirm_owned_cards_update"
 ---
 
 # Shopping assistant
@@ -68,6 +68,13 @@ paste-ready list: nothing is bought, imported into a store or put in a cart.
    - Show: the printings they actually got (ask; they may not know, then `printing_unknown`), then the preview.
    - Stop: `confirm_owned_cards_update` only after they say yes to the preview. Never add cards because they were on a shopping
      list: only what they say they received.
+
+## Where to get one card
+
+When the person asks where to buy a single card, call `where_to_buy` with its name. It gives plain links to shops in the order for the
+country they set in the web app, the stores they typed, the Wizards store locator and Scryfall. Give them as links, say they are plain
+links with no price or stock, repeat its `provenance`, and never call one shop cheaper. If no country is set, say the order is neutral and
+that they can set where they buy in the web app (Account, "Where I buy").
 
 ## Do not
 

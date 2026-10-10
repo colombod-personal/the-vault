@@ -531,6 +531,13 @@ window.VaultApi = (() => {
     exportFormats: () => call(V1 + '/collection/exports').then((r) => r.items),
     deleteAccount: () => call(V1 + '/me', { method: 'DELETE', json: { confirm: 'DELETE' } }),
 
+    // where to buy (#212): the menu's links for a card, the countries to choose from, and the person's own settings (country, typed stores)
+    buyMenu: (card) => call(V1 + '/buy/menu?card=' + encodeURIComponent(card)),
+    buyCountries: () => all(V1 + '/buy/countries?limit=500'),
+    buySettings: () => call(V1 + '/me/buy-settings'),
+    saveBuySettings: (body) => create(V1 + '/me/buy-settings', { method: 'PUT', json: body }),
+    removeBuySettings: () => call(V1 + '/me/buy-settings', { method: 'DELETE' }),
+
     // agents: personal access tokens
     tokens: () => all(V1 + '/me/tokens'),
     createToken: (name, scopes) => create(V1 + '/me/tokens', { json: { name, scopes } }),

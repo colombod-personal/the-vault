@@ -30,6 +30,7 @@ export const SOURCES = [
   'views/deck_opening.jsx',
   'views/lab.jsx',
   'views/ideas.jsx',
+  'views/buy.jsx',
   'views/valuation.jsx',
   'views/help.jsx',
   'app.jsx',
