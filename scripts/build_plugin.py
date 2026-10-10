@@ -964,7 +964,7 @@ OPENAI_MANIFEST = {
     "version": "0.1.0",
     "description": ("Magic: The Gathering rules, cards, decks and your collection for ChatGPT and Codex, grounded in "
                     "Scryfall and the Comprehensive Rules, with sources shown, and an expert council for deck reviews. "
-                    "Free and unofficial."),
+                    "Unofficial fan content."),
     "author": {"name": "The Vault", "url": "https://github.com/colombod-personal/the-vault"},
     "homepage": HOST,
     "repository": "https://github.com/colombod-personal/the-vault",
@@ -979,18 +979,19 @@ OPENAI_MANIFEST = {
         "negative": [{"description": c["name"] + ": " + c["expect"], "prompt": c["prompt"]} for c in reviewer.NEGATIVE]}},
     "interface": {
         "displayName": "The Vault",
-        "shortDescription": "Your Magic collection, decks and the rules, with sources",
+        "shortDescription": "Magic decks, rules, collection",  # the subtitle: at most 30 characters (OpenAI's check)
         "longDescription": ("Ask about the cards you own and what they are worth, check a deck against your collection, "
                             "find upgrades on a budget, get rules answers with cited rule numbers, and have an expert "
                             "council (Commander expert, casual table, judge, devil's advocate) review a deck. Card data "
                             "and prices are Scryfall's, rules are Wizards of the Coast's, shown with their sources. "
-                            "Free, unofficial Fan Content. " + sources.short_credit_line()),
+                            + sources.short_credit_line()),
         "developerName": "The Vault",
-        "category": "Lifestyle",
+        "category": "Entertainment",  # one of the plugin categories OpenAI's checker accepts (read 2026-10-10)
         "capabilities": ["Read", "Write"],
         "websiteURL": HOST,
         "privacyPolicyURL": f"{HOST}/privacy.html",
         "termsOfServiceURL": f"{HOST}/terms.html",
+        "supportURL": f"{HOST}/support.html",  # required for an MCP review
         "defaultPrompt": ["What are my most valuable cards?",
                           "Review my Commander deck with the expert council",
                           "What am I missing for this deck, and what will it cost?"],

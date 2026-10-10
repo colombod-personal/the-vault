@@ -128,6 +128,13 @@ def test_resource_and_authorization_server_metadata(client):
     assert client.api.options("/oauth/token").status_code == 204
 
 
+def test_the_openai_domain_check_answers_the_exact_token_as_plain_text(client):
+    """OpenAI's plugin portal (#240): only the token, not JSON, at the origin-root well-known URL."""
+    r = client.api.get("/.well-known/openai-apps-challenge")
+    assert r.status_code == 200 and r.text == "0x5MnvfLbnis5EFcH-Ub17kVBdb435wzrN1b5tYCYyM"
+    assert r.headers["content-type"].startswith("text/plain")
+
+
 def test_invalid_and_expired_tokens_get_a_challenge_too(client):
     res = client.mcp("ping", token="vault_oat_nope")
     assert res.status_code == 401 and 'error="invalid_token"' in res.headers["www-authenticate"]

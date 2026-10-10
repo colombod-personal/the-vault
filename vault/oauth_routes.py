@@ -273,6 +273,9 @@ def token_error(exc: server.OAuthError | clients.ClientError, status: int | None
                         headers={**NO_STORE, **CORS})
 
 
+OPENAI_APPS_CHALLENGE = "0x5MnvfLbnis5EFcH-Ub17kVBdb435wzrN1b5tYCYyM"  # domain check of the ChatGPT plugin (#240)
+
+
 def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, auth) -> APIRouter:
     router = APIRouter(tags=["oauth"])
     resource = server.resource_uri(settings.base_url)
@@ -305,6 +308,11 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
             "code_challenge_methods_supported": ["S256"], "client_id_metadata_document_supported": True,
             "authorization_response_iss_parameter_supported": True, "service_documentation": f"{base}/llms.txt",
         }, headers=metadata_headers)
+
+    @router.get("/.well-known/openai-apps-challenge", include_in_schema=False)
+    def openai_apps_challenge() -> Response:
+        # OpenAI's plugin portal checks that we own the MCP host: the exact token, as plain text (not a secret).
+        return Response(OPENAI_APPS_CHALLENGE, media_type="text/plain")
 
     @router.options("/.well-known/oauth-protected-resource", include_in_schema=False)
     @router.options("/.well-known/oauth-protected-resource" + resource_path, include_in_schema=False)
