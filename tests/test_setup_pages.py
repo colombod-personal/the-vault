@@ -185,7 +185,10 @@ def test_what_the_design_table_calls_unverified_is_said_to_be_unverified_on_the_
     assert chatgpt.count("not verified yet") >= 3  # plans, the menu path, the desktop app
     assert "Codex cloud" in codex and "not verified yet" in codex.split("### Codex cloud", 1)[1].split("\n## ", 1)[0]
     assert "not verified yet" in copilot.split("### GitHub Copilot desktop app", 1)[1].split("\n### ", 1)[0]
-    assert "not verified yet" in claude.split("### claude.ai and Claude Desktop", 1)[1]  # the prefilled link has not run on a real account
+    claude_ai = claude.split("### claude.ai and Claude Desktop", 1)[1].split("\n### ", 1)[0]
+    # the prefilled link ran on a real account (#437): the page says what Claude shows first, and when it was seen
+    assert bp.CLAUDE_LINK_NOTICE in claude_ai and f"tried on a real account on {bp.CLAUDE_LINK_CHECKED}" in claude_ai
+    assert "has not been tried" not in claude_ai
     for host in HOSTS:
         assert "not run in" in page(host)  # the page says it was written from the host's documentation and has not been run there yet
     perplexity = page("perplexity")

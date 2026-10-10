@@ -29,7 +29,7 @@ def test_bundle_is_built_from_the_current_sources():
 def test_every_view_is_in_the_bundle_and_nothing_compiles_in_the_browser():
     jsx = sorted(p.relative_to(PUBLIC).as_posix() for p in PUBLIC.rglob("*.jsx"))
     assert sorted(sources()) == jsx
-    html = (PUBLIC / "index.html").read_text()
+    html = (PUBLIC / "index.html").read_text(encoding="utf-8")
     assert 'src="app.bundle.js"' in html
     assert "text/babel" not in html and "babel" not in html.lower()
     assert ".development.js" not in html  # React's production build

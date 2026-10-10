@@ -161,6 +161,25 @@ skills, but its own sign-in had expired, so no model call could be made.
 Also not covered: the OAuth connect flow with a real host (`docs/mcp-oauth-host-checklist.md`), and the MCP Apps views in
 real hosts (`docs/mcp-apps.md`).
 
+## Which assistants are tested (the landing page's list, #437)
+
+The landing page (`public/index.html`) tells a visitor which assistants work. It says "Tested" only for an app where a real run is
+recorded in this file or its issue; the rest say "Setup guide, not tested yet" or that the app cannot add the Vault. The list on the
+page is `ASSISTANTS` in `scripts/build_plugin.py`; `tests/test_landing_page.py` fails when it and this table disagree. Change a row
+here, with its evidence, before changing the page.
+
+| Assistant | Status | Evidence |
+|---|---|---|
+| Claude (web) | tested | claude.ai on the demo account, 2026-10-08: the expert council run below and the host checklist (#239, #48) |
+| ChatGPT (web) | tested | 2026-10-09: the expert council run below (#235); connected through OAuth since 2026-10-06 (#77) |
+| Perplexity (web) | tested | 2026-10-09 on a Pro plan: "Real runs of the setup in Codex and Perplexity" below (#362) |
+| Codex CLI | tested | 2026-10-09, codex-cli 0.154.0: the same section below (#155) |
+| Claude Code | guide | the Connect page block and `public/setup/claude.md`; no clean run recorded (#153) |
+| GitHub Copilot (CLI, VS Code) | guide | the Connect page blocks and `public/setup/copilot.md`, from GitHub's and VS Code's documentation (#156) |
+| Cursor | guide | the Connect page block, from Cursor's documentation |
+| Comet | guide | the Comet section of `public/setup/perplexity.md`; not looked at (`docs/listings.md`) |
+| Microsoft Copilot app | cannot | checked in the app on 2026-10-10: personal accounts have a fixed connector list and no custom connector (`docs/listings.md`, #436) |
+
 ## What claude.ai gives the model (#319, measured 2026-10-08)
 
 New incognito chats (no memory), owner's Chrome, connector The Vault (demo account), Sonnet 5.5, permission mode Auto:
