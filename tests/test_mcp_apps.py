@@ -160,3 +160,5 @@ def test_the_export_is_a_local_blob_with_a_text_fallback_and_the_csp_is_unchange
     assert "new Blob(" in page and "URL.createObjectURL(" in page and "blocks downloads: use Copy list" in page
     csp = {v: mcp_ui.resource_meta(v)["ui"]["csp"] for v in mcp_ui.VIEWS}
     assert csp == {v: ({"resourceDomains": ["https://cards.scryfall.io"]} if v in ("card", "printings") else {}) for v in mcp_ui.VIEWS}
+    legacy = {v: mcp_ui.resource_meta(v)["openai/widgetCSP"] for v in mcp_ui.VIEWS}  # ChatGPT's key, same domains
+    assert legacy == {v: {"connect_domains": [], "resource_domains": ["https://cards.scryfall.io"] if v in ("card", "printings") else []} for v in mcp_ui.VIEWS}

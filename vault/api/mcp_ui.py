@@ -702,7 +702,9 @@ def html(view: str) -> str:
 def resource_meta(view: str) -> dict:
     """Content-security metadata for the host: no network at all, except Scryfall's image server for the card view."""
     csp = {"resourceDomains": [SCRYFALL_IMAGES]} if VIEWS[view].get("images") else {}
-    return {"ui": {"csp": csp, "prefersBorder": True}}
+    # ChatGPT's own key too: the ChatGPT desktop app showed the card picture as an empty box with only ui.csp (2026-10-10)
+    legacy = {"connect_domains": [], "resource_domains": [SCRYFALL_IMAGES] if VIEWS[view].get("images") else []}
+    return {"ui": {"csp": csp, "prefersBorder": True}, "openai/widgetCSP": legacy}
 
 
 def resources() -> list[dict]:
