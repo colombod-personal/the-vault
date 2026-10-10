@@ -100,6 +100,7 @@ function SignIn() {
             <li>Market value by card and by set, with Scryfall prices updated daily.</li>
             <li>Check any decklist against what you own, and share with friends.</li>
           </ul>
+          <p className="signin-back"><a href="/">What the Vault does, and how to connect your assistant</a></p>
         </section>
 
         <section className="signin-form" aria-labelledby="signin-title">
