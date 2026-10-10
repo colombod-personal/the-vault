@@ -107,6 +107,10 @@ def test_the_chatgpt_listing_fields_meet_openais_limits():
     for key in ("supportURL", "websiteURL", "privacyPolicyURL", "termsOfServiceURL"):
         assert face[key].startswith("https://mtgvault.cards") and len(face[key]) <= 1024, key
     assert face["supportURL"].endswith("/support.html")
+    assert face["category"] in {"Business & Operations", "Communication", "Creativity", "Data & Analytics",
+                                "Developer Tools", "Education & Research", "Entertainment", "Finance", "Healthcare",
+                                "Other", "Productivity", "Scientific Research", "Security", "Travel"}  # the portal's list
+    assert "free" not in face["longDescription"].lower().replace("free to", "")  # no pricing or offers (guidelines)
     assert len(face["defaultPrompt"]) <= 3 and all(len(p) <= 128 for p in face["defaultPrompt"])
 
 
