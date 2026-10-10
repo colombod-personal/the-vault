@@ -107,6 +107,8 @@ def test_the_chatgpt_listing_fields_meet_openais_limits():
     for key in ("supportURL", "websiteURL", "privacyPolicyURL", "termsOfServiceURL"):
         assert face[key].startswith("https://mtgvault.cards") and len(face[key]) <= 1024, key
     assert face["supportURL"].endswith("/support.html")
+    demo = load(bp.OPENAI / ".codex-plugin" / "plugin.json")["review"]["demo_recording_url"]
+    assert demo == "https://mtgvault.cards/demo/vault-chatgpt-demo.mp4" and (bp.ROOT / "public" / "demo" / "vault-chatgpt-demo.mp4").stat().st_size > 100_000
     assert face["category"] in {"Business & Operations", "Communication", "Creativity", "Data & Analytics",
                                 "Developer Tools", "Education & Research", "Entertainment", "Finance", "Healthcare",
                                 "Other", "Productivity", "Scientific Research", "Security", "Travel"}  # the portal's list
