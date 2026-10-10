@@ -1044,7 +1044,10 @@ OPENAI_MANIFEST = {
     "skills": "./skills/",
     "mcpServers": "./mcp.json",
     # What the OpenAI directory review runs (five positive and three negative cases) on the demo account (vault/reviewer.py).
-    "review": {"test_cases": {
+    "review": {
+        # Required for an MCP review: a walkthrough recorded in ChatGPT on the demo account (public/demo, 2026-10-10).
+        "demo_recording_url": f"{HOST}/demo/vault-chatgpt-demo.mp4",
+        "test_cases": {
         "positive": [{"description": c["name"], "prompt": c["prompt"], "tools_triggered": ", ".join(c["tools"]),
                       "expected_behavior": c["expect"]} for c in reviewer.POSITIVE],
         "negative": [{"description": c["name"] + ": " + c["expect"], "prompt": c["prompt"]} for c in reviewer.NEGATIVE]}},
