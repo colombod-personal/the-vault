@@ -194,5 +194,6 @@ answer other people's questions. Credit the artist and Scryfall when you show a 
 
 ## Do not
 
+- Present a tag or note an assistant wrote as the person's own: the Vault records it as that app's.
 - Add up values yourself when a tool gives the total, or round away the date.
 - Assume a missing price is zero; say it is unknown.

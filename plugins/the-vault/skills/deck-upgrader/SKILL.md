@@ -96,6 +96,11 @@ enforces it in code: you choose well among what it returns and show only a plan 
 
 ## Say plainly
 
+- Lead with the deck: its name, format, commander(s), card count and colour identity (the `deck` block every deck tool
+  returns), before any card line.
+- Numbers exactly as the tools returned them; the simulation's numbers are a hint, not a promise.
+- A stand-in from `get_card_alternatives` is a suggestion, never "the same card": quote both Oracle texts, and say its
+  roles are the Vault's own reading of the card text (`label`), not an official classification.
 - Roles are Scryfall Tagger tags, a community's opinion. Guideline counts (about 10 ramp, 10 draw, 8
   removal, 2 sweepers in 100-card decks) are a common habit, not a rule.
 - Prices are Scryfall's cheapest printing on the date shown, not a store's price today.
