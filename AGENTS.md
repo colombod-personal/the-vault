@@ -5,23 +5,23 @@ agent and every session (Claude, Codex, Copilot, Cursor). `CLAUDE.md` has the co
 
 ## 1. Acceptance criteria before any work
 
-- Never start work on an issue that has no acceptance criteria. Write them first, **from the owner's own words**
+- Never start work on a bead that has no acceptance criteria. Write them first, **from the owner's own words**
   (quote the ask), each one testable, and show them to the owner when the ask is open to more than one reading.
 - A criterion states what a person can do or see, in the app they use (Claude, ChatGPT, the website), not what the code
   contains. "Tests pass" is never a criterion on its own.
-- Track the work in the issue: claim it (`in-progress`, assignee, comment), keep a checklist, and link every PR.
+- Track the work in **beads**, and only in beads (section 8): claim the bead, record every step in it as it happens, and
+  link every PR.
 
-## 2. Done means evidence, issue by issue
+## 2. Done means evidence, bead by bead
 
-- A criterion is ticked only with **evidence posted in the issue**: the CI run for a test, the production response for an
+- A criterion is ticked only with **evidence recorded in the bead**: the CI run for a test, the production response for an
   API, and for anything a person uses through Claude or ChatGPT **a real run in that app after deploy** (screenshot or
   the captured answer). Merged is not done. Deployed is not done. Tests green is not done.
-- A PR is **linked** to its issue with a keyword GitHub understands (a plain mention of `#n` links nothing): `Closes #n` when the
-  PR completes the issue, so GitHub shows it in the issue and closes the issue on merge, with the evidence in the PR's
-  description; `Refs #n` plus a `Left open: ...` line when part of the issue is left. Checks that can only be run after deploy
-  are run right after deploy, and the issue is reopened if one fails.
+- A PR names its bead: the description starts with `No issue: bead vault-<id>` (`scripts/check_pr_rules.py` accepts it), with
+  the evidence in the PR's description. Only a PR that fixes a user's public GitHub report uses `Closes #n`. Checks that can
+  only be run after deploy are run right after deploy, and the bead is reopened if one fails.
 - Report status in three separate words, never "done": **merged**, **deployed**, **verified** (verified = the evidence
-  is in the issue). If something is partial, say so first.
+  is in the bead). If something is partial, say so first.
 - Before saying a feature works, run it the way the owner would: the real app, their data, their words.
 
 ## 3. The digital twins must match reality, or every green test is meaningless
@@ -47,7 +47,7 @@ agent and every session (Claude, Codex, Copilot, Cursor). `CLAUDE.md` has the co
 ## 5. How to behave with the owner
 
 - Do not hand the owner decisions that are the agent's to make. Decide, do it, show the evidence.
-- Do not change many issues, PRs or settings at once without showing the list first.
+- Do not change many beads, issues, PRs or settings at once without showing the list first.
 - Never ask the owner for personal data, or to relax a security setting as a shortcut; keep Vercel and Neon clean.
 - When the owner reports a problem, fix **every** place it occurs (all tools, all panels), not the one they pointed at.
 
@@ -84,62 +84,45 @@ repeat that.
 - Pull requests that CI turns red are fixed by pushing **one** corrected commit after running `prepush.py`, never by trial
   and error against CI. If you are not sure a push will pass, it is not ready.
 
-## 8. The issue is the board: progress is written there, in the same shape, every time
+## 8. Beads is where all work is tracked, and only beads
 
-The owner reads GitHub, not the chat. An issue that does not say where its work stands is a mess, whatever the code does.
-Every issue carries a **Progress block** at the top of its body (between `progress:start` and `progress:end`, written only by
-`scripts/issue_progress.py`): one state line, the pull requests, and a row per acceptance criterion with its state and
-evidence. A criterion is `open`, `in review` (a PR is open), `merged` (on main, not seen working), `verified` (evidence in
-the issue), `owner` (waits for a decision, an action or a real-app check only the owner can give) or `waived` (the owner
-dropped it, in a comment that says so). The state line is derived, never typed: it says VERIFIED only when every row is
-verified or waived.
+The owner's decision (2026-10-10): the product description says where the Vault is going; **beads** (`bd`) holds **all the
+work**: tasks, order, criteria, claims, progress and evidence. **GitHub issues are only the public place for users' bug
+reports and feature requests.** Work is never tracked in two places, and product plans never go into public issues (the
+repository is public).
 
-What happens, and who does it:
+1. **Start every session with `bd prime`**, then `bd ready` for the work that is free. If `bd` doesn't answer, stop and say so.
+   Never fall back to markdown TODO lists, plan files, notes or memory for tracking work.
+2. **Claim before working:** `bd update <id> --claim`. Work already claimed is not yours.
+3. **Record every step in the bead as it happens:** `bd update <id> --append-notes "<date>: what was done, where, proof"`.
+   Nothing is reported as done before the command that does it has run.
+4. **Break work down in beads:** `bd create "<title>" --parent <id>`, order with `bd dep add <later> --blocked-by <earlier>`.
+   Work found while working gets its own bead, linked to the one that found it.
+5. **Close with evidence:** only when every criterion is verified (section 2): `bd close <id> --reason "<what shipped, how it
+   was checked, link to the proof>"`.
+6. **Users' GitHub issues:** a user's bug report or feature request gets a bead (`--external-ref gh-<n>`) for the work. The
+   GitHub issue only gets short public replies, with no internal plans, and is closed when the fix or feature ships.
+7. **The roadmap lives in beads** as one epic per phase; each phase is blocked by the one before, so `bd ready` shows the
+   current phase only.
 
-1. **Before work:** the issue has criteria in the owner's words (section 1). Claim it: `in-progress`, assignee, comment,
-   and give it a **milestone** (an issue without a milestone is not planned work).
-2. **Opening a PR:** the description starts with `Closes #n` (the PR completes the issue; it needs an evidence section) or
-   `Refs #n` with a `Left open: ...` line (or `No issue: <why>`): `scripts/check_pr_rules.py` fails the pull request otherwise.
-   The `issue progress` workflow then updates the Progress block (`in review`) and comments on the issue by itself.
-3. **Merging:** the same workflow marks it `merged` and comments. With `Closes`, GitHub closes the issue on merge; the rows
-   still open are post-deploy checks, run right after deploy, and a failed check reopens the issue. With `Refs`, the issue stays
-   open and its rows say what is left.
-4. **Verifying:** after deploy, run the criterion the way the owner would (section 2), post the evidence in the issue, then
-   `python scripts/issue_progress.py tick <issue> "<words of the criterion>" --evidence "<link or the captured answer>"`.
-5. **Closing:** `python scripts/issue_progress.py close <issue>`: it refuses while any row is not verified or waived.
-   A bug is closed the same way, with the production evidence of the fix.
-6. **Waiting on the owner:** rows that need the owner are `owner`, the issue gets the `waiting-owner` label, and the comment
-   says the exact step. When the owner answers, the row becomes `verified` or `waived` with their words as evidence.
-7. **`in-progress` is only for work happening now** (a branch or agent is on it). When the PR merges or the work stops, remove
-   it: a stale label is a lie. `needs-verification` is not used: the Progress block says what is left and why.
+**Where beads runs.** On the owner's Windows PC, Smart App Control blocks the unsigned `bd.exe`, so `bd` is a wrapper
+(`%USERPROFILE%\.local\bin\bd`, `bd.cmd`) that runs every command on the owner's Ubuntu server over Tailscale, in the
+Vault's beads workspace on a shared Dolt server that starts on boot. Agents just type `bd ...`. An agent that can't reach it
+(a cloud sandbox) says so in its pull request, and the next local session records the steps in beads.
 
-If the board and the code disagree, the board is wrong: fix it in the same turn, before anything else.
+**Running the checks.** Smart App Control also blocks the Vault's Python on the owner's PC. `vault-check` (same folder) runs
+`scripts/prepush.py` for the current branch on that server, with the same Postgres as CI: `vault-check`, or
+`vault-check --full`. Section 7 applies: never push a pull request that `vault-check` hasn't passed.
 
-## 9. The GitHub repository is the backlog: read it, never remember it
+## 9. Read the record, never remember it
 
-The owner's words (2026-10-07): "github repo is the backlog, not your memory". Every statement about the backlog (how many issues
-are open or closed, which ones, what an issue or its epic says, what a pull request holds, whether CI is green, who a thing waits
-on) comes from a read made **in the same turn**: `gh issue list`, `gh issue view`, `gh pr view`, `gh pr checks`. Counts are computed
-from that list, never recalled, and the answer says what the read returned. This is rule 1 of `docs/triage.md` ("Look before you start") made binding for every statement, not only before starting.
+Every statement about the work (what is open or done, what a bead or a pull request holds, whether CI is green, who a thing
+waits on) comes from a read made **in the same turn**: `bd list`, `bd show`, `bd ready`, `gh pr view`, `gh pr checks`. Counts
+are computed from that read, never recalled.
 
-- Your own earlier summaries, the Progress blocks and labels you wrote, and the session's notes are **claims to re-check**, not facts.
-  An issue marked "not started" is checked against the code and the tests before work is planned or reported (#83 said "not started" with
-  16 passing tests behind it).
-- A label, state or milestone applied to many issues (`waiting-owner`, `status:*`) is derived from each issue's own text **and its
-  epic's text**, read first, and the list is shown before it is applied (section 5). A bulk label written from memory marked 3 of 15
-  issues wrongly, and put the collections issues at `status:ready` against the epic's own "stays needs-refinement until the design is agreed".
-- Before writing a doc, a design, an issue or a script, search the repository and the issue (and its epic) for one that already exists, and
-  extend it. Never overwrite a file you have not read: `git status` showing a file as modified that you thought was new means stop
-  (`docs/collections.md` was overwritten once this way).
-
-### Picking, claiming and finishing work (these rules live here; `docs/triage.md` only explains the labels)
-
-Rules that bind an agent are written in this file, because this is the file it reads. A rule that exists only in a `docs/` page does not bind anyone.
-
-1. **Look before you start:** list the open issues and pull requests (`gh issue list`, `gh pr list`) and check for overlap and for work already claimed.
-2. **Pick only `status:ready`**, highest priority first, not `waiting-owner`. Never implement `status:needs-refinement` (help refine it: research, a draft in a PR, questions in a comment); skip `status:blocked`.
-3. **Claim before working** (section 8, step 1) and release the claim when the work stops.
-4. **Close with evidence** (section 8, steps 4 and 5): what merged, how it was checked, what is left.
-5. **File what you find:** a defect found while working gets its own issue with area, type, status, priority and milestone, linked to the work that found it.
-6. **Epics hold sub-issues** (GitHub sub-issues, "blocked by" for order); an epic stays open until its last item closes.
-7. **`waiting-owner` means the owner is the only one who can do the one thing left.** Read the issue and its epic before applying it, say the exact step, and put a decision that many issues wait on in one place (the sign-off issue), not in many threads.
+- Your own earlier summaries and the session's notes are **claims to re-check**, not facts. A bead marked "not started" is
+  checked against the code and the tests before work is planned or reported.
+- Before asking the owner to do something (send an email, add a key, answer a question), check the beads and the repository
+  records for whether it already happened.
+- Before writing a doc, a design or a script, search the repository and the beads for one that already exists, and extend it.
+  Never overwrite a file you have not read.
