@@ -357,7 +357,7 @@ def test_perplexity_connect_page_card_and_llms_txt_give_the_same_steps_and_the_c
     for step in bp.PERPLEXITY_HOW:
         assert html.escape(step) in card, step[:60]
         assert step in llms_part, step[:60]
-    for seen in ("Custom connector (Remote)", "Add MCP connector", "Add connector", "Computer mode", "call_external_tool", "Comet: not verified yet"):
+    for seen in ("Custom connector (Remote)", "Add MCP connector", "Add connector", "Computer mode", "Using the Vault, what are my most valuable cards?"):
         assert seen in card and seen in llms_part, seen
     assert 'id="setup-perplexity"' in connect and "/setup/perplexity.md" in llms  # beside the other one-prompt setups
 
