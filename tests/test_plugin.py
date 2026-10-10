@@ -98,6 +98,22 @@ def test_no_page_or_plugin_file_names_a_vercel_address():
     assert offenders == []
 
 
+def test_the_chatgpt_listing_fields_meet_openais_limits():
+    """OpenAI's upload check (2026-10-10, developers.openai.com/plugins/deploy/submission): subtitle and name at most 30
+    characters, description at most 4000, an https support page (required for an MCP review), https privacy and terms."""
+    face = load(bp.OPENAI / ".codex-plugin" / "plugin.json")["interface"]
+    assert 0 < len(face["shortDescription"]) <= 30 and 0 < len(face["displayName"]) <= 30
+    assert 0 < len(face["longDescription"]) <= 4000 and len(face["developerName"]) <= 80
+    for key in ("supportURL", "websiteURL", "privacyPolicyURL", "termsOfServiceURL"):
+        assert face[key].startswith("https://mtgvault.cards") and len(face[key]) <= 1024, key
+    assert face["supportURL"].endswith("/support.html")
+    assert face["category"] in {"Business & Operations", "Communication", "Creativity", "Data & Analytics",
+                                "Developer Tools", "Education & Research", "Entertainment", "Finance", "Healthcare",
+                                "Other", "Productivity", "Scientific Research", "Security", "Travel"}  # the portal's list
+    assert "free" not in face["longDescription"].lower().replace("free to", "")  # no pricing or offers (guidelines)
+    assert len(face["defaultPrompt"]) <= 3 and all(len(p) <= 128 for p in face["defaultPrompt"])
+
+
 def test_the_chatgpt_and_codex_plugin_has_the_skills_the_experts_and_the_vault_server(tmp_path):
     """#225: ChatGPT and Codex load skills from a plugin package; with no subagents there, the experts are skills."""
     manifest = load(bp.OPENAI / ".codex-plugin" / "plugin.json")
