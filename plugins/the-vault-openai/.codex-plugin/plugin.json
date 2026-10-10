@@ -72,7 +72,7 @@
   },
   "interface": {
     "displayName": "The Vault",
-    "shortDescription": "Your Magic collection, decks and the rules, with sources",
+    "shortDescription": "Magic decks, rules, collection",
     "longDescription": "Ask about the cards you own and what they are worth, check a deck against your collection, find upgrades on a budget, get rules answers with cited rule numbers, and have an expert council (Commander expert, casual table, judge, devil's advocate) review a deck. Card data and prices are Scryfall's, rules are Wizards of the Coast's, shown with their sources. Free, unofficial Fan Content. Card data, rulings, images and prices are Scryfall's (prices originate at TCGplayer, Cardmarket and Cardhoarder); the Comprehensive Rules are Wizards of the Coast's, read live; role tags come from the Scryfall Tagger community, combos from Commander Spellbook, decks from Archidekt and their authors, collections from Dragon Shield and Moxfield files you upload. The Vault is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC. Full credits: https://mtgvault.cards/credits.html",
     "developerName": "The Vault",
     "category": "Lifestyle",
@@ -83,6 +83,7 @@
     "websiteURL": "https://mtgvault.cards",
     "privacyPolicyURL": "https://mtgvault.cards/privacy.html",
     "termsOfServiceURL": "https://mtgvault.cards/terms.html",
+    "supportURL": "https://mtgvault.cards/support.html",
     "defaultPrompt": [
       "What are my most valuable cards?",
       "Review my Commander deck with the expert council",

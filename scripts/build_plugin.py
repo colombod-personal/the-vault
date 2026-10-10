@@ -979,7 +979,7 @@ OPENAI_MANIFEST = {
         "negative": [{"description": c["name"] + ": " + c["expect"], "prompt": c["prompt"]} for c in reviewer.NEGATIVE]}},
     "interface": {
         "displayName": "The Vault",
-        "shortDescription": "Your Magic collection, decks and the rules, with sources",
+        "shortDescription": "Magic decks, rules, collection",  # the subtitle: at most 30 characters (OpenAI's check)
         "longDescription": ("Ask about the cards you own and what they are worth, check a deck against your collection, "
                             "find upgrades on a budget, get rules answers with cited rule numbers, and have an expert "
                             "council (Commander expert, casual table, judge, devil's advocate) review a deck. Card data "
@@ -991,6 +991,7 @@ OPENAI_MANIFEST = {
         "websiteURL": HOST,
         "privacyPolicyURL": f"{HOST}/privacy.html",
         "termsOfServiceURL": f"{HOST}/terms.html",
+        "supportURL": f"{HOST}/support.html",  # required for an MCP review
         "defaultPrompt": ["What are my most valuable cards?",
                           "Review my Commander deck with the expert council",
                           "What am I missing for this deck, and what will it cost?"],
