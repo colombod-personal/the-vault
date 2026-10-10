@@ -161,6 +161,7 @@ APPROVE_NOTE = ("Then sign in on the Vault's page and approve. Tick <strong>Writ
 ASSISTANTS = [
     {"name": "Claude (web)", "status": "tested", "note": "", "app": True},
     {"name": "ChatGPT (web)", "status": "tested", "note": "", "app": True},
+    {"name": "ChatGPT (desktop app)", "status": "tested", "note": "", "app": True},
     {"name": "Perplexity (web)", "status": "tested", "note": "Needs a plan with custom connectors (tested on Pro).", "app": True},
     {"name": "Codex CLI", "status": "tested", "note": "", "app": False},
     {"name": "Claude Code", "status": "guide", "note": "", "app": False},

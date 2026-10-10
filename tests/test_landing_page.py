@@ -82,7 +82,7 @@ def test_works_with_lists_every_assistant_with_its_honest_status():
 def test_the_landing_page_shows_only_apps_tested_for_real_no_developer_tools_or_unsupported_apps():
     """Owner, 2026-10-10: the landing page is for people using apps; only tested ones, no CLI, nothing we do not support."""
     shown = [a["name"] for a in bp.landing_assistants()]
-    assert shown == ["Claude (web)", "ChatGPT (web)", "Perplexity (web)"]
+    assert shown == ["Claude (web)", "ChatGPT (web)", "ChatGPT (desktop app)", "Perplexity (web)"]
     page = text(PUBLIC / "index.html")
     for gone in ("Codex", "Claude Code", "Cursor", "GitHub Copilot", "Microsoft Copilot", "CLI", "not tested yet", "Cannot add"):
         assert gone not in page, gone
@@ -96,7 +96,7 @@ def test_the_list_of_assistants_matches_what_is_tested_in_the_testing_doc():
     assert [(r[0], r[1]) for r in rows[1:]] == [(a["name"], a["status"]) for a in bp.ASSISTANTS]
     assert all(r[2] for r in rows[1:])  # every status has its evidence
     tested = {a["name"] for a in bp.ASSISTANTS if a["status"] == "tested"}
-    assert tested == {"Claude (web)", "ChatGPT (web)", "Perplexity (web)", "Codex CLI"}
+    assert tested == {"Claude (web)", "ChatGPT (web)", "ChatGPT (desktop app)", "Perplexity (web)", "Codex CLI"}
     # each tested app has its real run in the doc, not only a row
     for seen in ("claude.ai", "**ChatGPT** (2026-10-09", "**Perplexity** (web, Pro plan", "**Codex** (codex-cli"):
         assert seen in doc, seen

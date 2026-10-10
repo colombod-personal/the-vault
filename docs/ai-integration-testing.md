@@ -172,6 +172,7 @@ here, with its evidence, before changing the page.
 |---|---|---|
 | Claude (web) | tested | claude.ai on the demo account, 2026-10-08: the expert council run below and the host checklist (#239, #48) |
 | ChatGPT (web) | tested | 2026-10-09: the expert council run below (#235); connected through OAuth since 2026-10-06 (#77) |
+| ChatGPT (desktop app) | tested | 2026-10-10, ChatGPT for Windows (the OpenAI app, ChatGPT side of its ChatGPT/Codex switch): "Using The Vault: call whoami, then tell me my five most valuable cards" answered from the Vault, Connected, account Demo reviewer (user 5), Sliver Queen $306.36 first; card pictures show as placeholders in the desktop app (#77) |
 | Perplexity (web) | tested | 2026-10-09 on a Pro plan: "Real runs of the setup in Codex and Perplexity" below (#362) |
 | Codex CLI | tested | 2026-10-09, codex-cli 0.154.0: the same section below (#155) |
 | Claude Code | guide | the Connect page block and `public/setup/claude.md`; no clean run recorded (#153) |
