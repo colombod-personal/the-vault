@@ -3,7 +3,7 @@ name: sync-catalog
 # Postgres (jobs/sync_catalog.py, docs/catalog-design.md). Nothing loads unless the repository
 # variable CATALOG_SOURCES names sources (comma-separated: oracle_cards, rulings, oracle_tags);
 # each is enabled only after its terms are checked (docs/compliance.md). Runs only from main, in the
-# "vercel-production" environment (README → Security). Same database address logic as sync-prices.
+# "vercel-production" environment (docs/developing.md → Security). Same database address logic as sync-prices.
 on:
   schedule:
     - cron: "47 10 * * *"   # after sync-prices (10:17); Scryfall regenerates bulk files around 09:00 UTC

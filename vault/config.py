@@ -99,7 +99,7 @@ class Settings:
         if not self.database_url:
             raise RuntimeError(
                 "DATABASE_URL is not set. On Vercel, connect a Neon Postgres database to the project "
-                "(Storage -> Neon) and redeploy; locally, see README -> Run it locally."
+                "(Storage -> Neon) and redeploy; locally, see docs/developing.md -> Run it locally."
             )
         if os.environ.get("VERCEL") and not self.secure_cookies:
             # Secure cookies, the session-secret check and OAuth redirects all follow BASE_URL.
