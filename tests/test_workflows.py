@@ -1,6 +1,6 @@
 """CI and deployment security: secrets only reach main, and nothing untrusted runs next to them.
 
-The rules (README → Security):
+The rules (docs/developing.md → Security):
 - Secrets live in the "vercel-production" GitHub environment, which only main may use. A job
   that reads a secret declares that environment and only runs for main.
 - Secret-bearing workflows never run on push or pull_request (a branch could change them).

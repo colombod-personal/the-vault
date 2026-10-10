@@ -6,7 +6,7 @@ the real providers check and answers the way they do. This covers:
 - Apple's form_post, its ES256 client secret, and a name that arrives only once
 - Microsoft's tenant issuer and missing ``email`` claim
 - Facebook users who decline to share their e-mail
-Real-credential checks are listed in README ("Testing sign-in").
+Real-credential checks are listed in docs/developing.md ("Testing sign-in").
 """
 
 import json

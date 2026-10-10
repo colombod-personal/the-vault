@@ -88,7 +88,7 @@ The server stores only SHA-256 hashes of tokens.
    account. One that already has its own account moves over if that account is empty (no
    collection, imports, decks, shares, unexpired access tokens or value history), and that account
    is deleted once it has no sign-in left; one whose account holds data answers `409` and nothing
-   changes (README → "Sign-in providers"). Personal access tokens can't link sign-ins.
+   changes (docs/developing.md → "Sign-in providers"). Personal access tokens can't link sign-ins.
 
 Audiences: `APPLE_APP_BUNDLE_ID` for Apple and `GOOGLE_IOS_CLIENT_ID` for Google. Tokens from the
 web sign-in are refused. Google Sign-In for iOS configured with the server (web) client id is

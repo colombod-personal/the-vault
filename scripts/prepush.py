@@ -39,7 +39,7 @@ def out(*cmd: str) -> str:
 
 def main() -> int:
     if not os.environ.get("VAULT_TEST_DATABASE_URL"):
-        sys.exit("prepush: set VAULT_TEST_DATABASE_URL (README -> Run it locally): the checks need Postgres")
+        sys.exit("prepush: set VAULT_TEST_DATABASE_URL (docs/developing.md -> Run it locally): the checks need Postgres")
     subprocess.run(["git", "fetch", "-q", "origin", "main"])
     if subprocess.run(["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"]).returncode:
         sys.exit("prepush: your branch does not contain origin/main. Run `git merge origin/main`, resolve conflicts, rebuild "
