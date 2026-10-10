@@ -6,7 +6,8 @@ Read on 2026-10-09 from the pages linked below. Statements marked **verified** c
 
 - **Verified:** Microsoft's support page "Connecting Microsoft Copilot to other services" ([source](https://support.microsoft.com/en-us/microsoft-copilot/connecting-microsoft-copilot-to-other-services)) lists exactly these connectors for a personal account: OneDrive, Outlook.com (email, calendar, contacts), Google Drive, and Gmail, Google Calendar and Google Contacts. It applies to personal accounts with Microsoft 365 Personal, Family, Premium or Pro, on Copilot.com and the iOS and Android apps. It does not mention MCP, custom connectors, plugins, third-party apps or adding your own server, and shows no last-updated date.
 - **Not verified:** one vendor's documentation (time cockpit) says the consumer app does not support custom MCP servers. No Microsoft page found says so, or says the opposite.
-- **Conclusion for now:** as far as Microsoft's own page says, a consumer cannot add the Vault to the consumer Copilot. Whether a hidden setting or preview exists is **not verified** and needs a look inside the app on a personal account.
+- **Verified in the app (2026-10-10, Microsoft Copilot for Windows, personal account):** in **+ then Use connectors** and in **Settings then Connectors** the list is fixed: Microsoft OneDrive, Outlook, Google Drive, Google Calendar, Gmail, Google Contacts, Box and Dropbox. Settings has Preferences, Memory, Account, Connectors, Privacy, About and Web browsing; none has a custom connector or MCP option, and Copilot Labs is unrelated.
+- **Conclusion:** a person with a personal Microsoft account cannot add the Vault to the Copilot app, and nothing the Vault does changes that. Decision of the owner on 2026-10-10: no workarounds that would complicate supporting the other assistants; parked (issue #436, closed as not planned).
 
 ## Microsoft's routes that do take an MCP server (organisations and makers, not consumers)
 
@@ -27,7 +28,8 @@ Read on 2026-10-09 from the pages linked below. Statements marked **verified** c
 
 ## Left to do (the criteria of #401 still open)
 
-- Open the consumer Copilot on a personal account and look for any way to add a connector or MCP server (owner's sign-in).
+- ~~Open the consumer Copilot on a personal account and look for any way to add a connector or MCP server~~ Done 2026-10-10: there is none (see above).
+- Microsoft 365 Copilot (work or school): the Vault would need to hand out a client secret when Microsoft registers itself (Microsoft's page: dynamic client registration "without a client secret isn't supported yet"), and the Vault registers public clients only (`vault/oauth_clients.py`, `register`). Not built; parked with #436.
 - Install the Vault's plugin and connect the server in VS Code, Copilot CLI and the Copilot app; record what each calls (owner's GitHub sign-in).
 - Fix the plugin's layout gaps above if the install fails or to follow the standard: a separate issue with a test in `tests/test_plugin.py`.
 
