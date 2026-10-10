@@ -48,7 +48,8 @@ CROSS_SITE_ALLOWED = ("/api/auth/callback/google", "/api/auth/callback/microsoft
 READ_ONLY_POSTS = {"/api/v1/decks/parse", "/api/v1/imports/preview", "/api/v1/decks/simulate", "/api/v1/decks/coverage", "/api/v1/auth/revoke", "/api/v1/cards/lookup",
                    # computations on a decklist the caller sends: nothing is stored
                    "/api/v1/decks/stats", "/api/v1/decks/legality", "/api/v1/decks/upgrades",
-                   "/api/v1/decks/validate-changes", "/api/v1/decks/shopping-list", "/api/v1/decks/combos"}
+                   "/api/v1/decks/validate-changes", "/api/v1/decks/shopping-list", "/api/v1/decks/combos",
+                   "/api/v1/decks/roles"}
 
 
 def _origin(url: str) -> str:

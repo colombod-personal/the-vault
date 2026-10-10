@@ -18,6 +18,7 @@ vault-tools:
   - list_sets
   - list_card_names
   - search_cards
+  - card_roles
   - get_card
   - show_owned_printings
   - lookup_cards

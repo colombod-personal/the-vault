@@ -344,7 +344,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved, sw
     catch (e) { setError('Removing failed: ' + e.message); }
   }
 
-  const TABS = [['cards', 'Cards'], ['stats', 'Stats'], ['opening', 'Opening turns'], ['legality', 'Legality'], ['upgrades', 'Upgrades'], ['combos', 'Combos'], ['buy', 'Buy list'],
+  const TABS = [['cards', 'Cards'], ['stats', 'Stats'], ['does', 'What it does'], ['opening', 'Opening turns'], ['legality', 'Legality'], ['upgrades', 'Upgrades'], ['combos', 'Combos'], ['buy', 'Buy list'],
     ...(savedId ? [['history', 'History']] : [])];
 
   return (
@@ -427,6 +427,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved, sw
           </div>
           {tab === 'cards' && <DeckCards rows={rows} summary={summary} filter={filter} setFilter={setFilter} openCard={openCard} />}
           {tab === 'stats' && <DeckStats text={text} onOpening={() => setTab('opening')} />}
+          {tab === 'does' && <window.DeckRoles text={text} rows={rows} cardFor={deckRowCard} openCard={openCard} />}
           {tab === 'opening' && <DeckOpening text={text} title={deck.title} format={format || 'commander'} setFormat={setFormat} />}
           {tab === 'legality' && <DeckLegality text={text} format={format} setFormat={setFormat} />}
           {tab === 'upgrades' && <DeckUpgrades text={text} format={format} setFormat={setFormat} />}
@@ -529,6 +530,9 @@ function FormatPicker({ format, setFormat }) {
 
 // -- Cards: what you own of each, grouped by type ----------------------------------------------
 
+// A deck row in the shape the card panel opens (the Cards tab and the "What it does" tab both open the card this way).
+const deckRowCard = (r) => ({ n: r.name, s: r.scry ? r.scry.set : '', cn: r.scry ? r.scry.collector_number : '', p: 'Normal', c: 'Mint', l: 'English', q: r.owned, mk: r.unitPrice || 0, lo: 0, mi: 0, pd: 0, fd: '', ld: '', _scry: r.scry, _ownEntries: r.ownEntries, _deckRow: r });
+
 function DeckCards({ rows, summary, filter, setFilter, openCard }) {
   const groups = useMemoD(() => {
     const g = {};
@@ -548,7 +552,7 @@ function DeckCards({ rows, summary, filter, setFilter, openCard }) {
           <React.Fragment key={type}>
             <div className="deck-group">{type} <span className="muted">· {list.reduce((n, r) => n + r.qty, 0)}</span></div>
             {list.map((r) => (
-              <div className={`deck-row ${r.status}`} key={r.name} {...(r.scry ? window.vaultPressable(() => openCard({ n: r.name, s: r.scry.set, cn: r.scry.collector_number, p: 'Normal', c: 'Mint', l: 'English', q: r.owned, mk: r.unitPrice || 0, lo: 0, mi: 0, pd: 0, fd: '', ld: '', _scry: r.scry, _ownEntries: r.ownEntries, _deckRow: r }), r.name) : {})} style={{ cursor: r.scry ? 'pointer' : 'default' }}>
+              <div className={`deck-row ${r.status}`} key={r.name} {...(r.scry ? window.vaultPressable(() => openCard(deckRowCard(r)), r.name) : {})} style={{ cursor: r.scry ? 'pointer' : 'default' }}>
                 <div className="qty">{r.qty}×</div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 600 }}>{r.name}</div>
@@ -645,7 +649,7 @@ function DeckStats({ text, onOpening }) {
         ))}
       </div>
       <div className="panel">
-        <p className="eyebrow">Roles</p>
+        <p className="eyebrow">Roles <span className="muted">(Scryfall Tagger tags, a community's opinion)</span></p>
         {roles.length === 0 ? <p className="muted" style={{ fontSize: 12 }}>No role tags found for these cards.</p> :
           roles.map(([role, v]) => (
             <details key={role} className="deck-kv-details">

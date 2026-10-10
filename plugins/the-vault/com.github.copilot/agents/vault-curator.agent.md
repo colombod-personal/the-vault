@@ -14,6 +14,7 @@ tools:
   - the-vault/list_sets
   - the-vault/list_card_names
   - the-vault/search_cards
+  - the-vault/card_roles
   - the-vault/get_card
   - the-vault/show_owned_printings
   - the-vault/lookup_cards

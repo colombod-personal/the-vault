@@ -23,12 +23,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from .. import catalog_queries as q
-from .. import deck_tools, limited_data, role_rules, rules_changes
+from .. import card_roles, deck_tools, limited_data, role_rules, rules_changes
 from .. import provenance as prov
 from ..models import User
 from ..ratelimit import WINDOW, hit
 from ..rules_live import LiveRules, RulesUnavailable
 from .hal import link
+from .schemas import CardRolesOut, RoleVocabulary
 
 V1 = "/api/v1"
 Name = Annotated[str, Query(min_length=1, max_length=300, description="Exact card name (either face of a double-faced card)")]
@@ -326,6 +327,45 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
                 body["price"] = {"usd": price.usd, "usd_foil": price.usd_foil, "eur": price.eur, "as_of": price.day.isoformat(),
                                  "source": price.source, "printing": "the cheapest priced paper printing"}
                 body["provenance"] += q.provenance_for(db, "oracle_prices")
+        return body
+
+    @router.get("/roles", response_model=RoleVocabulary, response_model_by_alias=True,
+                summary="The 22 roles the Vault reads on a card (a mana rock, a token doubler, a free counterspell ...) and the rules that find each")
+    def roles_vocabulary(user=Depends(access), db: Session = Depends(get_db)) -> dict:
+        sources = q.sources(db)
+        return {"label": card_roles.LABEL, "roles_version": card_roles.VERSION, "roles": card_roles.vocabulary(),
+                "provenance": card_roles.computed_provenance(sources),
+                "_links": {"self": link(f"{V1}/catalog/roles"), "card": link(f"{V1}/catalog/cards/roles", title="Add ?name=NAME or ?oracle_id=ID"),
+                           "collection": link(f"{V1}/collection/roles", title="How many cards of yours have each role")}}
+
+    @router.get("/cards/roles", response_model=CardRolesOut, response_model_by_alias=True,
+                summary="What a card does, as a list of roles: the Vault's reading of its Oracle text, each with the rule that found it")
+    def card_role_list(name: str | None = Query(default=None, min_length=1, max_length=300),
+                       oracle_id: str | None = Query(default=None, min_length=36, max_length=36),
+                       user=Depends(access), db: Session = Depends(get_db)) -> dict:
+        if not name and not oracle_id:
+            raise HTTPException(422, "Give a name or an oracle_id")
+        found, suggestions = q.find_card(db, name=name, oracle_id=oracle_id)
+        if found is None and not suggestions:
+            raise HTTPException(404, "No card with that name")
+        sources = q.sources(db)
+        body = {"card": None, "suggestions": [c.name for c in suggestions], "label": card_roles.LABEL, "roles_version": card_roles.VERSION,
+                "roles": [], "message": None, "community_tags": [], "community_tags_label": card_roles.TAGGER_LABEL,
+                "provenance": card_roles.computed_provenance(sources),
+                "_links": {"self": link(f"{V1}/catalog/cards/roles"), "vocabulary": link(f"{V1}/catalog/roles")}}
+        if found is None:
+            return body
+        hits = card_roles.hits_of(found)
+        body["card"] = {"oracle_id": found.oracle_id, "name": found.name, "type_line": found.type_line, "mana_cost": found.mana_cost,
+                        "scryfall_uri": found.scryfall_uri}
+        body["roles"] = card_roles.views(hits)
+        if not hits:
+            body["message"] = ("The Vault's rules found no role on this card. That is not the same as the card doing nothing: the rules read "
+                               "22 common jobs and miss some wordings.")
+        body["community_tags"] = q.card_tags(db, found.oracle_id)
+        if body["community_tags"]:
+            body["provenance"] += q.provenance_for(db, "oracle_tags")
+        body["_links"] |= {"catalog_card": link(f"{V1}/catalog/cards?oracle_id={found.oracle_id}")}
         return body
 
     @router.post("/walkthrough", response_model=WalkthroughOut, response_model_by_alias=True,

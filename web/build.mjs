@@ -23,6 +23,7 @@ export const SOURCES = [
   'views/buckets.jsx',
   'views/tags.jsx',
   'views/scope.jsx',
+  'views/roles.jsx',
   'views/browse.jsx',
   'views/sets.jsx',
   'views/deck.jsx',

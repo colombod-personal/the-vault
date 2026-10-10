@@ -37,6 +37,9 @@ function Browse({ data, openCard, initialQuery, bucket, onBucket, tag, onTag, on
   const [typeF, setTypeF] = useStateB('');
   const [manaF, setManaF] = useStateB('');  // a mana value ('' = any); the server matches it exactly
   const [sort, setSort] = useStateB(initialQuery?.sort || 'value');
+  // What the card does (#435): the roles asked for (the card panel's "Show my cards that do this" arrives with one), and whether a card needs all of them
+  const [roles, setRoles] = useStateB(() => (initialQuery && initialQuery.roles) || []);
+  const [roleMatch, setRoleMatch] = useStateB('all');
   const [layout, setLayout] = useStateB('table');
   const [shown, setShown] = useStateB(null);   // { items, total, value_total, more }
   const [busy, setBusy] = useStateB(false);
@@ -47,10 +50,10 @@ function Browse({ data, openCard, initialQuery, bucket, onBucket, tag, onTag, on
     return () => clearTimeout(t);
   }, [q]);
 
-  const params = { q: query, set: setF, printing: printingF, type: typeF, mana_value: manaF, bucket: bucketId, tag: tagId, sort: BROWSE_SORTS[sort] || '-value' };
+  const params = { q: query, set: setF, printing: printingF, type: typeF, mana_value: manaF, bucket: bucketId, tag: tagId, role: roles, role_match: roles.length > 1 ? roleMatch : null, sort: BROWSE_SORTS[sort] || '-value' };
   const first = window.useVaultQuery(() => api.cards({ ...params, limit: BROWSE_PAGE }),
-    [api.base, data.meta.version, query, setF, printingF, typeF, manaF, bucketId, tagId, sort]);
-  useEffectB(() => { setPicked(new Set()); }, [bucketId, tagId, query, setF, printingF, typeF, manaF, sort, data.meta.version]);
+    [api.base, data.meta.version, query, setF, printingF, typeF, manaF, bucketId, tagId, sort, roles.join(','), roleMatch]);
+  useEffectB(() => { setPicked(new Set()); }, [bucketId, tagId, query, setF, printingF, typeF, manaF, sort, data.meta.version, roles.join(','), roleMatch]);
   useEffectB(() => { if (first.data) { setShown(first.data); setError(null); } }, [first.data]);
   useEffectB(() => { if (first.error) setError(first.error.message); }, [first.error]);
 
@@ -135,6 +138,7 @@ function Browse({ data, openCard, initialQuery, bucket, onBucket, tag, onTag, on
             {BROWSE_MANA.map(n => <option key={n} value={n}>Mana value {n}</option>)}
           </select>
         </div>
+        <window.RoleFilter api={api} version={data.meta.version} value={roles} onChange={setRoles} match={roleMatch} onMatch={setRoleMatch} />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-2)' }}>
           <div aria-live="polite">
             <span style={{ color: 'var(--gold)' }}>{total.toLocaleString()}</span> entries match · showing <span style={{ color: 'var(--text)' }}>{items.length.toLocaleString()}</span> · combined value <span style={{ color: 'var(--gold)' }}>${(shown?.value_total || 0).toFixed(2)}</span>
