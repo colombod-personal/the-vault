@@ -21,6 +21,7 @@
   "skills": "./skills/",
   "mcpServers": "./mcp.json",
   "review": {
+    "demo_recording_url": "https://mtgvault.cards/demo/vault-chatgpt-demo.mp4",
     "test_cases": {
       "positive": [
         {

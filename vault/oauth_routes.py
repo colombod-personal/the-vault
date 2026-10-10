@@ -42,7 +42,7 @@ log = logging.getLogger(__name__)
 PARAMS = ("response_type", "client_id", "redirect_uri", "state", "scope", "code_challenge",
           "code_challenge_method", "resource")
 MAX_QUERY = 2000  # the pending request lives in the session cookie
-MAX_STATE = 500
+MAX_STATE = 1500  # OpenAI's plugin portal sends about 700 characters; the whole query stays under MAX_QUERY
 REGISTER_MAX_BYTES = 8192
 CORS = {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, Authorization", "Access-Control-Max-Age": "3600"}

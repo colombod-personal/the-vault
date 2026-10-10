@@ -177,6 +177,7 @@ def test_every_tool_has_a_title_and_a_read_only_or_destructive_annotation_as_the
         assert entry["title"].strip() and entry["description"].strip(), tool.name
         hints = entry["annotations"]
         assert isinstance(hints["readOnlyHint"], bool) and isinstance(hints["destructiveHint"], bool), tool.name
+        assert hints["title"] == entry["title"], tool.name  # the Claude portal reads annotations.title
         if tool.write:
             assert hints["readOnlyHint"] is False, f"{tool.name} writes but says it is read only"
         else:
