@@ -417,7 +417,7 @@ def test_a_non_loopback_port_difference_is_not_tolerated(make_client):
     ({"resource": "http://testserver"}, "invalid_target"), ({"resource": "https://evil.example/api/mcp"}, "invalid_target"),
     ({"scope": "read admin"}, "invalid_scope"), ({"scope": "account"}, "invalid_scope"),
     ({"response_type": "token"}, "unsupported_response_type"), ({"response_type": None}, "unsupported_response_type"),
-    ({"state": "x" * 600}, "invalid_request"),
+    ({"state": "x" * 1600}, "invalid_request"),
 ])
 def test_other_request_problems_are_shown_with_a_return_button_not_redirected(client, override, error):  # #339
     client.sign_in()
