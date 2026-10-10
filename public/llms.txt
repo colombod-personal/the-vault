@@ -30,10 +30,10 @@ be revoked (Account → Connected apps for OAuth).
 - First tour after connecting: the MCP prompt `vault_start` (`prompts/get`); it is read-only and uses the person's own collection and decks.
 - Perplexity (custom remote connector; seen in a real run on 2026-10-09, Pro plan; Comet: not verified yet), connector URL `https://mtgvault.cards/api/mcp`:
   1. In the Perplexity web app open Connectors (https://www.perplexity.ai/computer/connectors) and choose Custom connector (Remote), then Add MCP connector. It needs a plan that offers custom connectors (the check ran on Pro).
-  2. Name it The Vault, leave the description optional, set the MCP server URL to https://mtgvault.cards/api/mcp, leave Advanced as it is (OAuth, no client ID or client secret, Streamable HTTP, Public), tick that you understand custom connectors can introduce risks, and add it.
+  2. Name it The Vault, leave the description optional, set the MCP server URL to https://mtgvault.cards/api/mcp, leave the advanced settings as they are, tick that you understand custom connectors can introduce risks, and add it.
   3. Open the connector and press Add connector. Perplexity opens the Vault's page "Connect Perplexity (www.perplexity.ai) to your Vault?": sign in (a passkey, Google and so on; the page shows who is signed in) and press Allow.
   4. The connector then shows Connected with the Vault's tools, each with a permission: Disable, Always ask or Allow.
-  5. Use it in Computer mode and name the Vault in the question (Perplexity reaches a connector's tools through list_external_tools, describe_external_tools and call_external_tool). Comet: not verified yet. The connector tile shows Perplexity's generic plug icon, because Perplexity has no icon field for custom connectors.
+  5. Use it in Computer mode and mention the Vault in your question, for example "Using the Vault, what are my most valuable cards?". The connector shows Perplexity's plain plug icon, because Perplexity has no icon field for custom connectors.
 - Token: header `Authorization: Bearer vault_pat_...` (a personal access token from Account → Agents & API). Keep it in an
   environment variable or the client's own secret prompt, never in a command line (shell history, the chat).
 - Each client has its own format, taken from its documentation (read 2026-10-07); the host is https://mtgvault.cards:

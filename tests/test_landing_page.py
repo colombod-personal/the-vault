@@ -76,7 +76,16 @@ def test_works_with_lists_every_assistant_with_its_honest_status():
     hosts = re.findall(r'<li class="host host-(\w+)"><span class="host-name">(.*?)</span><span class="host-status">(.*?)</span>',
                        section("works-with"))
     assert [(name.replace("&#x27;", "'"), status, label) for status, name, label in hosts] == [
-        (a["name"], a["status"], bp.ASSISTANT_STATUS[a["status"]]) for a in bp.ASSISTANTS]
+        (a["name"], a["status"], bp.ASSISTANT_STATUS[a["status"]]) for a in bp.landing_assistants()]
+
+
+def test_the_landing_page_shows_only_apps_tested_for_real_no_developer_tools_or_unsupported_apps():
+    """Owner, 2026-10-10: the landing page is for people using apps; only tested ones, no CLI, nothing we do not support."""
+    shown = [a["name"] for a in bp.landing_assistants()]
+    assert shown == ["Claude (web)", "ChatGPT (web)", "Perplexity (web)"]
+    page = text(PUBLIC / "index.html")
+    for gone in ("Codex", "Claude Code", "Cursor", "GitHub Copilot", "Microsoft Copilot", "CLI", "not tested yet", "Cannot add"):
+        assert gone not in page, gone
 
 
 def test_the_list_of_assistants_matches_what_is_tested_in_the_testing_doc():
