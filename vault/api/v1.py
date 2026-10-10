@@ -32,7 +32,7 @@ from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .. import analytics, deck_text, lab, oauth_server, outbound, tags as card_tags, tokens
+from .. import analytics, card_roles, catalog_queries, deck_text, lab, oauth_server, outbound, tags as card_tags, tokens
 from ..catalog import Catalog
 from .. import recent_signin
 from ..auth import (RECENT_SIGN_IN_METHOD_HOURS, IdentityInUse, Profile, email_verified, find_or_create, remove_identity,
@@ -42,7 +42,7 @@ from ..collection_view import SORTS, CollectionView, filtered, filtered_printing
 from .. import archidekt_cache, deck_import, deck_match, deck_overview, deck_refresh, deck_versions, experts, owned_changes
 from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, ImportOptions, NoSuchBucket, export_collection,
                         import_collection, preview_import as preview_collection_import, user_entries)
-from ..models import AccessToken, ApiSession, Bucket, Card, Deck, Identity, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
+from ..models import AccessToken, ApiSession, Bucket, Card, CatalogSource, Deck, Identity, Import, NativeNonce, OAuthClient, OAuthGrant, OracleCard, Passkey, PriceSnapshot, Share, User
 from ..native import LEEWAY as NATIVE_LEEWAY, NativeTokenError, NativeVerifier, ProviderUnavailable
 from ..passkeys import remove_passkey
 from ..prices import compute_values
@@ -84,6 +84,12 @@ SET_SORTS = {
     "release": lambda s: (_ordinal(s["released_at"]) or 10**7,),
     "-release": lambda s: (-(_ordinal(s["released_at"]) or -10**7),),
 }
+
+
+def roles_stamp(db: Session) -> str:
+    """Moves when the catalog is loaded or the role rules change: a list filtered by role is cached by it as well as by the collection."""
+    row = db.get(CatalogSource, "oracle_cards")
+    return f"roles-{card_roles.VERSION}-{row.version if row else '-'}"
 
 
 def scope_query(bucket_id: int | None, tag: str | None) -> str:
@@ -523,7 +529,12 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                   bucket: int | None = Query(None, ge=1, le=S.MAX_ID, description="Only the copies in this bucket "
                                              "(GET /collection/buckets); not on a shared collection"),
                   tag: str | None = Query(None, max_length=40, description="Only cards you tagged with this (GET /collection/tags); "
-                                          "not on a shared collection")):
+                                          "not on a shared collection"),
+                  role: list[str] = Query([], max_length=len(card_roles.POINTS),
+                                          description="Only cards that do this (repeat it for more): the Vault's own reading of the Oracle text, "
+                                                      "not an official classification (GET /collection/roles lists the roles). Every printing of "
+                                                      "a card with the role counts. Combined with the other filters"),
+                  role_match: Literal["all", "any"] = Query("all", description="With several roles: `all` (the card has every one) or `any` (at least one)")):
             if sort not in SORTS:
                 raise HTTPException(400, f"sort must be one of {sorted(SORTS)}")
             if card_type is not None:
@@ -534,11 +545,18 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 raise HTTPException(400, f"mana_value must be one of {', '.join(analytics.MANA_VALUES)}")
             bucket_id, tag = ctx.scope(bucket, tag)
             view = ctx.view(bucket_id)
+            try:
+                role = card_roles.check_roles(role)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from None
 
             def body():
                 items = filtered(view, q=q, set_code=set, finish=finish, condition=condition, name=name,
                                  card_type=card_type, mana_value=mana_value)
                 items = filtered_printing(items, printing)
+                if role:  # what the card does is stored with the card (oracle_cards.roles): one indexed query, every printing of a match counts
+                    having = card_roles.owned_printings(ctx.db, ctx.owner.id, role, role_match)
+                    items = [g for g in items if g.scryfall_id in having]
                 if tag is not None:  # the tag is on the card: every printing of a tagged card matches
                     tagged = card_tags.oracle_ids_for(ctx.db, ctx.owner, tag)
                     printings = {*ctx.db.scalars(select(Card.scryfall_id).where(Card.oracle_id.in_(tagged)))} if tagged else frozenset()  # (`set` is a parameter here)
@@ -551,10 +569,55 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                        for g in page]
                 return {**page_body(request, out, nxt, len(items), q=q, set=set, name=name, finish=finish,
                                     condition=condition, printing=printing, type=card_type, mana_value=mana_value,
-                                    bucket=bucket, tag=tag, sort=None if sort == "name" else sort, limit=limit),
+                                    bucket=bucket, tag=tag, role=role or None, role_match=role_match if role and role_match != "all" else None,
+                                    sort=None if sort == "name" else sort, limit=limit),
                         "value_total": round(sum(g.value for g in items), 2)}
 
-            return etag_response(request, view.version + (f".{card_tags.stamp(ctx.db, ctx.owner)}" if ctx.own else ""), body)
+            return etag_response(request, view.version + (f".{card_tags.stamp(ctx.db, ctx.owner)}" if ctx.own else "")
+                                 + (f".{roles_stamp(ctx.db)}" if role else ""), body)
+
+        @r.get("/roles", response_model=S.OwnedRoles, response_model_by_alias=True,
+               summary="What your cards do: the Vault's 22 roles, each with how many of your cards have it")
+        def roles(request: Request, ctx: Ctx = Depends(ctx_dep)):
+            def body():
+                counts = card_roles.owned_counts(ctx.db, ctx.owner.id)
+                read = ctx.db.scalar(select(func.count()).select_from(OracleCard).where(OracleCard.roles_version == card_roles.VERSION)) or 0
+                items = [{"role": v["role"], "point": v["point"], "name": v["name"], "means": v["means"], "family": v["family"],
+                          "cards": counts.get(v["role"], {}).get("cards", 0), "core_cards": counts.get(v["role"], {}).get("core", 0),
+                          "_links": {"cards": link(f"{ctx.base}/roles/cards?role={v['role']}"),
+                                     "browse": link(f"{ctx.base}/cards?role={v['role']}", title="The printings")}}
+                         for v in card_roles.vocabulary()]
+                return {"label": card_roles.LABEL, "roles_version": card_roles.VERSION, "read_cards": read, "items": items,
+                        "note": None if read else "The card catalog has not been read with these rules yet (it is loaded daily), so no role is counted yet.",
+                        "provenance": card_roles.computed_provenance(catalog_queries.sources(ctx.db), as_json=True),
+                        "_links": {"self": link(f"{ctx.base}/roles"), "vocabulary": link(f"{V1}/catalog/roles", title="The rules that find each role")}}
+
+            return etag_response(request, f"{sql_version(ctx)}.{roles_stamp(ctx.db)}", body)
+
+        @r.get("/roles/cards", response_model=S.OwnedRoleCards, response_model_by_alias=True,
+               summary="The cards you own that have these roles (one row per card), with the rule that found each role")
+        def role_cards(request: Request, ctx: Ctx = Depends(ctx_dep),
+                       role: list[str] = Query(..., min_length=1, max_length=len(card_roles.POINTS), description="A role slug (GET /collection/roles); repeat it for more"),
+                       match: Literal["all", "any"] = Query("all", description="With several roles: `all` (the card has every one) or `any`"),
+                       cursor: str | None = Query(None, max_length=500), limit: int | None = None):
+            try:
+                wanted = card_roles.check_roles(role)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from None
+            if not wanted:
+                raise HTTPException(400, "Name at least one role")
+
+            def body():
+                found = card_roles.owned_cards(ctx.db, ctx.owner.id, wanted, match)
+                page, nxt = paginate(found, lambda c: (c["card"].lower(),), lambda c: c["oracle_id"], cursor=cursor, limit=limit)
+                for c in page:
+                    c["_links"] = {"card": link(f"{V1}/catalog/cards/roles?oracle_id={c['oracle_id']}"),
+                                   "printings": link(f"{ctx.base}/cards?{urlencode({'name': c['card'].split(' // ')[0]})}")}
+                return {**page_body(request, page, nxt, len(found), role=wanted, match=match, limit=limit), "label": card_roles.LABEL,
+                        "roles_version": card_roles.VERSION, "role": wanted, "match": match,
+                        "provenance": card_roles.computed_provenance(catalog_queries.sources(ctx.db), as_json=True)}
+
+            return etag_response(request, f"{sql_version(ctx)}.{roles_stamp(ctx.db)}", body)
 
         @r.get("/cards/{card_id}", response_model=S.CardDetail, summary="One printing, with card data and price history")
         def card(request: Request, card_id: str, ctx: Ctx = Depends(ctx_dep)):

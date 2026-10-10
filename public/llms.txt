@@ -220,6 +220,13 @@ be revoked (Account → Connected apps for OAuth).
     another deck holds a copy and Scryfall's dated price for a copy to buy; `filtered_note` counts the owned cards set aside. The jobs are the
     Vault's own 22 roles found by rules over the Oracle text, not Scryfall's tags; say so, and never call a candidate "the same card"; `no_role`
     means the Vault does not know the card, not that nothing like it is owned. Read-only; changing a deck is `validate_deck_changes` then `update_deck`
+  - what a card does, and what the person's cards or a deck do: `card_roles`. The Vault's own reading of the Oracle text in 22 roles (a mana rock, a
+    token doubler, a counterspell, card draw once or every turn, removal, a board wipe, protection ...), each a short `point` ("Doubles tokens"),
+    `core` or `incidental`, with the `rule` that found it and a `why` line. Give `card` (its roles), `role` (the person's cards that have it; `match`
+    all or any) or `deck_id` (every role with the deck's cards, empty roles shown so a gap is visible); with none, each role with how many of the
+    person's cards have it. `search_cards` also takes `role` (and `role_match`). Say the label that comes with each answer: the Vault's reading of
+    the card text, not an official classification; a missing role means "no role known", not "does nothing". Scryfall Tagger tags are a community's
+    opinion and come apart as `community_tags`. Read-only
   - any card, owned or not: `lookup_cards`
   - edit the cards owned (bought, sold, traded): `update_owned_cards` (preview; asks which printing),
     `confirm_owned_cards_update` (after the person says yes), `undo_owned_cards_update`; pictures of the

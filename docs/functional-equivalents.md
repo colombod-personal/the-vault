@@ -419,7 +419,7 @@ catalog, and the per-deck report for the owner's four decks; publish both in thi
 
 The owner approved the recommended defaults of section 10 on 2026-10-09 ("take the recommendations"): the Vault's own text rules first, the 22-role vocabulary of section 5, two tiers, mana value ranked and shown (not a filter), and Scryfall's community tags only as an internal second input after the #62 terms record. That record does not exist, so **no tag is read by any of this**: the code that finds roles for equivalents (`vault/equivalents.py`) imports no tag table, no catalog source and no network client (a test fails if it does), and **no data was ingested from any outside source** (the only inputs are the Oracle text and the type line the catalog already holds). Decision 5 (sending the question to Scryfall) is still the owner's to make and still blocks release 2.
 
-What replaced what: `deck_ideas.equivalence` (two cards were equivalent when they shared a core coarse role, candidates found through Tagger tags) is gone. `deck_ideas.alternatives` now asks `vault.equivalents`; the lanes of the Ideas view and `deck_stats` keep the eight coarse roles (`vault/deck_tools.py`) exactly as they were. No migration: there is no `card_roles` table (the roles are computed from the text on request and cached in the process by catalog content hash); the table, the pipelines and the suggestion queue of `docs/card-roles-design.md` stay for #174.
+What replaced what: `deck_ideas.equivalence` (two cards were equivalent when they shared a core coarse role, candidates found through Tagger tags) is gone. `deck_ideas.alternatives` now asks `vault.equivalents`; the lanes of the Ideas view and `deck_stats` keep the eight coarse roles (`vault/deck_tools.py`) exactly as they were. No migration at that point (the roles were computed from the text on request and cached in the process by catalog content hash; section 13 stores them with the card); the table, the pipelines and the suggestion queue of `docs/card-roles-design.md` stay for #174.
 
 ### 12.1 The vocabulary, as coded
 
@@ -519,3 +519,48 @@ The phone check (`scripts/measure_phone.js`) at 390 px passed in all six: no hor
 ### 12.5 Left for later
 
 Release 2 (Scryfall's tags as an internal second input, with the agreement report between rules and tags) waits for the #62 terms record and decision 5. The `card_roles` table, the reviewer pipeline, `role_suggestions` and the "Suggest a role" button wait for #174; so do `roles_of(card | deck)` as a tool and the deck-level role counts on the new vocabulary. The per-deck report on the owner's four decks (roles per card, cards with no role) needs the real collection and is a first production check. Co-occurrence inside the person's own decks as a tie-breaker (section 2.4) is not built.
+
+## 13. As built (#435): what a card does, shown everywhere
+
+The owner asked in chat on 2026-10-10: "if we have the 'what the card does' (token generator, mana generator, token duplicator, counter proliferation, counterspell, protection, removal and so on) that we use to power the strategy logic and the AI, can we show these attributes as a list of points and give a way to interact with those lists?" There is no separate design document; this section is the record, and where a point was open the conservative choice was taken (13.5). Nothing was ingested from outside: the roles are still only the rules of section 12 over the Oracle text and type line the catalog already holds, and Scryfall's Tagger tags stay a separate, labelled list.
+
+### 13.1 Storage: read when the catalog loads, never per request
+
+- `oracle_cards.roles` (JSONB, migration `0123`): `{slug: {strength, rule, repeatable}}` in the Vault's order, with a **GIN index** (`ix_oracle_cards_roles`), so "which cards have these roles" is `roles ?& array[...]` (all) or `?|` (any): one indexed query. `oracle_cards.roles_version` is the version of the rules that read the row (`equivalents.RULES_VERSION`; null means not read yet).
+- `catalog_sync.oracle_card_row` reads the roles (`vault.card_roles.stored`) **before** the content hash is taken, and the hash covers them and the version. So the daily job's diff rewrites a row when its text **or the rules** change, and the first load after this change rewrites every row once: that is the backfill (the migration writes no data, so it cannot disagree with a later rule change). Until that load has run, a card whose `roles_version` is not the current one is read on the fly by the card endpoints (never shown as "no roles"), `/collection/roles` says `read_cards: 0` with a note, and the filter matches nothing rather than guess.
+- **Unreadable text is reported, not hidden.** A card whose text makes the rules raise is stored with no roles and named in the sync result (`unread_roles`, with the first error per card in `unread_roles_why`) and in a log warning, the way `unread_deck_rules` names a deck wording the legality check cannot read; the load goes on.
+- Timing on a large catalog (`tests/test_card_roles.py::test_filtering_a_large_collection_is_one_query_on_the_index`: 22,000 catalog cards, 5,500 owned printings, local Postgres): the role filter query took about 21 ms and the counts of all 22 roles about 25 ms.
+
+### 13.2 What a person sees
+
+The wording is one string everywhere (`card_roles.LABEL`): **"The Vault's reading of the card text, not an official classification"**; the answers' provenance is a `computed` block over Scryfall's Oracle text, naming the rules version.
+
+- **Card panel** (any card, in Browse, Sets, Lab, Ideas, a deck): "What this card does": one short point per role ("Doubles tokens", "Counters a spell", "Draws cards again and again"), marked "main job" or "on the side", each opening "Why?": the rule that found it, what the rule matches and what it is known to get wrong (also the hover text), and "Show my cards that do this" (Browse filtered to that role). A card with no role says that is not the same as doing nothing. Scryfall's Tagger tags, when the card has any, are a separate line labelled a community's opinion.
+- **Browse**: "What it does" opens the 22 roles with how many different cards you own with each; pick one or more, "All of them" (the default) or "Any of them", combined with the search, set, printing, type, mana value, bucket and tag filters. The line Browse already had, "N entries match", is the count. The filter is `GET /collection/cards?role=...&role_match=...` (also on `search_cards`), so a shared collection can be filtered the same way.
+- **Deck page, "What it does"**: every one of the 22 roles with the number of the deck's cards that have it; pressing one lists them (each opens its panel); a role with none shows 0 and says that means its rules found nothing; cards with no role are named, lands are counted apart. It works for any deck the page can read (`POST /decks/roles` takes the text), saved or not.
+- Phone first: 390 px, controls at least 44 px high, text at least 12 px, nothing scrolls sideways (`scripts/measure_phone.js` found no target under 44 px, no text under 12 px and no overflow in the card panel, the Browse filter and the deck tab).
+
+| State | 1400 px | 390 px |
+|---|---|---|
+| Card panel, one role's rule open | `docs/screenshots/card-roles-card-1400.jpg` | `docs/screenshots/card-roles-card-390.jpg` |
+| Browse, three roles picked, "Any of them" | `docs/screenshots/card-roles-browse-1400.jpg` | `docs/screenshots/card-roles-browse-390.jpg` |
+| Browse, the filtered list | `docs/screenshots/card-roles-browse-list-1400.jpg` | `docs/screenshots/card-roles-browse-list-390.jpg` |
+| A deck's "What it does" | `docs/screenshots/card-roles-deck-1400.jpg` | `docs/screenshots/card-roles-deck-390.jpg` |
+
+The screenshots are of the real app against a local database of synthetic data (well-known cards, one demo account), never the owner's collection.
+
+### 13.3 For assistants
+
+One read-only tool, `card_roles` (scope read; provenance `computed`): `card` gives a card's roles, `role` (one or more, `match` all or any) the person's cards that have them (one row per card, with copies and the rule), `deck_id` what a saved deck does, nothing the 22 roles with how many of the person's cards have each; `share_id` reads a shared collection. Its answers carry the same `label`, `point`, `rule` and `why` as the web view, and the tool description says the roles are the Vault's reading and not Scryfall's tags. `search_cards` also takes `role` and `role_match`. `POST /decks/roles` is on the read-only token's allowlist (`READ_ONLY_POSTS`) because it only computes. The `collection-analyst` and `deck-upgrader` skills and the `vault-collection-analyst`, `vault-curator` and `vault-deckbuilder` agents name the tool (generated plugin files rebuilt).
+
+### 13.4 Endpoints
+
+`GET /catalog/roles` (the vocabulary and the rules), `GET /catalog/cards/roles` (one card), `GET /collection/roles` and `/collection/roles/cards` (also under `/shared/{id}/collection`), `GET /collection/cards?role=`, `POST /decks/roles`. Documented in `docs/api.md`, `docs/ai-parity.md`, `docs/agents.md`, `public/llms.txt` and the in-app Help.
+
+### 13.5 Choices taken where the issue left a point open, and what was not built
+
+- A role filter with several roles needs **all** of them by default (like the other filters, which narrow); "any" is one click. Core and incidental roles both match; the lists say which is which. A "core only" filter was not built.
+- The Ideas lanes and `deck_stats` keep the eight coarse Tagger-based roles exactly as they were (the Stats tab now labels them a community's opinion); the 22 roles are a separate list.
+- The Browse role choice is not kept in the address (the type and mana value filters are not either); opening Browse from a card's "Show my cards that do this" starts it with that role.
+- The role counts in the picker are for the whole collection, not for the chosen bucket.
+- Not built: filtering the Lab, Sets or Ideas by role; a role chart; letting a person correct a role (the reviewer pipeline of `docs/card-roles-design.md` stays with #174).

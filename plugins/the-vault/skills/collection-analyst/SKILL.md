@@ -8,7 +8,7 @@ description: >-
   from their app, organising it into buckets and tags, sharing, and starting over or undoing a change.
 license: MIT
 metadata:
-  vault-tools: "whoami get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline get_collection_pnl list_spare_copies list_card_names check_decklist lookup_cards refresh_prices update_owned_cards confirm_owned_cards_update undo_owned_cards_update show_owned_printings list_imports get_import list_export_formats import_collection_csv start_collection_upload get_staged_upload confirm_staged_upload list_buckets create_bucket rename_bucket move_cards delete_bucket reset_collection undo_collection_reset list_tags tag_cards untag_cards rename_tag delete_tag get_card_metadata set_card_metadata get_bucket_metadata set_bucket_metadata list_shared_with_me get_shared_deck list_my_shares accept_share stop_sharing"
+  vault-tools: "whoami get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline get_collection_pnl list_spare_copies list_card_names card_roles check_decklist lookup_cards refresh_prices update_owned_cards confirm_owned_cards_update undo_owned_cards_update show_owned_printings list_imports get_import list_export_formats import_collection_csv start_collection_upload get_staged_upload confirm_staged_upload list_buckets create_bucket rename_bucket move_cards delete_bucket reset_collection undo_collection_reset list_tags tag_cards untag_cards rename_tag delete_tag get_card_metadata set_card_metadata get_bucket_metadata set_bucket_metadata list_shared_with_me get_shared_deck list_my_shares accept_share stop_sharing"
 ---
 
 # Collection analyst
@@ -28,6 +28,10 @@ estimate or fill gaps. Follow `vault-attribution` (if installed) for card data a
    - one printing in detail and its recent prices: `get_card`;
    - "show me my Sol Rings", "which printings do I have": `show_owned_printings` (pictures, most copies first);
    - rolled up by card name (top N, by color or type): `list_card_names`;
+   - what cards do (a mana rock, a token doubler, a counterspell, removal ...): `card_roles` with `card` gives a card's roles, with `role` the
+     cards they own that have it (`search_cards` also takes `role`), with no argument how many of their cards have each role. The roles are the
+     Vault's own reading of the Oracle text, not an official classification and not Scryfall's tags: say the answer's `label`, name the rule
+     that found a role when asked why, and treat a missing role as "no role known", never "does nothing";
    - sets: `list_sets`; highlights, gains and losses: `get_collection_stats`;
    - colors, types, mana values, rarities: `get_collection_breakdowns`;
    - value over time: `get_value_history`, `get_valuation`; buying pace: `get_acquisition_timeline`;

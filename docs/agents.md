@@ -128,6 +128,7 @@ Tools (the `share_id` argument reads a collection someone shared with you):
 | `list_card_names` (sort, colors, type, min_value, limit, cursor) | `GET /collection/names` |
 | `refresh_prices`* (cursor, force) | `POST /collection/refresh` |
 | `get_deck_ideas` (deck_id, lane, include_combos, limit, cursor), `get_card_alternatives` (deck_id, card, format, limit, cursor): the person's own saved decks only; the jobs are the Vault's own roles, in two tiers (same job, similar) | `GET /decks/{id}/ideas`, `GET /decks/{id}/ideas/alternatives` |
+| `card_roles` (card, role, match, deck_id, limit, cursor, share_id): what cards do in the Vault's own 22 roles, read from the Oracle text (not an official classification, not Scryfall's tags): `card` gives a card's roles, `role` the person's cards with it, `deck_id` what a saved deck does, nothing the roles with how many of the person's cards have each; each role names its rule | `GET /catalog/cards/roles`, `GET /collection/roles/cards`, `POST /decks/roles`, `GET /collection/roles` |
 | `check_decklist`, `parse_decklist` | `POST /decks/coverage`, `/decks/parse` |
 | `list_decks`, `get_deck`, `save_deck`*, `update_deck`* | `/decks` |
 | `get_archidekt_deck` | `/archidekt/decks/{id}` |

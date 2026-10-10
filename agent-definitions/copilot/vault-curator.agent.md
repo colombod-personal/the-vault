@@ -14,6 +14,7 @@ tools:
   - vault/list_sets
   - vault/list_card_names
   - vault/search_cards
+  - vault/card_roles
   - vault/get_card
   - vault/show_owned_printings
   - vault/lookup_cards

@@ -21,6 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import brackets
+from .. import card_roles
 from .. import catalog_queries as q
 from .. import combos
 from .. import deck_overview
@@ -210,6 +211,17 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
         if found and found.get("checked"):
             computed.inputs.append(prov.source("Commander Spellbook", origin="combos written by its community",
                                                url="https://commanderspellbook.com", as_of=date.today(), wizards_material=True))
+        return out
+
+    @router.post("/roles", response_model=Answer, response_model_by_alias=True,
+                 summary="What the deck does: each of the Vault's 22 roles with the deck's cards that have it (gaps shown empty)")
+    def deck_roles(request: Request, body: DeckIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        resolved = prepared(request, db, user, text_of(db, user, body))
+        result = card_roles.deck_roles(resolved)
+        result["unmatched"] = resolved.unmatched
+        out = answer(db, f"{card_roles.LABEL}: the Vault's own rules (version {card_roles.VERSION}) over the Oracle text of the deck's cards",
+                     result, ("oracle_cards",), "roles", identity(db, user, body))
+        out["_links"]["vocabulary"] = link(f"{V1}/catalog/roles")
         return out
 
     @router.post("/simulate", response_model=Answer, response_model_by_alias=True,

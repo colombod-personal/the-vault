@@ -6,7 +6,7 @@ description: >-
   build, a tune-up, or help with a weak role (ramp, draw, removal, sweepers), or wants to save, change or delete a deck.
 license: MIT
 metadata:
-  vault-tools: "whoami list_decks get_deck import_deck_from_link get_archidekt_deck save_deck update_deck delete_deck deck_stats simulate_draws deck_legality get_deck_ideas get_card_alternatives find_upgrades validate_deck_changes find_combos get_card_oracle"
+  vault-tools: "whoami list_decks get_deck import_deck_from_link get_archidekt_deck save_deck update_deck delete_deck deck_stats simulate_draws deck_legality get_deck_ideas get_card_alternatives card_roles find_upgrades validate_deck_changes find_combos get_card_oracle"
 ---
 
 # Deck upgrader
@@ -53,8 +53,10 @@ enforces it in code: you choose well among what it returns and show only a plan 
    - Calls: `get_deck_ideas`, `get_card_alternatives`.
    - Show: `get_deck_ideas` shows the deck's cards in role lanes with what the person owns, what is missing and what another deck
      holds (`borrowed_from`); `get_card_alternatives` with `card` lists owned cards that could stand in for a card of the deck,
-     free copies first. Roles are the eight coarse roles, a community's opinion: say so. A free card costs nothing, so offer it
-     before a purchase.
+     free copies first. The lanes' roles are the eight coarse roles, a community's opinion; the stand-ins' jobs are the Vault's own
+     reading of the Oracle text: say which is which. `card_roles` with `deck_id` shows what the deck does as a whole, each of 22
+     roles with its cards and the empty ones as gaps (the Vault's reading, not an official classification: repeat its `label`). A
+     free card costs nothing, so offer it before a purchase.
    - Stop: a card another deck holds is a choice for the person (the other deck loses it): say which deck.
 6. **Get candidates.**
    - Calls: `find_upgrades` with the budget (and `roles` if the person named a weak area).

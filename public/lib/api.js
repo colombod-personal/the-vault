@@ -156,11 +156,11 @@ window.VaultApi = (() => {
   const versions = {};  // collection base URL -> the version of its latest summary
 
   // GET one collection resource: from the local copy while the collection's version is unchanged,
-  // else from the server (then stored). Offline, the last copy. Searches (`q=`) aren't stored.
+  // else from the server (then stored). Offline, the last copy. Searches (`q=`) and lists filtered by role (`role=`) aren't stored.
   async function cachedGet(base, href) {
     const who = account();
     const version = versions[base];
-    const key = who && version && !/[?&]q=/.test(href) ? `res:${who}:${href}` : null;
+    const key = who && version && !/[?&](q|role)=/.test(href) ? `res:${who}:${href}` : null;  // a search, or a list filtered by what the card does (the catalog's rules change under the same collection version), is asked every time
     if (key) {
       const saved = await localStore.get(key);
       if (saved && saved.format === FORMAT && saved.version === version) return saved.body;
@@ -178,7 +178,10 @@ window.VaultApi = (() => {
 
   const query = (params) => {
     const q = new URLSearchParams();
-    for (const [k, v] of Object.entries(params || {})) if (v != null && v !== '') q.set(k, String(v));
+    for (const [k, v] of Object.entries(params || {})) {
+      if (Array.isArray(v)) v.forEach((x) => q.append(k, String(x)));  // a list is a repeated parameter (role=a&role=b)
+      else if (v != null && v !== '') q.set(k, String(v));
+    }
     const s = q.toString();
     return s ? '?' + s : '';
   };
@@ -289,6 +292,8 @@ window.VaultApi = (() => {
       // printings, one page: q, set, name, printing, finish, condition, limit; sort: name, -name,
       // -value, value, -quantity, set, -acquired, acquired. The page has `total` and `value_total`.
       cards: (params) => cardsPage(base + '/cards' + query(inScope(params))),
+      // what your cards do (#435): the Vault's 22 roles with how many of your cards have each; the cards themselves are `cards({ role: [...] })`
+      roles: () => call(base + '/roles'),
       // the most valuable printing of a card name (to open a card from a per-name list)
       topPrinting: (name) => cardsPage(base + '/cards' + query(inScope({ name: name.split(' // ')[0], sort: '-value', limit: 1 })))
         .then((p) => p.items[0] || null),
@@ -578,6 +583,10 @@ window.VaultApi = (() => {
     // check ran on, which updateDeck then saves. A card name is looked up in the card catalog (an exact name, else near names).
     deckValidateChanges: (deck_id, format, cuts, adds) => call(V1 + '/decks/validate-changes', { method: 'POST', json: { deck_id, format, cuts, adds, include_text: true } }),
     catalogCard: (name) => call(V1 + '/catalog/cards' + query({ name })),
+    // what a card does (#435): the Vault's reading of its Oracle text as a list of roles, each with the rule that found it
+    cardRoles: (name) => call(V1 + '/catalog/cards/roles' + query({ name })),
+    // what a deck does: every role with the deck's cards that have it (empty roles included)
+    deckRoles: (text) => call(V1 + '/decks/roles', { method: 'POST', json: { text } }),
     deckLegality: (text, format) => call(V1 + '/decks/legality', { method: 'POST', json: { text, format } }),
     deckUpgrades: (text, format, budget_usd, roles) => call(V1 + '/decks/upgrades', { method: 'POST', json: { text, format, budget_usd, use_collection: true, ...(roles ? { roles } : {}) } }),
     deckCombos: (text) => call(V1 + '/decks/combos', { method: 'POST', json: { text } }),

@@ -31,7 +31,7 @@ def link(href: str, **extra) -> dict:
 
 
 def url(request: Request, path: str, **params) -> str:
-    query = urlencode({k: v for k, v in params.items() if v not in (None, "")})
+    query = urlencode({k: v for k, v in params.items() if v not in (None, "")}, doseq=True)  # a list is a repeated parameter
     return path + ("?" + query if query else "")
 
 
