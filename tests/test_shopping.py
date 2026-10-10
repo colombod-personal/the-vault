@@ -300,7 +300,8 @@ def test_the_tool_takes_the_options_through_mcp_and_says_what_it_does_not_do(app
     props = tool.properties
     assert {"format", "finish", "language", "sets", "condition"} <= set(props)
     assert set(props["format"]["enum"]) == set(shop.FORMATS) | {"all"}
-    assert "never say which store is cheapest" in tool.description and "never contacts stores" in tool.description
+    assert "which store is cheapest is not known" in tool.description and "never contacts stores" in tool.description
+    assert "Never say which shop is cheapest" in mcp.INSTRUCTIONS  # #241: the order lives in the instructions
     assert "not per condition" in tool.description
     with TestClient(app) as bot:
         token = make_token(signed_in)

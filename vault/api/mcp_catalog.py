@@ -19,16 +19,22 @@ Rules, cards and prices - how to answer:
   browse; open each with get_rule and read its children, siblings and references. Say which rule number
   and which edition (version) you used. The rules are read live from Wizards of the Coast. For a recent
   update, or a rule you only know from an older source, call rules_changes: it compares the previous
-  edition with the current one.
+  edition with the current one; say which two editions you compared. Never quote a rule from memory:
+  get_rule is the only source for a rule's wording.
 - Quote only text a tool returned. Before you present a quote as an official rule, ruling or card
   text, call verify_citation; if it fails, use the source_text it returns instead of your wording.
+  present_steps takes steps you write yourself, citing rule numbers you opened with get_rule: use it only
+  after your quotes are verified.
 - If the sources do not settle a question, say you are not sure and point to the official rules or a judge.
 - Every result has `provenance`. Pass it on: say the material is Scryfall's or Wizards' (the Fan Content
   notice in it must be repeated when you show rules or card text), and that figures marked `computed`
   were worked out by the Vault from the sources it lists. Never present source material as the Vault's own.
 - The Vault is an unofficial fan project, not approved or endorsed by Wizards of the Coast, Scryfall, Archidekt or
   Commander Spellbook. Say so if asked who made a card, rule or price, and never speak for any of them.
-- Roles ("ramp", "removal") are Scryfall Tagger tags, a community's opinion. Popularity (EDHREC rank)
+- Roles ("ramp", "removal") are Scryfall Tagger tags, a community's opinion. The roles of card_roles and
+  get_card_alternatives are the Vault's own reading of the Oracle text, not an official classification: say so
+  (`label`), and that no role found means no role known. A stand-in from get_card_alternatives is a suggestion,
+  never "the same card": quote both Oracle texts. Popularity (EDHREC rank)
   is not power. Prices are dated and come from Scryfall; they are not a store's price today.
 - Budgets and legality are enforced by the Vault: before you present a list of changes, call
   validate_deck_changes and only present it if valid is true. The Vault never fills a store cart.
@@ -50,42 +56,55 @@ Rules, cards and prices - how to answer:
   or high power from its curve, roles or popularity; say what the tools show, and label any bracket placement above the
   computed floor as your opinion (deck_stats with include_combos returns `bracket`, the lowest Commander Bracket the deck's
   contents allow under Wizards' published rules, with its inputs). A deck of three or more colours: say that simulate_draws
-  does not check colours (colour_warning), so its mana numbers are optimistic. Never quote a card's cost, type or text
-  from memory: get_card_oracle.
+  does not check colours (colour_warning), so its mana numbers are optimistic. Explain simulate_draws' numbers in plain
+  words: they are a hint, not a promise. Never quote a card's cost, type or text from memory: get_card_oracle.
+- Collection figures: profit and loss (get_collection_pnl) covers only `covered_copies`: say how many copies the figures
+  cover (a copy with no price paid is not counted, and is not zero). With get_deck_overlap, say which allocation rule
+  was used (`allocation`).
 - Deck reviews, rules disputes and synergy questions: call council_brief and follow it. It seats the experts for
   the format, with each one's brief: answer as each of them in turn, then challenge, then the plan.
 - Decks: a person names a deck ("my sliver deck"); find it with list_decks before asking for a link.
-  A deck read from Archidekt is Archidekt's: credit Archidekt and give the deck's link back.
+  Lead with the deck: every answer about a deck starts with its name, format, commander(s), card count and colour
+  identity (the answer's `deck` block or `overview`, e.g. "Sliver Swarm: Commander, led by Sliver Overlord, 100 cards"),
+  before any card line; say when the format was only read from the list (`format_from`).
+  A deck read from Archidekt is Archidekt's: read only the deck the person gave you (check list_decks first: it may be
+  saved), credit Archidekt and give the deck's link back.
+- Connection and files: call whoami first to check the connection and the data versions. For a file too big to paste,
+  give the person start_collection_upload's link, then call get_staged_upload once they say it is uploaded. Give export
+  download links (list_export_formats) rather than reading the files. When they ask to see which printings of a card
+  they own, or to match a card in their hand, use show_owned_printings.
 - Changes to the person's data (their collection, decks and shares) are theirs to decide. Tools that change
   something first return a preview: show it, and run the change only once the person has said yes to that
   preview. Ask before saving a deck from a link. When a printing is ambiguous (choose_printing), ask which one
-  they have, or offer printing_unknown for an add; never pick one for them.
+  they have, or offer printing_unknown for an add; never pick one for them. Tags and notes an assistant writes are
+  recorded as that app's: never present them as the person's own.
 """
 
 
 def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants of mcp.py
     from urllib.parse import quote
 
-    DECK_ID = {**ID, "description": "A saved deck's id (from list_decks); use this instead of sending the list again"}
+    DECK_ID = {**ID, "description": "A saved deck's id (from list_decks), in place of `text`"}
+    TAKES_DECK = " Takes `deck_id` (a saved deck) or `text` (a decklist)."
 
     def _deck_body(a: dict, *more: str) -> dict:
         return {k: a[k] for k in ("text", "deck_id", *more) if a.get(k) is not None}
 
     deck = {"type": "string", "minLength": 1, "maxLength": 50_000,
-            "description": "The decklist, one card per line (e.g. '1 Sol Ring'); put commander cards under a 'Commander' header"}
+            "description": "The decklist, one card per line (e.g. '1 Sol Ring'), commander cards under a 'Commander' header"}
     fmt = {"type": "string", "maxLength": 20, "enum": list(__import__("vault.deck_tools", fromlist=["FORMATS"]).FORMATS),
            "description": "The format to check against"}
     return [
         Tool("whoami", "Who you are connected as, which scopes you have, and which data versions the Vault holds "
-             "(Comprehensive Rules edition, card data, rulings, tags, prices). Call this first to check the connection.",
+             "(Comprehensive Rules edition, card data, rulings, tags, prices): a check that the connection works.",
              path=lambda a: f"{V1}/agent/whoami", title="Check the connection", provenance=("catalog",)),
         Tool("get_card_oracle", "A card's official Oracle text, types, legalities and Scryfall Tagger tags, by exact name "
              "(either face of a double-faced card) or Oracle id. For a card with two faces, each face's mana cost, text and "
              "stats are under `faces`; the top-level fields can be empty. Also lists the recorded changes of its legality "
              "(`legality_changes`: a ban, an unban or a restriction, with the day the Vault saw it), and `computed_roles`: roles the Vault "
              "worked out from the Oracle text where Scryfall's tags have none (computed, with the rule used). A misspelled name returns "
-             "suggestions, never a guess. Works for any card, owned or not. A question about how a card works under the rules also needs "
-             "the rules themselves: call find_rules_term or get_rule too, and never answer it from memory.",
+             "suggestions, never a guess. Works for any card, owned or not. Oracle text is not the rules: how a card works under the rules "
+             "is settled by the Comprehensive Rules (find_rules_term, search_rules, get_rule).",
              {"name": {"type": "string", "minLength": 1, "maxLength": 300, "description": "Exact card name"},
               "oracle_id": {"type": "string", "minLength": 36, "maxLength": 36}},
              path=lambda a: f"{V1}/catalog/cards", query=("name", "oracle_id"), provenance=("catalog",), ui="card"),
@@ -94,7 +113,7 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              "taken, each with its sample size and the exact warning when the sample is small. Cards are given by name (`cards`, either face of "
              "a double-faced card), or the best sorted by one metric (`sort`); a sorted list leaves out the cards under 200 of the sort's own "
              "sample: games in hand for win_rate_in_hand and games_in_hand, packs seen for avg_last_seen_pick, picks for avg_taken_at. "
-             "Computed by the Vault from 17Lands' per-card counts, so figures can differ from 17lands.com; `attribution` is the credit to repeat. "
+             "Computed by the Vault from 17Lands' per-card counts, so figures can differ from 17lands.com; `attribution` is 17Lands' credit line. "
              "`not_found` lists names not in the data; a set that is not loaded answers with what is.",
              {"set": {"type": "string", "minLength": 2, "maxLength": 10, "pattern": "^[A-Za-z0-9]+$",
                       "description": "17Lands' set code, such as HOB (case does not matter)"},
@@ -111,34 +130,33 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              path=lambda a: f"{V1}/catalog/limited/{quote(a['set'], safe='')}", query=("format", "cards", "sort", "limit", "cursor"),
              provenance=("catalog",), title="Limited card statistics (17Lands)"),
         Tool("get_rulings", "A card's rulings (Wizards' text via Scryfall), newest first, at most 25 a page. More "
-             "remain when `next_offset` is not null: pass it back as `offset` to read the next page.",
+             "remain when `next_offset` is not null; that value as `offset` reads the next page.",
              {"oracle_id": {"type": "string", "minLength": 36, "maxLength": 36, "description": "From get_card_oracle"},
               "limit": {"type": "integer", "minimum": 1, "maximum": 25, "default": 25},
               "offset": {"type": "integer", "minimum": 0, "maximum": 10000, "default": 0, "description": "Skip this many of the newest rulings"}}, ["oracle_id"],
              path=lambda a: f"{V1}/catalog/cards/{quote(a['oracle_id'], safe='')}/rulings", query=("limit", "offset"), provenance=("catalog",)),
-        Tool("search_rules", "Search the Comprehensive Rules for a topic (e.g. 'replacement effect damage'); best matches "
-             "first, at most 10, each with its number and the edition. Use it for any question about how the rules work: never answer "
-             "one from memory, because the rules change between editions. A keyword ability or glossary term in the query puts "
+        Tool("search_rules", "Searches the Comprehensive Rules for a topic (e.g. 'replacement effect damage'); best matches "
+             "first, at most 10, each with its number and the edition. The rules change between editions; the text returned "
+             "here is the current edition's. A keyword ability or glossary term in the query puts "
              "its defining rules first. The rules are read live from Wizards of the Coast's current edition.",
              {"query": {"type": "string", "minLength": 2, "maxLength": 200},
               "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5}}, ["query"],
              path=lambda a: f"{V1}/catalog/rules/search", query=("q", "limit"), provenance=("catalog",)),
         Tool("rules_outline", "The Comprehensive Rules' table of contents, to find your way: with no argument the nine sections; "
-             "with a section (7), subsection (702) or rule (702.19), what is directly under it, with headings. Drill down, then "
-             "open a rule with get_rule.",
+             "with a section (7), subsection (702) or rule (702.19), what is directly under it, with headings. A rule's full text "
+             "is get_rule's.",
              {"under": {"type": "string", "maxLength": 20, "description": "A section, subsection or rule number"}},
              path=lambda a: f"{V1}/catalog/rules", query=("under",), provenance=("catalog",)),
         Tool("find_rules_term", "A glossary term or keyword ability ('trample', 'state-based actions', 'commander') and the rules "
-             "that define it, with the glossary definition. Start here when a question names a game term, and never quote a rule "
-             "from memory: only text returned by the rules tools is the current edition's.",
+             "that define it, with the glossary definition. Only text returned by the rules tools is the current edition's.",
              {"name": {"type": "string", "minLength": 2, "maxLength": 120}}, ["name"],
              path=lambda a: f"{V1}/catalog/rules/term/{quote(a['name'], safe='')}", provenance=("catalog",)),
         Tool("rules_changes", "What changed in the Comprehensive Rules between the previous edition and the current one, read live from "
              "Wizards of the Coast (the Vault stores neither): both editions' dates, the rule numbers added, removed, renumbered and "
              "changed, each changed rule with its first changed sentence, in rule order and capped, plus the rulings published and the "
-             "legality changes the Vault recorded since the previous edition took effect. Call it when a rule you rely on may be new or "
-             "different, when the question is about a recent rules change, or to check a rule number you remember is still the same "
-             "rule. A rule not listed did not change. Say which two editions you compared.",
+             "legality changes the Vault recorded since the previous edition took effect. It shows whether a rule is new or different, "
+             "and whether a rule number still names the same rule. A rule not listed did not change. The answer names the two "
+             "editions compared.",
              {"previous": {"type": "string", "format": "date", "maxLength": 10, "description": "The date in the previous edition's file name (YYYY-MM-DD); "
                            "by default it is found on Wizards' CDN, which keeps earlier files"},
               "since": {"type": "string", "format": "date", "maxLength": 10, "description": "First day of the rulings and legality window (YYYY-MM-DD); "
@@ -147,13 +165,12 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              path=lambda a: f"{V1}/catalog/rules/changes", query=("previous", "since", "limit"), provenance=("catalog",)),
         Tool("get_rule", "One rule by number (e.g. '613.1a') or a glossary term ('glossary:Trample'), with where it sits: its "
              "parent, children, previous and next rule, the rules it cites and the rules that cite it. This is the only source for "
-             "a rule's wording: when a rule is asked for or quoted, call it, and never quote a rule from memory (the rules change "
-             "between editions; a quote not returned here must not be called the current edition's). Follow the links to read "
-             "around a rule (exceptions often sit in a sibling or a later subrule).",
+             "a rule's wording in the current edition (the rules change between editions, and wording from anywhere else is not "
+             "known to be the current edition's). Exceptions often sit in a sibling or a later subrule, which the links reach.",
              {"number": {"type": "string", "minLength": 1, "maxLength": 120}}, ["number"],
              path=lambda a: f"{V1}/catalog/rules/{quote(a['number'], safe='')}", provenance=("catalog",)),
-        Tool("verify_citation", "Check that a quote is verbatim in the rule, Oracle text or ruling you attribute it to. Whitespace "
-             "and typographic quotes are forgiven; nothing else. If it fails you get the true text back. A rule is checked "
+        Tool("verify_citation", "Checks that a quote is verbatim in the rule, Oracle text or ruling you attribute it to. Whitespace "
+             "and typographic quotes are forgiven; nothing else. A failed check returns the true text. A rule is checked "
              "against the current Comprehensive Rules edition, which the answer names.",
              {"kind": {"type": "string", "enum": ["rule", "oracle_text", "ruling"]},
               "ref": {"type": "string", "minLength": 1, "maxLength": 300, "description": "A rule number (or glossary:Term), or a card name or Oracle id"},
@@ -167,7 +184,7 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              "in the deck, estimated cost, and a Commander Bracket hint (`bracket`): the lowest bracket the deck's contents allow under "
              "Wizards' published rules, from Game Changers, mass land denial, extra turns and, with `include_combos`, two-card combos "
              "from Commander Spellbook. Each input is listed; the hint is a floor, not a placement. Computed by the Vault from the "
-             "catalog. Roles say whether each came from Scryfall's tags or from the Vault's rules over Oracle text." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
+             "catalog. Roles say whether each came from Scryfall's tags or from the Vault's rules over Oracle text." + TAKES_DECK,
              {"text": deck, "deck_id": DECK_ID,
               "include_combos": {"type": "boolean", "default": False,
                                  "description": "Also ask Commander Spellbook for two-card combos (sends the deck's card names to it)"}}, [], method="POST",
@@ -175,23 +192,24 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
         Tool("simulate_draws", "How a deck's mana curve plays: a few sample games of the first turns (opening hand, draws, land "
              "drops, what gets cast) and the odds over many games: land drops made, mana by turn, cards in hand, the chance of "
              "discarding to hand size, 'five mana by turn 5'. Says when discarding or a big hand is the deck's plan, and lists "
-             "what the simulation does not model. `margin_points` is how far a percentage can be off at that many games. Explain the numbers in plain words; they are a hint, not a promise." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
+             "what the simulation does not model. `margin_points` is how far a percentage can be off at that many games. The numbers are a hint, not a promise." + TAKES_DECK,
              {"text": deck, "deck_id": DECK_ID, "format": fmt,
               "on_the_play": {"type": "boolean", "default": True, "description": "Going first"},
               "turns": {"type": "integer", "minimum": 1, "maximum": 10, "default": 6},
               "samples": {"type": "integer", "minimum": 0, "maximum": 10, "default": 5, "description": "Games shown turn by turn"},
-              "seed": {"type": "integer", "minimum": 0, "maximum": 2147483647, "description": "Repeat a run exactly"}},
+              "seed": {"type": "integer", "minimum": 0, "maximum": 2147483647, "description": "The same seed repeats a run exactly"}},
              ["format"], method="POST", path=lambda a: f"{V1}/decks/simulate",
              body=lambda a: _deck_body(a, "format", "on_the_play", "turns", "samples", "seed"),
              provenance=("computed",)),
         Tool("deck_legality", "Whether a decklist is legal in a format: banned or illegal cards, copy limits, deck size, commander color "
              "identity. Lists every issue, says what it did not check, and lists recorded changes of legality for the cards in the "
-             "deck in that format (`changes`)." + " Give `deck_id` (a saved deck, from list_decks) or `text`.", {"text": deck, "deck_id": DECK_ID, "format": fmt}, ["format"],
+             "deck in that format (`changes`)." + TAKES_DECK, {"text": deck, "deck_id": DECK_ID, "format": fmt}, ["format"],
              method="POST", path=lambda a: f"{V1}/decks/legality", body=lambda a: _deck_body(a, "format"),
              provenance=("computed",)),
         Tool("find_upgrades", "Upgrade candidates for a deck within a budget: legal, inside the deck's colors, not already in it, each priced "
              "at or under budget_usd, for the roles the deck is short of (or the roles you name). Ordered by popularity, which is "
-             "not power. Also lists the deck's least-played untagged cards as cut candidates. Then call validate_deck_changes." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
+             "not power. Also lists the deck's least-played untagged cards as cut candidates. The candidates are not checked as one "
+             "change; validate_deck_changes checks a list of cuts and adds." + TAKES_DECK,
              {"text": deck, "deck_id": DECK_ID, "format": fmt,
               "budget_usd": {"type": "number", "minimum": 0, "maximum": 100000, "description": "The most any single added card may cost"},
               "roles": {"type": "array", "maxItems": 8, "items": {"type": "string", "enum": ["ramp", "draw", "removal", "sweeper", "counterspell", "tutor", "recursion", "sacrifice_outlet"]}},
@@ -201,10 +219,10 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              method="POST", path=lambda a: f"{V1}/decks/upgrades",
              body=lambda a: _deck_body(a, "format", "budget_usd", "roles", "limit", "use_collection"),
              provenance=("computed",), ui="upgrades"),
-        Tool("validate_deck_changes", "Check a proposed list of cuts and adds before presenting it: every card exists and is legal, adds are in "
-             "the deck's colors, the resulting deck is still legal, and the adds' total price is within budget_usd. Present the plan only "
-             "if valid is true. Each cut or add is a card name; a quantity ('2 Mind Stone', '2x Mind Stone') repeats it and a set and "
-             "number are ignored." + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
+        Tool("validate_deck_changes", "Checks a proposed list of cuts and adds: every card exists and is legal, adds are in "
+             "the deck's colors, the resulting deck is still legal, and the adds' total price is within budget_usd. `valid` is true "
+             "only when every check passes. Each cut or add is a card name; a quantity ('2 Mind Stone', '2x Mind Stone') repeats it and a set and "
+             "number are ignored." + TAKES_DECK,
              {"text": deck, "deck_id": DECK_ID, "format": fmt, "adds": {"type": "array", "maxItems": 60, "items": {"type": "string", "maxLength": 300}},
               "cuts": {"type": "array", "maxItems": 60, "items": {"type": "string", "maxLength": 300}},
               "budget_usd": {"type": "number", "minimum": 0, "maximum": 100000, "description": "The most the adds may cost in total"},
@@ -213,9 +231,9 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              ["format"], method="POST", path=lambda a: f"{V1}/decks/validate-changes",
              body=lambda a: _deck_body(a, "format", "adds", "cuts", "budget_usd", "include_text"),
              provenance=("computed",)),
-        Tool("present_steps", "Show the person a step-by-step explanation (an interaction, a stack, a ruling) with each cited rule attached. "
-             "Write the steps yourself, citing rule numbers you looked up with get_rule; the Vault attaches each rule's verbatim text and "
-             "edition, and flags any number that does not exist. Use it after you have verified your quotes.",
+        Tool("present_steps", "Shows the person a step-by-step explanation (an interaction, a stack, a ruling) with each cited rule attached. "
+             "Takes the steps' text and the rule numbers each cites; the Vault attaches each rule's verbatim text and edition, and flags "
+             "any number that does not exist.",
              {"title": {"type": "string", "maxLength": 200},
               "cards": {"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": 300}},
               "steps": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "object", "properties": {
@@ -232,8 +250,7 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              "on demand. Descriptions are theirs and are attributed; the Vault keeps no copy of their data. It lists only combos Commander Spellbook knows: finding none does not mean the deck has " "no infinite combos." + " With `include_possible_loops` it also gives the Vault's own reading of the deck's card text for a possible loop "
              "Spellbook does not list (`possible_loops`): labelled the Vault's reading and not Spellbook's, off by default, with its arithmetic, "
              "what it assumes and which patterns it covers (today one: a repeatable ability that pays mana for a creature token, with something "
-             "that lets the token tap for mana and haste); it is returned even when Spellbook cannot be asked."
-             " Give `deck_id` (a saved deck, from list_decks) or `text`.",
+             "that lets the token tap for mana and haste); it is returned even when Spellbook cannot be asked." + TAKES_DECK,
              {"text": deck, "deck_id": DECK_ID,
               "include_possible_loops": {"type": "boolean", "default": False,
                                          "description": "Also give the Vault's reading of the card text for possible loops Commander Spellbook does not list"}},
@@ -245,8 +262,8 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              "help page, which `store_format` names, with what the paste cannot carry. With `finish`, `language`, `sets` or "
              "`condition` it picks the cheapest printing that fits (Scryfall's price of each printing) and reports which printing it "
              "chose per line, or that none qualifies; Scryfall's prices are not per condition, so `condition` never changes a price. "
-             "The Vault never contacts stores or fills carts, and knows no store's price: never say which store is cheapest."
-             + " Give `deck_id` (a saved deck, from list_decks) or `text`.",
+             "The Vault never contacts stores or fills carts, and knows no store's price, so which store is cheapest is not known."
+             + TAKES_DECK,
              {"text": deck, "deck_id": DECK_ID,
               "format": {"type": "string", "enum": ["plain", "cardkingdom", "tcgplayer", "cardmarket", "csv", "all"], "default": "plain",
                          "description": "How `text` is written (all: every format in `texts`)"},

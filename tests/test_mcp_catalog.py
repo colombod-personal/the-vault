@@ -2,6 +2,8 @@
 carries third-party data says where it came from, read-only tokens can use the computations, and the
 grounding rules reach the agent (instructions and prompts)."""
 
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -146,18 +148,21 @@ def test_hosts_without_the_skills_still_get_the_shop_and_deck_rules():
     'current' prices and a cart, and did not credit Archidekt. The rules must be in what every host reads."""
     from vault.api import mcp
     assert "Never say which shop is cheapest" in GROUNDING and "never say anything goes into a cart" in GROUNDING
-    # #304: a real run quoted rule 702.19 "word for word" with no get_rule call: the tools say they are the only source for a rule's wording
+    # #304: a real run quoted rule 702.19 "word for word" with no get_rule call. get_rule's description states the fact (the only
+    # source for a rule's wording in the current edition); the order not to quote from memory is in the instructions (#241)
     from vault.api import mcp
-    for name in ("get_rule", "find_rules_term", "search_rules"):
-        assert "from memory" in " ".join(mcp.BY_NAME[name].description.split()), name
     assert "the only source for a rule's wording" in " ".join(mcp.BY_NAME["get_rule"].description.split())
-    assert "never answer it from memory" in " ".join(mcp.BY_NAME["get_card_oracle"].description.split())
+    for name in ("find_rules_term", "search_rules"):
+        assert "current edition's" in " ".join(mcp.BY_NAME[name].description.split()), name
+    assert "Never answer a rules or card question from memory" in GROUNDING
+    assert "Never quote a rule from memory: get_rule is the only source for a rule's wording" in " ".join(GROUNDING.split())
     # #295: an assistant with browser tools opened a shop's Mass Entry to fill a cart after "buy my missing cards"
     flat = " ".join(GROUNDING.split())
     assert "Never place or fill an order for the person" in flat and "never use a browser or any other tool to open a shop, fill its cart" in flat
     assert "find it with list_decks" in GROUNDING and "credit Archidekt" in GROUNDING
-    assert "never say which store is cheapest" in mcp.BY_NAME["shopping_list"].description
-    assert "credit Archidekt" in mcp.BY_NAME["get_archidekt_deck"].description
+    # the descriptions state the facts behind those rules (#241: no orders in descriptions)
+    assert "which store is cheapest is not known" in mcp.BY_NAME["shopping_list"].description
+    assert "The deck is Archidekt's, with its author and link for the credit" in mcp.BY_NAME["get_archidekt_deck"].description
 
 
 def test_the_instructions_say_the_vault_is_not_endorsed_and_consent_names_owned_card_edits():
@@ -244,3 +249,139 @@ def test_the_archidekt_provenance_links_the_real_deck_not_the_vaults_id_for_it()
     assert block["url"] == "https://archidekt.com/decks/6803907" and block["origin"] == "deck by layer0"
     none = mcp_catalog.provenance_blocks(("archidekt",), {"deck": {"id": 9}})[0]  # nothing says where: the site, never a made-up deck
     assert none["url"] == "https://archidekt.com"
+
+
+# -- #241: tool descriptions say what a tool does, takes and returns; never how the model should behave ------------------------
+# The Claude directory's submission asks to attest: "Tool descriptions contain no instructions about model behavior, other tools,
+# or external instruction sources, and no hidden or encoded text." 38 of 81 descriptions carried orders ("say which deck this is
+# first", "then call validate_deck_changes", "Call this first", "never say which store is cheapest"). The facts stay in the
+# descriptions; the behaviour lives in the server instructions (GROUNDING), the skills and the agents (MOVED_RULES below).
+_ORDERS = ("call", "use", "say", "tell", "present", "explain", "quote", "credit", "check", "start", "give", "pass", "send", "ask",
+           "follow", "write", "drill", "show", "offer", "open", "fix", "move", "see", "look", "lead", "report", "repeat", "keep",
+           "let", "make", "avoid", "prefer", "try", "put", "confirm", "cite", "mention", "join", "link", "compare", "answer",
+           "remember", "treat", "include")
+INSTRUCTION_PATTERNS = [
+    # a sentence or clause that opens with an order: "Give `deck_id`", ": credit Archidekt", "; say so", "Then call ..."
+    re.compile(r"(?:^|[.:;!?(]\s*)(?:then\s+|otherwise\s+|and\s+)?(?:" + "|".join(_ORDERS) + r")\s", re.IGNORECASE),
+    re.compile(r"\b(?:must|should|always)\b|\bdo not\b|\bdon't\b", re.IGNORECASE),
+    re.compile(r"\bthen call\b|\bcall (?:it|this|them|[a-z]+_[a-z_]+)\b", re.IGNORECASE),
+    re.compile(r"\bnever (?:say|quote|answer|present|call|use|pick|claim|tell|guess|rank|recommend|compare|place|fill|open)\b",
+               re.IGNORECASE),
+    re.compile(r"\bsay (?:so|which|how|when|that)\b", re.IGNORECASE),
+    re.compile(r"\bfrom memory\b|\bbefore (?:answering|asking|presenting)\b|\binstead of asking\b", re.IGNORECASE),
+    re.compile(r"\byou (?:use|call|say|present|quote)\b", re.IGNORECASE),
+]
+
+
+def _descriptions():
+    """Every description a host shows the model: each tool's, and each of its inputs' (nested ones too)."""
+    def walk(node, where):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "description" and isinstance(value, str):
+                    yield where, value
+                else:
+                    yield from walk(value, f"{where}.{key}")
+        elif isinstance(node, list):
+            for value in node:
+                yield from walk(value, where)
+    for tool in mcp.TOOLS:
+        entry = tool.schema()
+        yield tool.name, entry["description"]
+        yield from walk(entry["inputSchema"]["properties"], tool.name)
+
+
+def instructions_in(text: str) -> list[str]:
+    return [m.group(0).strip() for pattern in INSTRUCTION_PATTERNS for m in pattern.finditer(text)]
+
+
+def test_the_patterns_catch_the_orders_the_descriptions_used_to_carry():
+    """The check would have failed on main before #241: these are sentences the descriptions held."""
+    for said in ("The answer's `deck` block names the deck: say which deck this is first.", "Then call validate_deck_changes.",
+                 "Call this first to check the connection.", "never say which store is cheapest.",
+                 "Use it for any question about how the rules work: never answer one from memory.",
+                 "The deck is Archidekt's: credit Archidekt and link the deck when you use it.",
+                 "Explain the numbers in plain words; they are a hint, not a promise.", "Give `deck_id` (a saved deck) or `text`.",
+                 "Roles are a community's opinion: say so.", "a quote not returned here must not be called the current edition's"):
+        assert instructions_in(said), said
+    for fact in ("Takes `deck_id` (a saved deck) or `text` (a decklist).", "Checks that a quote is verbatim.",
+                 "A misspelled name returns suggestions, never a guess.", "Read-only: it changes no deck.",
+                 "More than 25 cards comes back as a preview (applied false) and is applied only when sent again with confirm true."):
+        assert not instructions_in(fact), fact
+
+
+def test_no_tool_description_tells_the_model_what_to_do_or_which_tool_to_call():
+    offenders = {where: instructions_in(text) for where, text in _descriptions() if instructions_in(text)}
+    assert not offenders, offenders
+
+
+def test_tool_descriptions_and_titles_hold_no_hidden_or_encoded_text():
+    import unicodedata
+    texts = list(_descriptions()) + [(t.name, t.schema()["title"]) for t in mcp.TOOLS]
+    for where, text in texts:
+        hidden = [f"U+{ord(ch):04X}" for ch in text if not ch.isprintable() or unicodedata.category(ch) in ("Cf", "Co", "Cn")]
+        assert not hidden, (where, hidden)  # zero-width spaces, joiners, bidi controls, tags, private use, control characters
+        assert not re.search(r"[A-Za-z0-9+/=_-]{40,}", text), (where, text)  # no base64 or other encoded run
+
+
+# Each rule that left a description, and where it lives now (GROUNDING reaches every host, the skills and agents the plugins).
+MOVED_RULES = [
+    ("lead with the deck", "GROUNDING", "Lead with the deck: every answer about a deck starts with its name, format, commander(s), card count"),
+    ("lead with the deck", "skills/deck-upgrader/SKILL.md", "Lead with the deck: its name, format, commander(s), card count and colour identity"),
+    ("lead with the deck", "skills/expert-council/SKILL.md", "Open with the deck"),
+    ("lead with the deck", "agents/vault-deckbuilder.md", "Open with the deck: its name, format, commander(s), card count"),
+    ("say when the format is read from the list", "GROUNDING", "say when the format was only read from the list (`format_from`)"),
+    ("quote numbers exactly", "GROUNDING", "report each number exactly as a tool returned it"),
+    ("quote numbers exactly", "skills/expert-council/SKILL.md", "Numbers exactly as returned"),
+    ("simulation numbers are a hint, in plain words", "GROUNDING", "Explain simulate_draws' numbers in plain words: they are a hint, not a promise"),
+    ("simulation numbers are a hint, in plain words", "skills/deck-upgrader/SKILL.md", "the simulation's numbers are a hint, not a promise"),
+    ("previews need the person's yes", "GROUNDING", "run the change only once the person has said yes to that preview"),
+    ("previews need the person's yes", "skills/collection-analyst/SKILL.md", "only after they say yes"),
+    ("tags written by an assistant are not the person's", "GROUNDING", "never present them as the person's own"),
+    ("tags written by an assistant are not the person's", "skills/collection-analyst/SKILL.md", "Present a tag or note an assistant wrote as the person's own"),
+    ("rules from the Vault, never from memory", "GROUNDING", "Never answer a rules or card question from memory"),
+    ("rules from the Vault, never from memory", "GROUNDING", "get_rule is the only source for a rule's wording"),
+    ("rules from the Vault, never from memory", "skills/rules-judge/SKILL.md", "Never answer from memory"),
+    ("say which two editions were compared", "GROUNDING", "say which two editions you compared"),
+    ("say which two editions were compared", "skills/rules-judge/SKILL.md", "Say which two editions it compared"),
+    ("present_steps after verified quotes", "GROUNDING", "present_steps takes steps you write yourself, citing rule numbers you opened with get_rule"),
+    ("validate before presenting a plan", "GROUNDING", "call validate_deck_changes and only present it if valid is true"),
+    ("validate before presenting a plan", "agents/vault-deckbuilder.md", "Present the plan only when"),
+    ("prices are never current", "GROUNDING", 'never call a price "current"'),
+    ("prices are never current", "skills/shopping-assistant/SKILL.md", 'Call a price "current" or today\'s'),
+    ("no cheapest store", "GROUNDING", "Never say which shop is cheapest"),
+    ("no cheapest store", "skills/shopping-assistant/SKILL.md", "Say which store is cheapest"),
+    ("the council flow", "GROUNDING", "call council_brief and follow it"),
+    ("the council flow", "skills/expert-council/SKILL.md", "`council_brief` with the format and goal"),
+    ("credit Archidekt, one deck, check saved decks", "GROUNDING", "read only the deck the person gave you (check list_decks first"),
+    ("credit Archidekt, one deck, check saved decks", "GROUNDING", "credit Archidekt and give the deck's link back"),
+    ("credit Archidekt, one deck, check saved decks", "skills/archidekt-deck-helper/SKILL.md", "Fetch more than the one deck requested"),
+    ("find a named deck before asking for a link", "GROUNDING", "find it with list_decks before asking for a link"),
+    ("roles: the Vault's reading, say so", "GROUNDING", "not an official classification: say so"),
+    ("roles: the Vault's reading, say so", "skills/collection-analyst/SKILL.md", "say the answer's `label`"),
+    ("a stand-in is a suggestion; quote both Oracle texts", "GROUNDING", 'never "the same card": quote both Oracle texts'),
+    ("a stand-in is a suggestion; quote both Oracle texts", "skills/deck-upgrader/SKILL.md", 'never "the same card": quote both Oracle texts'),
+    ("P&L: say how many copies it covers", "GROUNDING", "say how many copies the figures"),
+    ("P&L: say how many copies it covers", "skills/collection-analyst/SKILL.md", "say how many copies the figures cover"),
+    ("overlap: say which allocation rule", "GROUNDING", "say which allocation rule"),
+    ("overlap: say which allocation rule", "skills/expert-council/SKILL.md", "say which allocation rule it used"),
+    ("overlap: say which allocation rule", "agents/vault-collection-analyst.md", "which allocation rule it used"),
+    ("whoami checks the connection", "GROUNDING", "call whoami first to check the connection"),
+    ("upload link, then read it", "GROUNDING", "then call get_staged_upload once they say it is uploaded"),
+    ("upload link, then read it", "skills/collection-analyst/SKILL.md", "`get_staged_upload` once they say it is uploaded"),
+    ("export links, not the files", "GROUNDING", "Give export download links (list_export_formats) rather than reading the files"),
+    ("export links, not the files", "skills/collection-analyst/SKILL.md", "give the link, do not read the file"),
+    ("show_owned_printings when asked to see", "GROUNDING", "use show_owned_printings"),
+    ("show_owned_printings when asked to see", "skills/collection-analyst/SKILL.md", "`show_owned_printings` (pictures"),
+    ("17Lands' credit in the answer", "GROUNDING", "repeat the answer's `attribution`"),
+]
+
+
+def test_every_rule_that_left_a_description_lives_in_the_instructions_or_a_skill_or_an_agent():
+    from pathlib import Path
+    root = Path(__file__).parent.parent
+    flat = lambda text: " ".join(text.split())  # noqa: E731
+    for rule, where, phrase in MOVED_RULES:
+        text = mcp.INSTRUCTIONS if where == "GROUNDING" else (root / where).read_text(encoding="utf-8")
+        assert flat(phrase) in flat(text), (rule, where, phrase)
+    assert GROUNDING in mcp.INSTRUCTIONS  # the server instructions every host reads at initialize

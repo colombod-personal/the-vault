@@ -102,8 +102,8 @@ class Tool:
 # How a re-import answers its three-way update (vault.merge): shared by import_collection_csv and confirm_staged_upload.
 MERGE_ARGS = {
     "conflicts": {"type": "string", "enum": ["vault", "app"], "default": "vault",
-                  "description": "For cards changed both in the person's app and in the Vault since the last import: keep "
-                                 "the Vault's edit (the default) or take the app's value, for all of them"},
+                  "description": "For cards changed both in the person's app and in the Vault since the last import: `vault` "
+                                 "keeps the Vault's edit (the default), `app` takes the app's value, for all of them"},
     "use_app_value": {"type": "array", "items": {"type": "string", "maxLength": 40}, "maxItems": 500,
                       "description": "Conflict ids from the preview to take the app's value for, whatever conflicts says"},
     "replace_everything": {"type": "boolean", "default": False,
@@ -190,7 +190,7 @@ TAG = {"type": "string", "pattern": TAG_PATTERN, "description": "A tag: 1 to 40 
 SCOPE = {"bucket": {"type": "integer", "minimum": 1, "maximum": MAX_ID,
                     "description": "Only the copies in this bucket (from list_buckets): 'what is my trade binder worth?'. "
                                    "Copies, value and cost of all buckets add up to the whole collection; distinct counts "
-                                   "(cards, printings, sets) do not, because a printing in two buckets counts in each. "
+                                   "(cards, printings, sets) are not additive, because a printing in two buckets counts in each. "
                                    "Not on a shared collection"},
          "tag": {"type": "string", "pattern": TAG_PATTERN, "maxLength": 40,
                  "description": "Only cards the person tagged with this (from list_tags): every printing of a tagged card counts, once. "
@@ -206,7 +206,7 @@ OWNED_LINES = {"type": "array", "minItems": 1, "maxItems": 50, "items": {
         "set": {"type": "string", "maxLength": 20, "description": "The printing's set code (with number)"},
         "number": {"type": "string", "maxLength": 30, "description": "The printing's collector number (with set)"},
         "finish": {"type": "string", "enum": ["nonfoil", "foil", "etched"]},
-        "printing_unknown": {"type": "boolean", "description": "Only when the person says they do not know (adds only)"},
+        "printing_unknown": {"type": "boolean", "description": "The person does not know the printing (adds only)"},
         "printings_page": {"type": "integer", "minimum": 1, "maximum": 20,
                            "description": "The next page of printings to choose from, when the answer says there are more"}}}}
 # null clears them on update_deck (as on the API), so it is advertised as allowed.
@@ -227,7 +227,7 @@ TOOLS = [
     Tool("get_collection_summary", "Totals for the collection: copies, printings, sets, market value, amount paid, "
          "prices date, and breakdowns by condition and printing. Takes `bucket` or `tag` for one bucket's or one tag's totals.",
          {**SCOPE, **SHARE}, path=_base, query=SCOPE_QUERY),
-    Tool("search_cards", "Find printings in the collection. Each item has name, set, collector number, finish, "
+    Tool("search_cards", "Finds printings in the collection. Each item has name, set, collector number, finish, "
          "condition, language, quantity, price (market/low/mid), value, paid, acquisition dates and Scryfall card data "
          "(type, colours, mana cost, rarity, text, image with artist credit). Paged.",
          {"query": {"type": "string", "description": "Text in the card or set name"},
@@ -265,19 +265,18 @@ TOOLS = [
          query=("q", "set", "name", "finish", "condition", "printing", "type", "mana_value", "bucket", "tag", "role", "role_match", "sort", "limit", "cursor")),
     Tool("list_tags", "The person's own labels on cards (trade, commander-staple, deck:sliver ...), each with how many cards have it and "
          "how many of those assignments were written by the person, by an assistant or by the system. A tag is on the card "
-         "(every printing), survives imports and stays when the last copy leaves. Use a tag as `tag` in search_cards to see its cards.",
+         "(every printing), survives imports and stays when the last copy leaves. A tag's cards are listed by search_cards with that `tag`.",
          {"query": {"type": "string", "maxLength": 40, "description": "Text in the tag's name"}, **PAGING},
          path=lambda a: f"{V1}/collection/tags", query=("q", "limit", "cursor")),
-    Tool("tag_cards", "Puts a tag on cards (the tag exists while a card has it; there is nothing to create first). Give card ids "
-         "from search_cards. Tags you write are recorded as written by this app and shown as such: never present them as the "
-         "person's own. More than 25 cards is shown first (applied false) and applied only when sent again with confirm true "
-         "after the person agreed. A card can have 50 tags and a person 500 different ones; a copy the Vault could not match to "
-         "a card can't take a tag.",
+    Tool("tag_cards", "Puts a tag on cards (the tag exists while a card has it; there is nothing to create first). Takes card ids "
+         "(from search_cards). A tag written here is recorded as written by this app, not by the person, and is shown that way. "
+         "More than 25 cards comes back as a preview (applied false) and is applied only when sent again with confirm true. "
+         "A card can have 50 tags and a person 500 different ones; a copy the Vault could not match to a card can't take a tag.",
          {"tag": TAG, "card_ids": CARD_IDS, "confirm": CONFIRM}, ["tag", "card_ids"],
          method="POST", path=lambda a: f"{V1}/collection/tags/{a['tag']}/cards",
          body=lambda a: {"card_ids": a["card_ids"], **({"confirm": True} if a.get("confirm") is True else {})}, write=True),
     Tool("untag_cards", "Takes a tag off cards; the cards and their other tags stay, and a tag nobody has any more is gone. More "
-         "than 25 cards is shown first (applied false) and applied only when sent again with confirm true after the person agreed.",
+         "than 25 cards comes back as a preview (applied false) and is applied only when sent again with confirm true.",
          {"tag": TAG, "card_ids": CARD_IDS, "confirm": CONFIRM}, ["tag", "card_ids"],
          method="POST", path=lambda a: f"{V1}/collection/tags/{a['tag']}/cards/remove",
          body=lambda a: {"card_ids": a["card_ids"], **({"confirm": True} if a.get("confirm") is True else {})},
@@ -313,7 +312,7 @@ TOOLS = [
          write=True),
     Tool("list_buckets", "The places the person's copies live in: one per folder of their files (a binder, a deck box, a trade "
          "box) and 'Unsorted', plus any they made. Each has its name, kind (default, folder or made), copies and rows; the "
-         "buckets' copies add up to the whole collection. Use a bucket's id as `bucket` in search_cards to see what is in it.",
+         "buckets' copies add up to the whole collection. A bucket's copies are listed by search_cards with its id as `bucket`.",
          dict(PAGING), path=lambda a: f"{V1}/collection/buckets", query=("limit", "cursor")),
     Tool("create_bucket", "Makes an empty bucket (a named place for copies). Names are unique per person, ignoring case; at most "
          "100 can be made by hand. Moving copies into it is a separate step.",
@@ -327,8 +326,8 @@ TOOLS = [
          body=lambda a: {k: a[k] for k in ("name", "position") if a.get(k) is not None}, write=True),
     Tool("move_cards", "Moves copies from one bucket to another: a stack is split when only part of it moves, the moved rows take "
          "the target bucket's name as their folder (so the person's next export shows it) and it is recorded as a change in "
-         "the history (a move is not undone: move the copies back). Give card ids from search_cards with `bucket`. More than 10 "
-         "copies is shown first (applied false) and applied only when sent again with confirm true after the person agreed.",
+         "the history (there is no undo; moving the copies back reverses it). Takes card ids (from search_cards with `bucket`). "
+         "More than 10 copies comes back as a preview (applied false) and is applied only when sent again with confirm true.",
          {"bucket_id": ID, "to_bucket_id": ID,
           "lines": {"type": "array", "minItems": 1, "maxItems": 50,
                     "items": {"type": "object", "additionalProperties": False, "required": ["card_id", "quantity"],
@@ -340,8 +339,8 @@ TOOLS = [
          body=lambda a: {"to": a["to_bucket_id"], "lines": a["lines"], **({"confirm": True} if a.get("confirm") is True else {})},
          write=True),
     Tool("delete_bucket", "Deletes an empty bucket. With confirm false or absent it returns the bucket (how many copies it holds) "
-         "and changes nothing; with confirm true it deletes it. A bucket that still holds copies is refused (409): move the "
-         "copies out first.",
+         "and changes nothing; with confirm true it deletes it. A bucket that still holds copies is refused (409) until they are "
+         "moved out.",
          {"bucket_id": ID, "confirm": CONFIRM}, ["bucket_id"],
          method=lambda a: "DELETE" if a.get("confirm") is True else "GET",
          path=lambda a: f"{V1}/collection/buckets/{int(a['bucket_id'])}", write=True, destructive=True),
@@ -387,7 +386,7 @@ TOOLS = [
          "paid, running totals and gain; the month that added the most value; the last 12 months' change. Takes `bucket` or `tag`.",
          {**SCOPE, **SHARE}, path=lambda a: _base(a) + "/valuation", query=SCOPE_QUERY),
     Tool("list_card_names", "The collection rolled up by card name: copies, market value, unit price, printings, "
-         "sets, colour, main type, mana value, rarity and an image (credit its artist). Paged; the first page "
+         "sets, colour, main type, mana value, rarity and an image with its artist credit. Paged; the first page "
          "sorted by -value is the top N.",
          {"sort": {"type": "string", "enum": ["-value", "value", "-quantity", "quantity", "name", "-name"],
                    "default": "-value"},
@@ -397,8 +396,8 @@ TOOLS = [
           "min_value": {"type": "number", "minimum": 0, "description": "Only names worth at least this (USD)"},
           **SCOPE, **PAGING, **SHARE},
          path=lambda a: _base(a) + "/names", query=("sort", "colors", "type", "min_value", "limit", "cursor") + SCOPE_QUERY),
-    Tool("refresh_prices", "Fetch fresh card data and today's prices from Scryfall for the person's own "
-         "printings, up to 300 per call, and recompute today's collection value. Each call returns a cursor and "
+    Tool("refresh_prices", "Fetches fresh card data and today's prices from Scryfall for the person's own "
+         "printings, up to 300 per call, and recomputes today's collection value. Each call returns a cursor and "
          "how many remain; passing the cursor continues until remaining is 0.",
          {"cursor": {"type": "string", "maxLength": 36, "description": "cursor from the previous call"},
           "force": {"type": "boolean", "default": False,
@@ -411,10 +410,10 @@ TOOLS = [
          path=lambda a: _base(a) + "/history", query=("since", "limit", "cursor") + SCOPE_QUERY),
     Tool("list_spare_copies", "The cards the person owns more copies of than their saved decks need at the same time (spare "
          "copies), dearest first, each with copies owned, needed, spare, the market value of the spare copies, how many saved decks "
-         "use it and the printings that are spare (a bounded preview, each with its price, condition, how many are marked for "
+         "contain it and the printings that are spare (a bounded preview, each with its price, condition, how many are marked for "
          "trade and its Scryfall link). `summary` totals every spare card, whatever the page. Spare means beyond the saved decks, "
-         "never worthless to the person; with no saved deck nothing is spare (`status` says so). Pass `name` to page one "
-         "card's spare printings. Basic lands are left out. Only the person's own collection.",
+         "not worthless to the person; with no saved deck nothing is spare (`status` says so). `name` pages one card's spare "
+         "printings. Basic lands are left out. Only the person's own collection.",
          {"name": {"type": "string", "minLength": 1, "maxLength": 300,
                    "description": "A card name: list that card's spare printing rows instead of the cards"}, **PAGING},
          path=lambda a: f"{V1}/collection/spare" + ("/printings" if a.get("name") else ""),
@@ -422,8 +421,8 @@ TOOLS = [
     Tool("get_collection_pnl", "Profit and loss by holding, over the copies whose price paid and current market price are both "
          "known: the winners (most profitable first) or the losers (biggest loss first), paged. `summary` (the same on every page) "
          "has the biggest gain and loss, the net gain, and how many copies were counted (`covered_copies`) and how many were not "
-         "(`unknown_cost_copies`: no price paid recorded; `unpriced_market_copies`: no current price). Say how many copies the "
-         "figures cover. Only the person's own collection.",
+         "(`unknown_cost_copies`: no price paid recorded; `unpriced_market_copies`: no current price), so the figures cover only "
+         "`covered_copies`. Only the person's own collection.",
          {"side": {"type": "string", "enum": ["winners", "losers"], "default": "winners"}, **PAGING},
          path=lambda a: f"{V1}/collection/pnl", query=("side", "limit", "cursor")),
     Tool("get_acquisition_timeline", "How many copies were bought each month. Takes `bucket` or `tag`.", {**SCOPE, **SHARE},
@@ -432,7 +431,7 @@ TOOLS = [
          "Archidekt, Moxfield, Arena and MTGO text formats.",
          {"text": {**DECKLIST, "description": "The decklist, one card per line, e.g. '1 Sol Ring'"}}, ["text"],
          method="POST", path=lambda a: f"{V1}/decks/coverage", body=lambda a: {"text": a["text"]}),
-    Tool("parse_decklist", "Parse a decklist into cards with quantity, set, collector number, finish and section.",
+    Tool("parse_decklist", "Parses a decklist into cards with quantity, set, collector number, finish and section.",
          {"text": DECKLIST}, ["text"], method="POST", path=lambda a: f"{V1}/decks/parse",
          body=lambda a: {"text": a["text"]}),
     Tool("lookup_cards", "Card data (type, text, colours, artist, image links) and current prices for up to 75 "
@@ -448,28 +447,26 @@ TOOLS = [
          method="POST", path=lambda a: f"{V1}/cards/lookup", body=lambda a: {"identifiers": a["identifiers"]}),
     Tool("list_decks", "The person's saved decks at a glance: each deck's name, `overview` (format, commander(s), card count, the "
          "commanders' colour identity) and where it came from (archidekt, moxfield, link, pasted); no card lines (get_deck "
-         "has them). Present each deck as its name, format and commander(s), e.g. 'Sliver Swarm: Commander, led by Sliver "
-         "Overlord, 100 cards'. Say when the format is read from the list rather than set (`format_from`). Pass `query` "
-         "with words from the deck's name ('sliver swarm') to find it: best match first, and when nothing matches `closest` "
-         "lists near names. People name their decks; use this before asking for a link or an id.",
+         "has them). `format_from` says whether the format was set on the deck or read from the list. `query` (words from the "
+         "deck's name, 'sliver swarm') finds a deck by name: best match first, and when nothing matches `closest` lists near "
+         "names.",
          {**PAGING, "query": {"type": "string", "maxLength": 200, "description": "Words from the deck's name"}},
          path=lambda a: f"{V1}/decks?brief=true", query=("limit", "cursor", "q")),  # no card text: get_deck has it
     Tool("get_deck_overlap", "Whether the person's saved decks can all be built at the same time from the copies they own, and "
          "what to buy or move if not. Counts copies by card name (any printing owned counts; basic lands are left out). `cards`: cards "
          "in more than one deck with `need_for_all`, `have` and `short`. `decks`: per deck what it `need`s, the contested cards "
-         "it `holds` and `lacking` (each missing copy is `not_owned`, so it must be bought, or `held_by_other_deck`, so it can be "
-         "moved), `stands_alone` (complete under the allocation), `independent` (also holds no contested card) and "
+         "it `holds` and `lacking` (each missing copy is `not_owned`, to buy, or `held_by_other_deck`, to move), `stands_alone` (complete under the allocation), `independent` (also holds no contested card) and "
          "`cost_to_complete`. A card is contested when two or more decks use it and the person owns some copies, but fewer than the "
          "decks need together; a card owned zero times is not contested (every deck that needs it lacks it). Contested copies go to "
-         "the decks in the `allocation` order (the deck closest to complete first, or `priority`, deck ids in order): say which rule "
-         "was used. `summary` has the decks needing a purchase and the cost to finish every deck, each card counted once. `list` "
-         "pages the full lists instead of the overview: `decks`, `contested` (each card with its `move` and `buy` options) or "
-         "`purchases` (cheapest first; `format` text is the paste-ready list, one page per call: join the pages). Prices are "
+         "the decks in the `allocation` order (the deck closest to complete first, or `priority`, deck ids in order); `allocation` "
+         "names the rule used. `summary` has the decks needing a purchase and the cost to finish every deck, each card counted once. "
+         "`list` pages the full lists instead of the overview: `decks`, `contested` (each card with its `move` and `buy` options) or "
+         "`purchases` (cheapest first; `format` text is the paste-ready list, one page per call, the pages together the whole list). Prices are "
          "Scryfall's cheapest, dated `prices_date`.",
          {"priority": {"type": "array", "maxItems": 200, "items": ID,
                        "description": "Deck ids (from list_decks), in the order they take contested copies; the others follow"},
           "list": {"type": "string", "enum": ["decks", "contested", "purchases"],
-                   "description": "Page one full list (use next_cursor as cursor) instead of the overview"},
+                   "description": "Page one full list (paged with next_cursor as cursor) instead of the overview"},
           "format": {"type": "string", "enum": ["json", "text"], "default": "json",
                      "description": "text: the purchases as a paste-ready list ('2 The World Tree' per line), one page per call"},
           **PAGING},
@@ -483,11 +480,11 @@ TOOLS = [
          "card count. Each card has `have`, `need`, `gets`, `not_owned`, `held_by_other_deck`, a `status` (owned, partial, missing) "
          "and `borrowed` with `borrowed_from` (the deck holding the copy it lacks); `move` appears only when a donor copy exists "
          "and `buy` (Scryfall's cheapest price, dated) only for copies to buy. Counts follow the allocation of get_deck_overlap. "
-         "Roles are the eight coarse roles, a community's opinion: say so. Each lane pages on its own (`lane`, `cursor`); "
+         "Roles are the eight coarse roles, a community's opinion. Each lane pages on its own (`lane`, `cursor`); "
          "`include_combos` adds the deck's combos from Commander Spellbook (the deck's card names are sent to them). Read-only; "
          "only the person's own decks.",
          {"deck_id": ID, "lane": {"type": "string", "enum": list(deck_ideas.LANES),
-                                  "description": "Only this lane; use next_cursor as cursor to page it"},
+                                  "description": "Only this lane, paged with next_cursor as cursor"},
           "include_combos": {"type": "boolean", "default": False,
                              "description": "Also ask Commander Spellbook for the deck's combos (sends the deck's card names to them)"},
           **PAGING}, ["deck_id"],
@@ -495,11 +492,11 @@ TOOLS = [
     Tool("get_card_alternatives", "Cards the person owns that do the same job as a card in one of their saved decks, best first. The jobs "
          "are the Vault's own 22 roles (a mana rock, a token doubler, a free counterspell, bounce, card draw once or every turn ...), found by "
          "written rules over the Oracle text: the Vault's own, not Scryfall's community tags, and every role names the rule that found it "
-         "(`roles`, `rule`; say so). Two tiers, never merged: `same_job` (the candidate has the card's main job and, where it matters, "
+         "(`roles`, `rule`). Two tiers, never merged: `same_job` (the candidate has the card's main job and, where it matters, "
          "repeats or is free in the same way) before `similar` (it shares another job or a neighbouring one; `different` says what "
          "differs; `tiers` counts both over the whole list). Each candidate says what it `lacks` (jobs of the asked-for card it does "
          "not do), what it adds (`extra`), why (`why`, built from the roles: it is a suggestion, never 'the same card'), and carries "
-         "both Oracle texts (`oracle_text`, Wizards of the Coast's via Scryfall: quote them). Candidates are inside the deck's colour "
+         "both Oracle texts (`oracle_text`, Wizards of the Coast's via Scryfall). Candidates are inside the deck's colour "
          "identity, legal in the format, and have copies left under the format's copy limit (an owned Sol Ring is not offered for a "
          "Commander deck that already runs one); `filtered_out` and `filtered_note` count the owned cards that do this job but were not "
          "offered, and why. A free copy comes first in a tier, then a card another deck holds (`borrowed_from`, with a `move` option only "
@@ -507,21 +504,20 @@ TOOLS = [
          "(ranked and shown, never a filter). `card` names the card the answer is about, with its `status` in the deck, its `roles` and "
          "its own `buy` price. `format` defaults to the format set on the deck, else commander. With nothing to offer, `reason` and "
          "`message` say why: `no_role` means the Vault knows no role for the card, which is not the same as the person owning nothing "
-         "like it. Read-only; changing the deck is validate_deck_changes then update_deck.",
+         "like it. Read-only: it changes no deck.",
          {"deck_id": ID, "card": {"type": "string", "minLength": 1, "maxLength": 300, "description": "The card to find a stand-in for"},
           "format": {"type": "string", "enum": list(FORMATS), "description": "The format whose legality and copy limit apply"},
           **PAGING}, ["deck_id", "card"],
          path=lambda a: f"{V1}/decks/{int(a['deck_id'])}/ideas/alternatives", query=("card", "format", "limit", "cursor")),
     Tool("card_roles", "What cards do, as short lists of roles: the Vault's own reading of the Oracle text in 22 roles (a mana rock, a token "
-         "doubler, a counterspell, card draw once or every turn, removal, a board wipe, protection ...). Give one of `card` (that card's roles), "
+         "doubler, a counterspell, card draw once or every turn, removal, a board wipe, protection ...). Takes one of `card` (that card's roles), "
          "`role` (the person's cards that have the role or roles) or `deck_id` (what a saved deck does: every role with the deck's cards that have "
          "it, and empty roles shown so a gap is visible); with none, every role with how many of the person's cards have it. The roles are "
-         "the Vault's reading of the card text, not an official classification and not Scryfall's community tags: say so with each answer "
-         "(`label`). Each role has a short `point` (\"Doubles tokens\"), is `core` (the card exists to do it) or `incidental` (it does it on the "
+         "the Vault's reading of the card text, not an official classification and not Scryfall's community tags; every answer's "
+         "`label` says so. Each role has a short `point` (\"Doubles tokens\"), is `core` (the card exists to do it) or `incidental` (it does it on the "
          "side), and names the rule that found it (`rule`, `why`: what the rule matches and what it gets wrong); a rule can miss or overreach, so "
          "no role found means no role known, not that the card does nothing. With `card`, Scryfall Tagger tags come apart as `community_tags` "
-         "(a community's opinion). `role` with several roles needs all of them unless `match` is any. Reading only; the owned cards that "
-         "could stand in for a card of a deck come from get_card_alternatives.",
+         "(a community's opinion). `role` with several roles needs all of them unless `match` is any. Reading only.",
          {"card": {"type": "string", "minLength": 1, "maxLength": 300, "description": "A card's name: its roles"},
           "role": {"type": "array", "minItems": 1, "maxItems": len(card_roles.POINTS), "items": {"type": "string", "enum": list(card_roles.POINTS)},
                    "description": "The person's cards that have these roles (one row per card, with the copies owned); paged"},
@@ -545,14 +541,15 @@ TOOLS = [
          {"deck_id": ID, "all_cards": {"type": "boolean", "default": False,
                                        "description": "Every card's ownership and owned printings (large)"}}, ["deck_id"],
          path=lambda a: f"{V1}/decks/{int(a['deck_id'])}?detail={'cards' if a.get('all_cards') else 'summary'}"),
-    Tool("save_deck", "Save a decklist to the person's decks.",
+    Tool("save_deck", "Saves a decklist to the person's decks.",
          {"name": {"type": "string"}, "text": DECKLIST, "source_url": SOURCE_URL, "source_author": SOURCE_AUTHOR,
           "format": DECK_FORMAT},
          ["name", "text"], method="POST", path=lambda a: f"{V1}/decks",
          body=lambda a: {"name": a["name"], "text": a["text"], "source_url": a.get("source_url"),
                          "source_author": a.get("source_author"), "format": a.get("format")}, write=True),
-    Tool("update_deck", "Replace a saved deck's name and text (and its source link, author and format, if given). To set only "
-         "the format, send the deck's current name and text from get_deck with the new format.",
+    Tool("update_deck", "Replaces a saved deck's name and text (and its source link, author and format, if given). Name and text "
+         "are required, so a change of format alone takes the deck's current name and text (as get_deck returns them) with the "
+         "new format.",
          {"deck_id": ID, "name": {"type": "string"}, "text": DECKLIST, "source_url": SOURCE_URL,
           "source_author": SOURCE_AUTHOR, "format": DECK_FORMAT},
          ["deck_id", "name", "text"], method="PUT", path=lambda a: f"{V1}/decks/{int(a['deck_id'])}",
@@ -563,7 +560,7 @@ TOOLS = [
          "is left unchanged unless update is true. Archidekt links only; the deck remains Archidekt's, with its credit and link.",
          {"url": {"type": "string", "minLength": 8, "maxLength": 500, "description": "An Archidekt deck link"},
           "name": {"type": "string", "maxLength": 200, "description": "Name to save it under (default: its name on Archidekt)"},
-          "update": {"type": "boolean", "default": False, "description": "For a deck already saved: compare it with Archidekt's current list"},
+          "update": {"type": "boolean", "default": False, "description": "For a deck already saved: a preview of how it differs from Archidekt's current list"},
           "confirm": {"type": "boolean", "description": "With update: replace the saved list with the previewed one"},
           "fingerprint": {"type": "string", "maxLength": 64, "description": "From the update preview"}},
          ["url"], method="POST", path=lambda a: f"{V1}/decks/import-link",
@@ -579,11 +576,11 @@ TOOLS = [
          body=lambda a: {k: a[k] for k in ("confirm", "fingerprint") if a.get(k) is not None},
          write=True, destructive=True, provenance=("archidekt",)),
     Tool("get_archidekt_deck", "A public deck from Archidekt by its id (the number in archidekt.com/decks/<id>). "
-         "One deck per request, only the one the person gave you. Check list_decks first: the deck may be saved. "
+         "One deck per request; the deck is not saved in the Vault (saved decks are in list_decks). "
          "Returns the deck's name, author, format and commander(s) (`overview`), card counts, the list with its "
          "sections and Archidekt's own bracket tag; not Archidekt's per-card shop prices. "
-         "The deck is Archidekt's: credit Archidekt and link the deck when you use it. Read-only: nothing can "
-         "change Archidekt, so the person applies any changes there themselves.",
+         "The deck is Archidekt's, with its author and link for the credit. Read-only: nothing here can "
+         "change Archidekt, so any change to the deck is made by the person on Archidekt.",
          {"deck_id": ID}, ["deck_id"], path=lambda a: f"{V1}/archidekt/decks/{int(a['deck_id'])}"),
     Tool("list_imports", "Past collection imports, newest first, with what changed each time.", dict(PAGING),
          path=lambda a: f"{V1}/imports", query=("limit", "cursor")),
@@ -599,20 +596,20 @@ TOOLS = [
          method="POST", path=lambda a: f"{V1}/imports" if a.get("confirm") is True else f"{V1}/imports/preview",
          query=MERGE_QUERY + ("bucket_id",), write=True, destructive=True),
     Tool("start_collection_upload", "For a collection file too big to paste: a one-time link (one hour) for the "
-         "person to upload the file. Nothing is imported: the file waits until they confirm. Give them the link, then "
-         "call get_staged_upload when they say it is uploaded. With bucket_id the upload goes into that bucket only, fixed "
+         "person to upload the file. Nothing is imported: the file waits until they confirm. The uploaded file is then read by "
+         "get_staged_upload. With bucket_id the upload goes into that bucket only, fixed "
          "when the link is made; without it the upload page lets the person pick one of their buckets, or the whole collection.",
          {"bucket_id": IMPORT_BUCKET["bucket_id"]}, method="POST", path=lambda a: f"{V1}/uploads", query=("bucket_id",), write=True),
     Tool("get_staged_upload", "A file the person uploaded through start_collection_upload: still waiting, or what "
          "importing it would change (what comes from their app, which Vault edits are kept, the conflicts) and which rows "
-         "match no known printing (fix those in the file and upload again). Names the bucket the upload goes into, if any, and "
+         "match no known printing (they need fixing in the file and a new upload). Names the bucket the upload goes into, if any, and "
          "what it leaves alone.",
          {"upload_id": ID, **MERGE_ARGS}, ["upload_id"], path=lambda a: f"{V1}/uploads/{int(a['upload_id'])}",
          query=MERGE_QUERY),
     Tool("confirm_staged_upload", "Imports a file uploaded through start_collection_upload: applies what changed in the "
          "person's app since their last import and keeps edits made in the Vault. With confirm false or absent it returns "
-         "the preview (including the conflicts and its `content_hash`) and changes nothing; with confirm true it imports it, "
-         "and only the file that was previewed: pass that preview's `content_hash`. "
+         "the preview (including the conflicts and its `content_hash`) and changes nothing; with confirm true and that preview's "
+         "`content_hash` it imports it, and only the file that was previewed. "
          "replace_everything makes the file replace the whole collection instead. An upload bound to a bucket (the bucket_id "
          "of start_collection_upload, or the one the person picked on the upload page) is compared with and replaces that bucket "
          "only: the preview names it; bucket_id here is a check that it is the bucket the upload is bound to.",
@@ -624,16 +621,16 @@ TOOLS = [
          path=lambda a: f"{V1}/uploads/{int(a['upload_id'])}" + ("/apply" if a.get("confirm") is True else ""),
          query=MERGE_QUERY + ("bucket_id", "content_hash"), write=True, destructive=True),
     Tool("show_owned_printings", "Pictures of the printings of one card the person owns (set, number, finish, copies, "
-         "Scryfall image with artist credit), most copies first. Use it when they ask to see which ones they have, or "
-         "to help them match a card in their hand. Hosts with MCP Apps show the pictures; otherwise give the list.",
+         "Scryfall image with artist credit), most copies first: which printings they have, to match a card in their hand. "
+         "Hosts with MCP Apps show the pictures; the answer also carries them as a list.",
          {"name": {"type": "string", "minLength": 1, "maxLength": 300, "description": "The card's name"}}, ["name"],
          path=lambda a: f"{V1}/collection/printings", query=("name",), ui="printings"),
     Tool("update_owned_cards", "Previews small edits to the cards the person owns (bought, sold, traded, found): add "
          "or remove copies, or set how many are owned. Changes nothing. Returns each card, its printing, copies before "
          "and after, the value change and, when every line is resolved, a confirmation for confirm_owned_cards_update. "
          "A line whose printing is ambiguous returns status choose_printing with the candidate printings (pictures in "
-         "the view; every printing of the card is offered, found live at Scryfall, 20 a page: send the line again "
-         "with printings_page for the next page); an add may be sent with printing_unknown. Limits: 50 lines, 25 copies removed (or 10% of the "
+         "the view; every printing of the card is offered, found live at Scryfall, 20 a page; the line sent again "
+         "with printings_page gives the next page); an add may be sent with printing_unknown. Limits: 50 lines, 25 copies removed (or 10% of the "
          "collection) per change; larger changes are imports.",
          {"lines": OWNED_LINES}, ["lines"], method="POST", path=lambda a: f"{V1}/collection/changes/preview",
          body=lambda a: {"lines": a["lines"]}, write=True, ui="printings"),
@@ -641,7 +638,7 @@ TOOLS = [
          "that preview's confirmation. Returns an error when the lines differ from the preview, the confirmation is "
          "older than 15 minutes, or the collection changed since. The change is recorded in the import history under "
          "this app's name; undo_owned_cards_update reverts it. A confirmation that came from undo_owned_cards_update "
-         "is not applied here: call undo_owned_cards_update again with it.",
+         "is not applied here: only undo_owned_cards_update applies it.",
          {"lines": OWNED_LINES, "confirmation": {"type": "string", "minLength": 8, "maxLength": 400,
                                                  "description": "From the preview the person agreed to"}},
          ["lines", "confirmation"], method="POST", path=lambda a: f"{V1}/collection/changes/apply",
@@ -655,7 +652,7 @@ TOOLS = [
          body=lambda a: {"confirmation": a.get("confirmation")}, write=True, destructive=True),
     Tool("council_brief", "The expert council for a deck review, a rules dispute or a synergy question: the panel the "
          "council's rules seat for the format and goal (only on-topic format experts; Commander adds the casual table; "
-         "always a rules judge and a devil's advocate), each member's full brief, and the chair's procedure. With a "
+         "every panel has a rules judge and a devil's advocate), each member's full brief, and the chair's procedure. With a "
          "deck_id and no format, the format is read from the saved deck.",
          {"format": {"type": "string", "maxLength": 40, "description": "commander, limited, pauper, standard, pioneer, two-headed-giant, ..."},
           "goal": {"type": "string", "maxLength": 300, "description": "What the person wants: tune, check, explain, synergies, budget"},
@@ -668,8 +665,8 @@ TOOLS = [
          {"expert": {"type": "string", "enum": sorted(experts.DATA["experts"])}}, ["expert"],
          path=lambda a: f"{V1}/experts/{a['expert']}"),
     Tool("list_export_formats", "Formats the collection can be exported in to move it to another app (Dragon "
-         "Shield, Moxfield, Archidekt, generic CSV, text list), each with a download link. The files can be "
-         "large; give the person the link rather than reading the whole file.",
+         "Shield, Moxfield, Archidekt, generic CSV, text list), each with a download link for the person. The files can be "
+         "large.",
          path=lambda a: f"{V1}/collection/exports"),
     Tool("list_shared_with_me", "Collections and decks other people have shared with this person.",
          path=lambda a: f"{V1}/shared"),
@@ -685,7 +682,7 @@ TOOLS = [
     Tool("list_my_shares", "What this person has shared (their collection or a deck), with whom, and whether the "
          "invite was accepted. Creating a share is done by the person in the Vault, not by an assistant.",
          dict(PAGING), path=lambda a: f"{V1}/shares", query=("limit", "cursor")),
-    Tool("accept_share", "Accept an invite link someone sent this person (the token after ?invite= in the link), so "
+    Tool("accept_share", "Accepts an invite link someone sent this person (the token after ?invite= in the link), so "
          "their collection or deck appears under list_shared_with_me.",
          {"invite_token": {"type": "string", "minLength": 8, "maxLength": 200, "description": "The invite token"}}, ["invite_token"],
          method="POST", path=lambda a: f"{V1}/shares/accept", body=lambda a: {"token": a["invite_token"]}, write=True),
@@ -730,7 +727,7 @@ DECK_ANALYSIS = {"deck_stats", "simulate_draws", "deck_legality", "find_upgrades
 for _tool in TOOLS:
     if _tool.name in DECK_ANALYSIS:  # #216: the answer says which deck it is about, before any card
         _tool.description += (" The answer's `deck` block names the deck (its name when saved, format, commander(s), card "
-                              "count, colour identity): say which deck this is first.")
+                              "count, colour identity).")
 for _tool in TOOLS:
     if not _tool.provenance:
         _tool.provenance = ("scryfall",) if _tool.name in SCRYFALL_DATA else ("archidekt",) if _tool.name == "get_archidekt_deck" else ()

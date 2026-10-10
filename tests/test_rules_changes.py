@@ -293,7 +293,10 @@ def test_an_agent_reads_the_brief_through_the_mcp_tool_and_it_is_read_only(agent
     read = make_token(agent)
     tools = {t["name"]: t for t in rpc(bot, "tools/list", token=read).json()["result"]["tools"]}
     assert tools["rules_changes"]["annotations"]["readOnlyHint"] is True
-    assert "Say which two editions you compared" in tools["rules_changes"]["description"]
+    assert "The answer names the two editions compared" in " ".join(tools["rules_changes"]["description"].split())
+    # #241: the order to say them is in the instructions every host reads, not in the description
+    from vault.api import mcp
+    assert "say which two editions you compared" in " ".join(mcp.INSTRUCTIONS.split())
     result = call_tool(bot, read, "rules_changes", limit=3)
     assert result["isError"] is False, result["content"][0]["text"]
     body = result["structuredContent"]

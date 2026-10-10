@@ -52,7 +52,7 @@ checked plan. Nothing in this flow changes the person's collection or decks.
    - Stop: never seat an expert for another format; say when there is no expert for the format.
 3. **Facts first.**
    - Calls: `deck_stats`, `simulate_draws` (how the curve plays), `deck_legality`, `find_combos` with `include_possible_loops` true,
-     `check_decklist`, `get_deck_overlap` (only if the person has other saved decks).
+     `check_decklist`, `get_deck_overlap` (only if the person has other saved decks; say which allocation rule it used).
    - Show: the shared facts once, with their names and numbers exactly as returned; give the same facts to every member. Spellbook's
      list and, apart from it, `possible_loops` (the Vault's reading of the card text, labelled as the Vault's and not Spellbook's).
    - Stop: if a tool fails or the catalog is not loaded, say so; do not fill the gap from memory.

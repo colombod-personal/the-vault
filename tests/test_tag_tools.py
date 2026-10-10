@@ -42,7 +42,9 @@ def test_the_tools_are_listed_classified_and_the_write_ones_are_marked(stocked, 
     for name in ("untag_cards", "delete_tag"):
         assert tools[name]["annotations"]["destructiveHint"] is True
     assert "tag" in tools["search_cards"]["inputSchema"]["properties"]
-    assert "never present them as the person's own" in " ".join(tools["tag_cards"]["description"].split())
+    assert "recorded as written by this app, not by the person" in " ".join(tools["tag_cards"]["description"].split())
+    # #241: the order not to present them as the person's own is in the instructions, not in the description
+    assert "never present them as the person's own" in " ".join(mcp.INSTRUCTIONS.split())
 
 
 def test_an_assistant_tags_cards_lists_and_searches_them_and_its_app_is_named(stocked, bot):
