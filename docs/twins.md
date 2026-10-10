@@ -36,7 +36,9 @@ Microsoft's `amplifier-bundle-digital-twin-universe`.
   that exists answers 200 with `Content-Length`, `Last-Modified`, a quoted `ETag`, `Accept-Ranges: bytes` and `Content-Type: text/csv` (the body is
   gzip); one that does not exist answers **403**, not 404, so "not published" and "withdrawn" are told apart by a HEAD per set code. The twin
   also serves a truncated or corrupt body and a `Content-Length` larger than any real file (`publish_raw`), so the job's refusals are tested without
-  such a file existing. `tests/conformance` checks the two answers with one HEAD each; the tests never reach the host.
+  such a file existing. `tests/conformance` checks the two answers with one HEAD each; the tests never reach the host. The rolling window
+  (#417) also reads Scryfall's list of sets (one request, `GET /sets`: code, set type, release day), which the Scryfall twin builds from the cards
+  it holds (`add_card(..., set_type=..., released_at=...)`); a conformance check compares its shape with the real list's.
 - **Archidekt is never contacted by a schedule**: the live Archidekt conformance checks run by hand only
   (`TWINS_LIVE_ARCHIDEKT=1`), fetch one named public deck and never search (docs/compliance.md).
 - **Archidekt decks are as heavy as real ones**: the twin sends every field of the real API (captured 2026-10-06 in

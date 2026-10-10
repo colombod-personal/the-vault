@@ -9,8 +9,13 @@ only per-card counts are kept (``limited_game_stats``, ``limited_pick_stats``, `
 Last-Modified are already stored is not read again. Nothing loads unless ``limited_17lands`` is named in ``--sources`` or the repository
 variable ``CATALOG_SOURCES`` (docs/compliance.md "Source gate"); the real run is the GitHub Action ``sync-limited``, never a laptop.
 
-Slice 1 reads the sets and formats it is given (default: ``DEFAULT_SETS`` and ``DEFAULT_FORMATS``); finding the eight most recent sets
-by asking S3 about each Scryfall set code, the 14-day wait after a release and deleting sets that leave the window are slice 2.
+**Which sets** (#417, docs/limited-data-design.md sections 4 and 14). With no ``--sets`` the job works out the rolling window itself: from
+Scryfall's list of sets (expansion, core, masters and draft-innovation sets released in the last 30 months) it asks the 17Lands bucket with
+HEAD about the upper-case code of each, newest first, and keeps, per format, the 8 newest sets that have a game file
+(``jobs/limited_window.py``). A set is not read until 14 days after its ``released_at``. A stored set that is no longer in the window is
+deleted, with its ``limited_sources`` rows, in the same run. ``--sets`` (a manual first fill or a re-read) names the sets instead: no
+discovery, no wait, nothing deleted. **Formats** default to PremierDraft and TradDraft. The job refuses to run when the 17Lands terms were
+last read more than 120 days ago (``jobs/limited_terms.py``, ``docs/compliance.md``).
 
 The limits are ours, because 17Lands publishes none for the dumps: one download at a time, the descriptive User-Agent of the other jobs,
 no file over 400 MB, at most 800 MB a run (the rest waits for the next), three retries only for connection errors, 429 and 5xx.
@@ -27,11 +32,13 @@ import os
 import re
 import time
 import zlib
+from datetime import date
 from email.utils import parsedate_to_datetime
 
 import httpx
+from mtg_toolkits.scryfall import ApiError, ScryfallClient
 
-from jobs import db_budget, sync_catalog
+from jobs import db_budget, limited_terms, limited_window, sync_catalog
 from vault import limited_data, limited_stats, outbound
 from vault.config import Settings
 from vault.db import Database
@@ -39,8 +46,7 @@ from vault.db import Database
 HOST = "17lands-public.s3.amazonaws.com"
 SOURCE = limited_data.SOURCE_NAME
 USER_AGENT = sync_catalog.USER_AGENT
-DEFAULT_SETS = ("HOB",)  # slice 1: one set, the newest with both files on 2026-10-09
-DEFAULT_FORMATS = ("PremierDraft",)
+DEFAULT_FORMATS = ("PremierDraft", "TradDraft")  # the two formats with a game and a draft file for every recent set
 MAX_FILE_BYTES = 400_000_000  # today's largest (FIN PremierDraft draft data) is 215.7 MB; a file far larger means a changed format
 MAX_RUN_BYTES = 800_000_000  # downloaded per run; the rest waits for the next run
 RETRY_WAITS = (2, 8, 30)  # seconds, only for connection errors, 429 and 5xx; Retry-After wins
@@ -147,9 +153,22 @@ def reduce(chunks, kind: str, set_code: str) -> limited_stats.FileResult:
             counter = (limited_stats.GameCounter if kind == "game" else limited_stats.PickCounter)(header, set_code)
             for row in reader:
                 counter.feed(row)
+            inflated = unzipped.tell()  # bytes after gunzip (the design's open question: nothing is kept, only counted)
     except (EOFError, gzip.BadGzipFile, zlib.error, UnicodeDecodeError, csv.Error) as exc:
         raise limited_stats.FileError(f"the download is truncated or corrupt ({type(exc).__name__}: {exc})") from exc
-    return counter.result()
+    result = counter.result()
+    result.notes = [*header_facts(header), f"{inflated} bytes after gunzip", *result.notes]
+    return result
+
+
+CARD_PREFIXES = ("deck_", "sideboard_", "opening_hand_", "drawn_", "tutored_", "pack_card_", "pool_")
+
+
+def header_facts(header: list[str]) -> list[str]:
+    """What the run reports about a file's header: its width and the names of the columns that are not per-card (never a value of
+    any row). The first real run (2026-10-09) did not print these; from now on every run does, so the next one settles the question."""
+    plain = [c for c in header if not c.startswith(CARD_PREFIXES)]
+    return [f"{len(header)} columns, {len(header) - len(plain)} of them per card", "other columns: " + ", ".join(plain[:80])]
 
 
 def _modified(response: httpx.Response):
@@ -159,34 +178,88 @@ def _modified(response: httpx.Response):
         return None
 
 
-def plan(client: httpx.Client, db, sets: list[str], formats: list[str]) -> list[dict]:
-    """HEAD every file asked for: what is published, how big, what version. Smallest first (the order they are read in)."""
+def discover(client: httpx.Client, db, scryfall_sets: list[dict], formats: list[str], today: date) -> dict:
+    """The rolling window (design sections 4 and 14): per format, the ``limited_window.WINDOW_SETS`` newest recent sets whose game
+    file exists. Scryfall's sets are asked about newest first, each with one HEAD per format, and the walk stops at the eighth; 403
+    means 17Lands has not published the file (yet), so the set is passed over. A set already stored whose game file is 403 now (a
+    withdrawn file) keeps its place and its rows, as in ``plan``. Returns ``{"window", "embargoed", "problems"}``; a HEAD that
+    failed is a problem (the window is then not certain, so nothing is deleted on its strength)."""
+    found, embargoed = limited_window.candidates(scryfall_sets, today)
+    window: dict[str, list[str]] = {fmt: [] for fmt in formats}
+    problems: list[str] = []
+    for fmt in formats:
+        for candidate in found:
+            if len(window[fmt]) >= limited_window.WINDOW_SETS:
+                break
+            url = file_url("game", candidate.code, fmt)
+            try:
+                head = _retrying(lambda url=url: client.head(url), f"HEAD {url}")
+            except FetchError as exc:
+                problems.append(f"{candidate.code} {fmt}: {exc}")
+                continue
+            if head.status_code == 200:
+                window[fmt].append(candidate.code)
+            elif head.status_code in (403, 404):
+                with db.sessions() as session:
+                    if limited_data.previous(session, candidate.code, fmt, "game"):
+                        window[fmt].append(candidate.code)
+            else:
+                problems.append(f"{candidate.code} {fmt}: HEAD answered {head.status_code}")
+    return {"window": window, "embargoed": {code: day.isoformat() for code, day in sorted(embargoed.items())}, "problems": problems}
+
+
+def remove_left(db, leaving: list[tuple[str, str]]) -> list[dict]:
+    """Delete the sets that left the window, with their ``limited_sources`` rows, in one transaction."""
+    removed = []
+    if leaving:
+        with db.sessions() as session:
+            for set_code, fmt in leaving:
+                removed.append({"set": set_code, "format": fmt, **limited_data.delete_set(session, set_code, fmt)})
+            limited_data.record_catalog_source(session)
+            session.commit()
+    return removed
+
+
+def scryfall_sets(settings, transport: httpx.BaseTransport | None) -> list[dict]:
+    """Scryfall's list of sets (one request) through the same rate-limited client as the other jobs."""
+    http = httpx.Client(transport=transport or outbound.transport(settings), timeout=httpx.Timeout(60), follow_redirects=True)
+    try:
+        with ScryfallClient(user_agent=USER_AGENT, client=http) as sf:
+            return sf.sets()
+    except (ApiError, httpx.HTTPError) as exc:
+        raise SystemExit(f"sync_limited: Scryfall's list of sets could not be read ({type(exc).__name__}: {exc}); no set was chosen") from exc
+    finally:
+        http.close()
+
+
+def plan(client: httpx.Client, db, pairs: list[tuple[str, str]]) -> list[dict]:
+    """HEAD every file asked for (a game and a draft file per ``(set, format)``): what is published, how big, what version. Smallest
+    first (the order they are read in)."""
     items = []
-    for set_code in sets:
-        for fmt in formats:
-            for kind in ("game", "draft"):
-                url = file_url(kind, set_code, fmt)
-                item = {"set": set_code, "format": fmt, "kind": kind, "url": url}
-                try:
-                    head = _retrying(lambda url=url: client.head(url), f"HEAD {url}")
-                except FetchError as exc:
-                    item |= {"status": "failed", "reason": str(exc)}
-                    items.append(item)
-                    continue
-                if head.status_code in (403, 404):  # S3 answers 403 for a file that is not there
-                    with db.sessions() as session:
-                        stored = limited_data.previous(session, set_code, fmt, kind)
-                    item |= {"status": "no_longer_published" if stored else "not_published",
-                             "note": "the stored rows are kept" if stored else "17Lands has not published this file"}
-                elif head.status_code != 200:
-                    item |= {"status": "failed", "reason": f"HEAD answered {head.status_code}"}
-                else:
-                    try:
-                        length = int(head.headers["content-length"])
-                    except (KeyError, ValueError):
-                        length = None
-                    item |= {"status": "found", "length": length, "etag": head.headers.get("etag"), "modified": _modified(head)}
+    for set_code, fmt in pairs:
+        for kind in ("game", "draft"):
+            url = file_url(kind, set_code, fmt)
+            item = {"set": set_code, "format": fmt, "kind": kind, "url": url}
+            try:
+                head = _retrying(lambda url=url: client.head(url), f"HEAD {url}")
+            except FetchError as exc:
+                item |= {"status": "failed", "reason": str(exc)}
                 items.append(item)
+                continue
+            if head.status_code in (403, 404):  # S3 answers 403 for a file that is not there
+                with db.sessions() as session:
+                    stored = limited_data.previous(session, set_code, fmt, kind)
+                item |= {"status": "no_longer_published" if stored else "not_published",
+                         "note": "the stored rows are kept" if stored else "17Lands has not published this file"}
+            elif head.status_code != 200:
+                item |= {"status": "failed", "reason": f"HEAD answered {head.status_code}"}
+            else:
+                try:
+                    length = int(head.headers["content-length"])
+                except (KeyError, ValueError):
+                    length = None
+                item |= {"status": "found", "length": length, "etag": head.headers.get("etag"), "modified": _modified(head)}
+            items.append(item)
     return sorted(items, key=lambda i: (i.get("length") or 0, i["set"], i["format"], i["kind"]))
 
 
@@ -225,8 +298,8 @@ def _read_once(client: httpx.Client, item: dict, budget: Budget) -> tuple[limite
         response.close()
 
 
-def run(client: httpx.Client, db, sets: list[str], formats: list[str], *, force: bool = False) -> list[dict]:
-    items = plan(client, db, sets, formats)
+def run(client: httpx.Client, db, pairs: list[tuple[str, str]], *, force: bool = False) -> list[dict]:
+    items = plan(client, db, pairs)
     budget = Budget(MAX_RUN_BYTES)
     index = None
     for item in items:
@@ -245,6 +318,7 @@ def run(client: httpx.Client, db, sets: list[str], formats: list[str], *, force:
             item |= {"status": "deferred", "note": f"{budget.used} of {MAX_RUN_BYTES} bytes were read this run; the next run takes {label}"}
             continue
         print(f"reading {label} ({item['length']} bytes)", flush=True)
+        started = time.monotonic()
         try:
             result, got = read_file(client, item, budget)
             always, unless = limited_stats.sanity_problems(result, stored)
@@ -263,7 +337,7 @@ def run(client: httpx.Client, db, sets: list[str], formats: list[str], *, force:
                                                 last_modified=got["modified"] or item["modified"], content_length=got["length"] or item["length"],
                                                 index=index)
             session.commit()
-        item |= {"status": "loaded", **written}
+        item |= {"status": "loaded", **written, "seconds": round(time.monotonic() - started, 1), "notes": result.notes}
     for item in items:
         item.pop("modified", None)
     return items
@@ -274,7 +348,8 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
     parser.add_argument("--sources", default=os.environ.get("CATALOG_SOURCES", ""),
                         help=f"comma-separated (default: $CATALOG_SOURCES, else none); this job loads {SOURCE}")
     parser.add_argument("--sets", default=os.environ.get("LIMITED_SETS", ""),
-                        help=f"17Lands set codes, comma-separated (default: $LIMITED_SETS, else {','.join(DEFAULT_SETS)})")
+                        help="17Lands set codes, comma-separated, to read exactly (no discovery, no wait, nothing deleted); "
+                             "default: $LIMITED_SETS, else the rolling window of the 8 newest sets with a game file")
     parser.add_argument("--formats", default=os.environ.get("LIMITED_FORMATS", ""),
                         help=f"from {', '.join(limited_stats.FORMATS)} (default: $LIMITED_FORMATS, else {','.join(DEFAULT_FORMATS)})")
     parser.add_argument("--force", action="store_true", help="read the files again even when this version is already loaded")
@@ -288,12 +363,17 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
     if SOURCE not in named:
         print(json.dumps({"enabled": [], "note": f"{SOURCE} is not enabled; see docs/compliance.md"}))
         return {}
-    sets = [s.strip().upper() for s in (args.sets or ",".join(DEFAULT_SETS)).split(",") if s.strip()]
+    named_sets = bool(args.sets.strip())
+    sets = [s.strip().upper() for s in args.sets.split(",") if s.strip()]
     formats = [s.strip() for s in (args.formats or ",".join(DEFAULT_FORMATS)).split(",") if s.strip()]
-    if not sets or [s for s in sets if not SET_CODE.match(s)]:
+    if named_sets and (not sets or [s for s in sets if not SET_CODE.match(s)]):
         parser.error("--sets takes 17Lands set codes such as HOB (letters and digits)")
     if not formats or [f for f in formats if f not in limited_stats.FORMATS]:
         parser.error(f"--formats takes {', '.join(limited_stats.FORMATS)}")
+    try:  # before anything is asked of anyone: the terms must have been read in the last 120 days (jobs/limited_terms.py)
+        terms_age = limited_terms.check(now=limited_terms.today())
+    except (limited_terms.TermsStale, OSError) as exc:
+        raise SystemExit(f"sync_limited: refusing to run: {exc}") from exc
 
     settings = Settings()
     db = Database(settings.database_url)
@@ -301,17 +381,34 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
     with db.sessions() as session:
         db_budget.check(session, refuse=True, stage="before the Limited load")
     headers = {"User-Agent": USER_AGENT, "Accept": "*/*"}
+    found: dict = {"window": {}, "embargoed": {}, "problems": []}
+    removed: list[dict] = []
     with httpx.Client(transport=transport or outbound.transport(settings), headers=headers, timeout=httpx.Timeout(60, read=300),
                       follow_redirects=False) as client:
-        items = run(client, db, sets, formats, force=args.force)
-    report = {"sets": sets, "formats": formats, "files": [{k: v for k, v in i.items() if k not in ("url", "etag")} for i in items]}
+        if named_sets:
+            pairs = [(code, fmt) for code in sets for fmt in formats]
+        else:
+            found = discover(client, db, scryfall_sets(settings, transport), formats, limited_terms.today())
+            pairs = [(code, fmt) for fmt in formats for code in found["window"][fmt]]
+            if not found["problems"]:  # a window that could not be fully worked out is no reason to delete anything
+                with db.sessions() as session:
+                    stored = limited_data.stored_pairs(session)
+                removed = remove_left(db, limited_window.leaving(
+                    stored, found["window"], {c: date.fromisoformat(d) for c, d in found["embargoed"].items()}, formats))
+        items = run(client, db, pairs, force=args.force)
+    report = {"sets": sorted({code for code, _ in pairs}), "formats": formats, "terms_read_days_ago": terms_age,
+              "files": [{k: v for k, v in i.items() if k not in ("url", "etag")} for i in items]}
+    if not named_sets:
+        report |= {"window": found["window"], "waiting_after_release": found["embargoed"], "removed": removed,
+                   "discovery_problems": found["problems"]}
     print(json.dumps(report, indent=2, default=str))  # before the last check, which fails the job at 70% (after its work)
     with db.sessions() as session:
         db_budget.check(session, stage="after the Limited load", fail_at_warn=True)
     failed = [i for i in items if i["status"] == "failed"]
-    if failed:
-        raise SystemExit("sync_limited: " + str(len(failed)) + " file(s) failed: "
-                         + "; ".join(f"{i['set']} {i['format']} {i['kind']}: {i['reason']}" for i in failed))
+    if failed or found["problems"]:
+        raise SystemExit("sync_limited: " + "; ".join(
+            ([f"{len(failed)} file(s) failed: " + "; ".join(f"{i['set']} {i['format']} {i['kind']}: {i['reason']}" for i in failed)] if failed else [])
+            + ([f"the window could not be fully worked out, nothing was deleted: {'; '.join(found['problems'])}"] if found["problems"] else [])))
     return report
 
 

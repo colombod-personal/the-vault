@@ -1,0 +1,33 @@
+name: limited-terms-monthly
+# On the 1st of every month: open a reminder issue to re-read the 17Lands pages and the licence sentence the Limited statistics rely on
+# (jobs/limited_terms.py, docs/compliance.md "17Lands", #417). The pages are drawn by script, so only a person can read them. The issue says
+# how old the "17Lands terms read on" date in docs/compliance.md is; the sync-limited job refuses to run once it is more than 120 days
+# old. This workflow holds no secret: only `issues: write` and the run's own token (the same shape as neon-monthly-check).
+on:
+  schedule:
+    - cron: "41 7 1 * *"
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  remind:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19 (#180); move deliberately
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.12"
+      - run: pip install --require-hashes --no-deps -r jobs/requirements-ops.txt  # httpx, hash-checked
+      - name: Open the monthly terms re-read issue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TERMS_REMINDER: "yes"
+        run: python -m jobs.budget_alert --from-env

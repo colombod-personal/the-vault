@@ -204,6 +204,21 @@ def test_scryfall_ruling_and_tag_shapes(real, twin):
     assert missing(r_tag["taggings"][0], ["oracle_id", "weight"]) == []
 
 
+def test_scryfall_sets_list_carries_what_the_limited_window_reads(real, twin):
+    """jobs/sync_limited.py works out its rolling window from the list of sets in ONE request (#417): the code, the set type and the
+    day of release of every set, in a list object without paging. The four set types it keeps must exist in the real list."""
+    from jobs import limited_window
+
+    for who, client in (("real", real), ("twin", twin)):
+        body = client.get("https://api.scryfall.com/sets").json()
+        assert body["object"] == "list" and body["has_more"] is False and len(body["data"]) > 0, who
+        assert all(not missing(entry, ["code", "set_type", "released_at", "name"]) for entry in body["data"][:50]), who
+        if who == "real":
+            assert limited_window.SET_TYPES <= {entry["set_type"] for entry in body["data"]}, "a set type the window keeps no longer exists"
+            found, _ = limited_window.candidates(body["data"], __import__("datetime").date.today())
+            assert len(found) >= limited_window.WINDOW_SETS, "fewer than 8 recent candidate sets: the window rule needs a look"
+
+
 def test_scryfall_requires_headers(real, twin):
     """Scryfall's published rules require a User-Agent and an Accept header, so the twin refuses requests without
     them: that is what keeps the Vault's own client honest. The real API stopped rejecting such requests (it

@@ -89,6 +89,8 @@ vault/privacy.py      GDPR data export (ZIP) and account erasure (purge_user)
 vault/outbound.py     sends outbound calls to the twin universe in local development (VAULT_TWINS_URL)
 jobs/sync_prices.py   CLI run by .github/workflows/sync-prices.yml
 jobs/sync_limited.py  17Lands per-card statistics (streams their files, keeps counts only), run by .github/workflows/sync-limited.yml
+jobs/limited_window.py  which sets are in the rolling window of 8 (pure rules);  jobs/limited_terms.py  the 120-day terms re-read the job checks
+                      and the text of the monthly reminder issue (.github/workflows/limited-terms-monthly.yml)
 vault/limited_stats.py, vault/limited_data.py  the sample-size rules, the counters, and the Limited statistics answer (get_limited_card_stats)
 twins/                digital twins of every outside service, for tests and offline development
 public/               front end (React, JSX compiled into public/app.bundle.js by web/build.mjs)

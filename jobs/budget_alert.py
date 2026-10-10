@@ -1,7 +1,7 @@
 """Open or update the GitHub issue that says a Neon limit is near (#64), from a workflow, with the workflow's own token.
 
     GITHUB_TOKEN=... GITHUB_REPOSITORY=owner/repo ALERT_KIND=storage ALERT_MESSAGE="..." python -m jobs.budget_alert
-    python -m jobs.budget_alert --from-env        # every alert the workflow collected (STORAGE_ALERT, USAGE_ALERT, MONTHLY)
+    python -m jobs.budget_alert --from-env        # every alert the workflow collected (STORAGE_ALERT, USAGE_ALERT, MONTHLY, TERMS_REMINDER)
 
 How the pieces fit (docs/catalog-design.md, "Neon budget"):
 
@@ -13,6 +13,8 @@ How the pieces fit (docs/catalog-design.md, "Neon budget"):
    figure moved by five points or more. Nothing is ever closed here: closing an alert is a person's decision.
 3. ``.github/workflows/neon-monthly-check.yml`` opens a reminder issue on the 1st of every month, for the things that cannot be
    read from the database or without an API key.
+4. ``.github/workflows/limited-terms-monthly.yml`` does the same for the 17Lands terms re-read (#417): kind ``limited-terms``, whose
+   text and date come from ``jobs/limited_terms.py`` and ``docs/compliance.md``.
 
 There are no secrets in this code: the token comes from the environment and is only sent to ``api.github.com``.
 """
@@ -27,6 +29,8 @@ import sys
 
 import httpx
 
+from jobs import limited_terms
+
 API = "https://api.github.com"
 USER_AGENT = "the-vault-budget-guard/0.1 (+https://github.com/colombod-personal/the-vault)"
 LABEL = "neon-budget"
@@ -35,7 +39,9 @@ TITLES = {
     "storage": "Neon storage is at 70% or more of the free plan (budget guard)",
     "usage": "Neon compute or network use is at 70% or more of the free plan this month (budget guard)",
     "monthly-check": "Neon monthly check: compute hours, network transfer and restore history",
+    "limited-terms": "17Lands terms re-read: the data set pages and the licence sentence (monthly reminder)",
 }
+LABELS = {"limited-terms": "area:data"}  # every other kind uses LABEL
 MONTHLY_BODY = """It is the first of the month. The budget guard watches database **storage** on every job run and, when a Neon API key is
 set (`NEON_API_KEY` secret and `NEON_PROJECT_ID` variable in the `vercel-production` environment), compute hours and network transfer
 too. If no key is set, or to double-check, read these in the Neon console (Billing, Usage) and write them below:
@@ -78,8 +84,8 @@ class GitHub:
                 return None
         return None
 
-    def create(self, title: str, body: str) -> dict:
-        res = self.client.post(f"/repos/{self.repo}/issues", json={"title": title, "body": body, "labels": [LABEL]})
+    def create(self, title: str, body: str, label: str = LABEL) -> dict:
+        res = self.client.post(f"/repos/{self.repo}/issues", json={"title": title, "body": body, "labels": [label]})
         if res.status_code == 422:  # the label could not be used: the alert matters more than its label
             res = self.client.post(f"/repos/{self.repo}/issues", json={"title": title, "body": body})
         res.raise_for_status()
@@ -102,19 +108,19 @@ def upsert_issue(github: GitHub, kind: str, message: str) -> dict:
     title = TITLES[kind]
     used = percent_in(message)
     marker = f"<!-- vault-budget-alert:{kind}" + (f" used={used}" if used is not None else "") + " -->"
-    detail = MONTHLY_BODY if kind == "monthly-check" else (
+    detail = MONTHLY_BODY if kind == "monthly-check" else limited_terms.reminder_body() if kind == "limited-terms" else (
         f"{message}\n\nThe budget guard failed the job on purpose so that this is noticed. What to do: `docs/catalog-design.md`, "
         "\"Neon budget\" (free space, thin or drop data, or move plan). This issue is updated while the figure stays above 70%; "
         "close it when it is below.")
     body = f"{marker}\n{detail}"
     existing = github.open_issue_with(kind)
     if existing is None:
-        made = github.create(title, body)
+        made = github.create(title, body, LABELS.get(kind, LABEL))
         return {"action": "created", "number": made["number"], "url": made.get("html_url")}
     recorded = re.search(r"<!-- vault-budget-alert:\S+ used=(\d+)", existing.get("body") or "")
     was = int(recorded.group(1)) if recorded else None
     github.update(existing["number"], body)
-    if kind == "monthly-check":
+    if kind in ("monthly-check", "limited-terms"):
         github.comment(existing["number"], "A new month has started and the previous check is still open: please do it now.")
     elif used is not None and (was is None or abs(used - was) >= COMMENT_EVERY_POINTS):
         github.comment(existing["number"], message)
@@ -123,13 +129,14 @@ def upsert_issue(github: GitHub, kind: str, message: str) -> dict:
 
 def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = None) -> list[dict]:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--from-env", action="store_true", help="STORAGE_ALERT, USAGE_ALERT and MONTHLY (non-empty ones)")
+    parser.add_argument("--from-env", action="store_true", help="STORAGE_ALERT, USAGE_ALERT, MONTHLY and TERMS_REMINDER (non-empty ones)")
     args = parser.parse_args(argv)
     token, repo = os.environ.get("GITHUB_TOKEN", ""), os.environ.get("GITHUB_REPOSITORY", "")
     if not token or not repo:
         raise SystemExit("budget_alert: GITHUB_TOKEN and GITHUB_REPOSITORY are required (a workflow provides both)")
     if args.from_env:
-        wanted = [(k, os.environ.get(v, "")) for k, v in (("storage", "STORAGE_ALERT"), ("usage", "USAGE_ALERT"), ("monthly-check", "MONTHLY"))]
+        wanted = [(k, os.environ.get(v, "")) for k, v in (("storage", "STORAGE_ALERT"), ("usage", "USAGE_ALERT"), ("monthly-check", "MONTHLY"),
+                                                          ("limited-terms", "TERMS_REMINDER"))]
         wanted = [(k, m) for k, m in wanted if m]
     else:
         wanted = [(os.environ.get("ALERT_KIND", ""), os.environ.get("ALERT_MESSAGE", "") or "monthly")]

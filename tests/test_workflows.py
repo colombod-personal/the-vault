@@ -35,7 +35,7 @@ def load(path):
 # The only jobs that may write issues (#64: the budget guard opens or updates a GitHub issue, which needs `issues: write`). Each one
 # holds no secret and no environment (test_the_issue_writers_hold_nothing_else): a read-only token everywhere else.
 ISSUE_WRITERS = {("sync-prices.yml", "alert"), ("sync-catalog.yml", "alert"), ("sync-limited.yml", "alert"), ("neon-monthly-check.yml", "remind"),
-                 ("issue-progress.yml", "progress")}  # writes the Progress block of the issues a PR names (AGENTS.md section 8)
+                 ("limited-terms-monthly.yml", "remind"), ("issue-progress.yml", "progress")}  # writes the Progress block of the issues a PR names (AGENTS.md section 8)
 
 
 @pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
@@ -318,6 +318,8 @@ def test_the_limited_job_runs_weekly_or_by_hand_only_from_main_and_stays_off_unt
     load_step = next(s for s in job["steps"] if s.get("id") == "load")
     assert load_step["env"]["CATALOG_SOURCES"] == "${{ vars.CATALOG_SOURCES }}"
     assert set(load_step["env"]) == {"CATALOG_SOURCES", "LIMITED_SETS", "LIMITED_FORMATS", "LIMITED_FORCE"}
+    inputs = wf["on"]["workflow_dispatch"]["inputs"]  # #417: the weekly run needs none of them (the job works the rolling window out itself)
+    assert all(inputs[k]["required"] is False and inputs[k]["default"] in ("", False) for k in inputs)
     text = (ROOT / ".github" / "workflows" / "sync-limited.yml").read_text(encoding="utf-8")
     assert "gh variable" not in text and "CATALOG_SOURCES=" not in text and "GITHUB_ENV" in text  # nothing here sets the variable
 
@@ -326,6 +328,16 @@ def test_a_monthly_reminder_issue_covers_what_the_guard_cannot_read():
     wf = load(ROOT / ".github" / "workflows" / "neon-monthly-check.yml")
     assert wf["on"]["schedule"] == [{"cron": "23 7 1 * *"}]  # the 1st of every month
     assert "workflow_dispatch" in wf["on"]
+
+
+def test_a_monthly_reminder_issue_asks_for_the_17lands_terms_to_be_read_again():
+    """#417: the pages are drawn by script, so only a person can re-read them; the job itself refuses after 120 days
+    (tests/test_limited_window.py). The workflow holds no secret and runs only from main (test_the_issue_writers_hold_nothing_else...)."""
+    wf = load(ROOT / ".github" / "workflows" / "limited-terms-monthly.yml")
+    assert wf["on"]["schedule"] == [{"cron": "41 7 1 * *"}] and "workflow_dispatch" in wf["on"]
+    step = next(s for s in wf["jobs"]["remind"]["steps"] if "run" in s and "jobs.budget_alert" in s["run"])
+    assert step["env"]["TERMS_REMINDER"] == "yes" and step["run"] == "python -m jobs.budget_alert --from-env"
+    assert any(s.get("uses", "").startswith("actions/checkout") for s in wf["jobs"]["remind"]["steps"])  # docs/compliance.md holds the date
 
 
 def test_no_scheduled_job_contacts_archidekt():
