@@ -114,6 +114,14 @@ function vaultHashFor(route) {
 }
 const vaultUrlFor = (route) => location.pathname + location.search + vaultHashFor(route);
 
+// The landing page (#437) is plain HTML in index.html, shown to a visitor of / who is not signed in. Its head script decides first,
+// before this bundle loads, from the server's readable account marker cookie (vault/app.py, account_marker; never a credential), and
+// sets window.VAULT_LANDING_HOME (the address was the bare /, read before the invite and notice parameters are taken off). Here the
+// server's answer settles it: signed in opens the app; signed out at / shows the landing page, and its "Sign in" (#/signin) shows the
+// sign-in screen.
+const vaultAtLandingHome = () => !location.search && !/^#\/./.test(location.hash);
+const vaultShowLanding = (show) => document.documentElement.classList.toggle('in-app', !show);
+
 // useTweaks, TweaksPanel, TweakSection, … are globals from tweaks-panel.jsx (same bundle).
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -137,6 +145,7 @@ function App() {
   const [refreshProgress, setRefreshProgress] = useStateApp(null);
   const [refreshError, setRefreshError] = useStateApp(null);
   const [auth, setAuth] = useStateApp('checking'); // 'checking' | 'signed-out' | 'signed-in'
+  const [landing, setLanding] = useStateApp(() => !!window.VAULT_LANDING_HOME); // signed out at the bare /: the landing page
   const [me, setMe] = useStateApp(null);
   const [notice, setNotice] = useStateApp(VAULT_START_NOTICE);
   const [accountOpen, setAccountOpen] = useStateApp(false);
@@ -209,21 +218,32 @@ function App() {
   const openCard = (c) => { setDrawerCard(c); openOverlay(); };
   const openAccount = () => { setAccountOpen(true); openOverlay(); };
   useEffectApp(() => {
-    history.replaceState({ route }, '', vaultUrlFor(route));
+    // At the bare / the address stays as it is, so a reload (or Back from the sign-in screen) shows the landing page again.
+    history.replaceState({ route }, '', window.VAULT_LANDING_HOME ? location.href : vaultUrlFor(route));
     const onPop = (e) => {
       const s = e.state || {};
       if (!s.overlay) { setDrawerCard(null); setAccountOpen(false); }
       setRouteState(s.route || vaultRouteFromHash(t.landing || 'dashboard'));
+      setLanding(vaultAtLandingHome());
     };
+    const onHash = () => setLanding(vaultAtLandingHome());  // "Sign in" (#/signin) and the page's own anchors (#demo)
     window.addEventListener('popstate', onPop);
+    window.addEventListener('hashchange', onHash);
     // Back from a provider's page after "Confirm it's you" (views/account.jsx): open Account where the person was. Here, after the
     // history entry above is set, so the overlay entry openAccount() pushes survives and Back closes Account instead of leaving the app.
     try {
       const back = JSON.parse(sessionStorage.getItem('vault_confirm_return') || 'null');
       if (back && Date.now() - back.at < 15 * 60 * 1000) openAccount(); else sessionStorage.removeItem('vault_confirm_return');
     } catch {}
-    return () => window.removeEventListener('popstate', onPop);
+    return () => { window.removeEventListener('popstate', onPop); window.removeEventListener('hashchange', onHash); };
   }, []);
+
+  // The landing page or the app (#437): decided by the server's answer, not by the hint the head script used.
+  useEffectApp(() => {
+    if (auth === 'signed-in') { vaultShowLanding(false); document.title = 'The Vault'; }
+    else if (auth === 'signed-out') vaultShowLanding(landing);
+    else if (!landing) vaultShowLanding(false);  // still asking (or the server cannot be reached) after "Sign in": show the app's own screen
+  }, [auth, landing]);
 
   // Apply theme tweaks to CSS variables
   useEffectApp(() => {
@@ -278,6 +298,7 @@ function App() {
       if (authRef.current !== 'signed-in') return;
       try { sessionStorage.setItem(window.SESSION_ENDED_KEY, '1'); } catch {}
       window.VaultApi.logout().catch(() => {});
+      setLanding(false);  // the sign-in screen, which says the session ended
       setAuth('signed-out');
     };
     window.addEventListener('vault:unauthorized', ended);
@@ -428,7 +449,7 @@ function App() {
     }
   };
 
-  if (auth === 'signed-out') return <SignIn />;
+  if (auth === 'signed-out') return landing ? null : <SignIn />;  // the landing page is index.html's own markup
   const nav = (view, extra = {}) => setRoute({ view, ...extra });
   const dismissWelcome = () => { welcomeDone(); setWelcome(false); };
   const welcomeBanner = welcome && !viewing && data && <Welcome hasCollection={data.meta.totalQty > 0} onDismiss={dismissWelcome} />;

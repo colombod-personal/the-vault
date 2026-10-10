@@ -148,6 +148,29 @@ PERPLEXITY_HOW = [
     "describe_external_tools and call_external_tool). Comet: not verified yet. The connector tile shows Perplexity's generic plug icon, "
     "because Perplexity has no icon field for custom connectors.",
 ]
+# Claude's prefilled Add custom connector link (#227, #437): opened on a real account on 2026-10-10. Claude first shows a red notice
+# because the connector came from an outside link; the pages say so, so nobody takes it for a fault.
+CLAUDE_LINK_CHECKED = "2026-10-10"
+CLAUDE_LINK_NOTICE = ("Claude first shows a red notice that the connector came from an external link. That is expected: check that the name "
+                      f"is The Vault and the address is {MCP_URL}, then press Continue.")
+APPROVE_NOTE = ("Then sign in on the Vault's page and approve. Tick <strong>Write</strong> only if the assistant may change your "
+                "collection and decks.")
+
+# The assistants the landing page lists (#437), with an honest status: "tested" (a real run on that app, recorded in
+# docs/ai-integration-testing.md), "guide" (a setup guide, not tested yet) or "cannot" (the app has no way to add the Vault).
+# tests/test_landing_page.py checks this list against the table "Which assistants are tested" in docs/ai-integration-testing.md.
+ASSISTANTS = [
+    {"name": "Claude (web)", "status": "tested", "note": ""},
+    {"name": "ChatGPT (web)", "status": "tested", "note": ""},
+    {"name": "Perplexity (web)", "status": "tested", "note": "Needs a plan with custom connectors (tested on Pro)."},
+    {"name": "Codex CLI", "status": "tested", "note": ""},
+    {"name": "Claude Code", "status": "guide", "note": ""},
+    {"name": "GitHub Copilot (CLI, VS Code)", "status": "guide", "note": ""},
+    {"name": "Cursor", "status": "guide", "note": ""},
+    {"name": "Comet", "status": "guide", "note": "Perplexity's browser."},
+    {"name": "Microsoft Copilot app", "status": "cannot", "note": "Personal accounts have no way to add a connector."},
+]
+ASSISTANT_STATUS = {"tested": "Tested", "guide": "Setup guide, not tested yet", "cannot": "Cannot add connectors"}
 TOKEN_ENV = "VAULT_TOKEN"
 # When the docs below were read for the blocks (docs/onboarding.md, "The connect page's blocks"). Nothing here has been
 # run in the harness itself, except Claude Code and the plugin validators: the page says what the docs say.
@@ -406,7 +429,7 @@ def _claude_ai_section() -> tuple[str, str]:
         ("ASSISTANT", "Tell the person this is the one step you cannot do yourself, because only they can use the Settings screen: add The Vault as a custom connector. Give them this link, which opens the Add custom connector dialog with the name and address filled in: "
                       f"{claude_connector_link()}"),
         ("PERSON", f"Open the link (or go to Settings, Connectors, Add custom connector, also shown as Customize, Connectors, and type the name The Vault and the address `{MCP_URL}`). Check that the address is exactly that and confirm Add. "
-                   "The link has not been tried on a real account yet (not verified yet); if it does not open the dialog, use the menu path. If a connector called The Vault is already there, do not add a second one: open it, check the address and reconnect it. Free plans may add one custom connector."),
+                   f"{CLAUDE_LINK_NOTICE} (The link was tried on a real account on {CLAUDE_LINK_CHECKED}; if it does not open the dialog, use the menu path.) If a connector called The Vault is already there, do not add a second one: open it, check the address and reconnect it. Free plans may add one custom connector."),
         ("PERSON", f"Choose Connect (or Sign in now) on the connector. In the browser sign in to The Vault with your Vault account and approve. {READ_ONLY_NOTE}"),
         ("PERSON", "Open a new chat and make sure The Vault is switched on for it (the connector toggle under the message box). A chat started before the connector was added may not list its tools. Then paste the same setup line again; "
                    "the assistant skips what is done and continues at the check."),
@@ -657,24 +680,25 @@ def setup_cards() -> str:
     return "\n  ".join(cards)
 
 
-def connect_page() -> str:
-    """public/connect.html, generated from the same constants as the plugin so it cannot go stale."""
+def manual_connector_cards(id_prefix: str = "") -> str:
+    """The add-by-hand cards for Claude, ChatGPT and Perplexity: one source for the Connect page and the landing page (#437),
+    so the two cannot drift. `id_prefix` keeps the ids apart on the landing page."""
     mcp_url = MCP_URL
+
     def app_card(app: str, title: str, steps: str, after_update: str) -> str:
         listing = LISTINGS.get(app)
         if listing:
             how = (f'<p><a class="btn primary" href="{listing}" target="_blank" rel="noopener">Add The Vault to {title}</a></p>'
-                   f'<p class="note">It opens The Vault in {title}\'s directory. Approve on the Vault\'s page when it asks '
-                   'you to sign in: tick <strong>Write</strong> if the assistant may edit your collection and decks.</p>')
+                   f"<p class=\"note\">It opens The Vault in {title}'s directory. {APPROVE_NOTE}</p>")
         elif OAUTH_READY:
             link = (f'<p><a class="btn sm" href="{html.escape(claude_connector_link(), quote=True)}" target="_blank" rel="noopener">'
-                    "Open Claude's Add custom connector dialog, filled in</a> (Claude's own link; not tried on a real account yet)</p>") if app == "claude" else ""
+                    "Open Claude's Add custom connector dialog, filled in</a></p>"
+                    f'<p class="note">{html.escape(CLAUDE_LINK_NOTICE)} Seen on a real account on {CLAUDE_LINK_CHECKED}.</p>') if app == "claude" else ""
             how = (f"<p>{steps}</p>" + link + _block(mcp_url) +
-                   '<p class="note">Then approve on the Vault\'s page: tick <strong>Write</strong> if the assistant may edit '
-                   f"your collection and decks. A listing in {title}'s directory is coming; this page will show the button.</p>")
+                   f"<p class=\"note\">{APPROVE_NOTE} A listing in {title}'s directory is coming; this page will show the button.</p>")
         else:
             how = "<p>Connecting by sign-in is not switched on yet. Use the developer options below, or check back here.</p>"
-        return (f'<div class="card" id="{app}"><h3>{title}</h3>{how}'
+        return (f'<div class="card" id="{id_prefix}{app}"><h3>{title}</h3>{how}'
                 f'<p class="note">After a Vault update that adds tools: {after_update}</p></div>')
 
     claude_card = app_card("claude", "Claude",
@@ -687,11 +711,15 @@ def connect_page() -> str:
                             "ChatGPT reads the tools only when the app is added: delete it (not only uninstall) and add it again.")
     perplexity_steps = "".join(f"<li>{html.escape(s)}</li>" for s in PERPLEXITY_HOW)
     perplexity_card = (
-        '<div class="card" id="perplexity"><h3>Perplexity</h3>'
+        f'<div class="card" id="{id_prefix}perplexity"><h3>Perplexity</h3>'
         f"<ol>{perplexity_steps}</ol>" + _block(mcp_url) +
         f'<p class="note">Seen in a real run on {PERPLEXITY_CHECKED} on a Pro plan; the documentation of Perplexity was not used. '
         "Comet (Perplexity's browser) was not looked at: not verified yet.</p></div>")
+    return "\n  ".join((claude_card, chatgpt_card, perplexity_card))
 
+
+def connect_page() -> str:
+    """public/connect.html, generated from the same constants as the plugin so it cannot go stale."""
     def harness_card(h: dict) -> str:
         steps = "".join(f"<p>{html.escape(s['label'])}</p>" + _block(s["code"]) for s in harness_steps(h))
         docs = ", ".join(f'<a href="{u}" target="_blank" rel="noopener">{html.escape(t)}</a>' for t, u in h["docs"])
@@ -744,9 +772,7 @@ def connect_page() -> str:
   <h2>1. In Claude, ChatGPT or Perplexity</h2>
   <p>No token needed: you sign in with your Vault account and choose what the assistant may do. You can disconnect it
     any time under <strong>Account → Connected apps</strong>.</p>
-  {claude_card}
-  {chatgpt_card}
-  {perplexity_card}
+  {manual_connector_cards()}
 
   <div class="card" id="use-it">
     <h3>Make your assistant use it</h3>
@@ -846,6 +872,51 @@ def connect_page() -> str:
 </body>
 </html>
 """
+
+
+# ---- the landing page (#437): the generated part of public/index.html -----------------------------------------------------
+# A visitor who is not signed in sees the landing page at /; most of it is hand-written in public/index.html. The list of
+# assistants and the add-by-hand cards are generated here, from ASSISTANTS and manual_connector_cards(), the same source as the
+# Connect page, so the two pages cannot say different things.
+LANDING_BEGIN = "<!-- landing:begin generated by scripts/build_plugin.py from ASSISTANTS and manual_connector_cards(): edit them there -->"
+LANDING_END = "<!-- landing:end -->"
+
+
+def works_with_html() -> str:
+    rows = []
+    for a in ASSISTANTS:
+        note = f'<span class="host-note">{html.escape(a["note"])}</span>' if a["note"] else ""
+        rows.append(f'<li class="host host-{a["status"]}"><span class="host-name">{html.escape(a["name"])}</span>'
+                    f'<span class="host-status">{ASSISTANT_STATUS[a["status"]]}</span>{note}</li>')
+    return "\n      ".join(rows)
+
+
+def landing_block() -> str:
+    return f"""      <section class="landing-section" id="works-with" aria-labelledby="works-with-title">
+        <h2 class="h2" id="works-with-title">Works with the assistant you have</h2>
+        <p class="landing-sub">Tested means we ran it for real in that app. The others have a setup guide that nobody has tried end to end yet.</p>
+        <ul class="landing-hosts">
+      {works_with_html()}
+        </ul>
+      </section>
+      <section class="landing-section" id="add-by-hand" aria-labelledby="add-by-hand-title">
+        <h2 class="h2" id="add-by-hand-title">Add it by hand, for now</h2>
+        <p class="landing-sub">A listing in the Claude and ChatGPT directories is coming. Until then, add the Vault as a custom connector:
+          it takes a minute, and the address is the same everywhere.</p>
+        <div class="landing-cards">
+  {manual_connector_cards("add-")}
+        </div>
+        <p class="landing-sub">Codex, Claude Code, GitHub Copilot or Cursor: <a href="/connect.html">the Connect page</a> has the steps for each.</p>
+      </section>
+"""
+
+
+def index_html() -> str:
+    """public/index.html with its generated landing part filled in (the rest is hand-written)."""
+    text = (ROOT / "public" / "index.html").read_text(encoding="utf-8").replace("\r\n", "\n")
+    head, rest = text.split(LANDING_BEGIN + "\n", 1)
+    _, tail = rest.split(LANDING_END, 1)
+    return head + LANDING_BEGIN + "\n" + landing_block() + "      " + LANDING_END + tail
 
 
 def load_agents() -> list[dict]:
@@ -1058,6 +1129,7 @@ def expected() -> dict[Path, str | Path]:
         ROOT / "README.md": sources.sync_block((ROOT / "README.md").read_text(encoding="utf-8").replace("\r\n", "\n")),
         MARKETPLACE: dump(MARKET),
         ROOT / "public" / "connect.html": connect_page(),
+        ROOT / "public" / "index.html": index_html(),
         ROOT / "public" / "llms.txt": llms_txt(),
         **setup_files(),
     }

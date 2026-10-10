@@ -3,18 +3,168 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>The Vault</title>
-  <meta name="description" content="The Vault: your Magic: The Gathering collection, decks, prices and rules in one place, with the sources shown, and an assistant connector for Claude, ChatGPT and more." />
+  <meta name="color-scheme" content="dark" />
+  <title>The Vault: your Magic collection and decks, for the AI assistant you already use</title>
+  <meta name="description" content="The Vault keeps your Magic: The Gathering collection and decks, and connects them to the AI assistant you already use: Claude, ChatGPT, Perplexity or Codex. Ask about your cards, decks and the rules, with the sources shown." />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="The Vault" />
+  <meta property="og:title" content="The Vault: your Magic collection and decks, for the AI assistant you already use" />
+  <meta property="og:description" content="Bring your collection and decks in once, then ask Claude, ChatGPT, Perplexity or Codex about them. Every answer shows where it came from." />
+  <meta property="og:url" content="https://mtgvault.cards/" />
+  <meta property="og:image" content="https://mtgvault.cards/og-image.jpg" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="ChatGPT answering from The Vault: a demo Commander deck checked as legal, with its commander, format and card count" />
+  <meta name="twitter:card" content="summary_large_image" />
   <link rel="preconnect" href="https://unpkg.com" crossorigin />
   <link rel="icon" href="/favicon.ico" sizes="32x32" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="layout.css" />
+  <script>
+    // The landing page (#437). It is plain HTML below, shown before any script loads, to a visitor of / who is not signed in.
+    // A signed-in browser (the server's readable account marker cookie, vault_account: an opaque hash, never a credential) or any
+    // other address (#/browse, ?invite=..., a sign-in error, "you signed out") opens the app instead. app.jsx keeps the class
+    // right once the server has said who is signed in.
+    (function () {
+      var home = !location.search && !/^#\/./.test(location.hash), hint = /(?:^|;\s*)vault_account=/.test(document.cookie);
+      try {
+        home = home && sessionStorage.getItem('vault_signed_out') !== '1' && sessionStorage.getItem('vault_session_ended') !== '1';
+      } catch (e) {}
+      window.VAULT_LANDING_HOME = home;
+      if (!home || hint) document.documentElement.classList.add('in-app');
+    })();
+  </script>
 </head>
 <body>
+  <div id="landing" class="landing">
+    <header class="landing-top">
+      <a class="landing-brand" href="/"><span class="mark" aria-hidden="true"><span>V</span></span><span class="title">The Vault</span></a>
+      <nav class="landing-nav" aria-label="On this page">
+        <a class="landing-navlink" href="#how">How it works</a>
+        <a class="landing-navlink" href="#works-with">Works with</a>
+        <a class="landing-navlink" href="#add-by-hand">Add it</a>
+        <a class="btn" href="#/signin">Sign in</a>
+      </nav>
+    </header>
+
+    <main class="landing-main">
+      <section class="landing-hero" aria-labelledby="landing-title">
+        <div class="landing-hero-text">
+          <p class="eyebrow">For Magic: The Gathering players</p>
+          <h1 class="h1" id="landing-title">Your Magic collection, your decks and the rules, for the AI assistant you already use.</h1>
+          <p class="landing-lede">The Vault keeps your cards and decks. Connect Claude, ChatGPT or another assistant you use, and ask in plain
+            words: what can I build, what should I buy, what does this card do, is my deck legal? Every answer shows where it came from.</p>
+          <div class="landing-actions">
+            <a class="btn primary landing-cta" href="#/signin">Sign in or create an account</a>
+            <a class="btn landing-cta" href="#demo" data-play-demo>Watch the demo</a>
+          </div>
+          <p class="landing-fine">Sign in with Google, Microsoft, Apple, Facebook or a passkey. Your collection stays private.</p>
+        </div>
+        <figure class="landing-demo" id="demo">
+          <video controls muted playsinline preload="none" poster="/demo/vault-chatgpt-demo-poster.jpg" width="1280" height="668"
+            aria-label="Demo: ChatGPT using The Vault">
+            <source src="/demo/vault-chatgpt-demo.mp4" type="video/mp4" />
+            <a href="/demo/vault-chatgpt-demo.mp4">Open the demo video</a>
+          </video>
+          <figcaption>54 seconds, no sound: ChatGPT using the Vault on the demo account. It finds the five most valuable cards, checks a
+            Commander deck is legal, lists what is missing with dated prices, says plainly that it cannot fill a shop's cart, prepares
+            adding a Sol Ring and waits for a yes, and answers a rules question with the rule's number.</figcaption>
+        </figure>
+      </section>
+
+      <section class="landing-section" id="how" aria-labelledby="how-title">
+        <h2 class="h2" id="how-title">How it works</h2>
+        <ol class="landing-steps">
+          <li class="landing-step">
+            <img src="/landing/phone-overview.jpg" width="390" height="844" loading="lazy" alt="The Vault on a phone: market value, total spent, profit and loss, and breadth of a demo collection" />
+            <div>
+              <h3>1. Bring your collection</h3>
+              <p>Import the CSV from Dragon Shield or Moxfield, or any list with card, set and number. The Vault matches every card,
+                prices it every day and keeps your decks next to it.</p>
+            </div>
+          </li>
+          <li class="landing-step">
+            <div class="landing-address" aria-hidden="true"><span>Settings → Connectors → Add</span><code>https://mtgvault.cards/api/mcp</code><span>Sign in · Allow</span></div>
+            <div>
+              <h3>2. Connect your assistant</h3>
+              <p>Add the Vault to the assistant you already use, with one address. You sign in with your Vault account and choose
+                what it may do: read only, or also make changes after asking you. <a href="#add-by-hand">Step by step</a>.</p>
+            </div>
+          </li>
+          <li class="landing-step">
+            <img src="/landing/assistant-answer.jpg" width="470" height="392" loading="lazy" alt="An assistant answering from The Vault: a demo deck's statistics and mana curve, with the Vault shown as the source" />
+            <div>
+              <h3>3. Ask it things</h3>
+              <p>Deck odds, what to buy to finish a deck, what a card really does, whether a deck is legal. The answer comes from your
+                own cards and the real rules text, with the sources shown.</p>
+            </div>
+          </li>
+        </ol>
+        <div class="landing-ask">
+          <h3>Try asking</h3>
+          <ul>
+            <li>“What are my five most valuable cards?”</li>
+            <li>“Is my Sliver deck legal in Commander? What am I missing, and what does it cost to finish?”</li>
+            <li>“Review my deck with the expert council. I want to tune it.”</li>
+            <li>“Which cards I own could stand in for the one I am missing?”</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- landing:begin generated by scripts/build_plugin.py from ASSISTANTS and manual_connector_cards(): edit them there -->
+      <section class="landing-section" id="works-with" aria-labelledby="works-with-title">
+        <h2 class="h2" id="works-with-title">Works with the assistant you have</h2>
+        <p class="landing-sub">Tested means we ran it for real in that app. The others have a setup guide that nobody has tried end to end yet.</p>
+        <ul class="landing-hosts">
+      <li class="host host-tested"><span class="host-name">Claude (web)</span><span class="host-status">Tested</span></li>
+      <li class="host host-tested"><span class="host-name">ChatGPT (web)</span><span class="host-status">Tested</span></li>
+      <li class="host host-tested"><span class="host-name">Perplexity (web)</span><span class="host-status">Tested</span><span class="host-note">Needs a plan with custom connectors (tested on Pro).</span></li>
+      <li class="host host-tested"><span class="host-name">Codex CLI</span><span class="host-status">Tested</span></li>
+      <li class="host host-guide"><span class="host-name">Claude Code</span><span class="host-status">Setup guide, not tested yet</span></li>
+      <li class="host host-guide"><span class="host-name">GitHub Copilot (CLI, VS Code)</span><span class="host-status">Setup guide, not tested yet</span></li>
+      <li class="host host-guide"><span class="host-name">Cursor</span><span class="host-status">Setup guide, not tested yet</span></li>
+      <li class="host host-guide"><span class="host-name">Comet</span><span class="host-status">Setup guide, not tested yet</span><span class="host-note">Perplexity&#x27;s browser.</span></li>
+      <li class="host host-cannot"><span class="host-name">Microsoft Copilot app</span><span class="host-status">Cannot add connectors</span><span class="host-note">Personal accounts have no way to add a connector.</span></li>
+        </ul>
+      </section>
+      <section class="landing-section" id="add-by-hand" aria-labelledby="add-by-hand-title">
+        <h2 class="h2" id="add-by-hand-title">Add it by hand, for now</h2>
+        <p class="landing-sub">A listing in the Claude and ChatGPT directories is coming. Until then, add the Vault as a custom connector:
+          it takes a minute, and the address is the same everywhere.</p>
+        <div class="landing-cards">
+  <div class="card" id="add-claude"><h3>Claude</h3><p>In Claude (web, desktop or mobile): <strong>Settings → Connectors → Add custom connector</strong>, name it The Vault and paste this address:</p><p><a class="btn sm" href="https://claude.ai/customize/connectors?modal=add-custom-connector&amp;connectorName=The%20Vault&amp;connectorUrl=https%3A%2F%2Fmtgvault.cards%2Fapi%2Fmcp" target="_blank" rel="noopener">Open Claude's Add custom connector dialog, filled in</a></p><p class="note">Claude first shows a red notice that the connector came from an external link. That is expected: check that the name is The Vault and the address is https://mtgvault.cards/api/mcp, then press Continue. Seen on a real account on 2026-10-10.</p><div class="code"><button class="copy" type="button" data-label="Copy">Copy</button><pre><code>https://mtgvault.cards/api/mcp</code></pre></div><p class="note">Then sign in on the Vault's page and approve. Tick <strong>Write</strong> only if the assistant may change your collection and decks. A listing in Claude's directory is coming; this page will show the button.</p><p class="note">After a Vault update that adds tools: disconnect and connect The Vault again, so Claude reads the new tools.</p></div>
+  <div class="card" id="add-chatgpt"><h3>ChatGPT</h3><p>In ChatGPT: <strong>Plugins → Add → Add custom MCP server</strong>, name it The Vault, paste this address and keep OAuth:</p><div class="code"><button class="copy" type="button" data-label="Copy">Copy</button><pre><code>https://mtgvault.cards/api/mcp</code></pre></div><p class="note">Then sign in on the Vault's page and approve. Tick <strong>Write</strong> only if the assistant may change your collection and decks. A listing in ChatGPT's directory is coming; this page will show the button.</p><p class="note">After a Vault update that adds tools: ChatGPT reads the tools only when the app is added: delete it (not only uninstall) and add it again.</p></div>
+  <div class="card" id="add-perplexity"><h3>Perplexity</h3><ol><li>In the Perplexity web app open Connectors (https://www.perplexity.ai/computer/connectors) and choose Custom connector (Remote), then Add MCP connector. It needs a plan that offers custom connectors (the check ran on Pro).</li><li>Name it The Vault, leave the description optional, set the MCP server URL to https://mtgvault.cards/api/mcp, leave Advanced as it is (OAuth, no client ID or client secret, Streamable HTTP, Public), tick that you understand custom connectors can introduce risks, and add it.</li><li>Open the connector and press Add connector. Perplexity opens the Vault&#x27;s page &quot;Connect Perplexity (www.perplexity.ai) to your Vault?&quot;: sign in (a passkey, Google and so on; the page shows who is signed in) and press Allow.</li><li>The connector then shows Connected with the Vault&#x27;s tools, each with a permission: Disable, Always ask or Allow.</li><li>Use it in Computer mode and name the Vault in the question (Perplexity reaches a connector&#x27;s tools through list_external_tools, describe_external_tools and call_external_tool). Comet: not verified yet. The connector tile shows Perplexity&#x27;s generic plug icon, because Perplexity has no icon field for custom connectors.</li></ol><div class="code"><button class="copy" type="button" data-label="Copy">Copy</button><pre><code>https://mtgvault.cards/api/mcp</code></pre></div><p class="note">Seen in a real run on 2026-10-09 on a Pro plan; the documentation of Perplexity was not used. Comet (Perplexity's browser) was not looked at: not verified yet.</p></div>
+        </div>
+        <p class="landing-sub">Codex, Claude Code, GitHub Copilot or Cursor: <a href="/connect.html">the Connect page</a> has the steps for each.</p>
+      </section>
+      <!-- landing:end -->
+
+      <section class="landing-section landing-final" aria-labelledby="final-title">
+        <h2 class="h2" id="final-title">Your cards, your assistant</h2>
+        <div class="landing-actions">
+          <a class="btn primary landing-cta" href="#/signin">Sign in or create an account</a>
+          <a class="btn landing-cta" href="#demo" data-play-demo>Watch the demo</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="landing-footer">
+      <p>A free fan project. Nothing is sold, and your collection is never shared unless you share it. Card data, images and prices
+        are Scryfall's; the rules are Wizards of the Coast's; every answer names its sources.</p>
+      <p>The Vault is unofficial Fan Content permitted under the <a href="https://company.wizards.com/en/legal/fancontentpolicy" rel="noopener noreferrer">Fan Content Policy</a>.
+        Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC.
+        Not affiliated with or endorsed by Anthropic, OpenAI, Perplexity, Microsoft, GitHub, Cursor, Scryfall, Archidekt, Dragon Shield or Moxfield.</p>
+      <p class="landing-links"><a href="/connect.html">Connect page</a> · <a href="/privacy.html">Privacy</a> · <a href="/terms.html">Terms</a> ·
+        <a href="/credits.html">Credits &amp; thanks</a> · <a href="/support.html">Support</a></p>
+    </footer>
+  </div>
+
   <div id="root"></div>
 
+  <script src="lib/landing.js"></script>
   <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
 
