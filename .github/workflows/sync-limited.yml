@@ -5,7 +5,7 @@ name: sync-limited
 # sources): that switch is the owner's, and it stays off until the first manual run has been checked. A run without it prints
 # "not enabled" and ends. `workflow_dispatch` takes the sets and formats to read (default: the job's DEFAULT_SETS and DEFAULT_FORMATS)
 # and `force` (read again a file whose version is already loaded). Runs only from main, in the "vercel-production" environment
-# (README → Security). Same database address logic as sync-catalog.
+# (docs/developing.md → Security). Same database address logic as sync-catalog.
 on:
   schedule:
     - cron: "17 11 * * 1"   # Mondays, after sync-catalog (10:47); 17Lands refreshes its files every few weeks, so most runs read nothing

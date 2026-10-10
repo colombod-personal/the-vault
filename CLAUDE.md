@@ -49,8 +49,8 @@ React prototype as the front end (`public/`). Read `README.md` first.
   Vault starts using a new endpoint or field of an outside service, teach the twin and add a
   conformance check in `tests/conformance`. A new outside service gets a new twin.
 - Run `pytest` before pushing, with `VAULT_TEST_DATABASE_URL` set to a Postgres database the tests
-  may wipe (README → Run it locally). The Vault runs on Postgres only, in the tests too.
-- CI and deployment security (README → Security, enforced by `tests/test_workflows.py`): only
+  may wipe (docs/developing.md → Run it locally). The Vault runs on Postgres only, in the tests too.
+- CI and deployment security (docs/developing.md → Security, enforced by `tests/test_workflows.py`): only
   merges to `main` deploy; secrets live in the `vercel-production` environment and reach only
   jobs that run for `main`, never on push/PR; read-only `permissions`, `persist-credentials: false`,
   pinned tools, values through `env` (no `${{ }}` in scripts), integrity hashes on CDN scripts.

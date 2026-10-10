@@ -226,7 +226,7 @@ def checklist(state: dict) -> str:
     lines.append(f"- {tick(state['providers'])} Sign-in: "
                  + (", ".join(state["providers"]) if state["providers"]
                     else "passkeys only. For Google, run `python -m jobs.vercel_setup --provider google` "
-                         "(README → Sign-in providers)"))
+                         "(docs/developing.md → Sign-in providers)"))
     if state["redirect_uris"]:
         lines += ["", "Redirect URIs to register with each provider:", ""]
         lines += [f"- {p}: `{uri}`" for p, uri in state["redirect_uris"].items()]

@@ -3,7 +3,7 @@ name: deploy (manual fallback)
 # connected. Normally merging to main deploys (see vercel.json → ignoreCommand).
 #
 # Runs only from main, in the "vercel-production" environment, which holds VERCEL_TOKEN and
-# should only allow the main branch (README → Security). The token reaches only the steps that
+# should only allow the main branch (docs/developing.md → Security). The token reaches only the steps that
 # talk to Vercel, never the dependency install or the tests.
 # Optional repository variables: VERCEL_SCOPE (team slug), VAULT_URL (public URL for the check).
 on:

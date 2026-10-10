@@ -94,7 +94,7 @@ def database_url():
     """An empty Postgres database for this test, migrated to the latest schema."""
     if not TEST_DATABASE_URL:
         pytest.fail("Set VAULT_TEST_DATABASE_URL to a Postgres database the tests may wipe "
-                    "(README -> Run it locally)", pytrace=False)
+                    "(docs/developing.md -> Run it locally)", pytrace=False)
     _empty_postgres(TEST_DATABASE_URL)
     return TEST_DATABASE_URL
 
