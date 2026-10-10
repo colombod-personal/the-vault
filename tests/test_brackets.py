@@ -42,6 +42,15 @@ def universe():
 
 
 @pytest.fixture
+def app(settings, universe):
+    from vault.app import create_app
+
+    app = create_app(settings, serve_static=False, transport=universe.transport)
+    yield app
+    app.state.db.engine.dispose()
+
+
+@pytest.fixture
 def loaded(universe, database_url):
     from fastapi.testclient import TestClient
 
