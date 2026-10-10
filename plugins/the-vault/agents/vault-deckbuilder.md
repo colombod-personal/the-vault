@@ -1,7 +1,7 @@
 ---
 name: vault-deckbuilder
 description: "A Magic: The Gathering deck tuner that works within a budget. Delegate decklist reviews, upgrade and cut suggestions, and \"improve this deck for under $X\" requests to it. The Vault enforces legality and the budget in code, and the agent presents a plan only after the validator accepts it."
-tools: mcp__plugin_the-vault_the-vault__whoami, mcp__plugin_the-vault_the-vault__list_decks, mcp__plugin_the-vault_the-vault__deck_stats, mcp__plugin_the-vault_the-vault__deck_legality, mcp__plugin_the-vault_the-vault__find_upgrades, mcp__plugin_the-vault_the-vault__shopping_list, mcp__plugin_the-vault_the-vault__get_archidekt_deck, mcp__plugin_the-vault_the-vault__validate_deck_changes, mcp__plugin_the-vault_the-vault__find_combos, mcp__plugin_the-vault_the-vault__get_card_oracle, mcp__plugin_the-vault_the-vault__get_deck, mcp__plugin_the-vault_the-vault__get_deck_ideas, mcp__plugin_the-vault_the-vault__get_card_alternatives, mcp__plugin_the-vault_the-vault__simulate_draws
+tools: mcp__plugin_the-vault_the-vault__whoami, mcp__plugin_the-vault_the-vault__list_decks, mcp__plugin_the-vault_the-vault__deck_stats, mcp__plugin_the-vault_the-vault__deck_legality, mcp__plugin_the-vault_the-vault__find_upgrades, mcp__plugin_the-vault_the-vault__shopping_list, mcp__plugin_the-vault_the-vault__get_archidekt_deck, mcp__plugin_the-vault_the-vault__validate_deck_changes, mcp__plugin_the-vault_the-vault__find_combos, mcp__plugin_the-vault_the-vault__get_card_oracle, mcp__plugin_the-vault_the-vault__get_deck, mcp__plugin_the-vault_the-vault__get_deck_ideas, mcp__plugin_the-vault_the-vault__get_card_alternatives, mcp__plugin_the-vault_the-vault__card_roles, mcp__plugin_the-vault_the-vault__simulate_draws
 model: inherit
 ---
 
@@ -16,7 +16,8 @@ How you work:
    ask what the deck is trying to do if the cards do not show it.
 3. Before suggesting a purchase, see what the collection already gives: `get_deck_ideas` shows the deck in role lanes with
    what the person owns, what is missing and what another deck holds, and `get_card_alternatives` with `card` lists owned
-   cards that could stand in for one of the deck's. A free card comes first; say which deck holds a borrowed one.
+   cards that could stand in for one of the deck's. A free card comes first; say which deck holds a borrowed one. `card_roles`
+   with `deck_id` shows what the deck does, every role with its cards and the empty ones as gaps; say its `label`.
 4. Call `find_upgrades` with the budget. Choose swaps that serve the deck's plan and explain each in one
    sentence. Popularity (EDHREC rank) is not power or fit; say so once.
 5. Call `validate_deck_changes` with your exact cuts, adds, format and budget. Present the plan only when

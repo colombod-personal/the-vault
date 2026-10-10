@@ -574,7 +574,8 @@ function App() {
             </ScopeFrame>
           )}
           {route.view === 'browse' && (
-            <Browse data={data} openCard={openCard} initialQuery={route.initialQuery} bucket={route.bucket} onBucket={setBucket}
+            <Browse key={route.initialQuery && route.initialQuery.roles ? 'roles:' + route.initialQuery.roles.join(',') : 'browse'}
+                    data={data} openCard={openCard} initialQuery={route.initialQuery} bucket={route.bucket} onBucket={setBucket}
                     tag={route.tag} onTag={setTag}
                     onChanged={reloadCollection} readOnly={!!viewing} />
           )}
@@ -620,6 +621,7 @@ function App() {
         <VaultFooter />
         {drawerCard && <CardDrawer card={drawerCard} costsHidden={!!data?.meta?.costsHidden} canMove={!viewing && !!data} canTag={!viewing && !!data}
                                    version={data?.meta?.version} onMoved={reloadCollection}
+                                   onFindRole={(slug) => nav('browse', { initialQuery: { roles: [slug] } })}
                                    onClose={() => closeOverlay(() => setDrawerCard(null))} />}
 
         <TweaksPanel title="Tweaks">
@@ -676,7 +678,7 @@ function App() {
   return <>{body}{accountPanel}</>;
 }
 
-function CardDrawer({ card, onClose, costsHidden, canMove, canTag, version, onMoved }) {
+function CardDrawer({ card, onClose, costsHidden, canMove, canTag, version, onMoved, onFindRole }) {
   const { buckets } = window.useBuckets(version, !!canMove);
   const { tags } = window.useTags(version, !!canTag);
   const [scry, setScry] = useStateApp(() => card._scry || card.scry || window.Scryfall.cached(card.n, card.s, card.cn));
@@ -767,6 +769,8 @@ function CardDrawer({ card, onClose, costsHidden, canMove, canTag, version, onMo
             )}
           </div>
         )}
+
+        <window.CardRoles name={card.n} onFind={onFindRole} />
 
         {card.q > 0 && (
           <div className="panel" style={{ marginBottom: 20 }}>

@@ -1326,3 +1326,95 @@ class DeckAlternatives(Page):
     items: list[IdeasAlternative]
     prices_date: str | None = None
     provenance: list[Provenance]
+
+
+# -- what a card does: the roles (#435, docs/functional-equivalents.md section 13) ----------------------------------------------------------
+
+class CardRole(FineRole):
+    """A role as every surface shows it: a short point, the rule that found it and a line saying why."""
+    point: str = Field(description="The short sentence a player reads: \"Doubles tokens\", \"Counters a spell\", \"Draws cards again and again\"")
+    family: str = Field(description="The job family the role belongs to (the draw roles are one family, the counter roles another)")
+    why: str = Field(description="Names the Vault's rule that found it, what the rule matches and what it is known to get wrong")
+
+
+class RuleInfo(BaseModel):
+    rule: str = Field(description="The id of the rule (documented in docs/functional-equivalents.md)")
+    matches: str = Field(description="What the rule matches in the Oracle text")
+    known_to_get_wrong: str = Field(description="What the rule is known to get wrong")
+
+
+class RoleDefinition(BaseModel):
+    role: str
+    point: str
+    name: str
+    means: str
+    family: str
+    rules: list[RuleInfo]
+
+
+class RoleVocabulary(Hal):
+    label: str = Field(description="The Vault's reading of the card text, not an official classification")
+    roles_version: str = Field(description="The version of the rules; changes whenever a rule does")
+    roles: list[RoleDefinition] = Field(description="The 22 roles in the order the Vault ranks them, each with the rules that find it")
+    provenance: list[Provenance]
+
+
+class CommunityTag(BaseModel):
+    tag: str
+    label: str | None = None
+    weight: str | None = Field(None, description="How strongly the community tagged it (strong, median, weak)")
+
+
+class CardRolesOut(Hal):
+    card: dict | None = Field(None, description="The card: oracle_id, name, type_line, mana_cost, scryfall_uri. Null when the name is not in the catalog")
+    suggestions: list[str] = Field(default_factory=list, description="Close names, when the name was not found exactly")
+    label: str = Field(description="The Vault's reading of the card text, not an official classification: say it wherever the roles are shown")
+    roles_version: str
+    roles: list[CardRole] = Field(default_factory=list, description="What the card does, core roles first in the Vault's order, then those it does on the side")
+    message: str | None = Field(None, description="Set when the Vault's rules found no role: that is not the same as the card doing nothing")
+    community_tags: list[CommunityTag] = Field(default_factory=list, description="Scryfall Tagger tags (a community's opinion), kept apart from the roles")
+    community_tags_label: str
+    provenance: list[Provenance]
+
+
+class OwnedRole(BaseModel):
+    role: str
+    point: str
+    name: str
+    means: str
+    family: str
+    cards: int = Field(description="Different cards you own that have this role (a card counts once, whatever its printings)")
+    core_cards: int = Field(description="Of those, the cards whose main job it is (the rest do it on the side)")
+    links: dict[str, Link] = Field(default_factory=dict, alias="_links")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class OwnedRoles(Hal):
+    label: str
+    roles_version: str
+    read_cards: int = Field(description="Catalog cards the current rules have read; 0 until the catalog has been loaded with this version")
+    items: list[OwnedRole]
+    note: str | None = None
+    provenance: list[Provenance]
+
+
+class OwnedRoleCard(BaseModel):
+    card: str
+    oracle_id: str
+    copies: int = Field(description="Copies owned, all printings")
+    type_line: str | None = None
+    mana_cost: str | None = None
+    mana_value: float | None = None
+    scryfall_uri: str | None = None
+    roles: list[CardRole]
+    links: dict[str, Link] = Field(default_factory=dict, alias="_links")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class OwnedRoleCards(Page):
+    label: str
+    roles_version: str
+    role: list[str] = Field(description="The roles asked for")
+    match: Literal["all", "any"]
+    items: list[OwnedRoleCard]
+    provenance: list[Provenance]
