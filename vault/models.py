@@ -65,6 +65,8 @@ class Identity(Base):
     provider: Mapped[str] = mapped_column(String(20))  # google | microsoft | apple | facebook | dev
     subject: Mapped[str] = mapped_column(String(255))  # provider's stable user id
     email: Mapped[str | None] = mapped_column(String(320))
+    # The provider vouched for `email` when it was last given (Google, Apple). Only such an address receives a confirmation code (#347).
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     user: Mapped[User] = relationship(back_populates="identities")
@@ -532,6 +534,28 @@ class Passkey(Base):
     backed_up: Mapped[bool] = mapped_column(Boolean, default=False)  # synced passkey
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class EmailCode(Base):
+    """A one-time code (and a one-click link) e-mailed to the address on an account, to confirm it is the person before a
+    serious account action (#347, vault.recent_signin). Bound to the account, to the browser session that asked
+    (``session_digest``, a keyed hash of the account's session key and that browser's request id) and to nothing else. Only keyed
+    hashes are stored: of the code, of the link's token and of the session. A code lives ten minutes, works once and dies after
+    five tries. Rows are also what the per-account and per-day send caps count, so they are kept two days (vault.retention)."""
+
+    __tablename__ = "email_codes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    session_digest: Mapped[str] = mapped_column(String(64))
+    code_hash: Mapped[str] = mapped_column(String(64))
+    link_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    asked_from: Mapped[str] = mapped_column(String(80))  # "Chrome on Windows": what the e-mail says asked (no address is kept)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    tries: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # the link was approved; the asking browser picks it up
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # spent, replaced or refused: never usable again
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
 class AccessToken(Base):

@@ -240,14 +240,14 @@ def test_two_removals_at_once_cannot_remove_the_last_passkey(database_url, tmp_p
     def remove_the_other_one():
         with Session(db.engine) as s:
             try:
-                remove_passkey(s, uid, first)
+                remove_passkey(s, uid, first, fresh=True)
                 s.commit()
                 outcome["result"] = "deleted"
             except HTTPException as exc:
                 outcome["result"] = exc.status_code
 
     with Session(db.engine) as s:
-        remove_passkey(s, uid, second)  # holds the account lock until commit
+        remove_passkey(s, uid, second, fresh=True)  # holds the account lock until commit
         racer = threading.Thread(target=remove_the_other_one)
         racer.start()
         time.sleep(0.5)

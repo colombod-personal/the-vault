@@ -34,14 +34,15 @@ from sqlalchemy.orm import Session
 
 from .. import analytics, deck_text, lab, oauth_server, outbound, tags as card_tags, tokens
 from ..catalog import Catalog
-from ..auth import (RECENT_SIGN_IN_METHOD_HOURS, IdentityInUse, Profile, find_or_create, remove_identity,
+from .. import recent_signin
+from ..auth import (RECENT_SIGN_IN_METHOD_HOURS, IdentityInUse, Profile, email_verified, find_or_create, remove_identity,
                     remove_recent_methods, require_live_session, sign_in_methods as account_sign_in_methods, why_not_removable)
 from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, history_summary, import_days, view_version
 from .. import archidekt_cache, deck_import, deck_match, deck_overview, deck_refresh, deck_versions, experts, owned_changes
 from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, ImportOptions, NoSuchBucket, export_collection,
                         import_collection, preview_import as preview_collection_import, user_entries)
-from ..models import AccessToken, ApiSession, Bucket, Card, Deck, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
+from ..models import AccessToken, ApiSession, Bucket, Card, Deck, Identity, Import, NativeNonce, OAuthClient, OAuthGrant, Passkey, PriceSnapshot, Share, User
 from ..native import LEEWAY as NATIVE_LEEWAY, NativeTokenError, NativeVerifier, ProviderUnavailable
 from ..passkeys import remove_passkey
 from ..prices import compute_values
@@ -96,8 +97,9 @@ def _iso(dt) -> str | None:
 
 
 def build_router(get_db, current_user, optional_user, settings, verifier: NativeVerifier, auth_providers,
-                 transport=None, account_user=None) -> APIRouter:
+                 transport=None, account_user=None, fresh_user=None) -> APIRouter:
     account_user = account_user or current_user
+    fresh_user = fresh_user or account_user  # the person, who also signed in recently (#347)
     router = APIRouter(prefix=V1)
 
     # -- entry point ------------------------------------------------------------------------
@@ -169,8 +171,12 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                 db.rollback()
                 raise HTTPException(401, "This sign-in was already used; sign in again") from None
             name = body.name if provider == "apple" else claims.get("name")
+            if account is not None and db.scalar(select(Identity.user_id).where(
+                    Identity.provider == provider, Identity.subject == str(claims["sub"]))) != account.id:
+                recent_signin.require_recent(db, request, settings)  # a sign-in new to the account is a link: only after a recent one (#347)
             try:  # the caller's session (a cookie or an app's token) is held to its live state when it links a sign-in (#347)
-                user = find_or_create(db, Profile(provider, str(claims["sub"]), claims.get("email"), name), account,
+                user = find_or_create(db, Profile(provider, str(claims["sub"]), claims.get("email"), name,
+                                              bool(claims.get("email")) and email_verified(claims.get("email_verified"))), account,
                                       request if account is not None else None)
             except IdentityInUse as exc:
                 raise HTTPException(409, str(exc)) from exc
@@ -232,17 +238,26 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         db.commit()
         return _me(user)
 
-    @router.get("/me/export", tags=["account"], summary="Everything held about you, as a ZIP (GDPR)")
-    def export_me(user: User = Depends(account_user), db: Session = Depends(get_db)) -> Response:
+    @router.get("/me/recent-sign-in", tags=["account"], response_model=S.RecentSignIn,
+                summary="Have you signed in recently? (needed for delete, export, tokens, adding or removing sign-in methods)")
+    def recent_sign_in(request: Request, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+        return {**recent_signin.status(db, request, user, settings),
+                "_links": {"self": link(f"{V1}/me/recent-sign-in"),
+                           "email_start": link("/api/auth/recent/email/start", title="E-mail a one-time code (POST)"),
+                           "email_confirm": link("/api/auth/recent/email/confirm", title="Confirm with the code (POST)")}}
+
+    @router.get("/me/export", tags=["account"], summary="Everything held about you, as a ZIP (GDPR); needs a recent sign-in")
+    def export_me(user: User = Depends(fresh_user), db: Session = Depends(get_db)) -> Response:
         name = f"vault-data-{date.today().isoformat()}.zip"
         return Response(export_archive(db, user), media_type="application/zip",
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
-    @router.delete("/me", tags=["account"], summary='Delete the account and all its data ({"confirm": "DELETE"})')
-    def delete_me(body: S.DeleteRequest, request: Request, user: User = Depends(account_user),
+    @router.delete("/me", tags=["account"], summary='Delete the account and all its data ({"confirm": "DELETE"}); needs a recent sign-in')
+    def delete_me(body: S.DeleteRequest, request: Request, user: User = Depends(fresh_user),
                   db: Session = Depends(get_db)) -> dict:
         if body.confirm != DELETE_CONFIRMATION:
             raise HTTPException(400, f'Send {{"confirm": "{DELETE_CONFIRMATION}"}} to delete your account')
+        require_live_session(db, request, user.id)  # "Sign out everywhere" may have ended this session since it was authenticated (#347)
         removed = purge_user(db, user.id)
         request.session.clear()
         return {"deleted": True, "removed": removed}
@@ -317,7 +332,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     @router.delete("/me/passkeys/{passkey_id}", tags=["account"], summary="Remove a passkey")
     def delete_passkey(passkey_id: Id, request: Request, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
-        remove_passkey(db, user.id, passkey_id, request)
+        remove_passkey(db, user.id, passkey_id, request, fresh=recent_signin.is_fresh(db, request, settings))
         db.commit()
         return {"deleted": True}
 
@@ -329,13 +344,14 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                              limit: int | None = None, user: User = Depends(account_user),
                              db: Session = Depends(get_db)) -> dict:
         methods = account_sign_in_methods(db, user.id)
+        fresh = recent_signin.is_fresh(db, request, settings)
         shown = [m for m in methods if m["recently_added"]] if recent_only else methods
         page, nxt = paginate(shown, lambda m: (-m["created_at"].timestamp(), m["kind"]), lambda m: m["id"],
                              cursor=cursor, limit=limit)
         items = [{"id": m["id"], "kind": m["kind"], "provider": m["provider"], "name": m["name"],
                   "created_at": _iso(m["created_at"]), "last_used_at": _iso(m["last_used_at"]),
                   "recently_added": m["recently_added"], "added_minutes_ago": m["added_minutes_ago"],
-                  "removable": why_not_removable(m, methods) is None, "removable_reason": why_not_removable(m, methods),
+                  "removable": why_not_removable(m, methods, fresh) is None, "removable_reason": why_not_removable(m, methods, fresh),
                   "_links": {"self": link(f"{V1}/me/passkeys/{m['id']}" if m["kind"] == "passkey"
                                           else f"{V1}/me/identities/{m['id']}")}} for m in page]
         body = page_body(request, items, nxt, len(shown), limit=limit, **({"recent_only": "true"} if recent_only else {}))
@@ -369,7 +385,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
     @router.post("/me/tokens", tags=["account"], response_model=S.NewAccessToken, status_code=201,
                  summary="Create a personal access token for your own agents and scripts (shown once)")
-    def create_token(request: Request, body: S.AccessTokenIn, user: User = Depends(account_user),
+    def create_token(request: Request, body: S.AccessTokenIn, user: User = Depends(fresh_user),
                      db: Session = Depends(get_db)):
         def run() -> dict:
             require_live_session(db, request, user.id)  # not after "Sign out the other browsers" ended this session (#347)

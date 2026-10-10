@@ -14,11 +14,27 @@ from tests.test_agents import call_tool, make_token
 from tests.test_catalog_api import BOLT  # noqa: F401  (fixtures below need the catalog helpers)
 from tests.test_deck_api import VALID
 from tests.test_mcp_catalog import agent, bot  # noqa: F401  (fixtures)
+from twins import Universe
+from vault.app import create_app
 from vault.api import mcp_ui
 from vault.deck_tools import FORMATS
 
 HARNESS = Path(__file__).parent / "mcp_view_harness.js"
 pytestmark = pytest.mark.skipif(not shutil.which("node"), reason="node is needed to run the views")
+
+
+@pytest.fixture
+def universe():
+    twin_universe = Universe()
+    yield twin_universe
+    assert not twin_universe.escapes, twin_universe.escapes
+
+
+@pytest.fixture
+def app(settings, universe):
+    app = create_app(settings, serve_static=False, transport=universe.transport)
+    yield app
+    app.state.db.engine.dispose()
 
 
 def run(view, tmp_path, input, result, tools=None, steps=None, **extra):

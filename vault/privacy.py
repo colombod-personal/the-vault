@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from .importer import export_collection
 from .sharing import display_name
-from .models import AccessToken, ApiSession, Bucket, BucketBaseline, BuySettings, CardAnnotation, TagAssignment, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, CollectionBaseline, ResetSnapshot, CollectionValue, Deck, DeckVersion, Entry, Identity, Import, Share, StagedUpload, User
+from .models import AccessToken, ApiSession, Bucket, BucketBaseline, BuySettings, CardAnnotation, TagAssignment, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, EmailCode, CollectionBaseline, ResetSnapshot, CollectionValue, Deck, DeckVersion, Entry, Identity, Import, Share, StagedUpload, User
 from .prices import history
 from .collection_view import CollectionView
 
@@ -118,7 +118,7 @@ def export_archive(db: Session, user: User) -> bytes:
     account = {
         "id": user.id, "name": user.name, "email": user.email, "created_at": user.created_at,
         "sign_in_methods": [
-            {"provider": i.provider, "subject": i.subject, "email": i.email, "linked_at": i.created_at}
+            {"provider": i.provider, "subject": i.subject, "email": i.email, "email_verified": i.email_verified, "linked_at": i.created_at}
             for i in user.identities
         ],
     }
@@ -237,6 +237,7 @@ def personal_data(user_id: int) -> dict:
         "passkeys": delete(Passkey).where(Passkey.user_id == user_id),
         "idempotent_requests": delete(IdempotentRequest).where(IdempotentRequest.user_id == user_id),
         "auth_codes": delete(AuthCode).where(AuthCode.user_id == user_id),
+        "email_codes": delete(EmailCode).where(EmailCode.user_id == user_id),  # hashed sign-in confirmation codes (#347)
         "shares": delete(Share).where(or_(Share.owner_id == user_id, Share.grantee_id == user_id)),
         "decks": delete(Deck).where(Deck.user_id == user_id),
         "tag_assignments": delete(TagAssignment).where(TagAssignment.user_id == user_id),

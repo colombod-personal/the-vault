@@ -142,7 +142,7 @@ person (`account_user`). OAuth tokens never carry the `account` scope, so those 
 the in-process path (M `test_even_on_the_mcp_servers_own_calls_a_token_never_gets_account_powers`,
 `test_authenticate_never_returns_the_account_scope`). Connected-app management itself is an account endpoint,
 so an app cannot revoke or list its siblings. A copied web session or native token does carry them: what that allows, what is built
-against it and what is decided (a recent sign-in, re-authenticated by an e-mailed one-time code, built in the next pull request) is in
+against it and what is built (a recent sign-in, re-confirmed by a passkey, a provider or an e-mailed one-time code) is in
 "A copied session, and the sign-in methods it can add" below.
 
 ### 6. Refresh token theft
@@ -339,11 +339,10 @@ grant on the consent screen.
   Building a path into an authorization server without a user or an analysis would add risk for nothing, so it is not built.
   **Owner decision, recommended: accept "not needed today".** If a host needs it, the mechanism, a section in this document
   and its tests go in one pull request, with the review lines the pull request template asks for.
-- **A recent sign-in for account-level actions (#347): decided by the owner on 2026-10-09, built in the next pull request.** Yes, 10 minutes,
-  for delete, export, adding or removing a passkey, linking a provider and creating a personal access token; the way to re-authenticate is a
-  one-time code and link e-mailed to the address on the account (Resend sends it), or the passkey or provider sign-in when the account has no
-  address. The design, the routes, the alternatives and the cost for people are in "A copied session, and the sign-in methods it can add".
-  Not built in #407, where "Sign out everywhere" shows and removes what was added in the last 24 hours (built).
+- **A recent sign-in for account-level actions (#347): decided yes by the owner on 2026-10-09, and built.** 10 minutes, for delete, export,
+  creating a personal access token, connecting an AI app, adding a passkey, removing an older passkey and linking a provider, confirmed with a
+  passkey, a linked provider or a code e-mailed to a verified address (Resend, inert until `RESEND_API_KEY` is set). The design, the routes, the
+  attacks considered and the residual risks are in "A copied session, and the sign-in methods it can add"; "Sign out everywhere" stays free of it.
 - **Public clients and `private_key_jwt` clients are supported; shared-secret (`client_secret_*`) clients are not.** claude.ai uses a metadata document with PKCE only (`none`); ChatGPT's document declares `private_key_jwt` (section 17).
 
 ## Residual risks
@@ -482,7 +481,7 @@ satisfy `account_user`, so the holder can do every account-level action: delete 
 access token, add a passkey, link a provider. "Sign out everywhere" rotates `User.session_key`, which ends every copied cookie, **but
 not a sign-in method the holder added meanwhile** (their own passkey, their own Google identity): with it they sign in again after the
 person has signed out everywhere. This needs a stolen cookie first, so it is a depth problem, not a way in. The issue splits the fix in
-four criteria; only the third is built, because the others wait for a decision from the owner.
+four criteria. The third was built first (below); the owner decided yes on 2026-10-09 and the others (the recent sign-in and its e-mailed code) are built after it.
 
 ### Built: "Sign out everywhere" ends the other sessions, then shows and removes sign-in methods (criterion 3)
 
@@ -506,7 +505,7 @@ below as "found by review"; each is fixed and tested. The first version listed o
   Now the other sessions end before anything is shown, and older methods are listed with their dates.
 - **API** (`docs/api.md`; the person only, through `account_user`, so a personal access token, a connected app and a reviewer's demo
   session get 403): `GET /api/v1/me/sign-in-methods[?recent_only=true]` (passkeys and linked providers, newest first, paged, with
-  `recently_added`, `removable` and `removable_reason`: `only_method`, `provider_too_old` or `needs_older_method`),
+  `recently_added`, `removable` and `removable_reason`: `only_method`, `provider_too_old`, `needs_older_method` or, for a passkey older than 24 hours on a session that has not signed in recently, `recent_sign_in_required`),
   `DELETE /api/v1/me/identities/{id}` (new: unlink a provider), `DELETE /api/v1/me/sign-in-methods/recent` (new: remove everything
   added in the last 24 hours, in one request, after the page's confirmation), `POST /api/auth/sign-out-others` (new) and the existing
   `DELETE /api/v1/me/passkeys/{id}`. The window is the server's constant `RECENT_SIGN_IN_METHOD_HOURS` (`vault/auth.py`); the page only
@@ -551,10 +550,10 @@ below as "found by review"; each is fixed and tested. The first version listed o
   or old) is removed only while another method older than 24 hours remains. So an account whose only old method is one passkey cannot
   remove it (add another passkey or sign-in, wait a day, then remove the first), and a young account (every method added today)
   removes nothing: the owner's and a copied session's methods cannot be told apart, and the person is told so (with the reason). This is the cost of having no recent-sign-in
-  check; the recent sign-in decided below is what lifts it.
+  check. It stays: the built recent sign-in (below) adds a requirement for an older passkey (a fresh session) and keeps "a method older than 24 hours must remain".
 - **Unlinking a provider is also limited to one linked in the last 24 hours** (409 otherwise, `provider_too_old`): if any provider could
   be unlinked, a copied session could add its own passkey and then unlink every provider the owner uses. An older provider is shown with
-  its date and the reason, and a pointer to the recent sign-in decided below.
+  its date and the reason, (a fresh session unlinking it was built and withdrawn after review: below).
 - **Passkeys per account are capped at 20** (`MAX_PASSKEYS`, `vault/passkeys.py`; 409 with a message at the options step, and again
   under the account lock when the credential is saved, so two devices cannot overshoot it). With "Remove everything added in the last 24
   hours" (one request, 409 unless an older method stays) a flood of recent passkeys is bounded and removable. *Found by review:* the
@@ -575,10 +574,10 @@ below as "found by review"; each is fixed and tested. The first version listed o
   nobody is told when a method is added (the Vault holds an e-mail address only from some providers and sends no mail). It does not
   end a copied native access token, a personal access token or a connected app's grant (they are listed and revoked under the
   Account panel's apps and tokens). A method an attacker added more than 24 hours ago is listed with its date but may not be
-  removable yet (the reason is shown). The recent sign-in decided below is what will stop the adding.
+  removable yet (the reason is shown). The recent sign-in below is what stops the adding.
 
-**Residual risks of what is built, found by review and NOT fixed here.** Each one is resolved by the recent sign-in the owner decided on
-(criteria 1 and 2, below, built in the next pull request), which is why they are listed and not worked around:
+**Residual risks of the 24-hour rule, found by review in #407.** Resolved or reduced by the recent sign-in below (each says how); kept here
+as they were written:
 - *The 24-hour rule delays a takeover, it does not prevent one by a patient attacker.* With a copied session the attacker registers their own
   passkey at time 0 and keeps hold of the account; if the owner does not open "Sign out everywhere" within a day, that passkey is older than
   24 hours, counts as an "older method", and the attacker can then remove the owner's passkeys. A recent-sign-in check, which the attacker
@@ -597,100 +596,208 @@ owner's own browser sent just before that response arrives still carries the old
 sign-in screen and clears its offline copy. A reload recovers it (the new cookie is in the browser by then). It happens after step 1
 and after each removal of a sign-in method, the moments the owner is looking at the panel.
 
-### Decided, built in the next pull request: a recent sign-in for account-level actions, re-authenticated by an e-mailed one-time code (criteria 1, 2 and 4)
+### Built (owner decided yes, 2026-10-09): a recent sign-in for the serious account actions, and an e-mailed code (criteria 1, 2 and 4)
 
-**Decided by the owner on 2026-10-09 (issue #347): yes.** In the owner's words: "we do a one time code to their email and they click
-there to authorize or type the code". **Not in this pull request:** nothing below is in the code of #407; it is built in the next one
-(branch `recent-signin-email`, Refs #347, which builds on the helpers of this one), which updates this section again with what was
-built and gets its own security review before the merge. This section is the decided design, so that the review of that change has
-something to hold it to.
+**The decision.** The owner, in chat on 2026-10-09, recorded on #347: "The yes I agree and to proceed we do a one time code to their email
+and they click there to authorize or type the code." The recommended 10 minutes and the recommended action list were taken as they stood
+(the owner approved the recommended defaults). This section replaces the proposal that stood here.
 
-**The decision.** The actions below need a sign-in within the last **10 minutes**. A person who has none re-authenticates with a
-**one-time e-mail code**: the Vault e-mails a code and a link to the address on the account; the person clicks the link or types the
-code. The code lasts 10 minutes, works once, is rate limited, and the page never says whether an address exists. An account with **no
-e-mail address on file** re-authenticates with its passkey or provider instead (the passkey login ceremony, or "Continue with Google"
-and the like), which also gives the 10 minutes. The sender is **Resend**, behind a small interface and inert until `RESEND_API_KEY` is
-set (tests use a fake sender); the privacy notice and `docs/gdpr.md` name Resend as a processor of the e-mail address and the code, and
-say what is kept (a short-lived hash of the code, nothing else) when that change lands.
+**Reviews (all by agents; no human has reviewed this).** The author's own read, then two independent read-only adversarial agent reviews of
+this diff, each before any merge (2026-10-09). Round 1 found, and these are fixed and tested: the mail went to the unverified, first-wins
+`users.email` (a copied session could place its own address on a passkey-only account and keep it after cleanup; now a provider-verified
+address a day old, below); a reused request id let a copy of the cookie share a later ask (now a new id on every ask); the withdrawn
+relaxation (below); the Approve button's `no-referrer` policy made browsers send `Origin: null`, which the cross-site-write guard refuses
+(now `same-origin`). It also found that the OAuth consent screen mints a 30-day credential with no recent sign-in; round 2 confirmed each
+fix and rated that one blocking against the owner's goal, so it is built too (below). A third read on the pull request (Copilot's review) found that the account deletion did not re-check the live session between authentication and the purge (a request past the freshness check could delete after "Sign out everywhere"; now `require_live_session` runs before `purge_user`, tested) and that returning from a provider broke the browser's Back button (fixed). What is left open is listed under "What this
+resolves, and what it does not" and "Residual risks", and a follow-up issue holds it.
 
-- **The claim.** `auth_at` (seconds since the epoch, from the server's clock) lives in the signed session cookie next to `uid` and `sk`.
-  A check, `fresh(request)`, is true when `now - auth_at <= 600`. The cookie is signed, so its holder can read but not change it, and
-  only a sign-in or a redeemed code sets it. Details that decide whether it means anything:
-  1. **`auth_at` is set only by proof of an existing way in.** A provider sign-in that links a new identity must keep the old `auth_at`
-     (`sign_in` clears the session and rebuilds it, so the old value is carried across, as `app_flow` is today), and registering a
-     passkey never touches it. Otherwise a copied session could sign in with the attacker's own Google, link it, and be "fresh".
-  2. **The code is for the account's own address, and it is bound to the session that asked.** It goes to `users.email`, which a
-     provider sign-in fills only when it is empty (`_find_or_create`), so linking an attacker's Google never changes where the code
-     goes. It is stored only as a hash with the account, the requesting session's key and an expiry; redeeming it (typed, or by the
-     link) spends it in one conditional `DELETE` under the account lock (`vault/locks.py`) and sets `auth_at` on the session that is
-     redeeming it. The link opened in a browser that does not hold the requesting session does not make that browser fresh: it says to
-     type the code in the window that asked (a design point for the review of that change to confirm). Whoever holds the copied cookie
-     **and** can read the mailbox passes: that is the residual of this design, below.
-  3. **Cookies made before the release have no `auth_at`** and count as stale: everyone confirms once on their first account-level
-     action after it. The reviewer demo session has no account powers at all (#345) and is unaffected.
-- **Routes** (the ones the issue names). A stale session is refused with 403, the code `recent_sign_in_required` and a body that names
-  the 10 minutes and the ways to confirm (plus an `X-Error` header, as the token errors have): `DELETE /api/v1/me`,
-  `GET /api/v1/me/export`, `POST /api/v1/me/tokens`, `POST /api/auth/passkey/register/options` **and** `/register/verify`,
-  `DELETE /api/v1/me/passkeys/{id}`, `DELETE /api/v1/me/identities/{id}`, and linking a provider: the callback
-  `GET|POST /api/auth/callback/{provider}` when a session is signed in and the identity is new to the account (a link, or a claim of an
-  empty account), checked at the callback because a copied session can open `/api/auth/login/google` directly. **Left as they are:**
-  `PATCH /me` (the name), shares, collection edits, disconnecting an app or a session, and "Sign out everywhere" (a person in a hurry
-  must always be able to cut every session). **Removals** keep the rule built in this pull request (a method older than 24 hours must
-  remain), and removing a method added in the last 24 hours stays free of the recent sign-in, so the Sign out everywhere panel works with
-  a stale session. Removing an older passkey, and unlinking an older provider, will need the recent sign-in; with it the "older method
-  must remain" rule can be relaxed for a fresh session, which is how an account with one old passkey could replace it.
-- **What a person without a fresh session sees.** On `recent_sign_in_required` the Account page shows "Confirm it's you": "E-mail me a
-  code" (the address is shown masked; a field for the code; the link in the mail does the same) and, for every account, "Use your
-  passkey" and "Continue with <provider>" for the methods it has (an account without an address sees only those). After the code or
-  the sign-in the action is repeated; a provider sign-in leaves the page, so the Account page opens again with "Confirmed. Press Delete
-  my account again". The 10 minutes start then. The Download link for the full export becomes a button that first asks
-  `GET /api/v1/me/recent-sign-in` (`{"fresh": true, "seconds_left": 412}`), because a browser would show the 403 JSON as a page.
-- **Native app tokens.** An iOS access token has the `account` scope and no cookie. Its freshness is judged from the `ApiSession` row it
-  belongs to (`created_at`, the sign-in that made the session; a refresh does not renew it); confirming makes a new session. There is no
-  iOS app in this repository to test against, so this is settled when the app is built; the web rule does not depend on it.
-- **Personal access tokens, connected apps and the reviewer session:** unchanged. They never had account powers.
+**The claim.** `sign_in()` (`vault/auth.py`) writes `auth_at` (seconds since the epoch, the server's clock) into the signed session cookie
+when someone proves control of a sign-in method the account already had, and the e-mailed code writes it when confirmed. The cookie is
+signed, so its holder can read but not change it. Two details decide whether it means anything, and both are tested:
+1. **A provider sign-in that links a method new to the account keeps the old `auth_at`** (`sign_in` clears the session and rebuilds it, so
+   the old value is carried across, as `app_flow` is). A copied session that links its own Google account is therefore not made fresh by
+   it, and registering a passkey never touches it. Fresh means: someone just proved control of a method the account had before, or of its
+   mailbox.
+2. **Cookies made before the release have no `auth_at`** and are stale (a value in the future, or of another type, is stale too), so
+   everybody confirms once on their first serious action after the release. The reviewer demo session has no account powers at all
+   (#345) and is unaffected.
 
-**Alternatives considered**
+`vault/recent_signin.py` holds the check (`require_recent`, 403 with the stable code `recent_sign_in_required`, `X-Error` header and
+`window_seconds`); `vault/app.py` has a `fresh_user` dependency next to `account_user`. The window is `RECENT_SIGNIN_SECONDS` (600; 60 to
+3600 or the Vault does not start).
 
+**Routes that need it** (a stale session is refused and nothing changes): `DELETE /api/v1/me`, `GET /api/v1/me/export`,
+`POST /api/v1/me/tokens`, `POST /api/auth/passkey/register/options` and `/register/verify` (the first so nobody is led through a device
+prompt and refused at the end; the second because the cookie may go stale in between), `DELETE /api/v1/me/passkeys/{id}` **for a passkey
+added more than 24 hours ago**, and linking a provider: the callback
+`GET|POST /api/auth/callback/{provider}` when a session is signed in and the identity is new to the account (a link, or the claim of an
+empty account; it redirects to `/?link_error=recent_sign_in_required`, or to the app with `error=recent_sign_in_required`), and
+`POST /api/v1/auth/native/{provider}` under the same condition, and **connecting an AI app**: `GET /oauth/authorize` shows a stale session
+the sign-in page instead of the consent screen, and `POST /oauth/authorize` refuses an answer from a stale session (a reviewer's demo session is
+exempt: it has no account powers and it is how the stores' review connects an app). Found by review: the consent mints a 30-day grant, up to
+read and write over MCP, the same power as the personal access token that is gated. The callback checks, not only the Account page, because a copied session
+can open `/api/auth/login/google` directly. **Left free on purpose:** "Sign out everywhere" (`POST /api/auth/sign-out-others`: a person in
+a hurry must always be able to cut every session, and an attacker gains nothing by signing the owner out), removing a method added in the
+last 24 hours (single or `DELETE /me/sign-in-methods/recent`: it can only remove what is new next to something the owner has used for
+longer, so the panel works from a stale session), `PATCH /me` (the name), shares, collection edits, and disconnecting an app or a session.
+Personal access tokens, connected apps and the reviewer session never had account powers: 403 as before, without the code.
+
+**Removals: the relaxation was built and withdrawn.** The brief allowed letting a fresh session unlink an older provider (an attacker's
+provider linked more than 24 hours ago cannot be unlinked today) "only if it can be done safely". It was built, the independent review
+found it unsafe, and it is not shipped: an attacker who plants a passkey inside one fresh window and waits a day has a method older than
+24 hours; signing in with it is a recent sign-in, and with the relaxation it could then unlink every provider the owner uses (the "older
+method must remain" rule is satisfied by the attacker's own method). Nothing tells the owner's methods from the attacker's once both are a
+day old. So an **older provider is still never unlinked here** (`provider_too_old`, fresh or not), and a method added in the last 24 hours
+is always free to remove. A passkey older than 24 hours can be removed only by a fresh session (new: before, any session could), and the
+rule "**a method older than 24 hours must remain afterwards**" holds for every removal (`established_methods`, inside the `DELETE`
+statement itself, after locking the account row), so a fresh copy still cannot take the owner's last old method. Test:
+`test_a_fresh_session_still_cannot_remove_the_last_old_method`, `test_an_older_provider_stays_linked_even_to_a_fresh_session_and_a_new_one_is_free`.
+**Next step, not built:** unlinking an older provider needs a way to tell the owner's methods from an attacker's that survived a day, for
+example a sign-in that was *used* by the owner after it was added (`Passkey.last_used_at` exists, identities have none), or a notice mail when a
+method is added.
+
+**App sessions.** An iOS access token has the `account` scope and no cookie. Its freshness is judged from the `ApiSession` row it belongs
+to: `created_at`, the sign-in that made the session (a refresh does not renew it); signing in again makes a new session. Apps do not use
+the e-mailed code (`app_sign_in_required`). Tests: `test_an_app_session_is_as_recent_as_its_sign_in`,
+`test_an_app_cannot_link_another_sign_in_from_a_stale_session`. There is no iOS app in this repository to try it against.
+
+**The e-mailed code** (`/api/auth/recent/email/*`, `vault/recent_signin.py`, `vault/email.py`). The person asks; the Vault mails a
+six-digit code and a link to the address on the account. The code is typed into the page that asked, or the link is opened (on any
+device) and its **Approve** button pressed; either confirms the browser that asked. What each attack meets:
+- *A link prefetcher, a mail scanner or a preview.* Opening the link is a GET that shows a page (who asked: browser and system, minutes
+  ago; Approve; This wasn't me) and changes nothing. Only the POST of the button approves. Test:
+  `test_a_link_prefetcher_cannot_spend_the_code`. The page is `no-store`, `Referrer-Policy: same-origin` (not `no-referrer`: a browser then sends `Origin: null` on the form's POST and the cross-site-write guard would refuse the Approve button), and `frame-ancestors 'none'`
+  (Vercel's header) stops it being framed under a fake button. The link's token (256 bits) is in the URL, hence in request logs: it is one
+  use, ten minutes, and approving it confirms only the browser session that asked.
+- *Someone asks for a code in the owner's name.* The code goes to the owner's mailbox and is bound to the asker's session: the account's
+  session key and a random request id in the asker's cookie, hashed together. The owner reading the code out, or approving the link, helps
+  the asker only; the e-mail says who asked (browser and system, time) and to ignore it otherwise. **Every ask writes a new request id**
+  (found by review: a reused id let a copy of the cookie taken after an earlier ask share a later one), and a send that fails leaves the
+  last good code alone; asking again ends the codes this cookie held. A copy of the cookie taken before the code was requested, another
+  browser of the same account, and another account all get `no_code` (a code of their own is `wrong_code`). A copy taken *after* the ask
+  holds the same request id as the browser that asked and is, for this purpose, the same session: it can use the code, approve-and-poll,
+  or ask again, which cancels the owner's live code (and uses the account's hourly allowance below). That is what a cookie is.
+  Signing everyone out ends a waiting code (the key changes). Tests: `test_a_code_requested_in_one_browser_cannot_be_used_in_another`,
+  `test_a_code_belongs_to_one_account`, `test_signing_everyone_out_kills_a_code_that_was_waiting`,
+  `test_a_second_ask_replaces_the_first_and_a_copy_of_the_old_cookie_gets_nothing`. **Residual:** a person talked into
+  approving a link they did not ask for approves the attacker's request. The page names the browser and the minutes to make that
+  visible; there is no number to compare. Anyone who can read the account's mailbox can confirm, which is the owner's chosen trade.
+- *Guessing.* Six digits from `secrets.randbelow`, stored only as an HMAC keyed with `SESSION_SECRET` (a leaked table cannot be tried
+  offline without the key), ten minutes, single use (the `used_at` update is the gate), at most 5 tries counted in the same `UPDATE` that
+  reads them (parallel guesses cannot exceed five), a new code replaces the old one only after it was sent, compared with
+  `hmac.compare_digest`, and the per-IP sign-in limit (`AUTH_VERIFY_RATE_LIMIT`) on top. **The odds, written down (found by review):** a
+  stale cookie can ask for a code and guess at it. Per code that is 5 tries at one in a million. With only the limits above (3 codes an
+  hour, 5 tries each) that is 15 guesses an hour, 10,800 over a cookie's 30 days, about 1 percent. So the account also has a **budget of
+  10 failed tries an hour summed over all its codes** (`FAILED_TRIES_PER_HOUR`; past it `confirm` and `start` answer 429
+  `email_attempts_exhausted` and only the passkey and provider paths remain) and **10 codes a day** (`SENDS_PER_DAY`, 429
+  `email_account_daily_limit`): at most 50 guesses a day, 1,500 over 30 days, **about 0.15 percent** at the very most for an attacker who never
+  stops, and the owner sees a mail for every code. Tests: `test_an_account_has_a_budget_of_failed_tries_an_hour_and_then_only_the_other_paths_remain`,
+  `test_an_account_may_ask_for_ten_codes_a_day`.
+- *Locks.* `start` counts the caps under the Vault-wide advisory lock and the account lock from `vault/locks.py` (`lock_account`,
+  `FOR NO KEY UPDATE`, the 5 s timeout set with `SET LOCAL` before the advisory lock is asked for), so a lock held long by one request
+  answers 503 with Retry-After for that ask instead of stalling every account's ask. Tests: `test_a_held_account_lock_makes_start_answer_503_and_does_not_hang`,
+  `test_a_held_vault_wide_cap_lock_does_not_stall_an_ask_for_ever`.
+- *Apple's private relay.* Apple forwards mail sent to a `privaterelay.appleid.com` address only from senders registered in the developer
+  account's "Sign in with Apple for Email Communication" settings. Until the owner registers the sending domain (and sets
+  `APPLE_RELAY_REGISTERED=1`), `start` answers 409 `email_relay_unregistered` ("Nothing was sent"), `GET /me/recent-sign-in` says
+  `reason: relay_unregistered`, and the page offers the passkey and provider paths, so nobody is told "sent" for a mail Apple will drop.
+  Tests: `test_an_apple_private_relay_address_is_not_mailed_until_the_sender_is_registered`, `..._once_the_owner_registered_the_sender`.
+- *Mail flooding and cost.* At most 3 sends an hour per account (under a lock, so two requests cannot both pass) and `EMAIL_DAILY_CAP`
+  (default 90, Resend's free plan is 100) a day for the whole Vault, then a clean 429 (`email_hourly_limit`, `email_daily_cap`) that points
+  to the passkey or provider. A failed send deletes its row so it does not count. **Residual (found by review):** a stale copy of the
+  cookie can ask three times an hour and so use the owner's hourly allowance and send the owner up to 72 "someone asked" mails a day (the
+  mail says to ignore them); the owner then confirms with a passkey or provider. Someone with a few accounts, each with a verified address
+  of their own, can use up the daily cap for everyone for a day; erasing an account deletes its rows, so the count can also be reset by
+  creating and deleting accounts, which only makes the Vault-wide cap a cost guard: Resend itself refuses past its own plan's 100 a day
+  (the twin does too, `daily_quota_exceeded`), and a refused send answers `email_send_failed` with the fallback paths.
+- *Learning about an address.* Everything here needs a signed-in session of the account. The answers say a code went "to the address on
+  this account", masked (`***@e***.com`), and never carry the address or the code. An account with no usable address, a Vault with no
+  sender, or an app gets a 409 that says so and the page offers the passkey and provider paths (tests for both).
+- *Where the address comes from (found by review, fixed).* The first version mailed `users.email`, which is whatever the first provider
+  said, unverified, never cleared and not editable: a copied session inside its fresh window could link its own Google to a passkey-only
+  account, put its own address there, survive "Sign out everywhere" (which removes the Google link, not the address) and receive every
+  later code; and a Microsoft or Facebook address is unverified, so anyone could have the Vault mail a third party. Now the code goes to
+  the e-mail of the **oldest linked provider whose address the provider vouches for** (`identities.email_verified`: Google and Apple say so
+  in the ID token; Microsoft and Facebook are never taken as verified) **and that has been on the account for more than 24 hours**
+  (`mail_address`). It leaves with the identity that gave it. Tests: `test_the_address_a_code_goes_to_is_one_a_provider_vouches_for_and_that_is_a_day_old`,
+  `test_a_passkey_only_account_has_no_address_to_poison_for_a_day`, `test_an_unverified_google_address_receives_nothing`. Existing identities start
+  as not verified and become verified at their next sign-in with Google or Apple (no data migration), so until then the code option is
+  not offered and the passkey and provider paths are. **Residual:** a patient attacker who links their own Google and is not noticed for a
+  day on a passkey-only account becomes that account's address; Account lists every method with its date, and "Sign out everywhere" removes
+  methods added in the last 24 hours, but nothing tells the owner on day one.
+- *Inert by default.* Without `RESEND_API_KEY` there is no sender: `/me/recent-sign-in` says `reason: no_sender`, start answers 409
+  `email_unavailable`, and no outbound call exists. The sender is behind a small `EmailSender` interface (`ResendSender`: HTTPS to
+  `api.resend.com`, bearer key, 5 s timeout, one retry made with the same `Idempotency-Key`, key and message never logged). Tests and local
+  development use `twins/resend.py`; `universe.escapes` stays empty. The twin is built from Resend's documentation and **not yet
+  compared with the live service** (`tests/conformance/test_resend_live.py` waits for an account and a key).
+- *Data.* `email_codes` holds hashes, a coarse browser label and times, no address and no code; 10 minutes as a code, 2 days as the record
+  the caps count (daily job), erased with the account. Resend receives the address and the message: `docs/gdpr.md` and the privacy notice
+  name it, with what Resend's own pages say about retention (read 2026-10-09; not our figure).
+
+**What a person sees.** On `recent_sign_in_required` the Account page shows "Confirm it's you" at the top of the panel (it also offers it next to an old passkey that "Sign out everywhere" lists): "Email me a code
+(***@e***.com)", "Use my passkey" (the ordinary passkey sign-in; the page checks that `me.id` did not change), and "Continue with Google"
+for each linked provider (which leaves the page: the Account panel opens again with "Confirmed. To delete my account, press it again").
+The code field has `inputmode="numeric"` and `autocomplete="one-time-code"`; the page polls `POST /email/poll` every 4 seconds so a link
+approved on a phone finishes the step on the laptop. The download of all data became a button that first asks
+`GET /api/v1/me/recent-sign-in`, because a browser would show the 403 JSON as a page. Screenshots at 1400 and 390 px:
+`docs/screenshots/confirm-its-you-*.jpg`.
+
+**Alternatives considered** (as proposed; B chosen by the owner, with the e-mailed code added):
 | Option | For | Against |
 |---|---|---|
-| A. Nothing (the 24-hour list built in #407 only) | no friction, no new code | the copied session can still add a method, export and delete; relies on the person looking at the list |
-| B. 10 minutes, re-authenticating with a passkey or provider only | no new service | a person who signed in with a provider has to leave the page and come back; a passkey needs a device prompt |
-| **B′. 10 minutes, the e-mailed code and link as the way, passkey or provider when the account has no address (decided)** | one click or a short code, same page; a copied cookie alone is not enough | needs an e-mail service (a processor to name, a sender domain to verify, a key to keep); the mailbox becomes part of the account's security |
-| C. 60 minutes | fewer prompts | a copy of a cookie from a normal sitting is almost always inside it: it protects very little |
-| D. Every time (0 minutes) for delete and export, 10 for the rest | strongest for the irreversible actions | a step before every delete or export, which the person has just chosen to do |
-| E. Shorter cookie lifetime (7 days) | one line | does nothing inside the window, and signs everybody out weekly |
-| F. E-mail the person when a method is added | tells them without looking | the same service B′ needs, and an alert is read later than a code is typed; it can be added once the sender exists |
-| G. A new method may not export or delete for 24 hours | catches the attacker's own method | a second clock to build and explain; the recent sign-in already stops them adding it |
+| A. Nothing (the 24-hour list alone) | no friction | the copied session can still add a method, export and delete |
+| **B. 10 minutes, the actions above (built)** | a copied session does nothing lasting once ten minutes have passed since the last sign-in; no new login route | one extra step for rare actions; a copy taken in the 10 minutes after a sign-in works for those 10 minutes |
+| C. 60 minutes | fewer prompts | a copy from a normal sitting is almost always inside it |
+| D. Every time for delete and export | strongest for the irreversible | a step before every delete or export the person just chose |
+| E. Shorter cookie lifetime | one line | does nothing inside the window, signs everybody out weekly |
+| F. Mail the person when a method is added | tells them without looking | a passkey-only account has no address; a second mail type (the code mail is the first, and only on request) |
 
-**Cost for people.** At most once per ten minutes, only for delete, export, adding or removing a passkey, linking a provider and
-creating a token, and once for everyone with a cookie from before the release: open the mail, click the link or type the code. An account without an address uses its passkey or provider as today. One person is worse off on
-purpose: someone who still has a session but no longer has any way in cannot add a passkey from it any more, as they can today; a
-session only a copied cookie still reaches is exactly what this stops. The new cost is the mail itself: it must arrive (a sender
-domain to verify, a free plan with daily limits) and a lost mailbox means using the passkey or provider.
+**What this resolves, and what it does not, of the residual risks of the 24-hour rule (#407):** *the patient attacker* (a method added at
+time 0 and left for a day): reduced, not resolved. A copied cookie now needs a recent sign-in to add a passkey or link a provider, so the
+attacker must have copied it inside the 10 minutes after the owner signed in; before, any copy did. *An old provider cannot be unlinked*:
+**not resolved** (the relaxation was withdrawn, above). *An account younger than 24 hours removes nothing*: unchanged. **Still open, found
+by review:** (1) creating a share (`POST /api/v1/shares`, an invite link a person accepts from their own account) needs only a session, and
+"Sign out everywhere" does not revoke shares, so a stale copy can share the collection or a deck with itself and the owner finds it only in
+the Shares list; (2) the export is gated, but the collection, decks and value history can all be read through the ordinary API with the same
+stale cookie, so the check protects deletion, tokens, connecting apps, the sign-in methods and the single ZIP, not the privacy of the collection
+from a copied cookie; (3) "Sign out everywhere", and removing a method added in the last 24 hours, are free of the check on purpose, so a stale
+copy can unlink a provider or remove a passkey the owner added today (never the last old method), and `DELETE /me/sign-in-methods/recent`
+signs the owner's other browsers out: a nuisance, never a way in. The owner's list for this decision did not include (1) or (2); a follow-up
+issue holds them.
 
-**What the next pull request builds, and where.** `vault/auth.py` (`sign_in` writes and carries `auth_at`; `fresh`; the link and claim
-path of the callback), `vault/app.py` (a `fresh_user` dependency next to `account_user`, 403 with the code), `vault/passkeys.py` (the
-two register routes), `vault/api/v1.py` (the routes above and `me/recent-sign-in`), a table for the code hashes (listed in
-`vault.privacy.personal_data`, the export and `docs/gdpr.md`), the sender (Resend behind an interface, a fake in `twins/`, a
-conformance check), `public/views/account.jsx` ("Confirm it's you"), tests for each route (stale refused, fresh accepted; a link by a
-stale session refused and not refreshing `auth_at`; the code works once, expires, is rate limited, is bound to the requesting
-session, never says whether an address exists), `docs/api.md`, `docs/gdpr.md`, `public/privacy.html`, `public/credits.html`. It touches
-`vault/auth.py` and `vault/passkeys.py`, so it needs its own threat-model update and a security review before the merge.
+**Residual risks**
+- A cookie copied inside the 10 minutes after a sign-in works for those 10 minutes (including adding a method and, a day later, signing
+  in with it; the last old method still cannot be removed, and an old provider cannot be unlinked).
+- The cookie is not bound to a device, so it can be replayed from anywhere; binding it to a client key (like DPoP) is a larger change and
+  is not proposed.
+- Anyone who can read the account's mailbox can confirm.
+- A person who approves a link or reads out a code for a request they did not make confirms the attacker's browser.
+- The Vault-wide daily mail cap can be exhausted by someone with many accounts, for a day.
+- A stale copy of the cookie can use up the account's three sends an hour (and so send the owner "someone asked" mails); see the caps above.
+- Resend's twin has not been compared with the live service, and Resend's delivery is outside our control (a late or lost mail leaves the
+  passkey and provider paths).
 
-**Criterion 4** (the threat model and `docs/gdpr.md` record the decision): recorded here and in `docs/gdpr.md` as decided; the
-sections turn from "decided" to "built" in the next pull request. `docs/gdpr.md` states what exists (the sign-in methods, above) and says
-what is decided (it will name Resend as a processor when the sender is built).
+**Cost for people.** A passkey touch, a trip to the provider (a few seconds) or a code from the mailbox, at most once per ten minutes, only
+for delete, export, adding or removing an older sign-in method, linking a provider and creating a token; everyone with a cookie from before the
+release meets it once. One person is worse off on purpose: someone who still has a session but no longer has any of their sign-in methods or
+mailbox cannot add a passkey from it any more, as they could before.
 
-**Residual risks, with or without the e-mail code**
-- A cookie copied inside the 10 minutes after a sign-in works for those 10 minutes; so does one held by someone who can also read the
-  account's mailbox.
-- The cookie is not bound to a device, so it can be replayed from anywhere; binding it to a client key (like DPoP) is a larger change
-  and is not decided.
-- Nobody is notified when a method is added (option F), so the 24-hour list depends on the person opening "Sign out everywhere".
-- Unlinking a provider linked more than 24 hours ago is not possible from the page until the recent sign-in is built, by design.
-- The mailbox and the sender become part of the account's security: a compromised mailbox with a copied cookie passes the check, and
-  Resend sees the address and the code in transit.
+**Tests** (`tests/test_recent_signin.py`, `tests/test_email.py`, `tests/test_recent_sign_in_methods.py`, `tests/test_passkeys.py`): for every
+protected route a stale session is refused (403, code, nothing changed) and a fresh one accepted; the window expires and is the setting;
+a cookie without a believable time is stale; a link does not renew, a known sign-in does; a personal access token, a reviewer session
+and an app session behave as above; the code is mailed to the twin and read from its record; hashed; single use; five tries; ten minutes;
+three an hour and the daily cap; bound to the browser and the account; dead after "Sign out everywhere"; the link is prefetch-safe, can
+be approved elsewhere and once; no address and no sender fall back to the passkey and provider paths; a failed send costs nothing;
+retention and erasure; nothing leaves the twin universe. With the check removed (`require_recent`) or the binding removed (`session_digest`
+fixed), the tests above fail.
+
+**Owner steps, after the merge** (nothing is sent until the key exists): create a Resend account, add and verify the domain
+`mtgvault.cards` (DNS records at Vercel), create an API key and save it as `RESEND_API_KEY` in the Vercel project; sign Resend's DPA
+(`docs/gdpr.md`); run `tests/conformance/test_resend_live.py` once and fix the twin where it differs; **for Apple private-relay
+addresses, register the sending domain (the domain of `EMAIL_FROM`) in the Apple developer account under Certificates, Identifiers & Profiles,
+Services, "Sign in with Apple for Email Communication", and then set `APPLE_RELAY_REGISTERED=1`**; until then those addresses are told "not
+sent" and use a passkey or provider.
+
 ## Where to buy settings (#212, 2026-10-09)
 
 The "Where to buy" menu keeps one small per-person record, `buy_settings`: a country the person chose and up to three shops they typed

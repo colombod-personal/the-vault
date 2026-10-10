@@ -203,6 +203,13 @@ with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic
 - CDN scripts carry integrity hashes, so a tampered copy won't run.
 - `tests/test_workflows.py` fails if a workflow breaks one of these rules.
 
+**A recent sign-in for serious actions (#347):** deleting the account, downloading all data, creating an access token, connecting an AI app, adding a passkey,
+linking a provider and removing an older passkey need a sign-in from the last 10 minutes (`RECENT_SIGNIN_SECONDS`). The person
+confirms with a passkey, a linked provider, or a one-time code and link e-mailed to a verified address on the account. The e-mail needs
+[Resend](https://resend.com) (`RESEND_API_KEY`, `EMAIL_FROM` on a domain verified there, `EMAIL_DAILY_CAP`, `APPLE_RELAY_REGISTERED`); **unset, nothing is sent** and
+only the passkey and provider paths are offered. Locally, run the twins and set `RESEND_API_KEY=re_twin_dev_key` (the code is at
+`/_twins/api/resend/sent`). Design, attacks and limits: `docs/mcp-oauth-threat-model.md`; routes: `docs/api.md`.
+
 **Store reviewers:** the Claude and ChatGPT directories need a demo account that works without a second factor. Set
 `REVIEWER_PASSPHRASE` (16+ characters) in the Vercel production environment and the sign-in page gains a "Reviewer sign-in"
 box that opens one fixed account of made-up data (`vault/reviewer.py`, guide at `/reviewers`); unset, the way in does not exist.

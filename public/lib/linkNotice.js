@@ -23,6 +23,10 @@
         `are never merged. To link it, sign out, sign in with ${name || 'it'}, download that account's data if ` +
         'you want it (Account → Download my data), delete it (Account → Delete my account), then sign in here ' +
         `again and link ${name || 'it'}.`;
+    } else if (error === 'recent_sign_in_required') {
+      tone = 'danger';
+      text = `${who} was not linked: linking a sign-in needs a recent sign-in with one this account already has. ` +
+        "Open Account, press Link again and confirm it's you first.";
     } else if (error) {
       tone = 'danger';
       text = `Linking failed (${error}). Please try again.`;

@@ -123,6 +123,8 @@ def _control(universe: Universe, twin, action: str, body: dict):
         # What Sign in with Apple / Google Sign-In would hand the iOS app (for the simulator).
         claims = {k: v for k, v in body.items() if k not in ("aud", "sub", "nonce")}
         return {"id_token": twin.native_id_token(body["aud"], body["sub"], body.get("nonce"), **claims)}
+    elif twin.name == "resend" and action == "sent":
+        return {"sent": twin.sent}  # the mails the Vault "sent": a developer reads the confirmation code here
     elif twin.name == "scryfall" and action == "cards":
         card = twin.add_card(body.pop("name"), body.pop("set"), body.pop("collector_number"), **body)
         return {"id": card["id"]}

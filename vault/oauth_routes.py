@@ -29,7 +29,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from sqlalchemy.orm import Session
 from starlette.datastructures import QueryParams
 
-from . import client_auth
+from . import client_auth, recent_signin
 from . import oauth_clients as clients
 from . import oauth_server as server
 from .auth import PKCE_CHALLENGE as PKCE_CHALLENGE_RE, SessionEnded, require_live_session, session_user
@@ -334,6 +334,11 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
         except RedirectError as exc:
             return return_page(exc, settings)
         user = session_user(db, request)
+        # Connecting an app mints a 30-day credential (read, and write if allowed): the same power as a personal access token, which needs a
+        # recent sign-in (#347). A stale session signs in again first, with a method the account has (that makes it fresh) and comes back here.
+        # A store reviewer's demo session is exempt: it has no account powers and is the way the stores' review connects an app.
+        if user is not None and "rv" not in request.session and not recent_signin.is_fresh(db, request, settings):
+            user = None
         if user is None:
             request.session["oauth_pending"] = {"q": raw, "t": int(time.time())}
             return sign_in_page(req, auth.offered, _passkeys_on(), settings.dev_login, bool(settings.reviewer_passphrase))
@@ -361,6 +366,9 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
         if shown is not None:
             request.session["oauth_consents"] = [n for n in mine if n != shown]
         user = session_user(db, request)
+        if user is not None and "rv" not in request.session and not recent_signin.is_fresh(db, request, settings):
+            return error_page("This needs a sign-in from the last few minutes, and yours is older. Start again from the app: the Vault "
+                              "will ask you to sign in first.")  # (#347; the screen was shown while the session was recent)
         # Both halves must match (this browser's, and the form's), then the database row is consumed
         # atomically: a copied cookie and form can not be played twice.
         asked = server.take_consent(db, user.id, nonce) if user is not None and shown is not None else None

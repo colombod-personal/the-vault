@@ -21,7 +21,7 @@ This is an engineering document, not legal advice: have the privacy notice
 | Table | Personal? | Contents | Export | Erasure |
 |---|---|---|---|---|
 | `users` | yes | display name, e-mail (from the sign-in provider) | `account.json` | `purge_user` |
-| `identities` | yes | provider, provider user id, e-mail, and when it was linked to the account (`linked_at`) | `account.json` | `purge_user` |
+| `identities` | yes | provider, provider user id, e-mail, whether the provider vouched for that e-mail (`email_verified`: the address a confirmation code may be sent to, #347), and when it was linked to the account (`linked_at`) | `account.json` | `purge_user` |
 | `imports` | yes | file name, date, change summary | `imports.json` | `purge_user` |
 | `collection_baselines` | yes | the cards (copies, condition, folder, price and date paid) of the last file you imported, so the next import can tell what changed in your app from what was edited here | `last_import_cards.json` | `purge_user` |
 | `bucket_baselines` | yes | the same record as `collection_baselines`, for a file imported into one bucket (#124): the cards of the last file imported into that bucket, so a re-import of that bucket applies only what changed in your app; one per bucket, replaced by the next import into it, forgotten by the next whole-collection import | `last_import_cards.json` (`by_bucket`) | `purge_user` (before the buckets), and with its bucket (`ON DELETE CASCADE`) |
@@ -46,6 +46,7 @@ This is an engineering document, not legal advice: have the privacy notice
 | `idempotent_requests` | yes | stored answers to retried POSTs and PUTs (24 hours, deleted by the daily retention job; the answer of a saved "Where I buy" setting holds none of it) | – (short-lived copies of answers already in the export) | `purge_user` |
 | `staged_uploads` | yes | a collection file an assistant asked the person to upload (the file itself, its name, when, and the bucket it goes into, if any), until it is applied or its link expires (one hour); only a hash of the link is stored | – (the person's own file, gone within the hour; the import it becomes is in the export) | applied, deleted when expired (the daily job, and whenever someone starts a link), `purge_user` |
 | `auth_codes` | yes | one-time sign-in codes for apps (2 minutes) | – (expire in minutes) | `purge_user` |
+| `email_codes` | yes | a code and link e-mailed to the address on the account to confirm it is the person before a serious account action (#347): only keyed hashes of the code, of the link's token and of the browser session that asked, what asked (a coarse browser and system such as "Chrome on Windows", never an IP address), tries and times. The code works for **10 minutes**, once; the row is kept **2 days** only because the send caps (3 an hour per account, a daily total) count it | – (hashes of short-lived secrets, no profile data) | the daily retention job after 2 days; `purge_user` |
 | `collection_values` | yes | daily market value and cost | `value_history.json` | `purge_user` |
 | `native_nonces` | no | hashes of used native sign-in nonces and Facebook data-deletion requests, until they would expire | – | deleted when expired |
 | `passkey_challenges` | no | a passkey ceremony someone tried to finish (random id, five minutes; the challenge itself is in the session cookie), naming no one | – | deleted once expired |
@@ -107,12 +108,13 @@ own window, as for any deletion (see the checklist below). **Erasure** (`DELETE 
   sign-in method can't be removed, and neither can a method while no OTHER method older than 24 hours would remain: a **change in what
   the person can erase**, made so that a copied session cannot replace the owner's methods with its own. It means an account whose only
   old method is one passkey, or an account whose methods were all added today, cannot remove it yet (the response says why); deleting
-  the whole account (`DELETE /api/v1/me`) is unchanged and erases every method. An account holds at most 20 passkeys. **Decided, built in the next pull request (#347):** the serious account actions (deleting the account, exporting
-  everything, adding or removing a passkey, linking a provider, creating a personal access token) will need a sign-in within the last 10 minutes;
-  a person without one confirms with a one-time code and link e-mailed to the address on the account (the code lasts 10 minutes, works once, is
-  rate limited, and only a short-lived hash of it is kept), or with a passkey or provider sign-in when the account has no address. Resend will send
-  the mail and is named here, in `public/privacy.html` and `public/credits.html` as a processor of the address and the code when that change lands;
-  nothing is sent or stored by this pull request. Design: `docs/mcp-oauth-threat-model.md`. Step 1 of Sign out everywhere also deletes the account's app sessions (`api_sessions`, with their retired refresh tokens) and
+  the whole account (`DELETE /api/v1/me`) is unchanged and erases every method. An account holds at most 20 passkeys. **Built (#347):** the serious account actions (deleting the account, exporting
+  everything, creating a personal access token, connecting an AI app, adding a passkey, removing a passkey older than 24 hours, linking a provider)
+  need a sign-in within the last 10 minutes; a person without one confirms with a one-time code and link e-mailed to a verified address of a provider
+  linked for a day (the code lasts 10 minutes, works once, is limited to 3 a hour and 10 a day for an account, and only a keyed hash of it is kept in
+  `email_codes`), or with a passkey or provider sign-in when the account has no such address. Resend sends the mail and is named here, in
+  `public/privacy.html` and `public/credits.html` as a processor of the address and the code; nothing is sent unless `RESEND_API_KEY` is set and the
+  person asks. Design and attacks: `docs/mcp-oauth-threat-model.md`. Step 1 of Sign out everywhere also deletes the account's app sessions (`api_sessions`, with their retired refresh tokens) and
   unused hand-over codes, and the personal access tokens and connected-app grants made in the last 24 hours (rows the person can already delete one by one); nothing new is stored. Only the
   person's own methods are read or removed, and another person's id is a 404 (`tests/test_recent_sign_in_methods.py`). #347.
 
@@ -149,7 +151,16 @@ own window, as for any deletion (see the checklist below). **Erasure** (`DELETE 
       DPA covers them), Neon, GitHub (the price job), the four sign-in providers in `vault/auth.py` (Google, Microsoft, Apple,
       Facebook) and passkeys (no third party), Scryfall (card images in the browser; identifiers only from the server),
       Commander Spellbook (`vault/combos.py` sends a deck's card names and nothing that identifies the person), Archidekt
-      (a GET of a public deck by number) and the AI assistant the person connects (their own choice, scoped, revocable).
+      (a GET of a public deck by number), Resend (`vault/email.py`: the account's e-mail address and a one-time code, only when the
+      person asks for one and only once `RESEND_API_KEY` is set) and the AI assistant the person connects (their own choice, scoped, revocable).
       `tests/test_legal_pages.py` fails if the notice stops naming one of them. Add any new outbound host here and in the notice.
+- [ ] **Resend** (`vault/email.py`, only when `RESEND_API_KEY` is set) receives the account's e-mail address and the confirmation
+      message (a six-digit code and a link). Before the key is set: sign Resend's DPA, and check what Resend retains. Read from Resend's
+      own pages on 2026-10-09 (not legal advice, and not a promise by Resend): its privacy policy (resend.com/legal/privacy-policy,
+      last updated 2026-08-27) describes the processing of its website visitors, says personal data is kept "only for as long as is
+      necessary" and may be processed in the United States, names no retention period for customers' e-mail content and points to a
+      subprocessors page; its account limits page (resend.com/docs/knowledge-base/account-quotas-and-limits) says e-mail content,
+      metadata, delivery status, events and logs are kept 30 days on the Free plan. The Vault stores nothing at Resend beyond that and
+      sends nothing but this one message, only when the person asks. See Resend's own terms for the current position.
 - [ ] Have a breach procedure: the supervisory authority must be notified within 72 hours.
 - [ ] Decide on inactive-account retention (for example, warn after 24 months, then delete).

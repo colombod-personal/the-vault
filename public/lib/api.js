@@ -30,7 +30,8 @@ window.VaultApi = (() => {
 
   class ApiError extends Error {
     // retryAfter: seconds from the answer's Retry-After header (429, 503), else null
-    constructor(status, message, retryAfter = null) { super(message); this.status = status; this.retryAfter = retryAfter; }
+    // code: the server's stable error code when it sends one (recent_sign_in_required, wrong_code, ...)
+    constructor(status, message, retryAfter = null, code = null) { super(message); this.status = status; this.retryAfter = retryAfter; this.code = code; }
   }
 
   // Retries: GETs, and POSTs carrying an Idempotency-Key, are retried on network errors and on
@@ -64,9 +65,9 @@ window.VaultApi = (() => {
         // The session ended (expired, or signed out in another tab): the app shows the sign-in screen.
         if (resp.status === 401 && !path.startsWith('/api/auth')) window.dispatchEvent(new Event('vault:unauthorized'));
         if (retryable && RETRYABLE.has(resp.status) && attempt < MAX_RETRIES) { await sleep(backoff(attempt, resp)); continue; }
-        let msg = 'HTTP ' + resp.status;
-        try { const p = await resp.json(); msg = p.detail || p.title || msg; } catch {}
-        throw new ApiError(resp.status, msg, Number(resp.headers.get('retry-after')) || null);
+        let msg = 'HTTP ' + resp.status, code = null;
+        try { const p = await resp.json(); msg = p.detail || p.title || msg; code = p.code || null; } catch {}
+        throw new ApiError(resp.status, msg, Number(resp.headers.get('retry-after')) || null, code);
       }
       const type = resp.headers.get('content-type') || '';
       return type.includes('json') ? resp.json() : resp.text();
@@ -445,8 +446,23 @@ window.VaultApi = (() => {
     remove: (m) => call(V1 + (m.kind === 'passkey' ? '/me/passkeys/' : '/me/identities/') + m.id, { method: 'DELETE' }),
   };
 
+  // A recent sign-in (#347): delete, export, tokens, adding or removing sign-in methods need one in the last few minutes. The server
+  // decides (403 with the code `recent_sign_in_required`); this only asks and confirms. A code is e-mailed to the address on the account.
+  const recent = {
+    status: () => call(V1 + '/me/recent-sign-in'),
+    // For actions that are not an API call the page can retry (a download, a trip to a provider): refuse here, with the same code.
+    ensure: async () => {
+      const s = await call(V1 + '/me/recent-sign-in');
+      if (!s.fresh || s.seconds_left < 20) throw new ApiError(403, "Confirm it's you first.", null, 'recent_sign_in_required');
+      return s;
+    },
+    emailStart: () => call('/api/auth/recent/email/start', { method: 'POST' }),
+    emailConfirm: (code) => call('/api/auth/recent/email/confirm', { method: 'POST', json: { code } }),
+    emailPoll: () => call('/api/auth/recent/email/poll', { method: 'POST' }),
+  };
+
   return {
-    ApiError, all, passkeys, signInMethods,
+    ApiError, all, passkeys, signInMethods, recent,
     providers: () => call('/api/auth/providers'),
     me: () => call(V1 + '/me'),
     collection: () => loadCollection(V1 + '/collection'),

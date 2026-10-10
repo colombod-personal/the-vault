@@ -216,6 +216,12 @@ function App() {
       setRouteState(s.route || vaultRouteFromHash(t.landing || 'dashboard'));
     };
     window.addEventListener('popstate', onPop);
+    // Back from a provider's page after "Confirm it's you" (views/account.jsx): open Account where the person was. Here, after the
+    // history entry above is set, so the overlay entry openAccount() pushes survives and Back closes Account instead of leaving the app.
+    try {
+      const back = JSON.parse(sessionStorage.getItem('vault_confirm_return') || 'null');
+      if (back && Date.now() - back.at < 15 * 60 * 1000) openAccount(); else sessionStorage.removeItem('vault_confirm_return');
+    } catch {}
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
