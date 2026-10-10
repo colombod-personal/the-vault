@@ -20,6 +20,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 
+from . import card_roles
 from .card_faces import all_text
 from .deck_tools import unread_deck_rule
 from .models import (CatalogSource, LegalityChange, OracleCard, OraclePrice, OraclePrinting, OracleTag, OracleTagLink, Ruling)
@@ -95,7 +96,9 @@ def _image(obj: dict) -> str | None:
     return uris.get("normal")
 
 
-def oracle_card_row(obj: dict) -> dict:
+def oracle_card_row(obj: dict, unread: dict[str, str] | None = None) -> dict:
+    """The row of one card. Its roles (what it does, ``vault.card_roles``) are read here and are part of the content hash, so a card
+    is rewritten when its text or the rules that read it change. ``unread`` collects ``{name: why}`` for a card the rules cannot read."""
     row = {
         "oracle_id": obj["oracle_id"], "name": obj["name"], "layout": obj.get("layout"),
         "mana_cost": obj.get("mana_cost"), "cmc": obj.get("cmc"), "type_line": obj.get("type_line"),
@@ -108,6 +111,10 @@ def oracle_card_row(obj: dict) -> dict:
         "representative_id": obj.get("id"), "digital": bool(obj.get("digital")),
         "artist": _artist(obj), "image_normal": _image(obj),
     }
+    row["roles"], why = card_roles.read_row(row)
+    row["roles_version"] = card_roles.VERSION
+    if why and unread is not None:
+        unread[row["name"]] = why
     row["content_hash"] = digest(row)
     return row
 
@@ -116,9 +123,10 @@ def sync_oracle_cards(db: Session, objects: Iterable[dict], today: date | None =
     """Bring ``oracle_cards`` in line with Scryfall's oracle-cards file. Returns counts."""
     today = today or date.today()
     new = {}
+    unread_roles: dict[str, str] = {}
     for obj in objects:
         if obj.get("object") == "card" and obj.get("oracle_id") and obj.get("layout") not in SKIPPED_LAYOUTS:
-            row = oracle_card_row(obj)
+            row = oracle_card_row(obj, unread_roles)
             new[row["oracle_id"]] = row
     old = {r.oracle_id: (r.content_hash, r.legalities) for r in db.execute(
         select(OracleCard.oracle_id, OracleCard.content_hash, OracleCard.legalities))}
@@ -143,8 +151,12 @@ def sync_oracle_cards(db: Session, objects: Iterable[dict], today: date | None =
     unread = sorted(row["name"] for row in new.values() if unread_deck_rule(all_text(SimpleNamespace(oracle_text=row.get("oracle_text"), faces=row.get("faces")))))
     if unread:
         log.warning("catalog sync: %d card(s) have deck-building wording the legality check does not read: %s", len(unread), ", ".join(unread[:20]))
+    if unread_roles:
+        log.warning("catalog sync: %d card(s) have text the role rules cannot read, so they have no roles: %s", len(unread_roles),
+                    ", ".join(sorted(unread_roles)[:20]))
     counts = {"cards": len(new), "written": len(changed), "removed": len(gone), "legality_changes": len(legality)}
-    return {**counts, "unread_deck_rules": unread} if unread else counts
+    return {**counts, **({"unread_deck_rules": unread} if unread else {}),
+            **({"unread_roles": sorted(unread_roles), "unread_roles_why": {n: unread_roles[n] for n in sorted(unread_roles)[:20]}} if unread_roles else {})}
 
 
 def ruling_row(obj: dict) -> dict:

@@ -28,7 +28,7 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 
-from .. import analytics, deck_ideas, experts, observability
+from .. import analytics, card_roles, deck_ideas, experts, observability
 from ..deck_tools import FORMATS
 from ..models import User
 from . import mcp_session, mcp_ui
@@ -260,9 +260,14 @@ TOOLS = [
           "tag": {"type": "string", "pattern": TAG_PATTERN, "maxLength": 40,
                   "description": "Only cards the person tagged with this (from list_tags): 'show my trade cards'. Every item "
                                  "also lists its `tags`. Not on a shared collection"},
+          "role": {"type": "array", "minItems": 1, "maxItems": len(card_roles.POINTS), "items": {"type": "string", "enum": list(card_roles.POINTS)},
+                   "description": "Only cards that do this (card_roles lists the roles): the Vault's own reading of the Oracle text, not an "
+                                  "official classification. Every printing of a card with the role counts; with several, the card needs all of them "
+                                  "unless role_match is any"},
+          "role_match": {"type": "string", "enum": list(card_roles.MATCH), "default": "all", "description": "With several roles: all or any"},
           **PAGING, **SHARE},
          path=lambda a: _base(a) + "/cards",
-         query=("q", "set", "name", "finish", "condition", "printing", "type", "mana_value", "bucket", "tag", "sort", "limit", "cursor")),
+         query=("q", "set", "name", "finish", "condition", "printing", "type", "mana_value", "bucket", "tag", "role", "role_match", "sort", "limit", "cursor")),
     Tool("list_tags", "The person's own labels on cards (trade, commander-staple, deck:sliver ...), each with how many cards have it and "
          "how many of those assignments were written by the person, by an assistant or by the system. A tag is on the card "
          "(every printing), survives imports and stays when the last copy leaves. Use a tag as `tag` in search_cards to see its cards.",
@@ -512,6 +517,28 @@ TOOLS = [
           "format": {"type": "string", "enum": list(FORMATS), "description": "The format whose legality and copy limit apply"},
           **PAGING}, ["deck_id", "card"],
          path=lambda a: f"{V1}/decks/{int(a['deck_id'])}/ideas/alternatives", query=("card", "format", "limit", "cursor")),
+    Tool("card_roles", "What cards do, as short lists of roles: the Vault's own reading of the Oracle text in 22 roles (a mana rock, a token "
+         "doubler, a counterspell, card draw once or every turn, removal, a board wipe, protection ...). Give one of `card` (that card's roles), "
+         "`role` (the person's cards that have the role or roles) or `deck_id` (what a saved deck does: every role with the deck's cards that have "
+         "it, and empty roles shown so a gap is visible); with none, every role with how many of the person's cards have it. The roles are "
+         "the Vault's reading of the card text, not an official classification and not Scryfall's community tags: say so with each answer "
+         "(`label`). Each role has a short `point` (\"Doubles tokens\"), is `core` (the card exists to do it) or `incidental` (it does it on the "
+         "side), and names the rule that found it (`rule`, `why`: what the rule matches and what it gets wrong); a rule can miss or overreach, so "
+         "no role found means no role known, not that the card does nothing. With `card`, Scryfall Tagger tags come apart as `community_tags` "
+         "(a community's opinion). `role` with several roles needs all of them unless `match` is any. Reading only; the owned cards that "
+         "could stand in for a card of a deck come from get_card_alternatives.",
+         {"card": {"type": "string", "minLength": 1, "maxLength": 300, "description": "A card's name: its roles"},
+          "role": {"type": "array", "minItems": 1, "maxItems": len(card_roles.POINTS), "items": {"type": "string", "enum": list(card_roles.POINTS)},
+                   "description": "The person's cards that have these roles (one row per card, with the copies owned); paged"},
+          "match": {"type": "string", "enum": list(card_roles.MATCH), "default": "all",
+                    "description": "With several roles: `all` (the card has every one, the default) or `any`"},
+          "deck_id": {**ID, "description": "A saved deck's id (list_decks): what that deck does"},
+          **PAGING, **SHARE},
+         path=lambda a: (f"{V1}/catalog/cards/roles?name={quote(a['card'])}" if a.get("card") else f"{V1}/decks/roles" if a.get("deck_id") is not None
+                         else _base(a) + ("/roles/cards" if a.get("role") else "/roles")),
+         method=lambda a: "POST" if not a.get("card") and a.get("deck_id") is not None else "GET",
+         body=lambda a: {"deck_id": a["deck_id"]} if not a.get("card") and a.get("deck_id") is not None else None,
+         query=("role", "match", "limit", "cursor"), title="What cards do (roles)", provenance=("computed",)),
     Tool("get_deck", "A saved deck: its name, `overview` (format, commander(s), card count, colour identity), a `summary` "
          "of how much of it the person owns (copies needed, owned, missing, cost to finish), the cards not fully owned "
          "(the dearest 40, each with its Scryfall unit price and the `price_date` that price is from: the cheapest priced paper printing of the card, or the printing the list names, "

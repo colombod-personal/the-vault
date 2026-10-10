@@ -692,6 +692,7 @@ class OracleCard(Base):
         Index("ix_oracle_cards_name_trgm", "name", postgresql_using="gin", postgresql_ops={"name": "gin_trgm_ops"}),
         Index("ix_oracle_cards_fts", text("to_tsvector('english', oracle_text)"),
               postgresql_using="gin"),
+        Index("ix_oracle_cards_roles", "roles", postgresql_using="gin"),  # "which cards have these roles" is one indexed query (#435)
     )
 
     oracle_id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -719,6 +720,11 @@ class OracleCard(Base):
     artist: Mapped[str | None] = mapped_column(String(200))  # of that printing: credited wherever its image is shown
     image_normal: Mapped[str | None] = mapped_column(String(500))  # Scryfall's own link to that printing's image
     digital: Mapped[bool] = mapped_column(Boolean, default=False)
+    # What the card does, in the Vault's own 22-role vocabulary (vault.card_roles, #435): ``{slug: {strength, rule, repeatable}}``,
+    # the Vault's reading of the Oracle text worked out when the catalog loads. ``roles_version`` is the version of the rules that
+    # read it (null: not read yet). Both are part of ``content_hash``, so a change of rules rewrites every row once.
+    roles: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
+    roles_version: Mapped[str | None] = mapped_column(String(20))
     content_hash: Mapped[str] = mapped_column(String(40))  # lets the daily job skip unchanged rows
 
 
