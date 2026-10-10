@@ -101,7 +101,7 @@ def test_the_checker_rejects_a_label_the_app_does_not_have():
 
 def test_the_decks_section_names_every_tab_and_the_pills_and_buttons_of_a_deck():
     tabs = re.findall(r"\['[a-z]+', '([^']+)'\]", DECK.split("const TABS =", 1)[1].split("];", 1)[0])
-    assert tabs == ["Cards", "Stats", "What it does", "Opening turns", "Legality", "Upgrades", "Combos", "Buy list", "History"]  # History only for a saved deck
+    assert tabs == ["Cards", "What it does", "Stats", "Opening turns", "Legality", "Upgrades", "Combos", "Buy list", "History"]  # History only for a saved deck
     named = set(quoted(sections()["decks"]))
     assert set(tabs) <= named, set(tabs) - named
     assert {"From a link", "Paste a list", "Save to your decks", "Update saved copy", "Refresh", "Remove", "Have", "Partial", "Need", "Copy list"} <= named

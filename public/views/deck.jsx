@@ -344,7 +344,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved, sw
     catch (e) { setError('Removing failed: ' + e.message); }
   }
 
-  const TABS = [['cards', 'Cards'], ['stats', 'Stats'], ['does', 'What it does'], ['opening', 'Opening turns'], ['legality', 'Legality'], ['upgrades', 'Upgrades'], ['combos', 'Combos'], ['buy', 'Buy list'],
+  const TABS = [['cards', 'Cards'], ['does', 'What it does'], ['stats', 'Stats'], ['opening', 'Opening turns'], ['legality', 'Legality'], ['upgrades', 'Upgrades'], ['combos', 'Combos'], ['buy', 'Buy list'],
     ...(savedId ? [['history', 'History']] : [])];
 
   return (
