@@ -86,13 +86,18 @@ class Tool:
     provenance: tuple[str, ...] = ()
     ui: str = ""  # the MCP Apps view (vault/api/mcp_ui.py) a host may show next to this tool's result
 
+    def display_title(self) -> str:
+        return self.title or self.name.replace("_", " ").capitalize()
+
     def schema(self, ui: bool = True) -> dict:
         out = {
-            "name": self.name, "title": self.title or self.name.replace("_", " ").capitalize(),
+            "name": self.name, "title": self.display_title(),
             "description": self.description,
             "inputSchema": {"type": "object", "properties": self.properties, "required": self.required,
                             "additionalProperties": False},
-            "annotations": {"readOnlyHint": not self.write, "destructiveHint": self.destructive, "openWorldHint": False},
+            # annotations.title too: the Claude directory portal reads the title there (2026-10-10, #241)
+            "annotations": {"title": self.display_title(), "readOnlyHint": not self.write, "destructiveHint": self.destructive,
+                            "openWorldHint": False},
         }
         if self.ui and ui:  # MCP Apps: hosts that support it show the view; others ignore this and show the text answer
             out["_meta"] = {"ui": {"resourceUri": mcp_ui.uri(self.ui), "visibility": ["model", "app"]}}
