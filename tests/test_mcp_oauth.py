@@ -857,6 +857,16 @@ def test_state_is_optional_but_echoed_when_present(client):
     assert "state" not in query(res) and query(res)["code"]
 
 
+def test_a_long_state_like_openais_plugin_portal_sends_is_accepted_and_echoed(client):
+    """OpenAI's plugin portal sent a 693-character state on 2026-10-10 and was refused at 500 (#240)."""
+    client.sign_in()
+    long_state = "s" * 693
+    res = client.answer(client.authorize(state=long_state))
+    assert query(res)["state"] == long_state and query(res)["code"]
+    too_long = client.authorize(state="x" * 1501)
+    assert too_long.status_code == 400 and "state is too long" in too_long.text  # refused on a page, never echoed
+
+
 # -- review fixes: redirect rebuilding, one-time consent, grant age, marker, races -------------
 
 BAD_LOOPBACK = [
