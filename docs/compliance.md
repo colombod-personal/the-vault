@@ -108,7 +108,7 @@ Moxfield asks legitimate developers to get in touch, is still second-hand (devel
 
 Rules for us: no automated fetching of Moxfield decks (the terms forbid it without Moxfield's approval).
 The user's own CSV or pasted list is fine. Any Moxfield-derived deck is labelled "Deck from Moxfield", with its author and a
-link. Moxfield must be asked before anything automated is built (draft in `docs/outreach-drafts.md`, **not sent**: owner).
+link. Moxfield must be asked before anything automated is built (the owner wrote to support@moxfield.com on 2026-10-10; no answer yet, so nothing is fetched).
 `tests/test_deck_import.py` rejects Moxfield links, so nothing is fetched in the meantime.
 
 ### Archidekt
@@ -318,14 +318,14 @@ block looks like this:
 ## Open with the owner
 
 These are **open owner actions**, not optional extras: the audit of #62 and #79 found them not done, and no decision to drop
-them is recorded. The drafts are final and ready (`docs/outreach-drafts.md`); nothing has been sent. Nobody but the owner
+them is recorded. The drafts are final and ready (`docs/outreach-drafts.md`). Moxfield and Archidekt were written to on 2026-10-10 (rows below); the others are not sent. Nobody but the owner
 sends them.
 
 | Ask | Why | State | Owner step |
 |---|---|---|---|
 | Scryfall: do the planned tools count as added value? (#62) | Their terms require "additional value"; the answer shapes the lookup tools | **Not sent** | Send the Scryfall draft from the contact route on https://scryfall.com/docs/api, record the answer here with date and who answered |
-| Moxfield: legitimate access before any automated deck fetching (#62) | Their terms forbid robots without written approval (read 2026-10-07) | **Not sent** | Send the Moxfield draft to support@moxfield.com or their Discord; until an answer, nothing is fetched |
-| Archidekt: is one public deck per person's request acceptable? (#79) | Their terms exclude "automated searches, requests, or queries"; the owner's position is that one request on a person's action is within them, but Archidekt has never been asked | **Not sent** | Send the Archidekt draft via https://archidekt.com/contact or their Discord (link on the terms page) |
+| Moxfield: legitimate access before any automated deck fetching (#62) | Their terms forbid robots without written approval (read 2026-10-07) | **Sent 2026-10-10** by the owner to support@moxfield.com (also asked about searching public decks, counts only); the owner says it had been sent before too, but no date was recorded. No answer yet | Record the answer here with date and who answered; until then nothing is fetched |
+| Archidekt: is one public deck per person's request acceptable? (#79) | Their terms exclude "automated searches, requests, or queries"; the owner's position is that one request on a person's action is within them | **Written 2026-10-10** to contact@archidekt.com (also asked about searching public decks, counts only); the owner says it had been sent before too, but no date was recorded. No answer yet | Record the answer here with date and who answered; until then no search is built |
 | Wizards: Fan Content Policy (optional since #142) | The rules are read live and nothing is stored, so nothing needs their permission today | Not sent, optional | Only if the owner wants it in writing |
 | Cardmarket's terms | Read in a browser on 2026-10-07 (the earlier "bot check" was a wrong address) | **Read** | Recorded in `docs/data-sources.md`: showing Cardmarket's own prices needs its prior written agreement (clause 9); nothing from Cardmarket is stored or shown today |
 | Fan Content monetisation terms | Needed before joining an affiliate programme | Not read | Read https://company.wizards.com/en/legal/fancontentpolicy before joining |
