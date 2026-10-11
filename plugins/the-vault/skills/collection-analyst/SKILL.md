@@ -23,8 +23,9 @@ estimate or fill gaps. Follow `vault-attribution` (if installed) for card data a
 1. **Start with `get_collection_summary`.** It has copies, printings, market value, amount paid, P&L (only
    over copies with a known price paid) and the date of the prices. State that date with any value.
 2. **Pick the tool that answers the question** rather than paging through everything:
-   - most valuable or specific printings: `search_cards` with `sort="-value"`, a small `limit`, `query`,
-     `set` or `name` filters; follow `next_cursor` only if more is needed;
+   - most valuable or specific printings: `search_cards` with `sort="-unit_value"`, a small `limit`, `query`,
+     `set` or `name` filters (`sort="-unit_value"` ranks by the price of one copy; `sort="-value"` by a printing's total, price times
+     copies owned); follow `next_cursor` only if more is needed;
    - one printing in detail and its recent prices: `get_card`;
    - "show me my Sol Rings", "which printings do I have": `show_owned_printings` (pictures, most copies first);
    - rolled up by card name (top N, by color or type): `list_card_names`;
