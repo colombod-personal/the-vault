@@ -81,7 +81,8 @@ PORTABLE_PLUGIN = {
 # personal access token header by hand (docs/skills.md).
 PORTABLE_MCP = {
     "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
-    "mcpServers": {NAME: {"type": "streamable-http", "url": f"{HOST}/api/mcp"}},
+    "mcpServers": {NAME: {"type": "streamable-http", "url": f"{HOST}/api/mcp",
+                          "extensions": {"com.openai": {"auth": {"type": "oauth", "client": {"mode": "cimd"}, "baseScopes": ["read"]}}}}},
 }
 CLAUDE_PLUGIN = {
     "name": NAME, "displayName": "The Vault", "version": VERSION, "description": DESCRIPTION, "author": AUTHOR,
@@ -1089,7 +1090,11 @@ OPENAI_MANIFEST = {
         "composerIcon": "./assets/logo.png",
     },
 }
-OPENAI_MCP = {"mcpServers": {NAME: {"type": "streamable-http", "url": f"{HOST}/api/mcp"}}}
+# The server declares its own sign-in (OpenAI's "Configure MCP authentication": extensions.com.openai.auth in mcp.json),
+# so a host that installs the plugin can run OAuth itself. The Vault offers CIMD and dynamic registration; CIMD is
+# preferred and OpenAI keeps the DCR fallback. No client id or secret lives in the package.
+MCP_AUTH = {"com.openai": {"auth": {"type": "oauth", "client": {"mode": "cimd"}, "baseScopes": ["read"]}}}
+OPENAI_MCP = {"mcpServers": {NAME: {"type": "streamable-http", "url": f"{HOST}/api/mcp", "extensions": MCP_AUTH}}}
 # Experts that work on a deck or a question: each becomes a skill where hosts have no subagents (the council skill
 # calls them; a person can also ask for one directly). The buyer and deckbuilder stay agents for plugin hosts.
 EXPERT_SKILLS = ("vault-commander-expert", "vault-casual-table", "vault-limited-expert", "vault-pauper-expert",

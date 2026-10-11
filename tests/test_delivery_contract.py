@@ -40,6 +40,15 @@ def test_the_chatgpt_and_codex_plugin_is_one_install_with_its_own_server():
     assert "expert-council" in skills and "rules-judge" in skills, skills
 
 
+def test_the_bundled_server_declares_its_own_sign_in_and_carries_no_secret():
+    # OpenAI "Configure MCP authentication": a host that installs the plugin runs OAuth itself only if mcp.json says so.
+    for path in (CODEX_PLUGIN_DIR / "mcp.json", CLAUDE_PLUGIN_DIR / "mcp.json"):
+        server = next(iter(load(path)["mcpServers"].values()))
+        auth = server["extensions"]["com.openai"]["auth"]
+        assert auth["type"] == "oauth" and auth["client"]["mode"] in ("cimd", "dcr"), path
+        assert "clientId" not in auth.get("client", {}) and "clientSecret" not in json.dumps(auth), path
+
+
 def test_both_git_marketplaces_exist_and_point_at_real_plugins():
     claude = load(ROOT / ".claude-plugin" / "marketplace.json")
     for entry in claude["plugins"]:
