@@ -94,7 +94,9 @@ CLAUDE_MCP = {"mcpServers": {NAME: {"type": "http", "url": f"{HOST}/api/mcp"}}}
 MARKET = {
     "name": NAME, "owner": {"name": "The Vault", "url": REPO},
     "description": "Tools and skills for Magic: The Gathering with your AI assistant",
-    "plugins": [{"name": NAME, "source": "./plugins/the-vault", "description": DESCRIPTION, "version": VERSION,
+    # One package for every host (vault-wxy.3.2): ChatGPT also reads this legacy file, so it points at the same folder
+    # as .agents/plugins/marketplace.json, and that folder carries Claude's overlay too.
+    "plugins": [{"name": NAME, "source": "./plugins/the-vault-openai", "description": DESCRIPTION, "version": VERSION,
                  "keywords": KEYWORDS}],
 }
 
@@ -1127,6 +1129,9 @@ def openai_files() -> dict[Path, str | Path]:
     files: dict[Path, str | Path] = {
         OPENAI / "plugin.json": dump(OPENAI_MANIFEST),
         OPENAI / "mcp.json": dump(OPENAI_MCP),
+        # Claude's overlay in the same folder, so Claude and ChatGPT install the one package (vault-wxy.3.2).
+        OPENAI / ".claude-plugin" / "plugin.json": dump(CLAUDE_PLUGIN),
+        OPENAI / ".mcp.json": dump(CLAUDE_MCP),
         OPENAI / "assets" / "logo.png": ROOT / "public" / "apple-touch-icon.png",
     }
     for source in sorted(SKILLS.rglob("*")):
@@ -1135,6 +1140,7 @@ def openai_files() -> dict[Path, str | Path]:
     for agent in load_agents():
         if agent["name"] in EXPERT_SKILLS:
             files[OPENAI / "skills" / agent["name"] / "SKILL.md"] = expert_skill(agent)
+        files[OPENAI / "agents" / f"{agent['name']}.md"] = claude_agent(agent)  # Claude's subagents, same package
     return files
 
 

@@ -52,7 +52,7 @@ def test_the_claude_manifests_are_one_install_with_no_pasted_token():
     server = load(bp.PLUGIN / ".mcp.json")["mcpServers"]["the-vault"]
     assert "headers" not in server and server["url"].startswith("https://") and server["url"].endswith("/api/mcp")
     market = load(bp.MARKETPLACE)
-    assert market["plugins"][0]["source"] == "./plugins/the-vault" and market["name"] == "the-vault"
+    assert market["plugins"][0]["source"] == "./plugins/the-vault-openai" and market["name"] == "the-vault"  # one package (vault-wxy.3.2)
     for path in [*bp.PLUGIN.rglob("*"), bp.MARKETPLACE, ROOT / "public" / "connect.html"]:
         if path.is_file():
             assert "vault_pat_" not in path.read_text(encoding="utf-8").replace("vault_pat_...", ""), f"a token in {path}"
