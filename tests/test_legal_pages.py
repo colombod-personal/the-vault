@@ -40,7 +40,7 @@ def test_the_pages_link_each_other_and_the_footer_and_the_manifest_names_the_ter
         assert "support.html" in page(name) and "privacy.html" in page(name), name
     jsx = (PUBLIC / "views" / "account.jsx").read_text(encoding="utf-8")
     assert jsx.count('href="/terms.html"') >= 2 and jsx.count('href="/support.html"') >= 2  # sign-in page and footer
-    manifest = json.loads((ROOT / "plugins" / "the-vault-openai" / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    manifest = json.loads((ROOT / "plugins" / "the-vault-openai" / "plugin.json").read_text(encoding="utf-8"))["extensions"]["com.openai"]
     assert manifest["interface"]["termsOfServiceURL"] == "https://mtgvault.cards/terms.html"
 
 

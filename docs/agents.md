@@ -90,7 +90,7 @@ shopping, collection, Archidekt helper, expert council) and the experts, so they
 
 - **Claude** (Claude Code, Claude desktop): `plugins/the-vault`, with the experts as agents. Install it from this
   repo's marketplace (`.claude-plugin/marketplace.json`).
-- **ChatGPT and Codex**: `plugins/the-vault-openai` (`.codex-plugin/plugin.json`, the skills, each expert as a skill
+- **ChatGPT and Codex**: `plugins/the-vault-openai` (root `plugin.json` in OpenAI's portable layout, `mcp.json` with its OAuth declaration, the skills, each expert as a skill
   since those hosts have no subagents, and the Vault's MCP server). `python scripts/build_plugin.py --zip` writes
   `dist/the-vault-openai.zip`: upload it on the Vault app's page in ChatGPT (Upload new version) or submit it to the
   plugin directory (#225).

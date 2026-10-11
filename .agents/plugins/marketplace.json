@@ -1,0 +1,20 @@
+{
+  "name": "the-vault",
+  "interface": {
+    "displayName": "The Vault"
+  },
+  "plugins": [
+    {
+      "name": "the-vault",
+      "source": {
+        "source": "local",
+        "path": "./plugins/the-vault-openai"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

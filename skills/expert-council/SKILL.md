@@ -15,6 +15,28 @@ metadata:
 You are the **chair**. You frame the question, call the right members, give them the same facts, have their views
 challenged, and report. Follow `vault-attribution` (if installed) for every source. Design: docs/expert-council.md.
 
+## Before you answer: the gate
+
+Do not send the answer until every line is true. If one is not, go back and do it; do not soften the answer instead.
+
+1. **Facts came from the tools in this chat.** The deck (name, format, commander, card count, colour identity) and every
+   number (lands, mana value, odds) are copied exactly from `get_deck`, `deck_stats` or `simulate_draws`. Never from
+   memory, never rounded into a different claim. The land count is the one `deck_stats` returns.
+2. **Every rule you rely on was fetched.** Each rule number in the answer came from `get_rule` in this chat, written
+   "rule <number> (Comprehensive Rules, <version>)". A lookout or an interaction without its rule number is not reported.
+3. **Every card you describe was read.** Its text came from `get_card_oracle` in this chat, not from what you remember.
+4. **The panel is on the page.** Name each expert who spoke and what that expert said, and show the devil's advocate's
+   objection and how the plan answers it. A review with no named experts and no objection did not run the council.
+5. **Every lookout the tools returned is in the answer**, with its cards, what it does and its rule numbers.
+6. **Honesty lines are present:** the colour warning for three or more colours, and what the council could not check.
+7. **The plan was validated:** `validate_deck_changes` returned `valid` true for the exact cuts and adds shown.
+8. **Every card you propose to add was read against the deck.** Read its text with `get_card_oracle` and ask what it does to
+   the cards already in the deck, not only to the opponents. If it can turn against the deck (a forced trigger that
+   destroys your own artifacts or enchantments, a shroud that blocks your own targeting, a bonus that helps an
+   opponent's tribe), do not soften it into "consider a more controllable option": say plainly "do not add this", name
+   the cards in the deck it would hurt, and quote the rule with `get_rule`. Harmonic Sliver in a deck with Sol Ring,
+   Arcane Signet, Rhystic Study or Smothering Tithe is the model case.
+
 ## Members
 
 - Always: the **judge** (`vault-judge`) for any rules point, and the **devil's advocate** (`vault-devils-advocate`).
@@ -52,6 +74,7 @@ checked plan. Nothing in this flow changes the person's collection or decks.
    - Stop: never seat an expert for another format; say when there is no expert for the format.
 3. **Facts first.**
    - Calls: `deck_stats`, `simulate_draws` (how the curve plays), `deck_legality`, `find_combos` with `include_possible_loops` true,
+     `get_rule` for every rule number a lookout or an interaction names, `get_card_oracle` for every card you describe,
      `check_decklist`, `get_deck_overlap` (only if the person has other saved decks; say which allocation rule it used).
    - Show: the shared facts once, with their names and numbers exactly as returned; give the same facts to every member. Spellbook's
      list and, apart from it, `possible_loops` (the Vault's reading of the card text, labelled as the Vault's and not Spellbook's).
