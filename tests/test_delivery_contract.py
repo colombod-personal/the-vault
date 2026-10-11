@@ -63,6 +63,19 @@ def test_both_git_marketplaces_exist_and_point_at_real_plugins():
         assert (target / "plugin.json").is_file() and (target / "mcp.json").is_file(), f"Codex marketplace entry {entry['name']} is broken"
 
 
+def test_every_marketplace_offers_the_one_same_package():
+    # vault-wxy.3.2: ChatGPT reads both marketplace files; two folders meant two "The Vault" entries, and the app
+    # installed the 8-skill one without the sign-in declaration.
+    claude = {e["source"] for e in load(ROOT / ".claude-plugin" / "marketplace.json")["plugins"]}
+    codex = {e["source"]["path"] for e in load(ROOT / ".agents" / "plugins" / "marketplace.json")["plugins"]}
+    assert claude == codex == {"./plugins/the-vault-openai"}, (claude, codex)
+    package = CODEX_PLUGIN_DIR
+    assert (package / "plugin.json").is_file() and (package / ".claude-plugin" / "plugin.json").is_file()
+    assert (package / "mcp.json").is_file() and (package / ".mcp.json").is_file()
+    assert (package / "skills" / "expert-council" / "SKILL.md").is_file() and any((package / "agents").glob("*.md"))
+    assert load(package / "plugin.json")["name"] == load(package / ".claude-plugin" / "plugin.json")["name"] == "the-vault"
+
+
 def test_the_codex_marketplace_is_not_ignored_by_git():
     # .agents/ was ignored once, so the marketplace never reached GitHub and the app could not install from it.
     result = subprocess.run(["git", "check-ignore", "-q", ".agents/plugins/marketplace.json"], cwd=ROOT)
