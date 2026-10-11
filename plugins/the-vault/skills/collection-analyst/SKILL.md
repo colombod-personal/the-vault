@@ -5,10 +5,11 @@ description: >-
   what they own, what is shared with them, and how a deck fits it. Use for "what is my collection
   worth", "my most valuable cards", "do I own the cards for this deck", price changes, sets or colors
   in the collection, spare copies, small edits when they bought, sold or traded cards, bringing in a fresh export
-  from their app, organising it into buckets and tags, sharing, and starting over or undoing a change.
+  from their app, organising it into buckets and tags, sharing, starting over or undoing a change, and signing out
+  of the Vault or switching to another Vault account.
 license: MIT
 metadata:
-  vault-tools: "whoami get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline get_collection_pnl list_spare_copies list_card_names card_roles check_decklist lookup_cards refresh_prices update_owned_cards confirm_owned_cards_update undo_owned_cards_update show_owned_printings list_imports get_import list_export_formats import_collection_csv start_collection_upload get_staged_upload confirm_staged_upload list_buckets create_bucket rename_bucket move_cards delete_bucket reset_collection undo_collection_reset list_tags tag_cards untag_cards rename_tag delete_tag get_card_metadata set_card_metadata get_bucket_metadata set_bucket_metadata list_shared_with_me get_shared_deck list_my_shares accept_share stop_sharing"
+  vault-tools: "whoami get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline get_collection_pnl list_spare_copies list_card_names card_roles check_decklist lookup_cards refresh_prices update_owned_cards confirm_owned_cards_update undo_owned_cards_update show_owned_printings list_imports get_import list_export_formats import_collection_csv start_collection_upload get_staged_upload confirm_staged_upload list_buckets create_bucket rename_bucket move_cards delete_bucket reset_collection undo_collection_reset list_tags tag_cards untag_cards rename_tag delete_tag get_card_metadata set_card_metadata get_bucket_metadata set_bucket_metadata list_shared_with_me get_shared_deck list_my_shares accept_share stop_sharing sign_out"
 ---
 
 # Collection analyst
@@ -59,6 +60,12 @@ say what the link shares and from whom before you use it, and use only a link th
 without `confirm` lists the shares and changes nothing: show the one they mean and send `confirm` only after they say yes. Creating
 a share is not an assistant's job (an invite link hands data to someone): send the person to the web app (Account, Share your
 collection).
+
+## Signing out or switching account
+
+When the person asks to sign out of the Vault or switch to another Vault account, call `sign_out` without `confirm`: say which
+account (name and email) and which app it would sign out, then send `confirm` only after they say yes. The next request asks them
+to sign in; on the Vault's page they choose "Use a different account" to switch.
 
 ## Editing what they own
 
