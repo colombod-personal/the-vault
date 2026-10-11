@@ -702,9 +702,9 @@ def validate_changes(db: Session, text: str, fmt: str, adds: list[str], cuts: li
             # What the plan does to the deck's price: the adds, the cuts (each with its own price) and the deck as a whole.
             # The budget above still counts only the adds; these figures are for comparing, not for the budget check.
             "added_cards": [{"name": e.card.name, "price_usd": plausible_price(prices[e.card.oracle_id].usd) if e.card.oracle_id in prices else None,
-                             # the lookouts this add is part of: what it would hurt, or the card that would hurt it
-                             "lookouts": [{k: x[k] for k in ("kind", "severity", "title", "role", "causes", "hurts", "rules")}
-                                          for x in planned["by_card"].get(e.card.name, [])]}
+                             # only an add that is part of a lookout carries `lookouts`: what it would hurt, or the card that would hurt it
+                             **({"lookouts": [{k: x[k] for k in ("kind", "severity", "title", "role", "causes", "hurts", "rules")}
+                                              for x in planned["by_card"][e.card.name]]} if e.card.name in planned["by_card"] else {})}
                             for e in resolved_adds.entries if e.card],
             "cut_cards": [{"name": c.name, "price_usd": plausible_price(cut_prices[c.oracle_id].usd) if c.oracle_id in cut_prices else None} for c in cut_cards],
             "cut_value_usd": cut_value, "cut_unpriced": cut_unpriced, "net_change_usd": round(total - cut_value, 2),

@@ -237,7 +237,7 @@ def test_the_same_add_to_a_deck_without_artifacts_or_enchantments_is_not_flagged
     deck = commander_list("Galerider Sliver")  # (a second "All Slivers have" card would make a different lookout: shared with opponents)
     out = validate(planned, deck, adds=["Harmonic Sliver"], cuts=SWAP_PLAINS)
     assert out["valid"] is True
-    assert out["lookouts"] == [] and out["warnings"] == [] and out["added_cards"][0]["lookouts"] == []
+    assert out["lookouts"] == [] and out["warnings"] == [] and "lookouts" not in out["added_cards"][0]
 
 
 def test_crystalline_sliver_added_to_a_deck_with_equipment_is_flagged_as_blocking_the_decks_own_targets(planned):
@@ -260,7 +260,7 @@ def test_a_cut_of_the_only_victim_clears_the_warning_and_the_deck_is_read_after_
     assert [x["kind"] for x in cut["lookouts_cleared"]] == ["forced_self_destruction"]  # the plan removes what the deck had
     # Harmonic Sliver comes in while the only artifact goes out: the deck after the plan has nothing for it to destroy
     swap = validate(planned, commander_list("Sol Ring"), adds=["Harmonic Sliver"], cuts=["Sol Ring"])
-    assert swap["lookouts"] == [] and swap["warnings"] == [] and swap["added_cards"][0]["lookouts"] == []
+    assert swap["lookouts"] == [] and swap["warnings"] == [] and "lookouts" not in swap["added_cards"][0]
     # one victim cut, another kept: the lookout stays (narrowed) and is still not new
     narrowed = validate(planned, commander_list("Harmonic Sliver", "Sol Ring", "Arcane Signet"), adds=["Galerider Sliver"], cuts=["Sol Ring"])
     assert [(x["new"], x["hurts"]) for x in narrowed["lookouts"]] == [(False, ["Arcane Signet"])] and narrowed["warnings"] == []
@@ -278,7 +278,7 @@ def test_an_add_that_a_card_already_in_the_deck_would_hurt_is_flagged_too(planne
 def test_a_near_miss_added_to_the_same_deck_is_not_flagged(planned, name):
     deck = commander_list("Sol Ring", "Arcane Signet", "Rhystic Study", "Smothering Tithe", "Skullclamp")
     out = validate(planned, deck, adds=[name], cuts=SWAP_PLAINS)
-    assert out["lookouts"] == [] and out["warnings"] == [] and out["added_cards"][0]["lookouts"] == [], name
+    assert out["lookouts"] == [] and out["warnings"] == [] and "lookouts" not in out["added_cards"][0], name
 
 
 def test_find_upgrades_carries_the_lookouts_a_candidate_would_create(planned):
