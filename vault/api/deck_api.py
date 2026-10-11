@@ -26,7 +26,7 @@ from .. import catalog_queries as q
 from .. import combos
 from .. import deck_overview
 from .. import deck_tools as dt
-from .. import possible_loops
+from .. import lookouts, possible_loops
 from .. import provenance as prov
 from .. import shopping as shop
 from .. import simulate
@@ -202,6 +202,8 @@ def build_router(get_db, current_user, settings, transport=None) -> APIRouter:
             except combos.ComboServiceError as exc:  # down, slow, rate-limited or breaker open: the rest of the answer stands
                 found = {"checked": False, "reason": str(exc)}
         result = dt.stats(db, resolved, found)
+        # what in the deck can turn against its owner, read from the card text (bead vault-85p.1): in the answer every host gets
+        result["lookouts"] = lookouts.read(possible_loops.card_texts(e for e in resolved.played() if e.line.section != "companion"))
         out = answer(db, "deck statistics", result, ("oracle_cards", "oracle_tags", "oracle_prices"), "stats", identity(db, user, body))
         # the bracket hint also rests on Wizards' published bracket pages (read on brackets.RULES_READ), and on Commander Spellbook
         # when its combos were asked for: they are inputs of the computed block, so the answer never reads as the Vault's own

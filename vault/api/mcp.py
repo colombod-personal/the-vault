@@ -658,7 +658,8 @@ TOOLS = [
     Tool("council_brief", "The expert council for a deck review, a rules dispute or a synergy question: the panel the "
          "council's rules seat for the format and goal (only on-topic format experts; Commander adds the casual table; "
          "every panel has a rules judge and a devil's advocate), each member's full brief, and the chair's procedure. With a "
-         "deck_id and no format, the format is read from the saved deck.",
+         "deck_id and no format, the format is read from the saved deck; with a deck_id the brief also carries the deck's "
+         "`lookouts` (what in it can turn against its owner, read by the Vault from the card text).",
          {"format": {"type": "string", "maxLength": 40, "description": "commander, limited, pauper, standard, pioneer, two-headed-giant, ..."},
           "goal": {"type": "string", "maxLength": 300, "description": "What the person wants: tune, check, explain, synergies, budget"},
           "deck_id": ID,

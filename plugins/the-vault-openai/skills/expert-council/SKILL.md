@@ -7,7 +7,7 @@ description: >-
   dispute settled, or a deep look at what a deck is trying to do.
 license: MIT
 metadata:
-  vault-tools: "whoami council_brief expert_brief list_decks get_deck deck_stats simulate_draws deck_legality find_combos check_decklist get_deck_overlap validate_deck_changes verify_citation get_card_oracle rules_changes get_limited_card_stats"
+  vault-tools: "whoami council_brief expert_brief list_decks get_deck deck_stats simulate_draws deck_legality find_combos check_decklist get_deck_overlap validate_deck_changes verify_citation get_card_oracle get_rule rules_changes get_limited_card_stats"
 ---
 
 # Expert council
@@ -55,6 +55,9 @@ checked plan. Nothing in this flow changes the person's collection or decks.
      `check_decklist`, `get_deck_overlap` (only if the person has other saved decks; say which allocation rule it used).
    - Show: the shared facts once, with their names and numbers exactly as returned; give the same facts to every member. Spellbook's
      list and, apart from it, `possible_loops` (the Vault's reading of the card text, labelled as the Vault's and not Spellbook's).
+     Every `lookout` the deck answer or the council brief carries (cards that can turn against their owner: a shroud that blocks
+     your own Equipment, a forced trigger that destroys your own artifacts, a bonus shared with opponents), with its cards and its
+     rule numbers quoted with `get_rule`; the plan never adds a card a lookout warns against.
    - Stop: if a tool fails or the catalog is not loaded, say so; do not fill the gap from memory.
 4. **Independent views.**
    - Calls: `get_card_oracle` for any card text a member quotes.
