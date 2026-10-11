@@ -76,7 +76,7 @@ function SetDetail({ data, code, onBack, openCard }) {
   const at = [api.base, data.meta.version, code];
   const sets = window.useVaultQuery(() => api.sets({ q: code }), at).data;
   const set = sets && sets.items.find(s => s.code === code);
-  const page = window.useVaultQuery(() => api.cards({ set: code, sort: '-value', limit: 60 }), at).data;
+  const page = window.useVaultQuery(() => api.cards({ set: code, sort: '-unit_value', limit: 60 }), at).data;
   if (!sets) return null;
   if (!set) {  // a set with no copies in the selection (the bucket or tag was changed on this page)
     return (
