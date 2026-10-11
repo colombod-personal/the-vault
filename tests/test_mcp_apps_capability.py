@@ -51,7 +51,7 @@ def test_a_host_that_does_not_advertise_it_gets_every_tool_without_view_links_an
     assert host.session_id.startswith("v1.0.")
     tools = listed(host)
     assert not [n for n, t in tools.items() if "_meta" in t]
-    assert set(tools) == {t.name for t in mcp.TOOLS if not t.write}  # the tools themselves are all there
+    assert set(tools) == {t.name for t in mcp.TOOLS if t.listed_for({"read"})}  # the tools themselves are all there
     call = host.tool("whoami")
     assert call["result"]["isError"] is False and call["result"]["content"][0]["text"]  # tool calls are untouched
 
