@@ -80,7 +80,9 @@ tuning", "Key interactions verified"). Read from the installed app (`app.asar`, 
   `_meta.ui.csp.resourceDomains`, then `_meta["openai/widgetCSP"].resource_domains`: the Vault declares both. The app's MCP-app
   sandbox cache on the same PC holds three Scryfall card JPEGs (Lavabelly Sliver, Sliver Queen, Harmonic Sliver: HTTP 200,
   `image/jpeg`, byte counts equal to the cached files, JPEG headers) written at 05:26 BST on 2026-10-11 by a Vault view that the
-  app's log shows running (`server=the-vault`).
+  app's log shows running (`server=the-vault`). The app logs every console warning and error a view's sandbox raises (first 50 per
+  view); across 2026-10-06 to 2026-10-11 that log holds 139 warnings (two iframe-sandbox notices) and no error: no view was
+  blocked by its policy in any of those runs, including the ten views the chat of 03:41 BST opened (`server=codex_apps`, the app's own connector for the Vault).
 - Scryfall's image server answers HTTP 403 `restricted` to any User-Agent containing `ChatGPT`, `GPTBot` or `OAI-SearchBot`
   (checked with curl, 2026-10-11) and 200 to browser and Electron User-Agents. If ChatGPT ever fetches a card picture on a
   person's behalf from its own servers, Scryfall refuses it. This was not seen happening; it is a second reason not to count
