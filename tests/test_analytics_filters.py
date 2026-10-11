@@ -163,7 +163,7 @@ def test_the_links_of_a_filtered_answer_keep_the_selection(stocked):
     binder = bucket_ids(stocked)["Binder"]
     links = stocked.get(COL, params={"bucket": binder, "tag": "x"}).json()["_links"]
     assert links["breakdowns"]["href"].endswith(f"/breakdowns?bucket={binder}&tag=x")
-    assert links["most_valuable"]["href"].endswith(f"/cards?sort=-value&bucket={binder}&tag=x")
+    assert links["most_valuable"]["href"].endswith(f"/cards?sort=-unit_value&bucket={binder}&tag=x")
     plain = stocked.get(COL).json()["_links"]
     assert plain["breakdowns"]["href"].endswith("/collection/breakdowns") and plain["self"]["href"].endswith("/collection")
     assert stocked.get(f"{COL}/valuation", params={"bucket": binder}).json()["_links"]["history"]["href"].endswith(f"/history?bucket={binder}")
