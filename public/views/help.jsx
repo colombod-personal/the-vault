@@ -19,7 +19,7 @@ const HELP_SECTIONS = [
   {
     id: 'collection', title: 'Your collection and prices', views: ['browse', 'valuation'],
     body: [
-      'Browse lists every printing you own. Search by card name or set, filter by set or printing, and sort by total value, quantity, name, or newest or oldest first. Open a card to see your copies of it, every printing you own, its text and its Scryfall prices.',
+      'Browse lists every printing you own. Search by card name or set, filter by set or printing, and sort by the price of one card (the default), total value (price times copies), quantity, name, mana value, or newest or oldest first. Open a card to see your copies of it, every printing you own, its text and its Scryfall prices.',
       'A card also says what it does, as a short list of points (“Doubles tokens”, “Counters a spell”), under “What this card does”. This is the Vault\'s reading of the card text, not an official classification: its own written rules read the card\'s Oracle text when the card catalog loads, and each point says which rule found it (press “Why?”). A rule can miss or overreach, so no point means no role known, not that the card does nothing. They are not Scryfall\'s community tags. In Browse, “What it does” filters your cards by one or more of these (“All of them” or “Any of them”), together with the other filters, and the count says how many entries match; “Show my cards that do this” on a card does the same from its panel.',
       'Prices are Scryfall\'s market prices in US dollars, refreshed daily and dated. “Spent” is what you paid, and profit and loss (“P&L”) counts only the copies where a price paid is known. Open “Market value” on the Vault page to see how your collection\'s value moved, by month and by day.',
     ],
@@ -27,7 +27,7 @@ const HELP_SECTIONS = [
   {
     id: 'sets', title: 'Sets', views: ['sets'],
     body: [
-      'Sets lists every set you own cards from, with how many cards and unique printings you own there and what they are worth. Search the list, sort it (by value, card count, release date, code or name) and open a set to see the cards you own from it, most valuable first.',
+      'Sets lists every set you own cards from, with how many cards and unique printings you own there and what they are worth. Search the list, sort it (by value, card count, release date, code or name) and open a set to see the cards you own from it, the dearest single card first.',
     ],
   },
   {

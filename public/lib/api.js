@@ -290,12 +290,12 @@ window.VaultApi = (() => {
       // client that asks about it. Own collection only (a shared one answers 404).
       scoped: (next) => loadCollection(base, next),
       // printings, one page: q, set, name, printing, finish, condition, limit; sort: name, -name,
-      // -value, value, -quantity, set, -acquired, acquired. The page has `total` and `value_total`.
+      // -value, value (a printing's total), -unit_value, unit_value (one copy's price), -quantity, set, -acquired, acquired. The page has `total` and `value_total`.
       cards: (params) => cardsPage(base + '/cards' + query(inScope(params))),
       // what your cards do (#435): the Vault's 22 roles with how many of your cards have each; the cards themselves are `cards({ role: [...] })`
       roles: () => call(base + '/roles'),
       // the most valuable printing of a card name (to open a card from a per-name list)
-      topPrinting: (name) => cardsPage(base + '/cards' + query(inScope({ name: name.split(' // ')[0], sort: '-value', limit: 1 })))
+      topPrinting: (name) => cardsPage(base + '/cards' + query(inScope({ name: name.split(' // ')[0], sort: '-unit_value', limit: 1 })))
         .then((p) => p.items[0] || null),
       // every set: q; sort: -value, value, -quantity, quantity, -unique, unique, name, code, release, -release
       sets: (params) => upTo(setsPage(base + '/sets' + query(inScope({ ...params, limit: 500 }))), Infinity),
