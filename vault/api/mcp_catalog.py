@@ -181,7 +181,8 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              method="POST", path=lambda a: f"{V1}/catalog/verify-citation",
              body=lambda a: {k: a[k] for k in ("kind", "ref", "quote", "version") if a.get(k) is not None}, provenance=("catalog",)),
         Tool("deck_stats", "Counts, mana curve, color identity, roles (ramp, draw, removal, sweepers...), the Commander Game Changers "
-             "in the deck, estimated cost, and a Commander Bracket hint (`bracket`): the lowest bracket the deck's contents allow under "
+             "in the deck, estimated cost, `lookouts` (cards in the deck that can turn against their owner, read by the Vault from the "
+             "card text, each with the cards, what happens, the rule numbers and what to do), and a Commander Bracket hint (`bracket`): the lowest bracket the deck's contents allow under "
              "Wizards' published rules, from Game Changers, mass land denial, extra turns and, with `include_combos`, two-card combos "
              "from Commander Spellbook. Each input is listed; the hint is a floor, not a placement. Computed by the Vault from the "
              "catalog. Roles say whether each came from Scryfall's tags or from the Vault's rules over Oracle text." + TAKES_DECK,
