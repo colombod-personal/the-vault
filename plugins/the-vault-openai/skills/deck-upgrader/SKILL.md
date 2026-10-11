@@ -15,6 +15,8 @@ The budget is a hard constraint, and the Vault enforces it with code. Your job i
 the candidates it returns, explain why, and present only a plan that the validator accepts. Follow
 `vault-attribution` (if installed) when you show prices, tags or combos.
 
+**The person's decks and collection are in the Vault: read them with the Vault's tools, never with a browser or computer.** Their saved decks, their collection and everything computed from them come from the tools named in the steps below, even when they are signed in to the Vault's website: do not open it, a browser or computer use to look. If a tool the steps name is not in your list yet, look it up by that name before saying it is missing; if it is truly not there, say so and stop, and do not fall back to a browser.
+
 **Check the connection when something is off.** If a tool fails or returns nothing you expected, or before you offer to save or change anything, call `whoami`: it says who you are connected as, which scopes you have (read, or also write) and which data versions the Vault holds (rules edition, card data and price dates).
 
 ## Flow: Upgrade a deck within a budget
