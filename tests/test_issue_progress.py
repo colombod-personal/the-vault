@@ -83,7 +83,9 @@ def test_agents_md_states_the_lifecycle_and_the_commands():
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     assert "## 8. Beads is where all work is tracked, and only beads" in agents
     for needed in ("bd prime", "bd ready", "bd update <id> --claim", "--append-notes", "bd close <id> --reason",
-                   "GitHub issues are only the public place", "vault-check", "merged", "deployed", "verified"):
+                   "GitHub issues are only the public place", "vault-check", "merged", "deployed", "verified",
+                   "### When sessions overlap", "claim in the bead is the only authority", "`handoff`", "reclaimed",
+                   "If the claim is refused, stop and record it"):
         assert needed in agents, needed
 
 

@@ -93,7 +93,9 @@ repository is public).
 
 1. **Start every session with `bd prime`**, then `bd ready` for the work that is free. If `bd` doesn't answer, stop and say so.
    Never fall back to markdown TODO lists, plan files, notes or memory for tracking work.
-2. **Claim before working:** `bd update <id> --claim`. Work already claimed is not yours.
+2. **Claim before working:** `bd update <id> --claim`, then say who you are in the bead: `bd update <id> --append-notes
+   "<date>: claimed by session '<title>' (<your actor name>), worktree <path>"`. Work already claimed is not yours (see
+   "When sessions overlap" below).
 3. **Record every step in the bead as it happens:** `bd update <id> --append-notes "<date>: what was done, where, proof"`.
    Nothing is reported as done before the command that does it has run.
 4. **Break work down in beads:** `bd create "<title>" --parent <id>`, order with `bd dep add <later> --blocked-by <earlier>`.
@@ -104,6 +106,34 @@ repository is public).
    GitHub issue only gets short public replies, with no internal plans, and is closed when the fix or feature ships.
 7. **The roadmap lives in beads** as one epic per phase; each phase is blocked by the one before, so `bd ready` shows the
    current phase only.
+
+### When sessions overlap
+
+Several sessions work on this repository at once, and one may start another. These rules decide who owns a bead. **The
+claim in the bead is the only authority**: not a chat remark, not a title, not who wrote the brief.
+
+1. **A session that finds its bead claimed by someone else stops before any research, edit or tool call that costs
+   something.** It appends one note ("second session refused at claim; no work done"), changes nothing else, and tells
+   the person. It does not change its mind because someone says in chat that the claim is "theirs": the claim itself
+   must change first (rule 3 or 5).
+2. **One bead, one live session.** Whoever claimed first keeps it. A brief that is started twice (by hand and from a
+   suggestion chip, say) is worked by one session; the other stops under rule 1.
+3. **A parent that wants a child session to do the work does not claim the bead.** It leaves it open, adds the label
+   `handoff`, and starts the child's brief with: "Claim vault-<id> first. If the claim is refused, stop and record it."
+   A start chip is single-use: the parent notes "chip prepared" in the bead, and a second start under rule 1 stops. If
+   the parent has already claimed it, it releases it before starting the child: `bd update <id> --status open
+   --assignee ""`, with a note ("released for the session started from this brief"). A parent that keeps working does
+   not delegate the same bead: it splits the part into a child bead (`bd create --parent <id>`), and the child session
+   takes that one.
+4. **A claim is live while its session is running or has written a note in the last two hours.** A session holding a
+   claim for a long job appends a progress note at least every 30 minutes. A session must not take a claim from a live
+   holder.
+5. **A claim whose session has stopped, or been idle for more than two hours with no note, may be reclaimed.**
+   Reclaim in one step and say why: `bd update <id> --assignee <your actor> --append-notes "<date>: reclaimed; holder
+   <old actor> idle since <time>, last note <time>"`. Check the holder in the session list before reclaiming.
+6. **The person who starts a session is not the one to arbitrate.** When a claim conflict is reported, the answer is
+   in the bead's notes and the session list; a person only decides when both holders are live and the work really
+   overlaps.
 
 **Where beads runs.** On the owner's Windows PC, Smart App Control blocks the unsigned `bd.exe`, so `bd` is a wrapper
 (`%USERPROFILE%\.local\bin\bd`, `bd.cmd`) that runs every command on the owner's Ubuntu server over Tailscale, in the
