@@ -3,20 +3,7 @@
   "mcpServers": {
     "the-vault": {
       "type": "streamable-http",
-      "url": "https://mtgvault.cards/api/mcp",
-      "extensions": {
-        "com.openai": {
-          "auth": {
-            "type": "oauth",
-            "client": {
-              "mode": "cimd"
-            },
-            "baseScopes": [
-              "read"
-            ]
-          }
-        }
-      }
+      "url": "https://mtgvault.cards/api/mcp"
     }
   }
 }
