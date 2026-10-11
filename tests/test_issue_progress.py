@@ -79,9 +79,11 @@ def test_the_workflow_updates_issues_from_the_default_branch_with_only_issue_wri
 
 
 def test_agents_md_states_the_lifecycle_and_the_commands():
+    # The owner's decision of 2026-10-10: all work is tracked in beads, GitHub issues are only users' reports and requests.
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    assert "## 8. The issue is the board" in agents
-    for needed in ("scripts/issue_progress.py", "Progress block", "waiting-owner", "in review", "merged", "verified", "milestone"):
+    assert "## 8. Beads is where all work is tracked, and only beads" in agents
+    for needed in ("bd prime", "bd ready", "bd update <id> --claim", "--append-notes", "bd close <id> --reason",
+                   "GitHub issues are only the public place", "vault-check", "merged", "deployed", "verified"):
         assert needed in agents, needed
 
 
