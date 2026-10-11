@@ -843,7 +843,7 @@ person could switch Vault accounts only through Account, "Connected apps", "Disc
   (M `test_a_read_only_connection_lists_the_tool_as_destructive_and_can_sign_out`).
 - **Nothing else is ended here.** A personal access token, the native app's own sign-in and a web session get 409 with where to end
   them (Account, "Agents & API"; the app; "Sign out"), and keep working (M `test_a_personal_access_token_is_refused_and_keeps_working`,
-  `test_a_web_session_is_refused_and_stays_signed_in`). A cross-site form POST with the cookie therefore revokes nothing.
+  `test_the_native_apps_own_sign_in_is_refused_and_keeps_working`, `test_a_web_session_is_refused_and_stays_signed_in`). A cross-site form POST with the cookie therefore revokes nothing.
 - **Audience unchanged.** An OAuth access token is still accepted only on `/api/mcp` and its in-process tool calls: the REST route called
   directly with one answers 401 (M `test_the_route_called_directly_with_an_oauth_token_is_refused`).
 - **Preview first, and the host asks.** Without `confirm` it only reads; the tool carries `destructiveHint: true` and
@@ -852,5 +852,10 @@ person could switch Vault accounts only through Account, "Connected apps", "Disc
 - **After revocation** the old access token gets the MCP 401 with `WWW-Authenticate: Bearer realm="the-vault", error="invalid_token",
   resource_metadata="..."`, and its refresh token gets `invalid_grant`, so the host starts the authorization again; the consent page
   offers "Use a different account" (M `test_the_old_token_then_gets_401_with_the_resource_metadata_and_cannot_refresh`).
-- Residual: the preview tells the connected app the account's email (to show which account would be signed out); `whoami` showed only
-  the name. The app is one the person connected to that account, and the email is theirs.
+- **The email is masked.** The preview names the account by its name and the email with all but the first letter hidden (`d***@example.com`),
+  so a connected app that calls the tool is not handed the whole address; it is enough for the person to tell their accounts apart
+  (M `test_an_email_is_masked_to_its_first_letter_and_domain`, `test_the_preview_says_who_which_app_and_what_happens_and_changes_nothing`).
+- **Revoked by id, so a refresh cannot misreport it.** The connection found for the request is revoked by its id and the person's
+  id, not looked up again by an access token a refresh may just have replaced (M `test_a_token_refresh_between_the_lookup_and_the_revoke_still_signs_the_connection_out`);
+  a connection ended meanwhile answers "already signed out", never the native app's message (M `test_a_connection_ended_meanwhile_says_already_signed_out_*`).
+  The preview shows the scopes the current token carries (`access_scopes`), which a refresh may have narrowed (M `test_the_preview_shows_what_this_token_carries_*`).

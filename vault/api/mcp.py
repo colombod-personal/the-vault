@@ -709,7 +709,7 @@ TOOLS = [
          write=True, destructive=True),
     Tool("sign_out", "Ends this app's connection to the Vault on this device: its access and refresh tokens are revoked, and the "
          "app's next request asks for a sign-in, where another account can be chosen. With confirm false or absent it returns "
-         "the account this connection is signed in to (name and email), the app, and what ending it does, and changes "
+         "the account this connection is signed in to (name and masked email), the app, and what ending it does, and changes "
          "nothing; with confirm true it ends this one connection. The account's other apps and devices, personal access "
          "tokens and web sign-in are not affected. Read-only connections can use it.",
          {"confirm": CONFIRM}, [],

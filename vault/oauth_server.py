@@ -344,14 +344,16 @@ def grant_of_access(db: Session, user_id: int, bearer: str) -> OAuthGrant | None
     return db.scalar(select(OAuthGrant).where(OAuthGrant.access_hash == _hash(bearer), OAuthGrant.user_id == user_id))
 
 
-def sign_out_connection(db: Session, user_id: int, bearer: str) -> OAuthGrant | None:
-    """Sign out the one connection behind this access token (the app asking, on this device): its access and refresh
-    tokens stop working. The person's other connections, of this app on other devices or of other apps, are untouched.
-    The revoked connection, or None when the token is not one of this person's connections."""
-    grant = grant_of_access(db, user_id, bearer)
-    if grant is not None:
-        revoke_grant(db, grant.id)
-    return grant
+def revoke_user_grant(db: Session, user_id: int, grant_id: int) -> bool:
+    """Sign out one of this person's connections by its id: its access and refresh tokens (and its retired refresh tokens)
+    stop working, and the person's other connections (the same app on other devices, other apps) are untouched. By id, not
+    by access token: a refresh in between replaces the token but not the connection. False when it is already gone or is
+    not this person's."""
+    removed = db.execute(delete(OAuthGrant).where(OAuthGrant.id == grant_id, OAuthGrant.user_id == user_id)).rowcount
+    if removed:
+        db.execute(delete(OAuthRetiredRefresh).where(OAuthRetiredRefresh.grant_id == grant_id))
+    db.commit()
+    return bool(removed)
 
 
 def revoke_user_app(db: Session, user_id: int, grant_id: int) -> int | None:

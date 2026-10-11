@@ -4,11 +4,13 @@ no sign-out control and keeps reusing its saved token, so `sign_out` ends the on
 connection, whatever its scopes. Personal access tokens and web sign-ins are refused with where to end them. The old token
 then gets the MCP 401 that points at the resource metadata, so the host signs in again."""
 
+import pytest
 from sqlalchemy import func, select
 
 from tests.test_mcp_oauth import BASE, V1, app, client, db_do, make_client, settings, universe  # noqa: F401 - fixtures
 from twins.mcp_client import McpClient
-from vault.models import OAuthGrant
+from vault import oauth_server, tokens as native_tokens
+from vault.models import OAuthGrant, User
 
 METADATA = f'resource_metadata="{BASE}/.well-known/oauth-protected-resource/api/mcp"'
 
@@ -40,7 +42,8 @@ def test_the_preview_says_who_which_app_and_what_happens_and_changes_nothing(app
     assert preview["isError"] is False
     body = preview["structuredContent"]
     assert body["signed_out"] is False
-    assert body["signed_in_as"]["email"] == "dev@localhost" and "id" in body["signed_in_as"] and "name" in body["signed_in_as"]
+    assert body["signed_in_as"]["email"] == "d***@localhost" and "id" in body["signed_in_as"] and "name" in body["signed_in_as"]
+    assert "dev@localhost" not in str(preview)  # a connected app is never handed the whole address
     assert body["connection"]["app"] == "Twin Agent" and body["connection"]["domain"] == "app.example"
     assert body["connection"]["scopes"] == ["read"] and body["connection"]["other_connections"] == 0
     assert "stops working" in body["what_happens"] and "Use a different account" in body["what_happens"]
@@ -128,3 +131,61 @@ def test_the_old_token_then_gets_401_with_the_resource_metadata_and_cannot_refre
     switched = client.connect(email="someone-else@example.com")["access_token"]
     who = result(client, switched, "whoami")["structuredContent"]["user"]["id"]
     assert who != first_user
+
+
+def test_the_preview_shows_what_this_token_carries_not_what_the_person_once_allowed(app, client):
+    """A refresh may narrow the scopes (RFC 6749 section 6): the preview says what authenticate() grants this token."""
+    tokens = client.connect(write=True, scope="read write")
+    assert result(client, tokens["access_token"], "sign_out")["structuredContent"]["connection"]["scopes"] == ["read", "write"]
+    narrowed = client.refresh(scope="read").json()
+    assert narrowed["scope"] == "read"
+    body = result(client, narrowed["access_token"], "sign_out")["structuredContent"]
+    assert body["connection"]["scopes"] == ["read"]
+
+
+def test_a_token_refresh_between_the_lookup_and_the_revoke_still_signs_the_connection_out(app, client, monkeypatch):
+    """The connection is revoked by its id, not looked up a second time by an access token that a refresh just replaced."""
+    tokens = client.connect()
+    real = oauth_server.grant_of_access
+    seen = {}
+
+    def refreshed_meanwhile(db, user_id, bearer):
+        grant = real(db, user_id, bearer)
+        if not seen:
+            seen["tokens"] = client.refresh(tokens["refresh_token"]).json()  # the app renews its token right here
+        return grant
+
+    monkeypatch.setattr(oauth_server, "grant_of_access", refreshed_meanwhile)
+    done = result(client, tokens["access_token"], "sign_out", confirm=True)
+    assert done["isError"] is False and done["structuredContent"]["signed_out"] is True
+    assert grants(app) == 0
+    assert client.mcp("tools/list", token=seen["tokens"]["access_token"]).status_code == 401  # the renewed token went too
+
+
+def test_a_connection_ended_meanwhile_says_already_signed_out_not_that_it_is_the_apps_own_sign_in(app, client, monkeypatch):
+    token = client.connect()["access_token"]
+    monkeypatch.setattr(oauth_server, "grant_of_access", lambda db, user_id, bearer: None)
+    for args in ({}, {"confirm": True}):
+        answer = result(client, token, "sign_out", **args)
+        assert answer["isError"] is True
+        detail = answer["structuredContent"]["detail"]
+        assert "already signed out" in detail and "Vault app" not in detail
+    assert grants(app) == 1
+
+
+def test_the_native_apps_own_sign_in_is_refused_and_keeps_working(app, client):
+    client.connect()  # the person exists; one app connection is not touched
+    native = db_do(app, lambda db: native_tokens.issue(db, db.scalar(select(User)), client="app"))["access_token"]
+    for args in ({}, {"confirm": True}):
+        refused = result(client, native, "sign_out", **args)
+        assert refused["isError"] is True and "Vault app" in refused["structuredContent"]["detail"]
+    assert grants(app) == 1
+    assert result(client, native, "whoami")["isError"] is False  # the sign-in still works
+
+
+@pytest.mark.parametrize("email,masked", [("dev@localhost", "d***@localhost"), ("a@b.example", "a***@b.example"),
+                                          ("Long.Name+tag@sub.example.com", "L***@sub.example.com"), (None, None), ("", None),
+                                          ("no-at-sign", None), ("@nolocal.example", None)])
+def test_an_email_is_masked_to_its_first_letter_and_domain(email, masked):
+    from vault.api.catalog_api import mask_email
+    assert mask_email(email) == masked

@@ -64,7 +64,7 @@ collection).
 ## Signing out or switching account
 
 When the person asks to sign out of the Vault or switch to another Vault account, call `sign_out` without `confirm`: say which
-account (name and email) and which app it would sign out, then send `confirm` only after they say yes. The next request asks them
+account (name and masked email) and which app it would sign out, then send `confirm` only after they say yes. The next request asks them
 to sign in; on the Vault's page they choose "Use a different account" to switch.
 
 ## Editing what they own

@@ -218,7 +218,7 @@ class WhoamiOut(BaseModel):
 
 class SignOutOut(BaseModel):
     signed_out: bool = Field(description="false: a preview, nothing changed; true: this connection was ended")
-    signed_in_as: dict = Field(description="The account this connection is signed in to: id, name, email")
+    signed_in_as: dict = Field(description="The account this connection is signed in to: id, name, and the email with all but its first letter hidden")
     connection: dict = Field(description="This connection: the app's name and web address, its scopes, when it was made, "
                                          "and how many other connections the account has (other devices and apps)")
     what_happens: str
@@ -233,6 +233,19 @@ NOT_A_CONNECTION = {
     "app": "This is the Vault app's own sign-in, not a connected AI app, so nothing was signed out. Sign out in the Vault app, or "
            "on the Vault's site: Account, \"Sign-in methods\", \"Sign out everywhere\".",
 }
+ALREADY_SIGNED_OUT = ("This connection was already signed out (or its token was just renewed), so nothing was changed here. "
+                      "Ask again to see whether it is still connected.")
+
+
+def mask_email(email: str | None) -> str | None:
+    """``d***@example.com``: enough for the person to tell which of their accounts, without handing every connected app
+    the whole address."""
+    if not email or "@" not in email:
+        return None
+    local, domain = email.rsplit("@", 1)
+    return f"{local[:1]}***@{domain}" if local else None
+
+
 SIGN_OUT_EFFECT = ("This connection stops working: its access and refresh tokens are revoked. The next request from {app} asks "
                    "for a sign-in to the Vault; on the Vault's page, \"Use a different account\" signs in as someone else. Other "
                    "apps and devices, personal access tokens and the web sign-in stay signed in.")
@@ -312,6 +325,8 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
             raise HTTPException(409, NOT_A_CONNECTION["pat"])
         grant = oauth_server.grant_of_access(db, user.id, bearer)
         if grant is None:
+            if oauth_server.is_access_token(bearer):  # a connection's token, whose connection was ended or renewed meanwhile
+                raise HTTPException(409, ALREADY_SIGNED_OUT)
             raise HTTPException(409, NOT_A_CONNECTION["app"])
         return grant
 
@@ -321,8 +336,8 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
         name = client.name if client else (domain or "Unknown app")
         others = db.scalar(select(func.count()).select_from(OAuthGrant).where(
             OAuthGrant.user_id == user.id, OAuthGrant.id != grant.id)) or 0
-        return {"signed_out": signed_out, "signed_in_as": {"id": user.id, "name": user.name, "email": user.email},
-                "connection": {"app": name, "domain": domain, "scopes": grant.scopes.split(),
+        return {"signed_out": signed_out, "signed_in_as": {"id": user.id, "name": user.name, "email": mask_email(user.email)},
+                "connection": {"app": name, "domain": domain, "scopes": grant.access_scopes.split(),
                                "connected_at": grant.created_at.isoformat() if grant.created_at else None,
                                "other_connections": others},
                 "what_happens": ("Signed out. " if signed_out else "") + SIGN_OUT_EFFECT.format(app=name),
@@ -338,8 +353,8 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
     def sign_out(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         grant = this_connection(request, user, db)
         body = sign_out_body(db, user, grant, signed_out=True)  # read before the row goes
-        if oauth_server.sign_out_connection(db, user.id, request.state.bearer) is None:  # ended meanwhile (a second call)
-            raise HTTPException(409, "This connection was already signed out.")
+        if not oauth_server.revoke_user_grant(db, user.id, grant.id):  # by id: a token refresh in between does not matter
+            raise HTTPException(409, ALREADY_SIGNED_OUT)  # ended meanwhile (a second call)
         return body
 
     @router.get("/limited/{set_code}", response_model=LimitedOut, response_model_by_alias=True,
