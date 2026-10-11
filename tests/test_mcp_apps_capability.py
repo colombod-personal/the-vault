@@ -51,7 +51,7 @@ def test_a_host_that_does_not_advertise_it_gets_every_tool_without_view_links_an
     assert host.session_id.startswith("v1.0.")
     tools = listed(host)
     assert not [n for n, t in tools.items() if "_meta" in t]
-    assert set(tools) == {t.name for t in mcp.TOOLS if not t.write}  # the tools themselves are all there
+    assert set(tools) == {t.name for t in mcp.TOOLS if t.listed_for({"read"})}  # the tools themselves are all there
     call = host.tool("whoami")
     assert call["result"]["isError"] is False and call["result"]["content"][0]["text"]  # tool calls are untouched
 
@@ -118,7 +118,7 @@ def test_the_session_id_carries_no_person_and_no_token(host):
     host.initialize(APPS_CAPABILITIES)
     sid = host.session_id
     assert host.tokens["access_token"] not in sid and "dev@localhost" not in sid and len(sid) < 70
-    assert sid.split(".")[0] == "v1" and sid.split(".")[1] in ("0", "1")  # a version, one bit, a random part and a signature, nothing else
+    assert sid.split(".")[0] == "v1" and sid.split(".")[1] in ("0", "1", "2", "3")  # a version, two bits (extension, compact list), a random part and a signature, nothing else
 
 
 def test_the_log_says_which_host_advertised_the_extension_without_naming_a_person(host, caplog):

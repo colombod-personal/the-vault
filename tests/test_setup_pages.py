@@ -423,7 +423,8 @@ def test_vault_start_is_listed_and_a_read_only_token_gets_it(signed_in, app):
         assert text.startswith("Start here") and "whoami" in text and "(not given)" not in text
         tools = {t["name"] for t in rpc(bot, "tools/list", token=read).json()["result"]["tools"]}
         assert set(READ_TOOLS_IT_USES) <= tools  # a read-only caller can do everything the tour asks
-        assert not [n for n in mcp.BY_NAME if mcp.BY_NAME[n].write and n in tools]
+        # no write tool, except the one a read-only connection is given on purpose (it only makes a link: vault-wxy.6)
+        assert not [n for n in mcp.BY_NAME if mcp.BY_NAME[n].write and not mcp.BY_NAME[n].any_scope and n in tools]
 
 
 def test_the_setup_pages_quote_the_tour_for_hosts_that_do_not_list_prompts():

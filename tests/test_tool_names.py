@@ -15,7 +15,7 @@ import yaml
 from vault.api import mcp
 from vault.api.mcp_catalog import GROUNDING, PROMPTS
 
-from test_skills import FIELDS  # fields of tool answers and arguments that are not tools
+from test_skills import FIELDS, PROFILE_TOOLS  # fields of tool answers and arguments that are not tools; the compact list's two tools
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -23,7 +23,7 @@ import build_plugin as bp  # noqa: E402
 
 TOOLS = set(mcp.BY_NAME)
 # Bare (not backticked) words in prompts and instructions that look like tool names but are fields, arguments or places.
-BARE_OK = FIELDS | {"deck_id", "bucket_id", "budget_usd", "price_date", "share_id", "oracle_id", "card_id", "upload_id", "import_id",
+BARE_OK = FIELDS | PROFILE_TOOLS | {"deck_id", "bucket_id", "budget_usd", "price_date", "share_id", "oracle_id", "card_id", "upload_id", "import_id",
                     "invite_token", "next_cursor", "next_offset", "include_combos", "total_usd", "known_card", "backup_download", "not_computed"}
 NAME = re.compile(r"\b[a-z]+(?:_[a-z0-9]+)+\b")
 BACKTICKED = re.compile(r"`([a-z]+(?:_[a-z0-9]+)+)`")

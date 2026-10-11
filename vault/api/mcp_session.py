@@ -45,20 +45,34 @@ def _sign(secret: str, body: str) -> str:
     return hmac.new(secret.encode(), f"mcp-session:{body}".encode(), hashlib.sha256).hexdigest()[:32]
 
 
-def issue(secret: str, ui: bool) -> str:
-    """A new session id for a client that did (or did not) advertise the MCP Apps extension."""
-    body = f"{_VERSION}.{'1' if ui else '0'}.{secrets.token_hex(8)}"
+def issue(secret: str, ui: bool, compact: bool = False) -> str:
+    """A new session id for a client that did (or did not) advertise the MCP Apps extension, and that does (or does not)
+    get the compact tool list (``mcp_profile``). One digit: bit 1 is the extension, bit 2 the compact list; ids issued
+    before the second bit existed carry 0 or 1 and read as "not compact"."""
+    state = (1 if ui else 0) + (2 if compact else 0)
+    body = f"{_VERSION}.{state}.{secrets.token_hex(8)}"
     return f"{body}.{_sign(secret, body)}"
 
 
-def read(secret: str, header: str | None) -> bool | None:
-    """True or False: what this server's own session id says about the extension. None: no usable id (unknown)."""
-    if not header or len(header) > 100:
+def _state(secret: str, header: str | None) -> int | None:
+    if not header or len(header) > 100 or not header.isascii():  # compare_digest raises on non-ASCII text
         return None
     parts = header.split(".")
-    if len(parts) != 4 or parts[0] != _VERSION or parts[1] not in ("0", "1"):
+    if len(parts) != 4 or parts[0] != _VERSION or parts[1] not in ("0", "1", "2", "3"):
         return None
     body = ".".join(parts[:3])
     if not hmac.compare_digest(parts[3], _sign(secret, body)):
         return None
-    return parts[1] == "1"
+    return int(parts[1])
+
+
+def read(secret: str, header: str | None) -> bool | None:
+    """True or False: what this server's own session id says about the extension. None: no usable id (unknown)."""
+    state = _state(secret, header)
+    return None if state is None else bool(state & 1)
+
+
+def compact(secret: str, header: str | None) -> bool:
+    """Whether this server's own session id says the client gets the compact tool list. False when there is no usable id."""
+    state = _state(secret, header)
+    return bool(state and state & 2)

@@ -234,7 +234,7 @@ be revoked (Account → Connected apps for OAuth).
   - imports, exports and sharing: `list_imports`, `get_import`, `import_collection_csv` (preview first: it
     keeps edits made here and applies only what changed in the person's app, and lists conflicts; with
     `bucket_id` it compares with and replaces that bucket only and says what it leaves alone),
-    big files: `start_collection_upload` (also takes `bucket_id`), `get_staged_upload`, `confirm_staged_upload`,
+    big files, and any file the person attaches (the one-time link, which a read-only connection can make): `start_collection_upload` (also takes `bucket_id`), `get_staged_upload`, `confirm_staged_upload` (needs write),
     (Dragon Shield, Moxfield or generic CSV), `list_export_formats`, `list_shared_with_me`,
     `get_shared_deck`, `list_my_shares`, `accept_share`, `stop_sharing` (asks first)
   - connection check: `whoami` (who you are, your scopes, and which data versions the Vault holds)
@@ -260,7 +260,7 @@ be revoked (Account → Connected apps for OAuth).
     store locator and Scryfall; the Vault contacts no shop and has no price or stock, so it names none the cheapest; the country and the
     stores are set by the person in the web app, Account, "Where I buy")
 - MCP prompts (`prompts/list`): `vault_start` (the read-only first tour), `rules_judge`, `explain_interaction`, `upgrade_deck`, `shopping_help`, `council_review`, `evaluate_deck`, `import_collection`, `organise_collection`, `reset_or_undo` (the last three start with a preview and change nothing until the person says yes).
-- A read-only token doesn't list the write tools; all of the above are read-only.
+- A read-only token lists `start_collection_upload` (a link that waits for the person; importing the file is `confirm_staged_upload`, write) and none of the other write tools; the prompts above are read-only.
 
 ## How to answer (rules, cards, decks)
 

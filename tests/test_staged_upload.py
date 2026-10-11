@@ -38,9 +38,22 @@ def test_link_upload_preview_confirm(agent, bot):
     assert gone.get("isError")  # the staged file is deleted once imported
 
 
-def test_a_read_only_connection_cannot_start_or_confirm(agent, bot):
+def test_a_read_only_token_can_start_and_read_an_upload_but_cannot_confirm_it(agent, bot):
+    """vault-wxy.6: the link only stages a file, so a read-only connection may make it (the longer version, with OAuth grants,
+    is tests/test_upload_read_only.py); importing the staged file is a write."""
     read = make_token(agent)
-    assert call_tool(bot, read, "start_collection_upload").get("isError")
+    started = call_tool(bot, read, "start_collection_upload")
+    assert not started.get("isError"), started
+    started = started["structuredContent"]
+    with TestClient(agent.app) as browser:
+        assert upload(browser, ticket_of(started["url"])).status_code == 200
+    staged = call_tool(bot, read, "get_staged_upload", upload_id=started["id"])["structuredContent"]
+    assert staged["status"] == "uploaded"
+    before = agent.get(f"{V1}/imports").json()["total"]
+    refused = call_tool(bot, read, "confirm_staged_upload", upload_id=started["id"], confirm=True,
+                        content_hash=staged["content_hash"])
+    assert refused.get("isError") and "read-only" in refused["content"][0]["text"]
+    assert agent.get(f"{V1}/imports").json()["total"] == before
 
 
 def test_a_ticket_works_only_for_its_owner_and_only_until_it_expires(app, agent, bot):
