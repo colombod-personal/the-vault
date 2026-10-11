@@ -5,7 +5,8 @@ description: >-
   what they own, what is shared with them, and how a deck fits it. Use for "what is my collection
   worth", "my most valuable cards", "do I own the cards for this deck", price changes, sets or colors
   in the collection, spare copies, small edits when they bought, sold or traded cards, bringing in a fresh export
-  from their app, organising it into buckets and tags, sharing, and starting over or undoing a change.
+  from their app (a file they attach or name goes through the one-time upload link), organising it into buckets and
+  tags, sharing, and starting over or undoing a change.
 license: MIT
 metadata:
   vault-tools: "whoami get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline get_collection_pnl list_spare_copies list_card_names card_roles check_decklist lookup_cards refresh_prices update_owned_cards confirm_owned_cards_update undo_owned_cards_update show_owned_printings list_imports get_import list_export_formats import_collection_csv start_collection_upload get_staged_upload confirm_staged_upload list_buckets create_bucket rename_bucket move_cards delete_bucket reset_collection undo_collection_reset list_tags tag_cards untag_cards rename_tag delete_tag get_card_metadata set_card_metadata get_bucket_metadata set_bucket_metadata list_shared_with_me get_shared_deck list_my_shares accept_share stop_sharing"
@@ -17,6 +18,15 @@ This is the person's own private data plus Scryfall's prices. Report what the to
 estimate or fill gaps. Follow `vault-attribution` (if installed) for card data and prices.
 
 **Check the connection when something is off.** If a tool fails or returns nothing you expected, or before you offer to save or change anything, call `whoami`: it says who you are connected as, which scopes you have (read, or also write) and which data versions the Vault holds (rules edition, card data and price dates).
+
+## A file the person attaches or names
+
+A collection file the person attaches or mentions (a CSV or text export from Dragon Shield, Moxfield or another app) never goes
+through the chat. Do not try to read, open, summarise or paste it, and do not use a browser for it. Call `start_collection_upload`
+at once and give them the one-time link (it works for one hour); say that nothing is imported until they have seen the preview and
+said yes. When they say the file is uploaded, call `get_staged_upload` and show the preview (see "Flow: Import a collection").
+Any connection can make the link and read the preview, read-only ones included; only the final import (`confirm_staged_upload`)
+needs write access, so a read-only connection is told at that step to reconnect the Vault and tick Write on its consent page.
 
 ## Answering questions
 
@@ -125,15 +135,16 @@ changed. An import applies only what changed in their app since their last impor
 1. **Check the starting point.**
    - Calls: `get_collection_summary`, `list_imports`.
    - Show: what they have today (copies, value, the price date) and when the last import ran and what it changed.
-   - Stop: if `whoami` says the connection is read-only, say that an import needs write access and stop.
+   - Stop: none. A read-only connection (`whoami` says so) can still get the upload link and the preview; say before step 4
+     that the import itself needs write access.
 2. **Choose the route and the bucket.**
    - Calls: `list_buckets`.
-   - Show: a file that fits in the chat goes straight to the preview; a big one gets a one-time upload link. By default a file is
-     the whole collection; if it is one binder, box or folder, ask which bucket it is for and show the choices.
+   - Show: a file the person attached or named, or one too big to paste, gets a one-time upload link; only a few pasted lines of CSV
+     go straight to the preview. By default a file is the whole collection; if it is one binder, box or folder, ask which bucket it is for and show the choices.
    - Stop: do not guess a bucket. If the person did not pick one, the preview says `bucket: null`: the whole collection.
 3. **Preview, with nothing changed.**
    - Calls: `import_collection_csv` (no `confirm`; `bucket_id` for one bucket), or `start_collection_upload` (give them the
-     link) and then `get_staged_upload` once they say it is uploaded.
+     link) and then `get_staged_upload` once they say it is uploaded. The file is never read, pasted or opened in a browser.
    - Show: from `merge`, three things: what their app changed (the only part applied), the edits made here that are kept, and
      each conflict. With a bucket, the preview names it and totals what is left alone: say both. Rows that match no known
      printing are listed: fix them in the file and upload again.
@@ -145,7 +156,10 @@ changed. An import applies only what changed in their app since their last impor
      they saw is imported.
    - Show: what was imported, as the preview showed it.
    - Stop: only after they say yes in this chat. If they want the file to replace everything (`replace_everything`), say first how
-     many edits made here it discards and ask again. If it is refused (expired, or the collection changed), preview again.
+     many edits made here it discards and ask again. If it is refused (expired, or the collection changed), preview again. If
+     the connection is read-only, the import is refused: say the file is staged and waiting (links work for one hour), that the
+     import needs the write permission, and that they reconnect the Vault and tick Write on its consent page (the same upload
+     can then be confirmed while its hour lasts; after that, make a new link).
 5. **Say what happened.**
    - Calls: `get_import`, `refresh_prices`.
    - Show: what the import added, removed and changed, what it kept and what it asked, never changes it did not make. Prices

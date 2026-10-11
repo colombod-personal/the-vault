@@ -9,7 +9,7 @@ access token from Account → Agents & API (or ``POST /api/v1/me/tokens``).
 Every tool is a thin wrapper around a ``/api/v1`` endpoint, called in-process with the
 caller's credentials. Tenancy, sharing, scopes, paging and validation are therefore
 enforced in one place. With a read-only token, write tools aren't listed, and calling one
-fails with the API's 403.
+fails with the API's 403; the exception is ``start_collection_upload`` (``Tool.any_scope``), which only makes a link.
 """
 
 from __future__ import annotations
@@ -85,6 +85,15 @@ class Tool:
     # block), "catalog" / "computed" (the API already includes one), or () for the person's own data only.
     provenance: tuple[str, ...] = ()
     ui: str = ""  # the MCP Apps view (vault/api/mcp_ui.py) a host may show next to this tool's result
+    # A write tool that a read-only connection still sees and may call, because what it does imports and changes nothing the
+    # person has: start_collection_upload makes a one-time link for a file that then waits for the person's confirmation
+    # (its REST route is in vault.app.READ_ONLY_POSTS; confirm_staged_upload stays write-scoped). It keeps ``write`` so the
+    # annotations stay honest: it is not read-only, it creates a link.
+    any_scope: bool = False
+
+    def listed_for(self, scopes: set[str]) -> bool:
+        """Whether a connection with these scopes sees this tool in tools/list."""
+        return not self.write or self.any_scope or "write" in scopes
 
     def display_title(self) -> str:
         return self.title or self.name.replace("_", " ").capitalize()
@@ -600,15 +609,21 @@ TOOLS = [
           "filename": {"type": "string", "default": "agent-import.csv"}, "confirm": CONFIRM, **IMPORT_BUCKET, **MERGE_ARGS}, ["csv"],
          method="POST", path=lambda a: f"{V1}/imports" if a.get("confirm") is True else f"{V1}/imports/preview",
          query=MERGE_QUERY + ("bucket_id",), write=True, destructive=True),
-    Tool("start_collection_upload", "For a collection file too big to paste: a one-time link (one hour) for the "
-         "person to upload the file. Nothing is imported: the file waits until they confirm. The uploaded file is then read by "
-         "get_staged_upload. With bucket_id the upload goes into that bucket only, fixed "
+    Tool("start_collection_upload", "How a collection file reaches the Vault from a chat: a one-time link (one hour) for the "
+         "person to upload the file in their browser, so the file never passes through the conversation. It is what a file the "
+         "person attached or names (an export from their app) needs, of any size. Nothing is imported: the file waits until "
+         "they confirm. The uploaded file is then read by get_staged_upload. Any connection may make the link, read-only ones "
+         "included, because it imports and changes nothing; importing the uploaded file is confirm_staged_upload, which needs "
+         "the write permission. At most 5 links are open at once; a file may be 20 MB. "
+         "With bucket_id the upload goes into that bucket only, fixed "
          "when the link is made; without it the upload page lets the person pick one of their buckets, or the whole collection.",
-         {"bucket_id": IMPORT_BUCKET["bucket_id"]}, method="POST", path=lambda a: f"{V1}/uploads", query=("bucket_id",), write=True),
+         {"bucket_id": IMPORT_BUCKET["bucket_id"]}, method="POST", path=lambda a: f"{V1}/uploads", query=("bucket_id",), write=True,
+         any_scope=True),
     Tool("get_staged_upload", "A file the person uploaded through start_collection_upload: still waiting, or what "
          "importing it would change (what comes from their app, which Vault edits are kept, the conflicts) and which rows "
          "match no known printing (they need fixing in the file and a new upload). Names the bucket the upload goes into, if any, and "
-         "what it leaves alone.",
+         "what it leaves alone. It changes nothing, and any connection may read it (read-only ones too); the person uploads "
+         "the file on the link first, so it is `waiting` until they have.",
          {"upload_id": ID, **MERGE_ARGS}, ["upload_id"], path=lambda a: f"{V1}/uploads/{int(a['upload_id'])}",
          query=MERGE_QUERY),
     Tool("confirm_staged_upload", "Imports a file uploaded through start_collection_upload: applies what changed in the "
@@ -928,7 +943,7 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
             settings = request.app.state.settings
             views = (not settings.mcp_apps_require_capability
                      or mcp_session.read(settings.session_secret, request.headers.get(mcp_session.HEADER)) is not False)
-            return _result(id_, {"tools": [t.schema(ui=views) for t in TOOLS if not t.write or "write" in scopes]})
+            return _result(id_, {"tools": [t.schema(ui=views) for t in TOOLS if t.listed_for(scopes)]})
         if method == "resources/list":  # the MCP Apps views (ui:// pages); there is nothing else to read
             return _result(id_, {"resources": mcp_ui.resources()})
         if method == "resources/templates/list":

@@ -49,7 +49,10 @@ READ_ONLY_POSTS = {"/api/v1/decks/parse", "/api/v1/imports/preview", "/api/v1/de
                    # computations on a decklist the caller sends: nothing is stored
                    "/api/v1/decks/stats", "/api/v1/decks/legality", "/api/v1/decks/upgrades",
                    "/api/v1/decks/validate-changes", "/api/v1/decks/shopping-list", "/api/v1/decks/combos",
-                   "/api/v1/decks/roles"}
+                   "/api/v1/decks/roles",
+                   # a one-time link for a file that then waits for the person's confirmation: nothing is imported or changed
+                   # (vault/uploads.py; the apply, /uploads/{id}/apply, is not here and needs the write scope)
+                   "/api/v1/uploads"}
 
 
 def _origin(url: str) -> str:

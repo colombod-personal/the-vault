@@ -826,3 +826,51 @@ exposes, and what stops misuse:
 - **Storage and lifetime.** The record holds only `country`, `stores` and `updated_at`; it is in the data map and export
   (`buy_settings.json`) and erased with the account, and a `PUT` stores no settings in its idempotency record (only `{"saved": true}`; a replay is rebuilt from the live row, so "Remove" leaves nothing behind), "Remove" also deletes the person's stored `PUT` records, and the daily retention job deletes every stored answer past its 24 hours (found by the security review of this change: the 24 hours used to be enforced only when the same person made another keyed request).
   Writes are limited to 30 a minute per person.
+
+## The upload link for a read-only connection (vault-wxy.6, 2026-10-11)
+
+A person attached a collection file in ChatGPT, whose connection to the Vault was read-only (the default: the consent's Write
+box is unticked), and the assistant could not offer the upload link: `start_collection_upload` was a write tool, so a read-only
+connection neither saw it in `tools/list` nor could call it (`POST /api/v1/uploads` answered 403;
+`tests/test_upload_read_only.py` fails on the code before this change). `get_staged_upload` was already a read. This change lets
+**any connection, a read-only one included, start an upload link**: `Tool.any_scope` lists `start_collection_upload` for every
+scope (it keeps `write=True`, so its annotations still say it is not read-only), and `POST /api/v1/uploads` is in
+`READ_ONLY_POSTS` (`vault/app.py`; exact path, so `POST /api/v1/uploads/{id}/apply` is not). It touches no file in section 6's
+list. Nothing else a read-only connection may do changes, and it still gets nothing that imports.
+
+What a read-only caller can now cause, and what stops it (all in `vault/uploads.py`; limits were already there, none was added):
+
+- **A row, bounded.** One `staged_uploads` row: the person's id, the hash of a random ticket, an expiry (one hour) and, if the caller
+  names one, the person's own bucket (another person's is the same 404). At most 5 are open per person (409 on the sixth), at most
+  10 are started a minute per person (429), expired rows are deleted by the next start and by the daily retention job
+  (`tests/test_staged_upload.py`, `tests/test_upload_read_only.py::test_a_read_only_connection_holds_at_most_five_open_links_and_only_for_the_persons_own_buckets`).
+- **Storage, bounded and not new.** A file is stored only by `POST /upload`, which needs the ticket, which the tool answer gives the
+  caller as it gives a write caller. One file per link (a new one replaces it), 20 MB at most (413, nothing kept:
+  `test_a_link_started_by_a_read_only_connection_takes_no_more_than_twenty_megabytes`), so at most 5 x 20 MB for one hour per person,
+  the same ceiling a write connection has. The cost is the person's own allowance, not the server's.
+- **It imports and changes nothing.** The file waits. The preview (`GET /uploads/{id}`, a read) compares it with the collection, which
+  a read connection can already read in full, so it shows the caller nothing new. The import is `POST /uploads/{id}/apply`: write
+  scope, only for the `content_hash` that was previewed (#352), and a read-only connection is refused with 403
+  (`test_a_read_only_connection_stages_and_previews_but_cannot_confirm`, also for a read-only personal token). `import_collection_csv`
+  and every other write tool stay unlisted and refused.
+- **No content is shown to the person by the app.** The upload page the person opens shows a fixed form and, for the person's own
+  buckets, their escaped names. The "File received" summary is the answer to the upload itself, shown to whoever posted the file.
+  An app that posts its own file with the ticket therefore cannot make the Vault show the person text of its choosing.
+- **Same answers for either grant.** The preview, with the conflicts named, is identical for a read-only and a write connection
+  (`test_the_preview_names_the_conflicts_the_same_for_a_read_only_and_a_write_connection`), and another person's upload is the same
+  404 (`test_a_read_only_connection_cannot_reach_another_persons_upload`).
+- **A tool a person is told about.** The consent screen's read line is unchanged ("Read your collection, decks, ..."): making a link
+  reads and changes nothing the person has and needs the person to open it. Reviewer: say if the line should name it.
+
+Residual risks, stated:
+
+- A staged file belongs to the person, not to the app that started the link (the id is per person). A write-scope assistant that is
+  told an upload id (by the person, or by an injected instruction) could confirm a file that a read-only app staged. It still has to
+  show the preview, send the preview's `content_hash` and wait for the person's yes, like every import; no tool lists another app's
+  uploads. If the review wants more, record the starting grant on the
+  row and name it in the preview.
+- A read-only app can fill the person's five links for an hour, so a write connection's `start_collection_upload` answers 409 until
+  they expire. That is the same denial a write app could already cause.
+- `POST /upload` has no body-size limit before the ticket is checked (read from the code, not measured): the framework reads the multipart body before the handler
+  rejects a made-up ticket. That is independent of scopes (the route takes no credential) and unchanged here; it is tracked as its own
+  bead (vault-wxy.8).

@@ -1,7 +1,8 @@
 """Collection files too big for a chat: the assistant asks for a one-time upload link, the person picks the file on a
 plain page, the file waits (staged, not imported), the assistant shows the preview, and the person confirms.
 
-- ``POST /api/v1/uploads`` (write): a ticket and the link to give the person. Only the ticket's hash is stored. With
+- ``POST /api/v1/uploads`` (any scope, read-only included: it imports nothing, vault.app.READ_ONLY_POSTS): a ticket and the
+  link to give the person. Only the ticket's hash is stored. With
   ``bucket_id`` the upload goes into that bucket only (#124): the link is bound to it, the preview and the apply use it, and
   the page cannot change it. Without, the page offers the person a picker of their own buckets when they have more than one.
 - ``GET /upload?ticket=`` and ``POST /upload``: the page. The ticket is the only credential; it works for one hour,
