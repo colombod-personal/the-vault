@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "the-vault": {
+      "type": "http",
+      "url": "https://mtgvault.cards/api/mcp"
+    }
+  }
+}
