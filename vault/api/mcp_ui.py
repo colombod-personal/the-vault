@@ -14,7 +14,10 @@ Rules the views keep (docs/compliance.md):
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
+from functools import lru_cache
 
 from .. import provenance as prov
 from ..deck_tools import FORMATS
