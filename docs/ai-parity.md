@@ -110,7 +110,7 @@ what is not covered. The real-host check (that Claude, ChatGPT, Codex, Cursor an
 
 ## Gaps (to close in #101)
 
-- ~~G1 Large files~~: a one-time upload link (`start_collection_upload`), the file staged and previewed (`get_staged_upload`), imported only with `confirm` (`confirm_staged_upload`); `vault/uploads.py`.
+- ~~G1 Large files~~: an upload link, good for one hour (`start_collection_upload`), the file staged and previewed (`get_staged_upload`), imported only with `confirm` (`confirm_staged_upload`); `vault/uploads.py`.
 - ~~G2 Import preview~~: `import_collection_csv` previews (`POST /imports/preview`, writes nothing) unless `confirm` is true.
 - ~~G3 One import's changes~~: `get_import`.
 - ~~G4 Deck overlap~~: `get_deck_overlap` ("which of my decks share cards, and am I short?"); the Graph (and its clusters) was removed for the Ideas view (#163).

@@ -6,7 +6,11 @@ nor could call it (403). The link only stages a file that waits; nothing is impo
 scope) is called with the preview's ``content_hash`` (vault/uploads.py, docs/mcp-oauth-threat-model.md "The upload link for a
 read-only connection")."""
 
+import html
+import re
+
 import pytest
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from tests.test_mcp_oauth import app, settings, universe  # noqa: F401 - fixtures: the app wired to the twin universe
@@ -16,13 +20,17 @@ from twins.mcp_client import McpClient
 from vault import app as vault_app
 from vault import importer, uploads
 from vault.api import mcp
+from vault.api.mcp import _marked_as_mcp
 from vault.models import Import, StagedUpload
 
 
-def connect(app, universe, *, write: bool, host: str) -> McpClient:
+BUCKETS = "/api/v1/collection/buckets"
+
+
+def connect(app, universe, *, write: bool, host: str, email: str = "dev@localhost") -> McpClient:
     """An app connected through OAuth as the same person, with the consent's Write box ticked or not."""
     client = McpClient(lambda: TestClient(app), universe.client_hosts.publish(host=host, name=f"Twin ({'write' if write else 'read'})"))
-    client.connect(write=write, scope="read write")  # asks for both, as ChatGPT does; the person's Write box decides
+    client.connect(write=write, email=email, scope="read write")  # asks for both, as ChatGPT does; the Write box decides
     return client
 
 
@@ -143,15 +151,45 @@ def test_a_read_only_personal_token_can_start_and_read_but_not_import(app):
         assert bot.post("/api/v1/imports", headers=headers, files={"file": ("a.csv", base_file(), "text/csv")}).status_code == 403
 
 
-# -- limits hold for a read-only connection -----------------------------------------------------------------------------
 
-def test_a_read_only_connection_holds_at_most_five_open_links_and_only_for_the_persons_own_buckets(app, read):
+
+# -- limits hold for a read-only connection, and the denial is plain -----------------------------------------------------
+
+def test_a_read_only_app_can_hold_the_five_links_and_the_409_says_what_the_person_can_do(app, read, write):
     links = [ok(read, "start_collection_upload") for _ in range(uploads.MAX_OPEN)]
-    over = tool(read, "start_collection_upload")
-    assert over["isError"] is True and "5 open upload links" in over["content"][0]["text"]
+    for refused in (tool(read, "start_collection_upload"), tool(write, "start_collection_upload")):  # one budget per person
+        text = refused["content"][0]["text"]
+        assert refused["isError"] is True and "5 open upload links" in text
+        assert "let them expire" in text and "no list of open links" in text  # what can be done, and that there is no list
     with app.state.db.sessions() as db:
-        assert db.query(StagedUpload).count() == len(links)  # the refused call stored nothing
-    assert tool(read, "start_collection_upload", bucket_id=999_999)["isError"] is True  # nobody's bucket
+        assert db.query(StagedUpload).count() == len(links)  # the refused calls stored nothing
+
+
+def test_a_read_only_app_can_use_up_the_persons_start_budget_and_the_denial_is_plain(app, read, write):
+    """The residual risk, written down as a test: the ten starts a minute are per person, whichever app uses them."""
+    answers = []
+    for _ in range(uploads.STARTS_PER_MINUTE + 1):
+        answers.append(tool(read, "start_collection_upload"))
+        with app.state.db.sessions() as db:  # keep the open count low so only the rate limit can answer
+            db.query(StagedUpload).delete()
+            db.commit()
+    assert [a["isError"] for a in answers] == [False] * uploads.STARTS_PER_MINUTE + [True]
+    denied = tool(write, "start_collection_upload")  # the person's own write app now waits for the same budget
+    assert denied["isError"] is True and "Too many upload start requests" in denied["content"][0]["text"]
+
+
+def test_a_read_only_connection_names_only_the_persons_own_buckets(app, read):
+    bob = TestClient(app)
+    assert bob.post("/api/auth/dev-login", params={"email": "bob@example.com"}).status_code == 200
+    theirs = bob.post(BUCKETS, json={"name": "Bob's box"}).json()
+    mine = read.browser.post(BUCKETS, json={"name": "Dev's box"}).json()  # the person's own session makes it
+    for bucket_id in (theirs["id"], 999_999):  # a real person's bucket and nobody's bucket: the same answer
+        refused = tool(read, "start_collection_upload", bucket_id=bucket_id)
+        assert refused["isError"] is True and "Bucket not found" in refused["content"][0]["text"]
+    own = ok(read, "start_collection_upload", bucket_id=mine["id"])
+    assert own["bucket"] == {"id": mine["id"], "name": "Dev's box"}
+    with app.state.db.sessions() as db:
+        assert [r.bucket_id for r in db.query(StagedUpload)] == [mine["id"]]  # only the person's own link was stored
 
 
 def test_a_link_started_by_a_read_only_connection_takes_no_more_than_twenty_megabytes(app, read):
@@ -163,14 +201,123 @@ def test_a_link_started_by_a_read_only_connection_takes_no_more_than_twenty_mega
     assert ok(read, "get_staged_upload", upload_id=started["id"])["status"] == "waiting"
 
 
-def test_a_read_only_connection_cannot_reach_another_persons_upload(app, universe, read):
+def test_the_upload_page_counts_against_the_import_allowance_of_the_person(app, read):
+    """The page parses and matches up to 20 MB for whoever holds the ticket; it shares the import routes' per-person limit."""
+    limit = app.state.settings.import_limit
     started = ok(read, "start_collection_upload")
-    stranger = McpClient(lambda: TestClient(app), universe.client_hosts.publish(host="evil.example", name="Twin (read, bob)"))
-    stranger.connect(write=False, email="bob@example.com")
-    assert tool(stranger, "get_staged_upload", upload_id=started["id"])["isError"] is True
+    ticket = ticket_of(started)
+    answers = [person_uploads(app, ticket, file(line(*KILLER, qty=1))) for _ in range(limit + 1)]
+    assert [a.status_code for a in answers] == [200] * limit + [429]
+    assert "Too many uploads" in answers[-1].text and int(answers[-1].headers["retry-after"]) >= 1
+    assert person_uploads(app, "not-a-real-ticket", file(line(*KILLER, qty=1))).status_code == 404  # refused first, counts for no one
+    assert ok(read, "get_staged_upload", upload_id=started["id"])["status"] == "uploaded"  # the last good file stays
+
+
+def test_another_person_cannot_read_or_apply_an_upload_a_read_only_app_started(app, universe, read):
+    started = ok(read, "start_collection_upload")
+    assert person_uploads(app, ticket_of(started), file(line(*KILLER, qty=5))).status_code == 200
+    staged = ok(read, "get_staged_upload", upload_id=started["id"])
+    for write_scope in (False, True):  # a stranger with a read grant, and one with a write grant
+        host = "evil.example" if write_scope else "plain.example"
+        bob = connect(app, universe, write=write_scope, host=host, email="bob@example.com")
+        got = tool(bob, "get_staged_upload", upload_id=started["id"])
+        assert got["isError"] is True and "No such upload" in got["content"][0]["text"]
+        applied = tool(bob, "confirm_staged_upload", upload_id=started["id"], confirm=True, content_hash=staged["content_hash"])
+        assert applied["isError"] is True
+        assert ("No such upload" if write_scope else "read-only") in applied["content"][0]["text"]
+    assert ok(read, "get_staged_upload", upload_id=started["id"])["status"] == "uploaded"  # still there, still the person's
 
 
 def test_the_tool_descriptions_state_the_limits_the_server_enforces():
     text = mcp.BY_NAME["start_collection_upload"].description
     assert f"At most {uploads.MAX_OPEN} links" in text and f"{importer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB" in text
     assert "read-only" in text and "confirm_staged_upload" in text and "write permission" in text
+    assert "not single-use" in text and "none can be listed or cancelled" in text  # said where the link is described
+    assert "changes nothing in the person's collection or decks" in text
+
+
+def test_the_consent_screen_tells_a_person_that_read_includes_the_upload_link(app, universe):
+    client = McpClient(lambda: TestClient(app), universe.client_hosts.publish())
+    client.sign_in()
+    text = html.unescape(client.authorize(scope="read write").text)
+    assert "give you a one-hour link to upload a collection file" in text
+    assert "read what importing that file would change. Importing it needs Write." in text
+
+
+# -- the allow-list, swept (review of 2026-10-11) -----------------------------------------------------------------------
+
+UNSAFE = {"post", "put", "patch", "delete"}
+# What a read-only OAuth token could already do before this change, by method and path template: the allow-list's POSTs...
+BEFORE_THIS_CHANGE = {("POST", p) for p in (
+    "/api/v1/decks/parse", "/api/v1/imports/preview", "/api/v1/decks/simulate", "/api/v1/decks/coverage", "/api/v1/auth/revoke",
+    "/api/v1/cards/lookup", "/api/v1/decks/stats", "/api/v1/decks/legality", "/api/v1/decks/upgrades",
+    "/api/v1/decks/validate-changes", "/api/v1/decks/shopping-list", "/api/v1/decks/combos", "/api/v1/decks/roles")}
+# ...and the routes that take no access token's authority at all (sign-in, and two public catalog computations).
+TAKE_NO_ACCESS_TOKEN = {("POST", "/api/v1/auth/native/{provider}"), ("POST", "/api/v1/auth/token"),
+                        ("POST", "/api/v1/catalog/walkthrough"), ("POST", "/api/v1/catalog/verify-citation")}
+THE_ONE_EXEMPTION = {("POST", "/api/v1/uploads")}
+
+
+def in_process(app) -> TestClient:
+    """The app as an MCP tool call reaches it: marked, so an OAuth access token is accepted on it (vault.api.mcp)."""
+    return TestClient(_marked_as_mcp(app))
+
+
+def unsafe_routes(app):
+    """Every documented unsafe-method route under /api/v1 (all of them are in the OpenAPI document)."""
+    for path, methods in app.openapi()["paths"].items():
+        if path.startswith("/api/v1/"):
+            for method in sorted(set(methods) & UNSAFE):
+                yield method.upper(), path
+
+
+def concrete(path: str) -> str:
+    return re.sub(r"\{[^}]+\}", "1", path)
+
+
+def test_a_read_only_oauth_token_is_refused_on_every_unsafe_route_but_the_upload_link(app, read):
+    token = read.tokens["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    routes = sorted(unsafe_routes(app), key=lambda r: r[1] == "/api/v1/auth/revoke")  # revoking ends the token: last
+    assert len(routes) > 40  # the sweep really saw the API
+    not_refused = set()
+    with in_process(app) as c:
+        for method, path in routes:
+            res = c.request(method, concrete(path), headers=headers, json={})
+            if res.status_code == 403:
+                assert "insufficient_scope" in res.headers.get("www-authenticate", ""), (method, path)
+            else:
+                not_refused.add((method, path))
+    # nothing new is open to a read-only token, and the one thing this change opens is exactly the upload link
+    assert not_refused == BEFORE_THIS_CHANGE | TAKE_NO_ACCESS_TOKEN | THE_ONE_EXEMPTION, (
+        not_refused ^ (BEFORE_THIS_CHANGE | TAKE_NO_ACCESS_TOKEN | THE_ONE_EXEMPTION))
+
+
+def test_an_oauth_token_is_not_accepted_on_the_rest_route_directly(app, read):
+    """The link is reached only through the MCP server: an OAuth access token on /api/v1/uploads itself is no credential."""
+    with TestClient(app) as direct:
+        res = direct.post("/api/v1/uploads", headers={"Authorization": f"Bearer {read.tokens['access_token']}"})
+    assert res.status_code == 401
+
+
+def test_variants_of_the_allowed_path_are_not_exempted(app, read):
+    headers = {"Authorization": f"Bearer {read.tokens['access_token']}"}
+    apply = "/api/v1/uploads/1/apply?content_hash=" + "0" * 64
+    with in_process(app) as c:
+        for method, url in (("POST", "/api/v1/imports?next=/api/v1/uploads"), ("POST", apply + "&x=/api/v1/uploads"),
+                            ("POST", "/api/v1/uploads%2F1%2Fapply?content_hash=" + "0" * 64), ("POST", "/api/v1//uploads"),
+                            ("POST", "/api/v1/uploads/1"), ("POST", "/api/v1/Uploads"),
+                            ("PUT", "/api/v1/uploads"), ("PATCH", "/api/v1/uploads"), ("DELETE", "/api/v1/uploads")):
+            res = c.request(method, url, headers=headers, json={}, follow_redirects=False)
+            assert res.status_code not in (200, 201, 202, 204), (method, url, res.status_code)
+        assert c.post("/api/v1/uploads/", headers=headers, follow_redirects=False).status_code != 201  # a redirect, or nothing
+        assert c.post("/api/v1/uploads", headers=headers, follow_redirects=False).status_code == 201  # only the exact path
+
+
+def test_the_allow_list_exempts_only_a_post_at_exactly_that_path():
+    for path in vault_app.READ_ONLY_POSTS:
+        assert not vault_app.is_write("POST", path), path
+        assert all(vault_app.is_write(method, path) for method in ("PUT", "PATCH", "DELETE")), path
+        assert not vault_app.is_write("GET", path)  # a read stays a read
+        assert vault_app.is_write("POST", path + "/") and vault_app.is_write("POST", path + "/1")
+    assert vault_app.is_write("POST", "/api/v1/uploads/1/apply")

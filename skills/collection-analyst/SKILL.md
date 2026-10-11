@@ -5,7 +5,7 @@ description: >-
   what they own, what is shared with them, and how a deck fits it. Use for "what is my collection
   worth", "my most valuable cards", "do I own the cards for this deck", price changes, sets or colors
   in the collection, spare copies, small edits when they bought, sold or traded cards, bringing in a fresh export
-  from their app (a file they attach or name goes through the one-time upload link), organising it into buckets and
+  from their app (a file they attach or name goes through the upload link), organising it into buckets and
   tags, sharing, and starting over or undoing a change.
 license: MIT
 metadata:
@@ -25,7 +25,7 @@ estimate or fill gaps. Follow `vault-attribution` (if installed) for card data a
 
 A collection file the person attaches or mentions (a CSV or text export from Dragon Shield, Moxfield or another app) never goes
 through the chat. Do not try to read, open, summarise or paste it, and do not use a browser for it. Call `start_collection_upload`
-at once and give them the one-time link (it works for one hour); say that nothing is imported until they have seen the preview and
+at once and give them the upload link (good for one hour: it works until it expires, and uploading again replaces the file; use the link already given in this chat rather than making another, there is no list of links); say that nothing is imported until they have seen the preview and
 said yes. When they say the file is uploaded, call `get_staged_upload` and show the preview (see "Flow: Import a collection").
 Any connection can make the link and read the preview, read-only ones included; only the final import (`confirm_staged_upload`)
 needs write access, so a read-only connection is told at that step to reconnect the Vault and tick Write on its consent page.
@@ -141,7 +141,7 @@ changed. An import applies only what changed in their app since their last impor
      that the import itself needs write access.
 2. **Choose the route and the bucket.**
    - Calls: `list_buckets`.
-   - Show: a file the person attached or named, or one too big to paste, gets a one-time upload link; only a few pasted lines of CSV
+   - Show: a file the person attached or named, or one too big to paste, gets an upload link; only a few pasted lines of CSV
      go straight to the preview. By default a file is the whole collection; if it is one binder, box or folder, ask which bucket it is for and show the choices.
    - Stop: do not guess a bucket. If the person did not pick one, the preview says `bucket: null`: the whole collection.
 3. **Preview, with nothing changed.**

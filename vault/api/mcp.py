@@ -86,7 +86,7 @@ class Tool:
     provenance: tuple[str, ...] = ()
     ui: str = ""  # the MCP Apps view (vault/api/mcp_ui.py) a host may show next to this tool's result
     # A write tool that a read-only connection still sees and may call, because what it does imports and changes nothing the
-    # person has: start_collection_upload makes a one-time link for a file that then waits for the person's confirmation
+    # person has: start_collection_upload makes a link (good for one hour) for a file that then waits for the person's confirmation
     # (its REST route is in vault.app.READ_ONLY_POSTS; confirm_staged_upload stays write-scoped). It keeps ``write`` so the
     # annotations stay honest: it is not read-only, it creates a link.
     any_scope: bool = False
@@ -609,12 +609,14 @@ TOOLS = [
           "filename": {"type": "string", "default": "agent-import.csv"}, "confirm": CONFIRM, **IMPORT_BUCKET, **MERGE_ARGS}, ["csv"],
          method="POST", path=lambda a: f"{V1}/imports" if a.get("confirm") is True else f"{V1}/imports/preview",
          query=MERGE_QUERY + ("bucket_id",), write=True, destructive=True),
-    Tool("start_collection_upload", "How a collection file reaches the Vault from a chat: a one-time link (one hour) for the "
-         "person to upload the file in their browser, so the file never passes through the conversation. It is what a file the "
+    Tool("start_collection_upload", "How a collection file reaches the Vault from a chat: a link, good for one hour, for the "
+         "person to upload the file in their browser, so the file never passes through the conversation. It is not single-use: "
+         "it works until it expires, and a second upload replaces the first file. It is what a file the "
          "person attached or names (an export from their app) needs, of any size. Nothing is imported: the file waits until "
          "they confirm. The uploaded file is then read by get_staged_upload. Any connection may make the link, read-only ones "
-         "included, because it imports and changes nothing; importing the uploaded file is confirm_staged_upload, which needs "
-         "the write permission. At most 5 links are open at once; a file may be 20 MB. "
+         "included, because it changes nothing in the person's collection or decks; importing the uploaded file is "
+         "confirm_staged_upload, which needs the write permission. At most 5 links are open at once, and none can be listed or "
+         "cancelled yet, so use the link already given in this chat rather than making another; a file may be 20 MB. "
          "With bucket_id the upload goes into that bucket only, fixed "
          "when the link is made; without it the upload page lets the person pick one of their buckets, or the whole collection.",
          {"bucket_id": IMPORT_BUCKET["bucket_id"]}, method="POST", path=lambda a: f"{V1}/uploads", query=("bucket_id",), write=True,

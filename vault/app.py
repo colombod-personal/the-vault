@@ -44,7 +44,8 @@ ACCOUNT_COOKIE = "vault_account"  # see account_marker
 CROSS_SITE_ALLOWED = ("/api/auth/callback/google", "/api/auth/callback/microsoft", "/api/auth/callback/apple",
                       "/api/auth/callback/facebook", "/api/facebook/data-deletion", "/oauth/token", "/oauth/register",
                       "/oauth/revoke")  # exact paths (#348): a prefix would also exempt whatever a proxy might decode into it
-# POSTs a read-only token may call: they only compute an answer, or revoke the token itself.
+# POSTs a read-only token may call: they only compute an answer, revoke the token itself, or (POST /api/v1/uploads) make a link
+# for a file that then waits for the person to confirm it. Matched by method and path: only a POST at exactly these paths.
 READ_ONLY_POSTS = {"/api/v1/decks/parse", "/api/v1/imports/preview", "/api/v1/decks/simulate", "/api/v1/decks/coverage", "/api/v1/auth/revoke", "/api/v1/cards/lookup",
                    # computations on a decklist the caller sends: nothing is stored
                    "/api/v1/decks/stats", "/api/v1/decks/legality", "/api/v1/decks/upgrades",
@@ -53,6 +54,12 @@ READ_ONLY_POSTS = {"/api/v1/decks/parse", "/api/v1/imports/preview", "/api/v1/de
                    # a one-time link for a file that then waits for the person's confirmation: nothing is imported or changed
                    # (vault/uploads.py; the apply, /uploads/{id}/apply, is not here and needs the write scope)
                    "/api/v1/uploads"}
+
+
+def is_write(method: str, path: str) -> bool:
+    """Whether a request needs the write scope: an unsafe method, unless it is a POST at exactly one of READ_ONLY_POSTS (method-aware:
+    a PUT, PATCH or DELETE at one of those paths, a trailing slash or any other path is still a write)."""
+    return method in UNSAFE_METHODS and not (method == "POST" and path in READ_ONLY_POSTS)
 
 
 def _origin(url: str) -> str:
@@ -243,7 +250,7 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
                                 headers={"WWW-Authenticate": (
                                     'Bearer error="invalid_token", ' if bearer else "Bearer ") + f'resource_metadata="{resource_metadata}"'})
         scopes = request.state.scopes
-        writes = request.method in UNSAFE_METHODS and request.url.path not in READ_ONLY_POSTS
+        writes = is_write(request.method, request.url.path)
         if writes and "write" not in scopes:
             raise HTTPException(403, "This access token is read-only. Create one with the write scope to make changes.",
                                 headers={"WWW-Authenticate": 'Bearer error="insufficient_scope", scope="write", '
