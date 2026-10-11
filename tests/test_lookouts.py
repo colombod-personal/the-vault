@@ -303,3 +303,42 @@ def test_find_upgrades_on_a_deck_the_candidates_cannot_hurt_has_no_warnings(plan
     assert res.status_code == 200, res.text
     out = res.json()["result"]
     assert out["warnings"] == [] and all("lookouts" not in c for c in out["candidates"]["ramp"])
+
+
+# -- a second lord of a tribe is a lookout the deck can read, not a warning about the add (review of PR #457) -----------------------
+# The reviewer's scenario: the deck has Gemhide Sliver and the plan adds Mesmeric Sliver. Both say "All Slivers have ...", so the
+# lookout "your Sliver bonuses also work for opponents' Slivers" is true, but it is the nature of every Sliver deck and it names
+# no card of the deck it hurts: it stays in `lookouts` (marked new) and is not a warning, so the verdict is not made red by it.
+
+SHADOW_SLIVER = CardText("Shadow Sliver", "Creature — Sliver",
+                         "All Sliver creatures have shadow. (They can block or be blocked by only creatures with shadow.)")
+
+
+def test_a_second_sliver_lord_is_listed_as_new_but_is_not_a_warning_about_the_add():
+    deck = [OVERLORD, GEMHIDE]
+    plan = lookouts.plan(deck, deck + [MESMERIC])
+    shared = [x for x in plan["lookouts"] if x["kind"] == "shared_with_opponents"]
+    assert [(x["new"], x["new_cards"], x["severity"], x["hurts"]) for x in shared] == [(True, ["Mesmeric Sliver"], "medium", [])]
+    assert plan["by_card"] == {} and plan["warnings"] == {}
+
+
+def test_a_lord_that_gives_the_decks_own_slivers_shadow_is_still_a_warning():
+    deck = [OVERLORD, GEMHIDE]
+    plan = lookouts.plan(deck, deck + [SHADOW_SLIVER])
+    assert plan["lookouts"][0]["severity"] == "high" and plan["lookouts"][0]["rules"] == ["702.28b"]
+    assert "Adding Shadow Sliver would turn against this deck." in plan["warnings"]["Shadow Sliver"]
+
+
+def test_a_second_sliver_lord_added_to_a_sliver_deck_is_not_a_warning_in_validate_deck_changes(planned):
+    out = validate(planned, commander_list("Gemhide Sliver"), adds=["Mesmeric Sliver"], cuts=SWAP_PLAINS)
+    assert out["valid"] is True and out["warnings"] == []
+    assert [(x["kind"], x["new"]) for x in out["lookouts"]] == [("shared_with_opponents", True)]  # still visible, with `new`
+    assert "lookouts" not in out["added_cards"][0]
+
+
+def test_find_upgrades_does_not_flag_a_candidate_for_being_one_more_lord_of_the_decks_tribe(planned):
+    res = planned.post(f"{V1}/upgrades", json={"text": commander_list("Necrotic Sliver"), "format": "commander", "budget_usd": 5, "roles": ["ramp"]})
+    assert res.status_code == 200, res.text
+    out = res.json()["result"]
+    assert {c["name"] for c in out["candidates"]["ramp"]} == set(RAMP)
+    assert out["warnings"] == [] and all("lookouts" not in c and "WARNING" not in c["why"] for c in out["candidates"]["ramp"])
