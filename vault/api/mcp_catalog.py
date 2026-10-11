@@ -359,7 +359,7 @@ PROMPTS = [
              "casual table voice), plus a rules judge and a devil's advocate, and the synergy or collection analyst if useful. Give each at most "
              "three points with evidence (read card text with get_card_oracle and fetch every rule number you cite with get_rule; read every card you propose to add against the deck, and if it can turn against the deck, say plainly not to add it and name the cards it would hurt), then let the devil's advocate challenge them with evidence; a rules disagreement is settled "
              "only by a quote checked with verify_citation (and rules_changes when a rule a member relies on may have changed lately). Answer with the plan first (checked with "
-             "validate_deck_changes, shown only if valid is true, with each of its warnings beside the card it names), then Agreed, Disputed and Not checked in one line each, and offer the full "
+             "validate_deck_changes, shown only if valid is true; a card whose add turns against the deck comes back in its warnings and is listed under \"do not add\" with that sentence, outside the plan, unless the person insists), then Agreed, Disputed and Not checked in one line each, and offer the full "
              "discussion on request. Label metagame knowledge as opinion."},
     {"name": "evaluate_deck", "title": "Check a deck from a link",
      "description": "Read one Archidekt deck from its link (or a saved deck), check it against the collection, and give a change list and what to buy.",

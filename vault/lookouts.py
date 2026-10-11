@@ -155,6 +155,13 @@ def _key(x: dict) -> tuple[str, str]:
     return x["kind"], x["title"]
 
 
+def warns(x: dict) -> bool:
+    """Whether a lookout is a warning about the card that brings it in: it names a card of the deck it hurts, or it is high severity
+    (shadow, 702.28b). A medium lookout that hurts no card (a second lord of a tribe: its bonuses are shared with opponents) is true of
+    nearly every tribal deck and about the deck rather than the add: it stays in ``lookouts``, marked new, and is not a warning."""
+    return bool(x["hurts"]) or x["severity"] == "high"
+
+
 def _about(x: dict, card: str) -> dict:
     """One lookout as it concerns one card the plan brings in: whether the card does it (``cause``), is hurt by it (``hurt``) or
     only makes it worse (``worsens``: a token maker of the type), the deck's other cards it would hurt, the rules and the advice."""
@@ -183,8 +190,8 @@ def plan(before: Iterable[CardText], after: Iterable[CardText], *, was: dict | N
     - ``lookouts``: every lookout of the deck after the plan, worst first. ``new`` is true when the plan creates it or widens it
       (a card it hurts joins); ``new_cards`` are the cards of it that the plan brings into the deck.
     - ``cleared``: lookouts the deck has now and no longer has after the plan.
-    - ``by_card``: for each card the plan brings in, the new lookouts it is part of (see ``about``), and ``warnings`` one plain
-      sentence for each of those cards.
+    - ``by_card``: for each card the plan brings in, the new lookouts it is part of that warn (see ``warns`` and ``about``), and
+      ``warnings`` one plain sentence for each of those cards. A new lookout that does not warn is only in ``lookouts``.
 
     ``was`` is the ``read`` of ``before`` when the caller has it already (find_upgrades asks about many cards on one deck)."""
     before, after = list(before), list(after)
@@ -197,7 +204,7 @@ def plan(before: Iterable[CardText], after: Iterable[CardText], *, was: dict | N
         new = _key(x) not in old or bool(set(x["cards"]) - old[_key(x)])
         brought = sorted(c for c in x["cards"] if c not in names) if new else []
         lookouts.append({**x, "new": new, "new_cards": brought})
-        for c in brought:
+        for c in brought if warns(x) else []:
             by_card.setdefault(c, []).append(_about(x, c))
     kept = {_key(x) for x in now["lookouts"]}
     cleared = [{"kind": x["kind"], "title": x["title"], "cards": x["cards"]} for x in was["lookouts"] if _key(x) not in kept]
