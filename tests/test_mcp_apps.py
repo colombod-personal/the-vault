@@ -5,6 +5,7 @@ and carry the provenance footer. Hosts without MCP Apps keep the normal text ans
 import re
 import shutil
 import subprocess
+from urllib.parse import urlparse
 
 import pytest
 
@@ -28,21 +29,26 @@ def test_tools_list_names_the_view_only_for_tools_that_have_one(agent, bot):
     tools = {t["name"]: t for t in rpc(bot, "tools/list", token=read).json()["result"]["tools"]}
     for view, names in VIEWS.items():
         for tool in names:
-            assert tools[tool]["_meta"] == {"ui": {"resourceUri": f"ui://vault/{view}", "visibility": ["model", "app"]}}
+            assert tools[tool]["_meta"] == {"ui": {"resourceUri": mcp_ui.uri(view), "visibility": ["model", "app"]}}
     assert "_meta" not in tools["whoami"] and "_meta" not in tools["search_cards"]
 
 
 def test_views_are_listed_and_read_as_mcp_app_html_with_csp(agent, bot):
     read = make_token(agent)
     listed = rpc(bot, "resources/list", token=read).json()["result"]["resources"]
-    assert {r["uri"] for r in listed} == {f"ui://vault/{v}" for v in VIEWS} and all(r["mimeType"] == "text/html;profile=mcp-app" for r in listed)
-    card = rpc(bot, "resources/read", {"uri": "ui://vault/card"}, read).json()["result"]["contents"][0]
+    assert {r["uri"] for r in listed} == {mcp_ui.uri(v) for v in VIEWS} and all(r["mimeType"] == "text/html;profile=mcp-app" for r in listed)
+    card = rpc(bot, "resources/read", {"uri": mcp_ui.uri("card")}, read).json()["result"]["contents"][0]
     assert card["mimeType"] == "text/html;profile=mcp-app" and card["text"].startswith("<!doctype html>")
     assert card["_meta"]["ui"]["csp"] == {"resourceDomains": ["https://cards.scryfall.io"]}  # the card image, nothing else
-    deck = rpc(bot, "resources/read", {"uri": "ui://vault/deck"}, read).json()["result"]["contents"][0]
+    assert card["_meta"]["openai/widgetCSP"] == {"connect_domains": [], "resource_domains": ["https://cards.scryfall.io"]}  # ChatGPT's key, same domains
+    for entry in listed:  # the policy is on the listing too, the same as on the page itself
+        page = rpc(bot, "resources/read", {"uri": entry["uri"]}, read).json()["result"]["contents"][0]
+        assert entry["_meta"] == page["_meta"], entry["uri"]
+    deck = rpc(bot, "resources/read", {"uri": mcp_ui.uri("deck")}, read).json()["result"]["contents"][0]
     assert deck["_meta"]["ui"]["csp"] == {}  # no network at all
     gone = rpc(bot, "resources/read", {"uri": "ui://vault/nope"}, read).json()
     assert gone["error"]["code"] == -32002
+    assert rpc(bot, "resources/read", {"uri": "ui://vault/card-zzzzzzzz"}, read).json()["error"]["code"] == -32002  # a digest is eight hex digits
     assert rpc(bot, "resources/read", {"uri": 5}, read).json()["error"]["code"] == -32002
 
 
@@ -150,7 +156,7 @@ def test_the_deck_view_offers_every_format_the_server_checks():
 def test_the_combos_view_is_for_find_combos_and_allows_no_network_at_all(agent, bot):
     assert mcp.BY_NAME["find_combos"].ui == "combos"
     read = make_token(agent)
-    page = rpc(bot, "resources/read", {"uri": "ui://vault/combos"}, read).json()["result"]["contents"][0]
+    page = rpc(bot, "resources/read", {"uri": mcp_ui.uri("combos")}, read).json()["result"]["contents"][0]
     assert page["_meta"]["ui"]["csp"] == {} and "Commander Spellbook" in page["text"] and "<img" not in page["text"]
 
 
@@ -162,3 +168,52 @@ def test_the_export_is_a_local_blob_with_a_text_fallback_and_the_csp_is_unchange
     assert csp == {v: ({"resourceDomains": ["https://cards.scryfall.io"]} if v in ("card", "printings") else {}) for v in mcp_ui.VIEWS}
     legacy = {v: mcp_ui.resource_meta(v)["openai/widgetCSP"] for v in mcp_ui.VIEWS}  # ChatGPT's key, same domains
     assert legacy == {v: {"connect_domains": [], "resource_domains": ["https://cards.scryfall.io"] if v in ("card", "printings") else []} for v in mcp_ui.VIEWS}
+
+
+def hosts_named_in(page: str) -> set[str]:
+    """Every host a page names in an address, including the ones written inside a regular expression (the views limit where a
+    picture may come from with `/^https:\\/\\/cards\\.scryfall\\.io\\//`): the hosts the page can ask the browser for."""
+    return {found.replace("\\", "") for found in re.findall(r"(?:https?|wss?):\\?/\\?/([A-Za-z0-9.\\-]+)", page)}
+
+
+def declared_hosts(meta: dict) -> tuple[set[str], set[str]]:
+    """The hosts the policy lets a view load from (`resourceDomains`) and talk to (`connectDomains`), from both keys; the two keys
+    must say the same, or a host that reads only one of them (ChatGPT's desktop app reads either) would block what the other allows."""
+    ui, chatgpt = meta["ui"]["csp"], meta["openai/widgetCSP"]
+    domains = [*ui.get("resourceDomains", []), *chatgpt["resource_domains"], *ui.get("connectDomains", []), *chatgpt["connect_domains"]]
+    assert all(re.fullmatch(r"https://[a-z0-9.-]+", d) for d in domains), domains  # an origin: no path, no wildcard, no http
+    assert sorted(ui.get("resourceDomains", [])) == sorted(chatgpt["resource_domains"]), meta
+    assert sorted(ui.get("connectDomains", [])) == sorted(chatgpt["connect_domains"]), meta
+    return ({urlparse(d).hostname for d in ui.get("resourceDomains", [])}, {urlparse(d).hostname for d in ui.get("connectDomains", [])})
+
+
+@pytest.mark.parametrize("view", sorted(VIEWS))
+def test_the_domains_a_view_declares_are_exactly_the_hosts_its_page_can_ask_for(view):
+    """The ChatGPT desktop app showed grey boxes where card pictures belong (2026-10-10, 2026-10-11) and the cause was hunted in the
+    policy by eye. Now the page and the policy are compared by a test: a host the page names that the policy does not declare
+    is blocked by the host (the view looks broken), and a declared host the page never names is a wider policy than needed."""
+    page = mcp_ui.html(view)
+    resources, connects = declared_hosts(mcp_ui.resource_meta(view))
+    assert connects == set(), "no view talks to a network: tools are called through the host"
+    assert hosts_named_in(page) == resources, f"{view}: the page names {sorted(hosts_named_in(page))}, the policy declares {sorted(resources)}"
+    for loads_a_resource in ("@font-face", "@import", "url(", "<link", "<script src", "<iframe", "<object", "<embed", "<video", "<audio", "<source", "srcset", "<picture"):
+        assert loads_a_resource not in page, f"{view} loads a resource with {loads_a_resource}: declare its host, or do not"
+    assert ('h("img"' in page or "<img" in page) == bool(resources)  # a picture only where a host is declared for it, and then it is drawn
+    assert "http://" not in page and "ws://" not in page  # https only (wss:// contains neither)
+
+
+def test_what_the_hosts_would_see_changes_when_the_page_or_its_policy_does(monkeypatch):
+    """OpenAI's rule: the resource URI is a cache key, and a breaking change to the page publishes a new URI. #446 changed the
+    policy under the same address. The address now carries a digest of the page and its policy, so that cannot happen again."""
+    for view in mcp_ui.VIEWS:
+        assert mcp_ui.uri(view) == f"ui://vault/{view}-{mcp_ui.version(view)}" and re.fullmatch(r"[0-9a-f]{8}", mcp_ui.version(view))
+        assert mcp_ui.view_of(mcp_ui.uri(view)) == view == mcp_ui.view_of(f"ui://vault/{view}")  # the old address is still served
+        assert mcp_ui.view_of(f"ui://vault/{view}-00000000") == view  # and a tool list a host kept from an older release
+    assert len({mcp_ui.version(v) for v in mcp_ui.VIEWS}) == len(mcp_ui.VIEWS)
+    before = {v: mcp_ui.version.__wrapped__(v) for v in mcp_ui.VIEWS}
+    assert before == {v: mcp_ui.version(v) for v in mcp_ui.VIEWS}  # stable from one call to the next
+    monkeypatch.setattr(mcp_ui, "SCRYFALL_IMAGES", "https://cards.scryfall.example")  # the policy changes: only the views that use it get a new address
+    assert {v for v in mcp_ui.VIEWS if mcp_ui.version.__wrapped__(v) != before[v]} == {"card", "printings"}
+    monkeypatch.undo()
+    monkeypatch.setattr(mcp_ui, "CSS", mcp_ui.CSS + "\n.x { color: red; }")  # the page changes: every view does
+    assert {v for v in mcp_ui.VIEWS if mcp_ui.version.__wrapped__(v) != before[v]} == set(mcp_ui.VIEWS)

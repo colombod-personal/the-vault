@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 
 import httpx
@@ -161,7 +162,9 @@ def prompts(c: Client) -> None:
     got = c.rpc("prompts/get", {"name": "rules_judge", "arguments": {"question": "Does Bolt kill a 3/3?"}})["result"]
     check("verify_citation" in got["messages"][0]["content"]["text"], "the rules_judge prompt tells the agent to verify citations")
     res = c.rpc("resources/list")["result"]["resources"]
-    check({r["uri"] for r in res} == {f"ui://vault/{v}" for v in VIEWS} and all(r["mimeType"] == "text/html;profile=mcp-app" for r in res),
+    # each address is ui://vault/<view>-<eight hex digits of the page and its policy>: OpenAI's rule that a changed page has a new address
+    check({re.sub(r"-[0-9a-f]{8}$", "", r["uri"]) for r in res} == {f"ui://vault/{v}" for v in VIEWS} and len(res) == len(VIEWS)
+          and all(re.fullmatch(r"ui://vault/[a-z]+-[0-9a-f]{8}", r["uri"]) and r["mimeType"] == "text/html;profile=mcp-app" for r in res),
           f"the {len(VIEWS)} MCP Apps views are served", str(sorted(r["uri"] for r in res)))
     enforced = os.environ.get("MCP_APPS_REQUIRE_CAPABILITY", "") not in ("0", "false", "no")  # as the server under test is configured
     for name, caps, expect in (("a host with MCP Apps", APPS, True), ("a host without", {}, not enforced)):
@@ -172,8 +175,13 @@ def prompts(c: Client) -> None:
         with_views = {t["name"] for t in listed if "_meta" in t}
         check(bool(session) and (len(with_views) >= len(VIEWS)) == expect and (expect or not with_views),
               f"tools/list for {name}: view links {'present' if expect else 'absent'}", f"session={bool(session)} views on {sorted(with_views)}")
-    page = c.rpc("resources/read", {"uri": "ui://vault/card"})["result"]["contents"][0]
-    check("innerHTML" not in page["text"] and page["_meta"]["ui"]["csp"] == {"resourceDomains": ["https://cards.scryfall.io"]}, "the card view inserts text only and allows only Scryfall's image host")
+    card = next(r["uri"] for r in res if r["uri"].startswith("ui://vault/card-"))
+    page = c.rpc("resources/read", {"uri": card})["result"]["contents"][0]
+    check("innerHTML" not in page["text"] and page["_meta"]["ui"]["csp"] == {"resourceDomains": ["https://cards.scryfall.io"]}
+          and page["_meta"]["openai/widgetCSP"]["resource_domains"] == ["https://cards.scryfall.io"],
+          "the card view inserts text only and allows only Scryfall's image host, under both policy keys")
+    old = c.rpc("resources/read", {"uri": "ui://vault/card"})["result"]["contents"][0]  # the address before versions, still in cached tool lists
+    check(old["text"] == page["text"], "the address from before versions still serves the card view")
 
 
 GROUPS = {"connection": connection, "cards": cards, "rules": rules, "decks": decks, "prompts": prompts}

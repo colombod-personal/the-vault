@@ -60,6 +60,10 @@ priced daily from Scryfall, plus their saved decks and what others have shared w
 - Collections shared with the person: list_shared_with_me, then pass share_id to the
   collection tools.
 - Card data and images come from Scryfall. When you show a card, credit its artist and Scryfall.
+- Show card pictures only through the Vault's views (get_card_oracle, show_owned_printings, update_owned_cards): hosts that
+  support MCP Apps draw them there, whole and with the artist. Do not write a picture link into your answer as a markdown image
+  or build your own grid of pictures: hosts refuse images that come from an answer's text (ChatGPT showed empty grey boxes,
+  2026-10-11). Without a view, name the card and link its Scryfall page.
 - reset_collection empties the whole inventory or one bucket. Call it without a confirmation first, give the person the numbers
   (copies, market value, what was added only in the Vault, tags and notes) and the export link, and send the confirmation it
   returned only when they clearly asked for that exact reset. Never reset to make an import or an edit easier. A reset can be

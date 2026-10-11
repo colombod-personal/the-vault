@@ -98,6 +98,8 @@ function controls() {
 function snapshot() {
   return { text: text(root), controls: controls(), calls: fromView.filter((m) => m.method === "tools/call").map((m) => ({ name: m.params.name, arguments: m.params.arguments })),
            requests: fromView.filter((m) => m.id !== undefined).map((m) => m.method), notifications: fromView.filter((m) => m.id === undefined).map((m) => m.method),
+           // every picture the view asked the host's browser to load: the hosts of these must be in the view's declared resourceDomains
+           images: root.find((e) => e.tag === "img").map((e) => ({ src: e.attributes.src || null, alt: e.attributes.alt || null })),
            copied: copied.slice(), downloads: downloads.slice(), errors: errors.slice() };
 }
 async function settle() { for (let i = 0; i < 12; i++) { await new Promise((r) => setImmediate(r)); } }

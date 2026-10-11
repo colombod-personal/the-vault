@@ -222,6 +222,10 @@ Project's instructions, and the plugin's skills in claude.ai (#319).
   sends its message and screenshots time out. Drive the tab that is in front.
 - Claude draws its own image grids in a sandbox that blocks outside images, so a "show me pictures" answer it builds
   itself shows empty boxes and links. Pictures must come from a Vault view, whose CSP allows cards.scryfall.io (#205).
+- ChatGPT's desktop app shows grey boxes for card pictures the assistant writes into its own answer (2026-10-11): it draws a remote
+  picture there only if ChatGPT's own link check approves it, and a view's CSP has no say in that. Pictures that come from a Vault
+  view load (see docs/mcp-apps.md, "Pictures in the ChatGPT desktop app"). A real run for pictures must open the Vault's view, not
+  count the pictures in the answer text.
 - Name-only collection imports price an arbitrary printing (see `docs/usability-review.md`); use files with set and number.
 
 ## Expert council: a real run (2026-10-05)
