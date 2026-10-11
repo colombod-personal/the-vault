@@ -88,7 +88,10 @@ def council(fmt: str | None, goal: str | None = None, team_format: str | None = 
                        "three or more colours, say simulate_draws does not check colours (colour_warning). Never quote a "
                        "card's cost, type or text from memory. Cite every rule number with the Comprehensive Rules edition (`version`) a "
                        "rules tool returned, as \"rule <number> (Comprehensive Rules, <version>)\"; a member who relies on a rule that "
-                       "may have changed lately calls rules_changes first and says which two editions it compared."),
+                       "may have changed lately calls rules_changes first and says which two editions it compared. When the brief carries "
+                       "`lookouts` (what in the deck can turn against its owner, read by the Vault from the card text), every "
+                       "member weighs them, the plan never adds a card a lookout warns against, and the answer names each lookout "
+                       "with its cards and rule numbers (quoted with get_rule)."),
     }
     if key and key not in FORMAT_EXPERTS:
         out["note"] = (f"There is no {key} expert yet: the panel runs without a format expert, and says so.")

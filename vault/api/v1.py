@@ -40,6 +40,7 @@ from ..auth import (RECENT_SIGN_IN_METHOD_HOURS, IdentityInUse, Profile, email_v
 from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, history_summary, import_days, view_version
 from .. import archidekt_cache, deck_import, deck_match, deck_overview, deck_refresh, deck_versions, experts, owned_changes
+from .. import deck_tools, lookouts, possible_loops
 from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, ImportOptions, NoSuchBucket, export_collection,
                         import_collection, preview_import as preview_collection_import, user_entries)
 from ..models import AccessToken, ApiSession, Bucket, Card, CatalogSource, Deck, Identity, Import, NativeNonce, OAuthClient, OAuthGrant, OracleCard, Passkey, PriceSnapshot, Share, User
@@ -1395,14 +1396,24 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                       deck_id: int | None = Query(None, ge=1, le=2**31 - 1),
                       team_format: str | None = Query(None, max_length=40, description="Two-Headed Giant: the format the team plays"),
                       budget: bool = False, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-        note = None
-        if deck_id is not None and not format:
+        note, deck = None, None
+        if deck_id is not None:
             deck = owned_deck(db, user, deck_id)
+        if deck is not None and not format:
             seen = deck_overview.overview(deck.text, deck.format)
             format = seen["format"]
             note = (f"Format from the deck '{deck.name}': {format or 'unknown'} ({seen['format_from'] or 'not set'})"
                     + (f"; commander(s): {', '.join(seen['commanders'])}" if seen["commanders"] else ""))
-        return experts.council(format, goal, team_format, budget, note)
+        out = experts.council(format, goal, team_format, budget, note)
+        if deck is not None and "oracle_cards" in catalog_queries.sources(db):
+            # the lookouts come with the brief (bead vault-85p.1), so every member works from them without another call
+            try:
+                resolved = deck_tools.resolve(db, deck_tools.parse(deck.text))
+                out["lookouts"] = lookouts.read(possible_loops.card_texts(
+                    e for e in resolved.played() if e.line.section != "companion"))
+            except deck_tools.DeckError:
+                pass
+        return out
 
     @router.get("/experts", tags=["decks"], summary="The council's experts: who they are")
     def list_experts(user: User = Depends(current_user)) -> dict:
