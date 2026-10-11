@@ -27,6 +27,11 @@ Every change to `skills/`, `agents/`, the plugin manifests or the tools' answers
    `tests/test_delivery_contract.py` and `tests/test_plugin.py`.
 2. **Install from Git, in the real app.** On the PC with the apps: add the marketplace at the branch, install the plugin.
    Open the app's Skills list and record that the Vault skills are there. Record the commit and, for a zip, its sha256.
+   **Then check the server loaded:** Settings > Plugins > MCPs lists The Vault under "From plugins" (Authenticate there
+   if it asks), and the app's log has no `failed to parse plugin MCP server` line for it. Skills load without the
+   server, so a plugin can look installed with no Vault tool in it (11 Oct 2026). Without the app, the same check:
+   `CODEX_HOME=<empty folder> codex plugin marketplace add <checkout>`, `codex plugin add the-vault@the-vault`,
+   `codex mcp list` shows `the-vault`.
 3. **Fresh chat, neutral prompt**, the way a player asks: "Review my Sliver Swarm deck, I want to tune it." Also a rules
    question and a card question. Instant and Thinking.
 4. **Score with the rubric**, per run, pass or fail per item, by someone who did not build the change:
@@ -48,4 +53,7 @@ Every change to `skills/`, `agents/`, the plugin manifests or the tools' answers
 - the Codex marketplace being git-ignored, so the app found nothing;
 - the manifests disagreeing on name or version;
 - the plugin's skills drifting from `skills/`;
-- the answer gate in `expert-council` being weakened.
+- the answer gate in `expert-council` being weakened;
+- a field in the plugin's `mcp.json` that the ChatGPT desktop app's loader rejects (`extensions` made it log "unknown
+  field `extensions`, expected `url` or `headers`" and register no server, so the plugin had no Vault tools). The sign-in
+  declaration OpenAI's directory reads goes only in the upload ZIP (`build_plugin.py --zip`).
