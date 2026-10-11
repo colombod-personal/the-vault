@@ -31,7 +31,7 @@ from fastapi.responses import JSONResponse, Response
 from .. import analytics, card_roles, deck_ideas, experts, observability
 from ..deck_tools import FORMATS
 from ..models import User
-from . import mcp_session, mcp_ui
+from . import mcp_profile, mcp_session, mcp_ui
 from .mcp_catalog import GROUNDING, PROMPTS, catalog_tools, provenance_blocks, render_prompt
 from .schemas import MAX_ID
 
@@ -930,8 +930,12 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
             # Which hosts say they can show MCP Apps is what the next tools/list depends on; the log shows it per host
             # (name and version only, no person, no token). Control characters are dropped, the length is bounded.
             who = re.sub(r"[^ -~]", "", f"{info.get('name')}/{info.get('version')}")[:60]
+            # A host that gives a plugin's tools a size budget (the Codex family) gets the compact list (mcp_profile).
+            compact = mcp_profile.is_compact_client(info.get("name"))
             log.info("MCP initialize from %s: MCP Apps extension %s", who, "advertised" if ui else "not advertised")
-            request.state.new_session = mcp_session.issue(request.app.state.settings.session_secret, ui)
+            if compact:
+                log.info("MCP initialize from %s: compact tool list", who)
+            request.state.new_session = mcp_session.issue(request.app.state.settings.session_secret, ui, compact)
             return _result(id_, {
                 "protocolVersion": asked if asked in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
                 "capabilities": {"tools": {"listChanged": False}, "prompts": {"listChanged": False},
@@ -943,7 +947,7 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
                                           "mimeType": "image/png", "sizes": ["180x180"]},
                                          {"src": f"{request.app.state.settings.base_url}/favicon.svg",
                                           "mimeType": "image/svg+xml", "sizes": ["any"]}]},
-                "instructions": INSTRUCTIONS,
+                "instructions": INSTRUCTIONS + (mcp_profile.INSTRUCTIONS_NOTE if compact else ""),
             })
         if method == "ping":
             return _result(id_, {})
@@ -953,6 +957,8 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
             settings = request.app.state.settings
             views = (not settings.mcp_apps_require_capability
                      or mcp_session.read(settings.session_secret, request.headers.get(mcp_session.HEADER)) is not False)
+            if mcp_session.compact(settings.session_secret, request.headers.get(mcp_session.HEADER)):
+                return _result(id_, {"tools": mcp_profile.tool_list(BY_NAME, scopes, ui=views)})
             return _result(id_, {"tools": [t.schema(ui=views) for t in TOOLS if t.listed_for(scopes)]})
         if method == "resources/list":  # the MCP Apps views (ui:// pages); there is nothing else to read
             return _result(id_, {"resources": mcp_ui.resources()})
@@ -979,14 +985,31 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
             name = params.get("name")
             if not isinstance(name, str):
                 return _rpc_error(id_, -32602, "Invalid params: name must be the tool's name")
-            tool = BY_NAME.get(name)
             args = params.get("arguments")
             if args is None:  # omitted: no arguments
                 args = {}
-            if tool is None:
-                return _rpc_error(id_, -32602, f"Unknown tool: {params.get('name')}")
             if not isinstance(args, dict):
                 return _rpc_error(id_, -32602, "Invalid arguments: must be an object")
+            if name in mcp_profile.DISPATCHERS:  # the compact list's tools: look one up, or run another by name
+                runner = {t["name"]: t for t in mcp_profile.dispatcher_tools()}[name]
+                why = _invalid(runner["inputSchema"], args, "arguments")
+                if why:
+                    return _rpc_error(id_, -32602, f"Invalid arguments: {why}")
+                if name == mcp_profile.LOOKUP:
+                    found = mcp_profile.lookup(TOOLS, scopes, args)
+                    return _result(id_, {"content": [{"type": "text", "text": json.dumps(found, separators=(",", ":"), default=str)}],
+                                         "structuredContent": found, "isError": "error" in found})
+                via, name, args = name, args["name"], args.get("arguments") or {}
+                # The same path as a direct call from here on: the argument check, the API and the token's scopes decide.
+                # What is refused first is presentation policy (mcp_profile.refusal), not the enforcement.
+                no = mcp_profile.refusal(BY_NAME.get(name), via, scopes)
+                if no:
+                    return _rpc_error(id_, -32602, no if BY_NAME.get(name) else f"Unknown tool: {name} ({mcp_profile.LOOKUP} lists them)")
+                observability.event(logging.INFO, "mcp_dispatch", tool=name, via=via,
+                                    request_id=request.scope.get("state", {}).get("request_id", ""))
+            tool = BY_NAME.get(name)
+            if tool is None:
+                return _rpc_error(id_, -32602, f"Unknown tool: {params.get('name')}")
             why = _invalid(tool.schema()["inputSchema"], args, "arguments")
             if why:
                 return _rpc_error(id_, -32602, f"Invalid arguments: {why}")

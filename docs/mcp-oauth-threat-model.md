@@ -896,3 +896,38 @@ Residual risks, stated:
 - `POST /upload` has no body-size limit before the ticket is checked (read from the code, not measured): the framework reads the multipart body before the handler
   rejects a made-up ticket. That is independent of scopes (the route takes no credential) and unchanged here; it is tracked as its own
   bead (vault-wxy.8).
+
+## The compact tool list for the Codex family (2026-10-11, vault-wxy.5)
+
+What changed: a client whose `initialize` names it `codex-mcp-client` is shown a short list (core tools, `vault_tools`,
+`vault_call`, and `vault_write` for a token that may write) instead of all 81 tools, because Codex drops a plugin's tools past
+a size budget. The choice is carried in the existing signed `Mcp-Session-Id` (one more bit; nothing is stored).
+
+- **What the session id grants:** nothing. It carries a presentation bit (two bits: MCP Apps views, compact list), signed under
+  the server secret; it is not bound to a person. A replayed or copied id gives the caller their own data in a compact list. A
+  client that spoofs the name only changes which list it is shown; scopes are checked per token on every call.
+- **`vault_call` / `vault_write` use the caller's own credentials:** they build the same in-process request as a direct call
+  (`call_api`), forwarding the caller's `Authorization`, so the REST layer's scope check and every ownership check apply
+  unchanged. A read-only token running a write tool through them gets the same refusal as a direct call
+  (`tests/test_mcp_profile.py`).
+- **Two runners, not one:** a host's "always allow" attaches to a tool name. `vault_call` is read-only (`readOnlyHint`) and
+  refuses write tools; `vault_write` is the one that changes data, is listed only to a token that may write, and carries
+  `destructiveHint` true because it can run tools that replace or merge (`update_deck`, `set_*_metadata`, `rename_tag`).
+  Approving reads never pre-approves changes, and approving `vault_write` is asked as a destructive tool is.
+- **The refusal of destructive tools is presentation policy, not enforcement.** The runners will not run a tool marked
+  `destructive` (deletes or revokes), a core tool (called by name) or each other, because a host that sees one runner cannot
+  show that tool's own warning. A direct `tools/call` of such a tool by name still works for a token that may write, as it
+  did before; the API decides. `tests/test_mcp_profile.py` derives the destructive set from the catalog (`DELETE` methods,
+  `delete_`/`reset_`/`untag_`/`stop_` names, write tools with a confirmation or update flag must be marked destructive or
+  recorded as reviewed, with the reason).
+- **Reviewed, not marked destructive** (the list, with reasons, is `REVIEWED_NOT_DESTRUCTIVE` in the test): `tag_cards` and
+  `move_cards` (previewed, reversible); `import_deck_from_link` (`update` with `confirm` replaces the saved copy of that one
+  deck) and `refresh_deck` (replaces it with the source's list, destructive) are **listed directly** so the host shows each
+  one's own approval; `update_deck`, `rename_tag`, `rename_bucket`, `set_card_metadata` and `set_bucket_metadata` replace or
+  merge the person's own data and sit behind `vault_write`, whose approval is destructive.
+- **Residual:** a prompt-injected model with `vault_write` approved can run any non-destructive write the token's scope allows
+  (save or update a deck, move cards, accept a share). The scope reach is the same as with the full tool list, but the
+  per-tool approval is coarser: one "always allow vault_write" covers all of them, where the full list lets a person allow
+  `create_bucket` and keep asking for `update_deck`. Mitigation: `vault_write` is marked destructive so the host asks, the
+  replacing tools that matter most (`import_deck_from_link`, `refresh_deck`, the collection edits and their confirmations) are
+  listed directly with their own hints, and a person who wants per-tool control can use a client that gets the full list.
