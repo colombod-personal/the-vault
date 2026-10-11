@@ -118,7 +118,7 @@ def test_the_session_id_carries_no_person_and_no_token(host):
     host.initialize(APPS_CAPABILITIES)
     sid = host.session_id
     assert host.tokens["access_token"] not in sid and "dev@localhost" not in sid and len(sid) < 70
-    assert sid.split(".")[0] == "v1" and sid.split(".")[1] in ("0", "1")  # a version, one bit, a random part and a signature, nothing else
+    assert sid.split(".")[0] == "v1" and sid.split(".")[1] in ("0", "1", "2", "3")  # a version, two bits (extension, compact list), a random part and a signature, nothing else
 
 
 def test_the_log_says_which_host_advertised_the_extension_without_naming_a_person(host, caplog):

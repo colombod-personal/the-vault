@@ -12,6 +12,8 @@ from vault.api import mcp
 SKILLS = Path(__file__).parent.parent / "skills"
 FOLDERS = sorted(p for p in SKILLS.iterdir() if p.is_dir())
 TOOLS = set(mcp.BY_NAME)
+# The compact tool list for the Codex family (vault/api/mcp_profile.py): two tools that are not in the full catalog.
+PROFILE_TOOLS = {"vault_tools", "vault_call", "vault_write"}
 # Words in backticks that are fields of tool answers or arguments, not tools (`unit_value` is a value of search_cards' sort).
 FIELDS = {"oracle_id", "source_text", "discard_may_be_the_plan", "deck_id", "budget_usd", "added_cost_usd", "known_card", "next_cursor", "share_id", "total_usd",
           "price_date", "store_format", "no_qualifying_printing", "not_checked", "include_sideboard", "choose_printing", "printing_unknown", "did_you_mean", "format_from", "colour_warning", "bracket_floor",
@@ -50,7 +52,7 @@ def test_declared_tools_exist_and_are_the_only_real_tools_the_body_names(folder)
     mentioned = set(re.findall(r"`([a-z]+(?:_[a-z0-9]+)+)`", body))
     assert mentioned & TOOLS <= declared, f"names tools it does not declare: {(mentioned & TOOLS) - declared}"
     assert declared <= mentioned | {"whoami"}, f"declares tools it never mentions: {declared - mentioned}"
-    invented = {m for m in mentioned if m not in TOOLS and m not in FIELDS}
+    invented = {m for m in mentioned if m not in TOOLS and m not in FIELDS and m not in PROFILE_TOOLS}
     assert not invented, f"unknown tool-like names: {invented}"
 
 
@@ -171,7 +173,7 @@ def test_a_skill_that_reads_decks_or_the_collection_says_to_use_the_vaults_tools
     names = set(meta["metadata"]["vault-tools"].split())
     if names & PERSONAL_DATA_TOOLS:
         assert USE_THE_VAULTS_TOOLS in body, f"{folder.name} reads the person's data but does not say to use the Vault's tools, not a browser"
-        assert "look it up by that name before saying it is missing" in body, f"{folder.name} does not say what to do when a tool is not loaded yet"
+        assert "look it up by that name before saying it is missing" in body and "never fall back to a browser" in body and all(f"`{n}`" in body for n in PROFILE_TOOLS), f"{folder.name} does not say what to do when a tool is not loaded yet"
     else:
         assert USE_THE_VAULTS_TOOLS not in body  # the line is for skills that read the person's data
 
