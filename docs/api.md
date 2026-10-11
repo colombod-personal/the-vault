@@ -177,6 +177,7 @@ is stored). Over the limit they answer `429` (problem+json) with `Retry-After` i
 | `POST /api/v1/cards/lookup` with `refresh: true` (per signed-in user; a call to Scryfall for up to 75 printings) | 20 | `LOOKUP_REFRESH_LIMIT` |
 | `GET /api/v1/archidekt/decks/{id}`, `POST /api/v1/decks/import-link` and `POST /api/v1/decks/{id}/refresh`: the calls that really go to Archidekt, together (per signed-in user; a read served from the cache is never limited, and over the limit the copy the Vault holds is served, only a deck it holds no copy of is refused) | 30 | `ARCHIDEKT_LIMIT` |
 | `POST /api/v1/imports` and `POST /api/v1/imports/preview` together (per signed-in user; up to 20 MB of parsing each) | 10 | `IMPORT_LIMIT` |
+| `POST /upload` (the upload page; per link, not per person, and not the `/imports` counter, so a loop on one link costs the person that link only; up to 20 MB of parsing each; a made-up ticket is counted nowhere) | 10 per link | `IMPORT_LIMIT` |
 | `POST /api/v1/collection/reset` and `POST /api/v1/collection/reset/undo` together (per signed-in user; the preview and the reset read the whole inventory) | 10 | – |
 | `PUT` and `DELETE /api/v1/me/buy-settings` together (per signed-in user) | 30 | – |
 | `GET /api/v1/collection/spare`, `/collection/spare/printings` and `/collection/pnl` together (per signed-in user; each reads the whole collection and the saved decks) | 120 | `LAB_LIMIT` |

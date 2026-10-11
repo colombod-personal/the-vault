@@ -94,16 +94,20 @@ def limited(bucket: str, *, verify: bool = False, setting: str | None = None) ->
     return [Depends(check)]
 
 
-def per_user(request: Request, bucket: str, user_id: int, allowed: int, db: Session | None = None) -> None:
+def per_user(request: Request, bucket: str, user_id: int, allowed: int, db: Session | None = None, *, kind: str = "user") -> None:
     """Limit one signed-in user's calls to an expensive endpoint (e.g. a refresh that calls
     Scryfall) to ``allowed`` a minute, whichever device or token they come from. Counted like the
     sign-in limits, under a keyed hash of the bucket and user id, so the rows name no one.
     Pass the request's own ``db`` session: counting in a second one would hold two connections at once, and a request that
-    needs two when the pool is busy waits for itself (#169)."""
+    needs two when the pool is busy waits for itself (#169).
+
+    ``kind`` names what ``user_id`` is: a different ``kind`` is a different counter even for the same number, so a credential
+    that is not a person (an upload link's id) can have a counter of its own. Every try counts, accepted or refused: a caller
+    that loops keeps its own counter above the limit, which is why that counter must not be one the person also needs."""
     settings: Settings = request.app.state.settings
     now = time.time()
     minute = int(now // WINDOW)
-    key = hmac.new(settings.session_secret.encode(), f"user:{bucket}:{user_id}".encode(), hashlib.sha256).hexdigest()
+    key = hmac.new(settings.session_secret.encode(), f"{kind}:{bucket}:{user_id}".encode(), hashlib.sha256).hexdigest()
     if db is None:
         with request.app.state.db.sessions() as own:
             count = _count(own, key, minute)

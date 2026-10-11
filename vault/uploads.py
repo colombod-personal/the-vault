@@ -14,7 +14,8 @@ plain page, the file waits (staged, not imported), the assistant shows the previ
   what the person was shown; the hash covers the bucket too). Like every import it applies only what changed in the person's
   app and keeps edits made in the Vault (``vault.merge``).
 - At most 5 open links per person and 10 started a minute (a retry makes another link and uses a slot); each file posted to
-  the page counts against the per-person import allowance (``import_limit`` a minute, 429); expired files are deleted by the daily
+  the page counts against its own per-link allowance (``import_limit`` a minute for each link, 429, not the person's /imports
+  counter); expired files are deleted by the daily
   job (``vault.retention``). A link is not single-use: it works until it expires and a second file replaces the first. Links
   are not attributed to an app and there is no list or cancel yet (a read-only app can hold the five and use the starts of a
   minute, the same as a write app could: docs/mcp-oauth-threat-model.md, "The upload link for a read-only connection").
@@ -238,11 +239,15 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         if staged is None:
             return page("Upload link expired", "<h1>This upload link has expired</h1>"
                         "<p>Ask your assistant for a new one.</p>", status=404)
-        try:  # up to 20 MB of parsing and matching: the same per-person allowance as the import routes (#353)
-            per_user(request, "import", staged.user_id, settings.import_limit, db)
+        # Up to 20 MB of parsing and matching, limited to IMPORT_LIMIT a minute per link, on a counter of its own: the shared
+        # per-person "import" counter counts refused tries too, so whoever still holds a link (an app the person has since
+        # disconnected) could loop here and keep the person's own /imports at 429. A made-up ticket was refused above and is
+        # counted nowhere. A person is bounded by 5 links x IMPORT_LIMIT, and a link that is being looped is replaced by a new one.
+        try:
+            per_user(request, "upload page", staged.id, settings.import_limit, db, kind="ticket")
         except HTTPException as exc:
             limited = page("Too many uploads", "<h1>Too many uploads just now</h1><p>Wait a minute, then upload the file "
-                           "again with the same link.</p>", status=429)
+                           "again with the same link. If this keeps happening, ask your assistant for a new link.</p>", status=429)
             limited.headers["Retry-After"] = (exc.headers or {}).get("Retry-After", "60")
             return limited
         chosen, asked = staged.bucket_id, bucket.strip()
