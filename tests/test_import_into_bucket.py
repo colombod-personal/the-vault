@@ -350,16 +350,21 @@ def test_another_persons_bucket_is_a_404_on_every_way_in_and_nothing_is_imported
         assert held(app, "Bob's box", "bob@example.com") == []
 
 
-def test_a_read_only_connection_cannot_import_into_a_bucket_or_start_a_bucket_upload(app, stocked, bot):
+def test_a_read_only_connection_cannot_import_into_a_bucket_but_may_start_a_bucket_upload(app, stocked, bot):
+    """vault-wxy.6: the link only stages a file bound to the bucket; the import (the apply) is the write."""
     ids = bucket_ids(stocked)
     read = make_token(stocked)
     h = {"Authorization": f"Bearer {read['token']}"}
     files = {"file": ("e.csv", trade_file(), "text/csv")}
     assert bot.post(f"{V1}/imports", params={"bucket_id": ids["Trade"]}, files=files, headers=h).status_code == 403
     assert bot.post(f"{V1}/imports/preview", params={"bucket_id": ids["Trade"]}, files=files, headers=h).status_code == 200  # a read
-    assert bot.post(f"{V1}/uploads", params={"bucket_id": ids["Trade"]}, headers=h).status_code == 403
-    for tool, args in (("import_collection_csv", {"csv": trade_file().decode(), "confirm": True}), ("start_collection_upload", {})):
-        assert call_tool(bot, read, tool, bucket_id=ids["Trade"], **args).get("isError"), tool
+    started = bot.post(f"{V1}/uploads", params={"bucket_id": ids["Trade"]}, headers=h)
+    assert started.status_code == 201 and started.json()["bucket"]["id"] == ids["Trade"]  # the link is bound to the bucket
+    assert bot.post(f"{V1}/uploads/{started.json()['id']}/apply", params={"content_hash": "0" * 64, "bucket_id": ids["Trade"]},
+                    headers=h).status_code == 403
+    assert call_tool(bot, read, "import_collection_csv", bucket_id=ids["Trade"], csv=trade_file().decode(), confirm=True).get("isError")
+    assert call_tool(bot, read, "confirm_staged_upload", upload_id=started.json()["id"], bucket_id=ids["Trade"], confirm=True,
+                     content_hash="0" * 64).get("isError")
     assert names_in(app, "Trade") == ["A Killer Among Us", "Belfry Spirit"]
 
 
