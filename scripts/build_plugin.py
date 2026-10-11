@@ -86,15 +86,10 @@ PORTABLE_MCP = {
 CLAUDE_PLUGIN = {
     "name": NAME, "displayName": "The Vault", "version": VERSION, "description": DESCRIPTION, "author": AUTHOR,
     "homepage": REPO, "repository": REPO, "license": "MIT", "keywords": KEYWORDS,
-    "userConfig": {
-        "vault_url": {"type": "string", "title": "Vault address", "default": HOST,
-                      "description": "Where The Vault runs (the default is the public one)"},
-        "vault_token": {"type": "string", "title": "Personal access token", "sensitive": True, "required": True,
-                        "description": "Create one in The Vault: Account, Agents & API. Read-only is enough for rules, cards and deck analysis."},
-    },
 }
-CLAUDE_MCP = {"mcpServers": {NAME: {"type": "http", "url": "${user_config.vault_url}/api/mcp",
-                                    "headers": {"Authorization": "Bearer ${user_config.vault_token}"}}}}
+# One install, no pasted token: the plugin carries the MCP server and the host signs the person in (OAuth), exactly as
+# for the ChatGPT and Codex plugin. A personal access token stays an option for scripts, never a step for a player.
+CLAUDE_MCP = {"mcpServers": {NAME: {"type": "http", "url": f"{HOST}/api/mcp"}}}
 MARKET = {
     "name": NAME, "owner": {"name": "The Vault", "url": REPO},
     "description": "Tools and skills for Magic: The Gathering with your AI assistant",

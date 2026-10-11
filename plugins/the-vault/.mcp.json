@@ -2,10 +2,7 @@
   "mcpServers": {
     "the-vault": {
       "type": "http",
-      "url": "${user_config.vault_url}/api/mcp",
-      "headers": {
-        "Authorization": "Bearer ${user_config.vault_token}"
-      }
+      "url": "https://mtgvault.cards/api/mcp"
     }
   }
 }

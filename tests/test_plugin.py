@@ -45,12 +45,12 @@ def test_the_portable_plugin_follows_agent_plugins_1_0():
     assert names == sorted(p.name for p in bp.SKILLS.iterdir() if p.is_dir())
 
 
-def test_the_claude_manifests_ask_for_the_token_and_never_contain_one():
+def test_the_claude_manifests_are_one_install_with_no_pasted_token():
     plugin = load(bp.PLUGIN / ".claude-plugin" / "plugin.json")
-    assert plugin["name"] == "the-vault" and plugin["userConfig"]["vault_token"]["sensitive"] is True
+    assert plugin["name"] == "the-vault" and "userConfig" not in plugin  # no step for the player but sign-in
     assert not plugin["name"].startswith(("claude-", "anthropic-"))
     server = load(bp.PLUGIN / ".mcp.json")["mcpServers"]["the-vault"]
-    assert server["headers"]["Authorization"] == "Bearer ${user_config.vault_token}" and server["url"] == "${user_config.vault_url}/api/mcp"
+    assert "headers" not in server and server["url"].startswith("https://") and server["url"].endswith("/api/mcp")
     market = load(bp.MARKETPLACE)
     assert market["plugins"][0]["source"] == "./plugins/the-vault" and market["name"] == "the-vault"
     for path in [*bp.PLUGIN.rglob("*"), bp.MARKETPLACE, ROOT / "public" / "connect.html"]:
