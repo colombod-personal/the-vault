@@ -17,20 +17,5 @@
     "decks",
     "scryfall",
     "collection"
-  ],
-  "userConfig": {
-    "vault_url": {
-      "type": "string",
-      "title": "Vault address",
-      "default": "https://mtgvault.cards",
-      "description": "Where The Vault runs (the default is the public one)"
-    },
-    "vault_token": {
-      "type": "string",
-      "title": "Personal access token",
-      "sensitive": true,
-      "required": true,
-      "description": "Create one in The Vault: Account, Agents & API. Read-only is enough for rules, cards and deck analysis."
-    }
-  }
+  ]
 }

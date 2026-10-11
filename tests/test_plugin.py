@@ -45,12 +45,12 @@ def test_the_portable_plugin_follows_agent_plugins_1_0():
     assert names == sorted(p.name for p in bp.SKILLS.iterdir() if p.is_dir())
 
 
-def test_the_claude_manifests_ask_for_the_token_and_never_contain_one():
+def test_the_claude_manifests_are_one_install_with_no_pasted_token():
     plugin = load(bp.PLUGIN / ".claude-plugin" / "plugin.json")
-    assert plugin["name"] == "the-vault" and plugin["userConfig"]["vault_token"]["sensitive"] is True
+    assert plugin["name"] == "the-vault" and "userConfig" not in plugin  # no step for the player but sign-in
     assert not plugin["name"].startswith(("claude-", "anthropic-"))
     server = load(bp.PLUGIN / ".mcp.json")["mcpServers"]["the-vault"]
-    assert server["headers"]["Authorization"] == "Bearer ${user_config.vault_token}" and server["url"] == "${user_config.vault_url}/api/mcp"
+    assert "headers" not in server and server["url"].startswith("https://") and server["url"].endswith("/api/mcp")
     market = load(bp.MARKETPLACE)
     assert market["plugins"][0]["source"] == "./plugins/the-vault" and market["name"] == "the-vault"
     for path in [*bp.PLUGIN.rglob("*"), bp.MARKETPLACE, ROOT / "public" / "connect.html"]:
@@ -101,13 +101,13 @@ def test_no_page_or_plugin_file_names_a_vercel_address():
 def test_the_chatgpt_listing_fields_meet_openais_limits():
     """OpenAI's upload check (2026-10-10, developers.openai.com/plugins/deploy/submission): subtitle and name at most 30
     characters, description at most 4000, an https support page (required for an MCP review), https privacy and terms."""
-    face = load(bp.OPENAI / ".codex-plugin" / "plugin.json")["interface"]
+    face = load(bp.OPENAI / "plugin.json")["extensions"]["com.openai"]["interface"]
     assert 0 < len(face["shortDescription"]) <= 30 and 0 < len(face["displayName"]) <= 30
     assert 0 < len(face["longDescription"]) <= 4000 and len(face["developerName"]) <= 80
     for key in ("supportURL", "websiteURL", "privacyPolicyURL", "termsOfServiceURL"):
         assert face[key].startswith("https://mtgvault.cards") and len(face[key]) <= 1024, key
     assert face["supportURL"].endswith("/support.html")
-    demo = load(bp.OPENAI / ".codex-plugin" / "plugin.json")["review"]["demo_recording_url"]
+    demo = load(bp.OPENAI / "plugin.json")["extensions"]["com.openai"]["review"]["demo_recording_url"]
     assert demo == "https://mtgvault.cards/demo/vault-chatgpt-demo.mp4" and (bp.ROOT / "public" / "demo" / "vault-chatgpt-demo.mp4").stat().st_size > 100_000
     assert face["category"] in {"Business & Operations", "Communication", "Creativity", "Data & Analytics",
                                 "Developer Tools", "Education & Research", "Entertainment", "Finance", "Healthcare",
@@ -118,9 +118,10 @@ def test_the_chatgpt_listing_fields_meet_openais_limits():
 
 def test_the_chatgpt_and_codex_plugin_has_the_skills_the_experts_and_the_vault_server(tmp_path):
     """#225: ChatGPT and Codex load skills from a plugin package; with no subagents there, the experts are skills."""
-    manifest = load(bp.OPENAI / ".codex-plugin" / "plugin.json")
-    assert manifest["name"] == "the-vault" and manifest["skills"] == "./skills/" and manifest["mcpServers"] == "./mcp.json"
-    assert manifest["interface"]["privacyPolicyURL"].endswith("/privacy.html") and manifest["interface"]["logo"] == "./assets/logo.png"
+    manifest = load(bp.OPENAI / "plugin.json")  # OpenAI's portable layout: skills/ and mcp.json at fixed paths
+    face = manifest["extensions"]["com.openai"]["interface"]
+    assert manifest["name"] == "the-vault" and manifest["$schema"].endswith("/plugin.schema.json") and not (bp.OPENAI / ".codex-plugin").exists()
+    assert face["privacyPolicyURL"].endswith("/privacy.html") and face["logo"] == "./assets/logo.png"
     assert load(bp.OPENAI / "mcp.json")["mcpServers"]["the-vault"]["url"] == "https://mtgvault.cards/api/mcp"
     skills = {p.parent.name for p in (bp.OPENAI / "skills").glob("*/SKILL.md")}
     assert {p.name for p in bp.SKILLS.iterdir() if p.is_dir()} <= skills  # every skill
@@ -129,7 +130,7 @@ def test_the_chatgpt_and_codex_plugin_has_the_skills_the_experts_and_the_vault_s
     assert judge.startswith("---\nname: vault-judge\n") and next(a for a in bp.load_agents() if a["name"] == "vault-judge")["body"] in judge
     import zipfile
     names = zipfile.ZipFile(bp.write_zip(tmp_path / "p.zip")).namelist()
-    assert ".codex-plugin/plugin.json" in names and "skills/expert-council/SKILL.md" in names
+    assert "plugin.json" in names and ".codex-plugin/plugin.json" not in names and "skills/expert-council/SKILL.md" in names
     logo = zipfile.ZipFile(tmp_path / "p.zip").read("assets/logo.png")
     assert logo == (bp.ROOT / "public" / "apple-touch-icon.png").read_bytes()  # images byte for byte
 
@@ -148,7 +149,7 @@ def test_a_directory_listing_turns_the_steps_into_an_add_button(monkeypatch):
 def test_the_chatgpt_plugin_carries_five_positive_and_three_negative_review_cases_naming_real_tools():
     """#240: the OpenAI directory review runs these on the demo account."""
     from vault.api import mcp
-    cases = load(bp.OPENAI / ".codex-plugin" / "plugin.json")["review"]["test_cases"]
+    cases = load(bp.OPENAI / "plugin.json")["extensions"]["com.openai"]["review"]["test_cases"]
     assert len(cases["positive"]) == 5 and len(cases["negative"]) == 3
     for case in cases["positive"]:
         assert case["description"] and case["prompt"] and case["expected_behavior"]
