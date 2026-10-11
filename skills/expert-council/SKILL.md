@@ -30,6 +30,12 @@ Do not send the answer until every line is true. If one is not, go back and do i
 5. **Every lookout the tools returned is in the answer**, with its cards, what it does and its rule numbers.
 6. **Honesty lines are present:** the colour warning for three or more colours, and what the council could not check.
 7. **The plan was validated:** `validate_deck_changes` returned `valid` true for the exact cuts and adds shown.
+8. **Every card you propose to add was read against the deck.** Read its text with `get_card_oracle` and ask what it does to
+   the cards already in the deck, not only to the opponents. If it can turn against the deck (a forced trigger that
+   destroys your own artifacts or enchantments, a shroud that blocks your own targeting, a bonus that helps an
+   opponent's tribe), do not soften it into "consider a more controllable option": say plainly "do not add this", name
+   the cards in the deck it would hurt, and quote the rule with `get_rule`. Harmonic Sliver in a deck with Sol Ring,
+   Arcane Signet, Rhystic Study or Smothering Tithe is the model case.
 
 ## Members
 

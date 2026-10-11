@@ -37,6 +37,21 @@ PLUGIN = ROOT / "plugins" / "the-vault"
 # and the Vault's MCP server. Uploaded as a ZIP: python scripts/build_plugin.py --zip
 OPENAI = ROOT / "plugins" / "the-vault-openai"
 MARKETPLACE = ROOT / ".claude-plugin" / "marketplace.json"
+# ChatGPT and Codex read a Git marketplace from .agents/plugins/marketplace.json (Settings > Plugins > Add > Add a
+# marketplace: a GitHub repo, a Git URL or a local folder). It points at the same plugin the ZIP carries.
+CODEX_MARKETPLACE = ROOT / ".agents" / "plugins" / "marketplace.json"
+CODEX_MARKET = {
+    "name": "the-vault",
+    "interface": {"displayName": "The Vault"},
+    "plugins": [
+        {
+            "name": "the-vault",
+            "source": {"source": "local", "path": "./plugins/the-vault-openai"},
+            "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+            "category": "Productivity",
+        }
+    ],
+}
 
 NAME = "the-vault"
 # Agent Plugins 1.0 has no agent concept ("commands, hooks, agents ... outside the v1 format", spec section on why only
@@ -1136,6 +1151,7 @@ def expected() -> dict[Path, str | Path]:
         PLUGIN / "README.md": README,
         ROOT / "README.md": sources.sync_block((ROOT / "README.md").read_text(encoding="utf-8").replace("\r\n", "\n")),
         MARKETPLACE: dump(MARKET),
+        CODEX_MARKETPLACE: dump(CODEX_MARKET),
         ROOT / "public" / "connect.html": connect_page(),
         ROOT / "public" / "index.html": index_html(),
         ROOT / "public" / "llms.txt": llms_txt(),

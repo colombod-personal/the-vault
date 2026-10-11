@@ -112,14 +112,14 @@ Measured for a Commander deck review ("tune it on a budget"): the panel the seat
 
 | Who | Tool calls as its brief says | Tool calls if it reuses the chair's facts | Tool answers read (tokens) as briefed | Tool answers read (tokens) reusing the facts | Brief (tokens) |
 |---|---|---|---|---|---|
-| chair (`expert-council`) | 9 | 9 | 18189 | 18189 | 2667 |
+| chair (`expert-council`) | 9 | 9 | 18189 | 18189 | 2832 |
 | `vault-commander-expert` | 4 | 0 | 5526 | 0 | 603 |
 | `vault-casual-table` | 5 | 3 | 4469 | 1690 | 540 |
 | `vault-synergy-analyst` | 7 | 4 | 8314 | 1837 | 458 |
 | `vault-collection-analyst` | 4 | 2 | 12437 | 3491 | 346 |
 | `vault-judge` (+ rules answers, not measured) | 5 | 5 | 563 | 563 | 410 |
 | `vault-devils-advocate` | 4 | 4 | 2252 | 2252 | 480 |
-| **Run** | **38** | **27** | **51748** | **28022** | **5504** |
+| **Run** | **38** | **27** | **51748** | **28022** | **5669** |
 
 Measured answers (tokens, one call each, on the fixture deck): `check_decklist` 3698, `deck_legality` 620, `deck_stats` 1932, `find_combos` 847, `find_upgrades` 870, `get_card_oracle` 563, `get_deck` 2868, `get_deck_overlap` 5248, `list_decks` 288, `search_cards` 147, `shopping_list` 2622, `simulate_draws` 2127, `validate_deck_changes` 562. The chair hands every member the shared facts (`deck_stats` to `get_deck_overlap`, together 14471 tokens), which each member's context then holds as well: 14471 tokens in each of the 6 members' contexts, 86826 across the run, on top of the table. The lists passed as arguments (`check_decklist` takes the whole deck list) are not counted. Commander Spellbook's answer (`find_combos`) is the twin's, so a real one can be longer; it is measured with `include_possible_loops`, as the council asks for it, on a deck whose card texts are invented and hold no loop, so each possible loop the reading finds adds about 290 tokens (the Sliver Queen, Manaweft Sliver and Heart Sliver example of docs/possible-loops-design.md, measured the same way).
 
