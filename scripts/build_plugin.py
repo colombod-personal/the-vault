@@ -33,7 +33,7 @@ SKILLS = ROOT / "skills"
 AGENTS = ROOT / "agents"
 DEFS = ROOT / "agent-definitions"
 PLUGIN = ROOT / "plugins" / "the-vault"
-# ChatGPT and Codex plugin (#225): .codex-plugin/plugin.json, the skills, the experts as skills (no subagents there),
+# ChatGPT and Codex plugin (#225): root plugin.json (OpenAI portable layout), mcp.json, the skills, the experts as skills (no subagents there),
 # and the Vault's MCP server. Uploaded as a ZIP: python scripts/build_plugin.py --zip
 OPENAI = ROOT / "plugins" / "the-vault-openai"
 MARKETPLACE = ROOT / ".claude-plugin" / "marketplace.json"
@@ -1046,19 +1046,7 @@ def experts_module() -> str:
             'never this file."""\n\n# fmt: off\nDATA = ' + data + "\n")
 
 
-OPENAI_MANIFEST = {
-    "name": NAME,
-    "version": "0.1.0",
-    "description": ("Magic: The Gathering rules, cards, decks and your collection for ChatGPT and Codex, grounded in "
-                    "Scryfall and the Comprehensive Rules, with sources shown, and an expert council for deck reviews. "
-                    "Unofficial fan content."),
-    "author": {"name": "The Vault", "url": "https://github.com/colombod-personal/the-vault"},
-    "homepage": HOST,
-    "repository": "https://github.com/colombod-personal/the-vault",
-    "license": "MIT",
-    "keywords": ["magic-the-gathering", "mtg", "commander", "decks", "rules", "collection", "scryfall"],
-    "skills": "./skills/",
-    "mcpServers": "./mcp.json",
+OPENAI_REVIEW_AND_INTERFACE = {
     # What the OpenAI directory review runs (five positive and three negative cases) on the demo account (vault/reviewer.py).
     "review": {
         # Required for an MCP review: a walkthrough recorded in ChatGPT on the demo account (public/demo, 2026-10-10).
@@ -1090,11 +1078,31 @@ OPENAI_MANIFEST = {
         "composerIcon": "./assets/logo.png",
     },
 }
+# OpenAI's portable layout (developers.openai.com/plugins/build/plugins, "Plugin structure"): root plugin.json with the
+# Agent Plugins schema; skills/ and mcp.json are found at fixed paths; OpenAI presentation and review go inline under
+# extensions.com.openai (which replaces a .codex-plugin/plugin.json overlay). This is also the layout ChatGPT's Plugin
+# Creator produced for this plugin on 2026-10-11.
+OPENAI_MANIFEST = {
+    "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+    "name": NAME,
+    "version": "0.1.0",
+    "description": ("Magic: The Gathering rules, cards, decks and your collection for ChatGPT and Codex, grounded in "
+                    "Scryfall and the Comprehensive Rules, with sources shown, and an expert council for deck reviews. "
+                    "Unofficial fan content."),
+    "author": {"name": "The Vault", "url": "https://github.com/colombod-personal/the-vault"},
+    "homepage": HOST,
+    "repository": "https://github.com/colombod-personal/the-vault",
+    "license": "MIT",
+    "keywords": ["magic-the-gathering", "mtg", "commander", "decks", "rules", "collection", "scryfall"],
+    "extensions": {"com.openai": {"interface": OPENAI_REVIEW_AND_INTERFACE["interface"],
+                                  "review": OPENAI_REVIEW_AND_INTERFACE["review"]}},
+}
 # The server declares its own sign-in (OpenAI's "Configure MCP authentication": extensions.com.openai.auth in mcp.json),
 # so a host that installs the plugin can run OAuth itself. The Vault offers CIMD and dynamic registration; CIMD is
 # preferred and OpenAI keeps the DCR fallback. No client id or secret lives in the package.
 MCP_AUTH = {"com.openai": {"auth": {"type": "oauth", "client": {"mode": "cimd"}, "baseScopes": ["read"]}}}
-OPENAI_MCP = {"mcpServers": {NAME: {"type": "streamable-http", "url": f"{HOST}/api/mcp", "extensions": MCP_AUTH}}}
+OPENAI_MCP = {"$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+              "mcpServers": {NAME: {"type": "streamable-http", "url": f"{HOST}/api/mcp", "extensions": MCP_AUTH}}}
 # Experts that work on a deck or a question: each becomes a skill where hosts have no subagents (the council skill
 # calls them; a person can also ask for one directly). The buyer and deckbuilder stay agents for plugin hosts.
 EXPERT_SKILLS = ("vault-commander-expert", "vault-casual-table", "vault-limited-expert", "vault-pauper-expert",
@@ -1117,7 +1125,7 @@ def expert_skill(agent: dict) -> str:
 
 def openai_files() -> dict[Path, str | Path]:
     files: dict[Path, str | Path] = {
-        OPENAI / ".codex-plugin" / "plugin.json": dump(OPENAI_MANIFEST),
+        OPENAI / "plugin.json": dump(OPENAI_MANIFEST),
         OPENAI / "mcp.json": dump(OPENAI_MCP),
         OPENAI / "assets" / "logo.png": ROOT / "public" / "apple-touch-icon.png",
     }

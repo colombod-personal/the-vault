@@ -59,7 +59,7 @@ def test_the_plugin_manifests_carry_the_short_credit_line():
     line = sources.short_credit_line()
     for scheme in ("Scryfall", "Wizards of the Coast", "Commander Spellbook", "Archidekt", "Dragon Shield", "Moxfield", "Tagger"):
         assert scheme in line, scheme
-    openai = json.loads((ROOT / "plugins" / "the-vault-openai" / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    openai = json.loads((ROOT / "plugins" / "the-vault-openai" / "plugin.json").read_text(encoding="utf-8"))["extensions"]["com.openai"]
     assert sources.CREDITS_URL in openai["interface"]["longDescription"] and "Scryfall" in openai["interface"]["longDescription"]
     claude = json.loads((ROOT / "plugins" / "the-vault" / "plugin.json").read_text(encoding="utf-8"))
     assert "Scryfall" in claude["description"] and "credits" in claude["description"].lower()

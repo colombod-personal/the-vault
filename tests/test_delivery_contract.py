@@ -32,8 +32,9 @@ def test_the_claude_plugin_is_one_install_with_its_own_server_and_no_credential_
 
 
 def test_the_chatgpt_and_codex_plugin_is_one_install_with_its_own_server():
-    plugin = load(CODEX_PLUGIN_DIR / ".codex-plugin" / "plugin.json")
-    assert plugin["name"] == "the-vault" and plugin["skills"] == "./skills/" and plugin["mcpServers"] == "./mcp.json"
+    plugin = load(CODEX_PLUGIN_DIR / "plugin.json")  # OpenAI's portable layout
+    assert plugin["name"] == "the-vault" and plugin["$schema"].endswith("/plugin.schema.json")
+    assert "interface" in plugin["extensions"]["com.openai"] and not (CODEX_PLUGIN_DIR / ".codex-plugin").exists()
     server = next(iter(load(CODEX_PLUGIN_DIR / "mcp.json")["mcpServers"].values()))
     assert server["url"] == SERVER_URL and "headers" not in server
     skills = sorted(p.name for p in (CODEX_PLUGIN_DIR / "skills").iterdir() if p.is_dir())
@@ -59,7 +60,7 @@ def test_both_git_marketplaces_exist_and_point_at_real_plugins():
     for entry in codex["plugins"]:
         assert entry["source"]["source"] == "local" and entry["policy"]["installation"] == "AVAILABLE"
         target = ROOT / entry["source"]["path"]
-        assert (target / ".codex-plugin" / "plugin.json").is_file(), f"Codex marketplace entry {entry['name']} is broken"
+        assert (target / "plugin.json").is_file() and (target / "mcp.json").is_file(), f"Codex marketplace entry {entry['name']} is broken"
 
 
 def test_the_codex_marketplace_is_not_ignored_by_git():
@@ -71,7 +72,7 @@ def test_the_codex_marketplace_is_not_ignored_by_git():
 def test_name_and_version_agree_in_every_manifest():
     claude = load(CLAUDE_PLUGIN_DIR / ".claude-plugin" / "plugin.json")
     portable = load(CLAUDE_PLUGIN_DIR / "plugin.json")
-    codex = load(CODEX_PLUGIN_DIR / ".codex-plugin" / "plugin.json")
+    codex = load(CODEX_PLUGIN_DIR / "plugin.json")
     market = load(ROOT / ".claude-plugin" / "marketplace.json")["plugins"][0]
     names = {claude["name"], portable["name"], codex["name"], market["name"]}
     versions = {claude["version"], portable["version"], codex["version"], market["version"]}
