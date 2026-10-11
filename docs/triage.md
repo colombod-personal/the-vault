@@ -1,7 +1,8 @@
 # Triage: labels, states and how work is picked up
 
-One page for people and agents (issue #131). Every open issue carries one **status**, at least one **area**, one **type**
-and a **priority**.
+One page for people and agents (issue #131). **Since 2026-10-10 GitHub issues are only the public place for users' bug
+reports and feature requests. All work is tracked in beads** (`AGENTS.md` section 8): tasks, order, claims, progress and
+evidence live there, and product plans never go into public issues. This page is about the labels a user's report carries.
 
 ## Labels
 
@@ -10,8 +11,8 @@ and a **priority**.
 | Area (one or more) | `area:frontend`, `area:backend`, `area:database`, `area:data`, `area:ai-integration`, `area:infra` | What part of the product it touches |
 | Type (one) | `bug`, `type:feature`, `type:design`, `type:research`, `type:chore` | The kind of work |
 | Status (one) | `status:needs-refinement`, `status:ready`, `status:blocked` | Whether it can be picked up (below) |
-| Working | `in-progress`, `waiting-owner` | `in-progress`: a session or person is on it right now (a branch or agent exists; removed when the PR merges or work stops). `waiting-owner`: a decision, an action or a real-app check only the owner can give is the one thing left (the Progress block says which). `needs-verification` is retired: the Progress block says what is merged and what is not yet verified |
-| Planning | milestone | Every open issue has one (M1 to M6 for the AI-integration roadmap, M7 for the hardening and verification work after the audit of 2026-10-07). No milestone, not planned |
+| Working (retired) | `in-progress`, `waiting-owner` | Retired for internal work on 2026-10-10: claims, waiting and progress are kept in the bead, never as labels. A user's report does not carry them |
+| Planning (retired) | milestone | Retired on 2026-10-10: order and phases are the roadmap epics in beads |
 | Priority (one) | `P1` do first, `P2` next, `P3` later | Order of work |
 | Topic (optional) | `mcp`, `skills`, `harness`, `auth`, `security`, `apps-ui`, `onboarding`, `accessibility`, `epic` | Finer tags; `epic` marks a container |
 
@@ -34,29 +35,24 @@ New issues start in the right place: the forms under `.github/ISSUE_TEMPLATE` (b
 or `type:feature` and `status:needs-refinement`, ask for acceptance criteria in the person's own words, and the issue
 chooser points people who only want to connect an assistant to https://mtgvault.cards/connect.html.
 
-## How an issue moves
+## How a user's report moves
 
-`status:needs-refinement` → `status:ready` → `in-progress` → closed. An issue waiting on another is `status:blocked`
-and also lists the blocker (GitHub "blocked by").
+`status:needs-refinement` → `status:ready` → closed.
 
-- **needs-refinement:** the design or the question is open. Agents do **not** implement it. They may help refine it:
-  research, a design draft in a PR for the owner's review, questions in a comment.
-- **ready:** refined, with acceptance criteria. Anyone may pick it up.
-- **blocked:** do not start; work the blocker.
-- **in-progress:** claimed. Do not start it elsewhere.
+1. **A person files a report** with one of the forms (bug report or feature request).
+2. **It gets a bead** for the work, with `--external-ref gh-<n>`: `bd create "<title>" --external-ref gh-<n>`. The
+   bead holds the criteria, the plan and the evidence; the issue never does.
+3. **The issue gets short public replies only** (that it was seen, questions, and when it ships), with no internal plans.
+4. **It is closed when the fix or feature ships**, with a short public note of what changed. The bead closes with its own
+   evidence (`AGENTS.md` sections 2 and 8).
+
+Other people (and their agents) can add a reaction or a comment to a report; the bead is where they are read and ranked.
 
 ## Rules for agents
 
-The binding text is **AGENTS.md section 9** (an agent reads that file, not this page); this list is kept in step with it.
-
-1. **Look before you start.** List issues and PRs updated since your last look and check for overlap with your area.
-2. **Claim before working.** Add `in-progress`, assign yourself, and comment what you are doing. Remove the label when you
-   finish or hand off.
-3. **Pick only `status:ready`** (highest priority first). Never implement `status:needs-refinement`; skip `status:blocked`.
-4. **Close with evidence.** A comment saying what merged (PR numbers), how it was checked, and what is left.
-5. **File what you find.** A defect found while working gets its own issue with area, type, status and priority, linked to
-   the work that found it.
-6. **Epics hold sub-issues** (GitHub sub-issues, with "blocked by" for order). The epic stays open until its last item closes.
+The binding text is **AGENTS.md sections 8 and 9** (an agent reads that file, not this page). In short: start with
+`bd prime` and `bd ready`, claim with `bd update <id> --claim`, record every step in the bead, close with evidence, and
+never create or label a GitHub issue for internal work.
 
 ## What "done" means for a feature
 
