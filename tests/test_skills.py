@@ -12,11 +12,11 @@ from vault.api import mcp
 SKILLS = Path(__file__).parent.parent / "skills"
 FOLDERS = sorted(p for p in SKILLS.iterdir() if p.is_dir())
 TOOLS = set(mcp.BY_NAME)
-# Words in backticks that are fields of tool answers or arguments, not tools.
+# Words in backticks that are fields of tool answers or arguments, not tools (`unit_value` is a value of search_cards' sort).
 FIELDS = {"oracle_id", "source_text", "discard_may_be_the_plan", "deck_id", "budget_usd", "added_cost_usd", "known_card", "next_cursor", "share_id", "total_usd",
           "price_date", "store_format", "no_qualifying_printing", "not_checked", "include_sideboard", "choose_printing", "printing_unknown", "did_you_mean", "format_from", "colour_warning", "bracket_floor",
           "use_app_value", "replace_everything", "include_combos", "include_possible_loops", "possible_loops", "one_short", "content_hash", "bucket_id", "keep_tags", "keep_history", "no_undo",
-          "source_url", "source_author", "borrowed_from", "deck_text", "include_text", "invite_token", "covered_copies"}
+          "source_url", "source_author", "borrowed_from", "deck_text", "include_text", "invite_token", "covered_copies", "unit_value"}
 
 
 def parse(folder: Path):
