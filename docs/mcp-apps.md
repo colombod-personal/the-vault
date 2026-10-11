@@ -38,7 +38,15 @@ show the tool's normal text answer, which has the same information.
   connector first: hosts keep the tool list from when they connected) and read the log line above.
 - `resources/list` and `resources/read` serve the pages (`text/html;profile=mcp-app`) with `_meta.ui.csp`:
   no network at all, except `resourceDomains: ["https://cards.scryfall.io"]` for the card image. Nothing else
-  is loaded: no scripts, fonts or stylesheets from elsewhere.
+  is loaded: no scripts, fonts or stylesheets from elsewhere. The same domains are also under ChatGPT's own key,
+  `_meta["openai/widgetCSP"]` (`resource_domains`, `connect_domains`), and the policy is on the listing as well as on the page.
+  `tests/test_mcp_apps.py` fails if a page names a host its policy does not declare (or the policy declares one the page never
+  names), and `tests/test_mcp_apps_run.py` reads back every picture a view draws on real tool answers.
+- **A view's address carries a digest of its page and its policy**: `ui://vault/card-1a2b3c4d`. OpenAI: "Treat the resource URI as
+  a cache key. When you make a breaking change to the HTML, JavaScript, or CSS, publish a new URI and update every tool that
+  references it" ([Apps SDK, Add UI](https://developers.openai.com/apps-sdk/build/chatgpt-ui)). #446 changed the policy under
+  an unchanged address. The address from before (`ui://vault/card`) and any older digest are still served (with the current
+  page), so a host that kept a tool list from an earlier release does not break.
 - Each page does the handshake (`ui/initialize`, then `ui/notifications/initialized`), receives
   `ui/notifications/tool-input` and `ui/notifications/tool-result`, reports its size
   (`ui/notifications/size-changed`), applies the host's theme, calls tools with `tools/call` and opens links
@@ -56,6 +64,31 @@ show the tool's normal text answer, which has the same information.
 - **Card images** are Scryfall's own link, shown whole with the artist and "Image: Scryfall"; never cropped.
 - **Nothing is invented in the UI.** Numbers come from tool output; prices carry their date; roles are
   labelled as a community's opinion; popularity is not presented as power.
+
+## Pictures in the ChatGPT desktop app (2026-10-11, bead vault-eb1)
+
+What the owner saw: grey boxes with a picture icon beside each card in ChatGPT's own answer ("Sliver Swarm: optimized Commander
+tuning", "Key interactions verified"). Read from the installed app (`app.asar`, build 26.1007) and its logs, on the owner's PC:
+
+- Those rows are the **assistant's own answer layout**, not a Vault view. The app draws a remote picture in an answer only when
+  the signed-in client gets `safe: true` from ChatGPT's `POST /ecosystem/url_safe` for that link (links on openai.com, chatgpt.com
+  and chat.com skip the check), and never when external egress is restricted (the app's code ties that to Lockdown Mode);
+  otherwise it shows its grey "Image unavailable" box. A view's policy has no say in that, so no change to `resourceDomains` can
+  fix it, and the Vault cannot make ChatGPT accept `cards.scryfall.io` links in an answer's text. Which of the two applied to the
+  owner's chat could not be read from the PC: the `url_safe` answer is not logged.
+- **The views do load Scryfall pictures in this app.** The app's reader of a view's policy (`function W` in the bundle) takes
+  `_meta.ui.csp.resourceDomains`, then `_meta["openai/widgetCSP"].resource_domains`: the Vault declares both. The app's MCP-app
+  sandbox cache on the same PC holds three Scryfall card JPEGs (Lavabelly Sliver, Sliver Queen, Harmonic Sliver: HTTP 200,
+  `image/jpeg`, byte counts equal to the cached files, JPEG headers) written at 05:26 BST on 2026-10-11 by a Vault view that the
+  app's log shows running (`server=the-vault`). The app logs every console warning and error a view's sandbox raises (first 50 per
+  view); across 2026-10-06 to 2026-10-11 that log holds 139 warnings (two iframe-sandbox notices) and no error: no view was
+  blocked by its policy in any of those runs, including the ten views the chat of 03:41 BST opened (`server=codex_apps`, the app's own connector for the Vault).
+- Scryfall's image server answers HTTP 403 `restricted` to any User-Agent containing `ChatGPT`, `GPTBot` or `OAI-SearchBot`
+  (checked with curl, 2026-10-11) and 200 to browser and Electron User-Agents. If ChatGPT ever fetches a card picture on a
+  person's behalf from its own servers, Scryfall refuses it. This was not seen happening; it is a second reason not to count
+  on pictures written into an answer.
+- What the Vault does about it: the server instructions tell the assistant to show pictures only through the views and
+  otherwise to name the card and link its Scryfall page, never to write picture links into the answer.
 
 ## Checked, and not checked
 

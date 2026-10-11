@@ -16,7 +16,7 @@ function Dashboard({ data, gotoBrowse, gotoSets, gotoSet, gotoValuation, openCar
   // Everything below is the server's: the most valuable and newest printings, the top sets, the
   // acquisition timeline. They are asked again when the collection's version changes.
   const at = [api.base, m.version];
-  const topCards = (window.useVaultQuery(() => api.cards({ sort: '-value', limit: 12 }), at).data || { items: [] }).items;
+  const topCards = (window.useVaultQuery(() => api.cards({ sort: '-unit_value', limit: 12 }), at).data || { items: [] }).items;
   const recent = (window.useVaultQuery(() => api.cards({ sort: '-acquired', limit: 6 }), at).data || { items: [] }).items;
   const topSets = (window.useVaultQuery(() => api.sets(), at).data || { items: [] }).items.slice(0, 10);
   const maxSetVal = topSets[0]?.value || 1;
@@ -134,9 +134,9 @@ function Dashboard({ data, gotoBrowse, gotoSets, gotoSet, gotoValuation, openCar
         <div className="section-head">
           <div>
             <p className="eyebrow">The crown jewels</p>
-            <h2 className="h2" style={{ marginTop: 4 }}>Top printings by total value</h2>
+            <h2 className="h2" style={{ marginTop: 4 }}>Most valuable single cards</h2>
           </div>
-          <button className="btn ghost" onClick={() => gotoBrowse({ sort: 'value' })}>
+          <button className="btn ghost" onClick={() => gotoBrowse({ sort: 'unitValue' })}>
             Browse all →
           </button>
         </div>
@@ -277,7 +277,7 @@ function CardTile({ c, onClick }) {
         <div className="name">{c.n}</div>
         <div className="sub">
           <span>{c.s} · #{c.cn}</span>
-          <span className="val">${totalVal}</span>
+          <span className="val">${totalVal}{c.q > 1 && c.mk != null ? <span className="muted" style={{ fontSize: 10, marginLeft: 4 }}>(${Number(c.mk).toFixed(2)} each)</span> : null}</span>
         </div>
       </div>
     </div>

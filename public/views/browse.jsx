@@ -4,7 +4,9 @@ const { useEffect: useEffectB, useState: useStateB } = React;
 
 const BROWSE_PAGE = 60;
 // The view's sort choices, as the server's `sort` parameter.
-const BROWSE_SORTS = { value: '-value', qty: '-quantity', name: 'name', recent: '-acquired', oldest: 'acquired', mana: 'mana_value', manaDesc: '-mana_value' };
+const BROWSE_SORTS = { unitValue: '-unit_value', unitValueAsc: 'unit_value', value: '-value', valueAsc: 'value', qty: '-quantity', name: 'name', recent: '-acquired', oldest: 'acquired', mana: 'mana_value', manaDesc: '-mana_value' };
+// Single card value is the default: the price of one copy, so 3 copies at $10 do not outrank 1 copy at $25 (total value, price times copies, is the other choice).
+const BROWSE_DEFAULT_SORT = 'unitValue';
 // The same types and mana value buckets as the Lab's breakdowns and the assistant's tools (the server defines them, vault/analytics.py):
 // one main type per card (an Artifact Creature is a Creature), and mana value 0 to 7 or 8+ (a fraction counts down).
 const BROWSE_TYPES = ['Creature', 'Land', 'Artifact', 'Enchantment', 'Instant', 'Sorcery', 'Planeswalker', 'Battle', 'Other'];
@@ -36,7 +38,7 @@ function Browse({ data, openCard, initialQuery, bucket, onBucket, tag, onTag, on
   const [printingF, setPrintingF] = useStateB('');
   const [typeF, setTypeF] = useStateB('');
   const [manaF, setManaF] = useStateB('');  // a mana value ('' = any); the server matches it exactly
-  const [sort, setSort] = useStateB(initialQuery?.sort || 'value');
+  const [sort, setSort] = useStateB(initialQuery?.sort || BROWSE_DEFAULT_SORT);
   // What the card does (#435): the roles asked for (the card panel's "Show my cards that do this" arrives with one), and whether a card needs all of them
   const [roles, setRoles] = useStateB(() => (initialQuery && initialQuery.roles) || []);
   const [roleMatch, setRoleMatch] = useStateB('all');
@@ -50,7 +52,7 @@ function Browse({ data, openCard, initialQuery, bucket, onBucket, tag, onTag, on
     return () => clearTimeout(t);
   }, [q]);
 
-  const params = { q: query, set: setF, printing: printingF, type: typeF, mana_value: manaF, bucket: bucketId, tag: tagId, role: roles, role_match: roles.length > 1 ? roleMatch : null, sort: BROWSE_SORTS[sort] || '-value' };
+  const params = { q: query, set: setF, printing: printingF, type: typeF, mana_value: manaF, bucket: bucketId, tag: tagId, role: roles, role_match: roles.length > 1 ? roleMatch : null, sort: BROWSE_SORTS[sort] || BROWSE_SORTS[BROWSE_DEFAULT_SORT] };
   const first = window.useVaultQuery(() => api.cards({ ...params, limit: BROWSE_PAGE }),
     [api.base, data.meta.version, query, setF, printingF, typeF, manaF, bucketId, tagId, sort, roles.join(','), roleMatch]);
   useEffectB(() => { setPicked(new Set()); }, [bucketId, tagId, query, setF, printingF, typeF, manaF, sort, data.meta.version, roles.join(','), roleMatch]);
@@ -121,7 +123,10 @@ function Browse({ data, openCard, initialQuery, bucket, onBucket, tag, onTag, on
             {Object.keys(data.meta.printings).filter(k => k).map(p => <option key={p} value={p}>{p}</option>)}
           </select>
           <select className="select" aria-label="Sort by" value={sort} onChange={e => setSort(e.target.value)}>
-            <option value="value">Sort: total value ↓</option>
+            <option value="unitValue">Sort: single card value ↓</option>
+            <option value="unitValueAsc">Sort: single card value ↑</option>
+            <option value="value">Sort: total value ↓ (price × copies)</option>
+            <option value="valueAsc">Sort: total value ↑</option>
             <option value="qty">Sort: quantity ↓</option>
             <option value="name">Sort: name A→Z</option>
             <option value="recent">Sort: newest first</option>
@@ -178,8 +183,8 @@ function Browse({ data, openCard, initialQuery, bucket, onBucket, tag, onTag, on
                 <th>#</th>
                 <th>Printing</th>
                 <th className="num">Qty</th>
-                <th className="num">Market</th>
-                <th className="num">Total</th>
+                <th className="num" title="The price of one copy">Market</th>
+                <th className="num" title="The price of one copy times the copies you own">Total</th>
                 <th className="num">Spent</th>
                 <th className="num">P&amp;L</th>
               </tr>

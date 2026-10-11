@@ -496,7 +496,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
             def body():
                 links = {
                     "self": link(f"{ctx.base}{qs}"), "cards": link(f"{ctx.base}/cards{qs}"),
-                    "most_valuable": link(f"{ctx.base}/cards?sort=-value" + qs.replace("?", "&")),
+                    "most_valuable": link(f"{ctx.base}/cards?sort=-unit_value" + qs.replace("?", "&")),
                     "sets": link(f"{ctx.base}/sets{qs}"),
                     "timeline": link(f"{ctx.base}/timeline{qs}"), "history": link(f"{ctx.base}/history{qs}"),
                     "stats": link(f"{ctx.base}/stats{qs}"),
@@ -518,7 +518,11 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
         @r.get("/cards", response_model=S.CardPage, summary="Printings you own, one page at a time")
         def cards(request: Request, q: str | None = None, set: str | None = None, name: str | None = None,
-                  finish: str | None = None, condition: str | None = None, sort: str = "name",
+                  finish: str | None = None, condition: str | None = None,
+                  sort: str = Query("name", description="One of name, -name, -value, value, -quantity, set, -acquired, acquired, "
+                                    "mana_value, -mana_value, -unit_value, unit_value. `-value` and `value` order by the printing's "
+                                    "total (price times copies); `-unit_value` and `unit_value` order by the price of one copy. "
+                                    "Printings with no price are last in both directions"),
                   cursor: str | None = None, limit: int | None = None, ctx: Ctx = Depends(ctx_dep),
                   printing: str | None = Query(None, description="Printing label: Normal, Foil, Etched, … (any case)"),
                   card_type: str | None = Query(None, alias="type", max_length=40,
