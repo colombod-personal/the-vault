@@ -157,3 +157,26 @@ def test_removing_a_step_of_the_flow_fails_the_check(name):
     assert any("get_deck" in p for p in deck_flow_problems(meta, without_show))
     undeclared = {**meta, "metadata": {**meta["metadata"], "vault-tools": meta["metadata"]["vault-tools"].replace("get_deck", "")}}
     assert any("does not declare" in p for p in deck_flow_problems(undeclared, body))
+
+
+# The tools that read a person's own decks and collection. A skill that names one of them must tell the assistant to use the Vault's
+# tools for that data and never a browser or computer (vault-wxy.5: ChatGPT drove the browser on the signed-in page to list decks).
+PERSONAL_DATA_TOOLS = {"list_decks", "get_deck", "get_collection_summary", "search_cards"}
+USE_THE_VAULTS_TOOLS = "read them with the Vault's tools, never with a browser or computer."
+
+
+@pytest.mark.parametrize("folder", FOLDERS, ids=lambda p: p.name)
+def test_a_skill_that_reads_decks_or_the_collection_says_to_use_the_vaults_tools_not_a_browser(folder):
+    meta, body = parse(folder)
+    names = set(meta["metadata"]["vault-tools"].split())
+    if names & PERSONAL_DATA_TOOLS:
+        assert USE_THE_VAULTS_TOOLS in body, f"{folder.name} reads the person's data but does not say to use the Vault's tools, not a browser"
+        assert "look it up by that name before saying it is missing" in body, f"{folder.name} does not say what to do when a tool is not loaded yet"
+    else:
+        assert USE_THE_VAULTS_TOOLS not in body  # the line is for skills that read the person's data
+
+
+def test_removing_the_line_fails_the_check():
+    folder = SKILLS / "deck-upgrader"
+    _, body = parse(folder)
+    assert USE_THE_VAULTS_TOOLS in body and USE_THE_VAULTS_TOOLS not in body.replace(USE_THE_VAULTS_TOOLS, "")
