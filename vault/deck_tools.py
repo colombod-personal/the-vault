@@ -30,6 +30,11 @@ FORMATS = ("commander", "standard", "pioneer", "modern", "legacy", "vintage", "p
 SINGLETON = {"commander", "duel", "predh", "paupercommander", "brawl", "standardbrawl", "oathbreaker", "gladiator"}
 COMMANDER_STYLE = {"commander", "duel", "predh", "paupercommander", "brawl", "standardbrawl", "oathbreaker"}  # color identity applies
 SIZE_100 = {"commander", "duel", "predh", "paupercommander", "brawl"}  # brawl: 100 cards, Wizards' Brawl page (read 2026-10-10)
+# Exactly 60 cards including the commander (Standard Brawl: WPN's Brawl quick guide, 2018-04-19, "60-card decks", one commander) or
+# the Oathbreaker and the Signature Spell (Oathbreaker: oathbreakermtg.org rules 906.6a, read 2026-10-11).
+SIZE_60_EXACT = {"standardbrawl", "oathbreaker"}
+# Gladiator: at least 100 cards, singleton, no sideboard, no commander (gladiatormtga.com/about, read 2026-10-11).
+GLADIATOR_MIN = 100
 LEGAL = ("legal", "restricted")
 COLORS = ("W", "U", "B", "R", "G")
 
@@ -348,11 +353,18 @@ def legality(resolved: Resolved, fmt: str) -> dict:
     total = sum(e.line.quantity for e in in_deck)
     if fmt in SIZE_100 and total != 100:
         issues.append({"kind": "deck_size", "card": None, "detail": f"{total} cards; {fmt} decks have exactly 100 (commander included)"})
-    elif fmt not in SIZE_100 and fmt not in COMMANDER_STYLE and total < 60 and fmt not in ("gladiator",):
+    elif fmt in SIZE_60_EXACT and total != 60:
+        who = "Oathbreaker and Signature Spell included" if fmt == "oathbreaker" else "commander included"
+        issues.append({"kind": "deck_size", "card": None, "detail": f"{total} cards; {fmt} decks have exactly 60 ({who})"})
+    elif fmt == "gladiator" and total < GLADIATOR_MIN:
+        issues.append({"kind": "deck_size", "card": None, "detail": f"{total} cards; gladiator decks have at least {GLADIATOR_MIN}"})
+    elif fmt not in SIZE_100 and fmt not in SIZE_60_EXACT and fmt not in COMMANDER_STYLE and fmt != "gladiator" and total < 60:
         issues.append({"kind": "deck_size", "card": None, "detail": f"{total} cards; {fmt} main decks have at least 60"})
     side = sum(e.line.quantity for e in side_entries)
-    if fmt not in COMMANDER_STYLE and side > 15:
+    if fmt not in COMMANDER_STYLE and fmt != "gladiator" and side > 15:
         issues.append({"kind": "sideboard_size", "card": None, "detail": f"{side} sideboard cards (a companion counts as one); at most 15"})
+    if fmt == "gladiator" and side > 0:
+        issues.append({"kind": "sideboard_size", "card": None, "detail": f"{side} sideboard cards; gladiator has no sideboards (and so no companion)"})
     commanders = resolved.section("commander")
     ident = None
     if fmt in COMMANDER_STYLE:
@@ -360,7 +372,11 @@ def legality(resolved: Resolved, fmt: str) -> dict:
         if not commanders:
             issues.append({"kind": "no_commander", "card": None, "detail": "no Commander section found, so color identity was not checked"})
         else:
-            ident = set(identity(commanders))
+            lead = commanders
+            if fmt == "oathbreaker":
+                walkers = [e for e in commanders if e.card is not None and "Planeswalker" in (e.card.type_line or "")]
+                lead = walkers or commanders  # no Planeswalker is reported by commander_issues; fall back to all of the section
+            ident = set(identity(lead))
             for e in played:
                 if e.card and e.line.section != "commander" and not set(e.card.color_identity or []) <= ident:
                     issues.append({"kind": "color_identity", "card": e.card.name,
@@ -368,7 +384,8 @@ def legality(resolved: Resolved, fmt: str) -> dict:
     return {"format": fmt, "legal": not issues, "issues": issues, "cards_checked": total,
             "commander_color_identity": sorted(ident, key=COLORS.index) if ident is not None else None,
             "not_checked": ["which partner ability fits which (only that each of two commanders has one is checked)", "the companion's own deck-building condition",
-                            "Standard Brawl, Oathbreaker, Gladiator and Pauper Commander: their deck sizes and commander rules (only copies and colour identity are checked)",
+                            "a Pauper Commander commander's rarity (only that it is a creature, Vehicle or Spacecraft; the legality data carries the rest)",
+                            "Oathbreaker with partners: which Signature Spell goes with which Oathbreaker",
                             "sideboard legality of individual cards", "format-specific rules not listed here"],
             "checked": _checked_rules(fmt)}
 
@@ -390,7 +407,7 @@ def _can_be_commander(card, fmt: str) -> bool:
         return True
     if "Spacecraft" in types:
         return True  # only a Spacecraft with a power/toughness box may lead; that box is not in the text, so never called illegal on a guess
-    return fmt == "brawl" and "Planeswalker" in types
+    return fmt in ("brawl", "standardbrawl") and "Planeswalker" in types
 
 
 def _partner_kind(card) -> set[str]:
@@ -424,12 +441,35 @@ def commander_issues(commanders: list, fmt: str) -> list[dict]:
     count = sum(e.line.quantity for e in commanders)
     if count > 2:
         out.append({"kind": "commander_count", "card": None, "detail": f"{count} commanders; a deck has one, or two with partner abilities (rule 702.124g)"})
-    if fmt in ("commander", "duel", "predh", "brawl"):
+    if fmt in ("commander", "duel", "predh", "brawl", "standardbrawl"):
         for card in cards:
             if not _can_be_commander(card, fmt):
                 out.append({"kind": "commander_not_eligible", "card": card.name,
-                            "detail": "is not a legendary creature" + (" or Planeswalker" if fmt == "brawl" else ", Vehicle or Spacecraft")
+                            "detail": "is not a legendary creature" + (" or Planeswalker" if fmt in ("brawl", "standardbrawl") else ", Vehicle or Spacecraft")
                                       + " and does not say it can be your commander (rule 903.3)"})
+    if fmt == "paupercommander":
+        # PDH Home Base rules (pdhhomebase.com/rules, read 2026-10-11): the commander is an uncommon creature, Vehicle or Spacecraft
+        # and need not be legendary. Its rarity is not in the oracle text, so only the type is checked here.
+        for card in cards:
+            types = card.type_line or ""
+            if not any(word in types for word in ("Creature", "Vehicle", "Spacecraft")) and "can be your commander" not in all_text(card):
+                out.append({"kind": "commander_not_eligible", "card": card.name,
+                            "detail": "is not a creature, Vehicle or Spacecraft (Pauper Commander's commander is an uncommon creature)"})
+    if fmt == "oathbreaker":
+        # oathbreakermtg.org rules 906.3 and 906.4 (read 2026-10-11): one Planeswalker as the Oathbreaker and an instant or sorcery as
+        # its Signature Spell, both in the command section; with the Partner mechanic there are two of each.
+        walkers = [c for c in cards if "Planeswalker" in (c.type_line or "")]
+        spells = [c for c in cards if any(t in (c.type_line or "") for t in ("Instant", "Sorcery"))]
+        if cards and not walkers:
+            out.append({"kind": "oathbreaker_missing", "card": None, "detail": "no Planeswalker among the Oathbreaker cards (rule 906.3)"})
+        if cards and not spells:
+            out.append({"kind": "signature_spell_missing", "card": None, "detail": "no instant or sorcery as the Signature Spell (rule 906.4)"})
+        if walkers and spells:
+            walker_identity = set(identity([e for e in commanders if e.card in walkers]))
+            for card in spells:
+                if not set(card.color_identity or []) <= walker_identity:
+                    out.append({"kind": "color_identity", "card": card.name,
+                                "detail": "the Signature Spell's colour identity is outside the Oathbreaker's (rule 906.4)"})
     if fmt in ("commander", "duel", "predh") and len(cards) == 2 and count == 2:
         a, b = cards
         ka, kb = _partner_kind(a), _partner_kind(b)
@@ -448,6 +488,13 @@ def _checked_rules(fmt: str) -> list[str]:
              "'any number' or 'up to N' excepted"]
     if fmt in SIZE_100:
         rules.append("exactly 100 cards including the commander, the companion not counted (rule 903.5a)")
+    elif fmt == "standardbrawl":
+        rules.append("exactly 60 cards including the commander, a legendary creature or Planeswalker (WPN Brawl guide, 2018)")
+    elif fmt == "oathbreaker":
+        rules.append("exactly 60 cards including the Oathbreaker (a Planeswalker) and the Signature Spell (an instant or sorcery in its "
+                     "colour identity) (Oathbreaker rules 906.3, 906.4, 906.6a)")
+    elif fmt == "gladiator":
+        rules.append("at least 100 cards, no sideboard (Gladiator rules, gladiatormtga.com)")
     elif fmt not in COMMANDER_STYLE:
         rules.append("at least 60 cards (rule 100.2a); a sideboard of at most 15 and the copy limit counted over deck and sideboard (rule 100.4a)")
     if fmt in COMMANDER_STYLE:
