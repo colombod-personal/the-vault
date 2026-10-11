@@ -1,4 +1,4 @@
-"""vault-wxy.6: the one-time upload link works for a read-only connection, the default grant.
+"""vault-wxy.6: the upload link works for a read-only connection, the default grant.
 
 A person attached a collection file of about 7,000 cards in ChatGPT; the assistant could not offer the upload link, because
 ``start_collection_upload`` was a write tool: a read-only connection (the default consent) neither saw it in ``tools/list``
@@ -195,7 +195,7 @@ def test_a_read_only_connection_names_only_the_persons_own_buckets(app, read):
 def test_a_link_started_by_a_read_only_connection_takes_no_more_than_twenty_megabytes(app, read):
     started = ok(read, "start_collection_upload")
     big = person_uploads(app, ticket_of(started), b"x" * (importer.MAX_UPLOAD_BYTES + 1))
-    assert big.status_code == 413 and "20 MB" in big.text
+    assert big.status_code == 413 and "20 MB" in big.text and "about 4 MB" in big.text
     with app.state.db.sessions() as db:
         assert db.get(StagedUpload, started["id"]).content is None  # nothing was kept
     assert ok(read, "get_staged_upload", upload_id=started["id"])["status"] == "waiting"
@@ -265,7 +265,15 @@ def test_the_tool_descriptions_state_the_limits_the_server_enforces():
     assert "read-only" in text and "confirm_staged_upload" in text and "write permission" in text
     assert "not single-use" in text and "none can be listed or cancelled" in text  # said where the link is described
     assert "changes nothing in the person's collection or decks" in text
-# the server's own limit is 20 MB; on the hosted site the platform's request cap (docs/developing.md) is what a person meets    assert "mtgvault.cards" in text and "about 4 MB" in text and "before the Vault sees it" in textdef test_llms_txt_does_not_call_the_upload_link_one_time():    from pathlib import Path    text = (Path(__file__).resolve().parent.parent / "public" / "llms.txt").read_text(encoding="utf-8")    assert "one-time link" not in text and "link, good for one hour" in text  # it is reusable until it expires
+    # the server's own limit is 20 MB; on the hosted site the platform's request cap (docs/developing.md) is what a person meets
+    assert "mtgvault.cards" in text and "about 4 MB" in text and "before the Vault sees it" in text
+    assert "a file may be 20 MB" not in text  # the old sentence: true for the server, false for the hosted site
+
+
+def test_llms_txt_does_not_call_the_upload_link_one_time():
+    from pathlib import Path
+    text = (Path(__file__).resolve().parent.parent / "public" / "llms.txt").read_text(encoding="utf-8")
+    assert "one-time link" not in text and "link, good for one hour" in text  # it is reusable until it expires
 
 
 def test_the_consent_screen_tells_a_person_that_read_includes_the_upload_link(app, universe):

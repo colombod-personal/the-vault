@@ -1,5 +1,5 @@
-"""Collection files too big for a chat: the assistant asks for a one-time upload link, the person picks the file on a
-plain page, the file waits (staged, not imported), the assistant shows the preview, and the person confirms.
+"""Collection files too big for a chat: the assistant asks for an upload link (good for one hour, not single-use), the person
+picks the file on a plain page, the file waits (staged, not imported), the assistant shows the preview, and the person confirms.
 
 - ``POST /api/v1/uploads`` (any scope, read-only included: it imports nothing, vault.app.READ_ONLY_POSTS): a ticket and the
   link to give the person. Only the ticket's hash is stored. With
@@ -117,7 +117,7 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         return {"id": bucket.id, "name": bucket.name} if bucket is not None else None
 
     @router.post(f"{V1}/uploads", tags=["imports"], status_code=201,
-                 summary="A one-time link for the person to upload a collection file (staged, not imported); with `bucket_id` "
+                 summary="A link, good for one hour, for the person to upload a collection file (staged, not imported); with `bucket_id` "
                          "the file goes into that bucket only")
     def start_upload(request: Request, bucket_id: BucketId = None, user: User = Depends(current_user),
                      db: Session = Depends(get_db)) -> dict:
@@ -266,7 +266,8 @@ def build_router(get_db, current_user, settings) -> APIRouter:
                 chosen = found
         content = await file.read(MAX_UPLOAD_BYTES + 1)
         if len(content) > MAX_UPLOAD_BYTES:
-            return page("File too large", "<h1>The file is too large</h1><p>20 MB at most.</p>", status=413)
+            return page("File too large", "<h1>The file is too large</h1><p>20 MB at most, and about 4 MB on mtgvault.cards, "
+                        "where the hosting platform refuses a bigger request first.</p>", status=413)
         staged.content, staged.filename, staged.uploaded_at = content, (file.filename or "upload.csv")[:255], _now()
         staged.bucket_id = chosen
         db.commit()
