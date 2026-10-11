@@ -189,6 +189,27 @@ def test_the_upgrades_view_pairs_each_add_with_a_cut_and_shows_the_price_differe
     assert f"{validated['result']['deck_cost_before_usd']:.2f} before" in checked["text"] and f"{validated['result']['deck_cost_after_usd']:.2f} after" in checked["text"]
 
 
+def test_the_upgrades_view_puts_a_warning_beside_a_valid_plan_and_marks_the_candidate_that_would_turn_against_the_deck(agent, bot, token, saved, tmp_path):
+    import copy
+
+    args = {"deck_id": saved, "format": "commander", "budget_usd": 5, "roles": ["ramp"]}
+    up = copy.deepcopy(answer(bot, token, "find_upgrades", **args))
+    cut = up["result"]["cut_candidates"][0]["name"]
+    add = up["result"]["candidates"]["ramp"][0]
+    title = f"{add['name']} will destroy your own artifacts"
+    add["lookouts"] = [{"kind": "forced_self_destruction", "severity": "high", "title": title, "role": "cause", "causes": [add["name"]],
+                        "hurts": ["Test Rock"], "rules": ["603.3d", "601.2c"], "what": "w", "advice": "a"}]
+    add["why"] += f"; WARNING: it would turn against this deck: {title}"
+    validated = copy.deepcopy(answer(bot, token, "validate_deck_changes", deck_id=saved, format="commander", adds=[add["name"]], cuts=[cut], budget_usd=5))
+    said = f"Adding {add['name']} would turn against this deck. It destroys Test Rock (rules 603.3d, 601.2c)."
+    validated["result"]["warnings"] = [said]
+    snaps = run("upgrades", tmp_path, args, up, tools={"validate_deck_changes": validated},
+                steps=[{"action": "check", "tag": "input", "type": "checkbox", "nth": 0}, {"action": "click", "tag": "button", "text": "Check this plan"}])
+    assert f"WARNING: it would turn against this deck: {title}" in snaps[0]["text"]  # on the candidate, before it is chosen
+    checked = snaps[2]
+    assert f"Warning: {said}" in checked["text"] and "Valid, with 1 warning." in checked["text"]  # valid is true, and the warning is still read
+
+
 def test_the_budget_slider_asks_the_validator_again_and_works_for_a_saved_deck(agent, bot, token, saved, tmp_path):
     args = {"deck_id": saved, "format": "commander", "budget_usd": 5, "roles": ["ramp"]}
     up = answer(bot, token, "find_upgrades", **args)

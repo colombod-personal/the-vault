@@ -29,7 +29,8 @@ Do not send the answer until every line is true. If one is not, go back and do i
    objection and how the plan answers it. A review with no named experts and no objection did not run the council.
 5. **Every lookout the tools returned is in the answer**, with its cards, what it does and its rule numbers.
 6. **Honesty lines are present:** the colour warning for three or more colours, and what the council could not check.
-7. **The plan was validated:** `validate_deck_changes` returned `valid` true for the exact cuts and adds shown.
+7. **The plan was validated:** `validate_deck_changes` returned `valid` true for the exact cuts and adds shown, and every
+   sentence in its `warnings` is on the page beside the card it names (a warning does not make a plan invalid).
 8. **Every card you propose to add was read against the deck.** Read its text with `get_card_oracle` and ask what it does to
    the cards already in the deck, not only to the opponents. If it can turn against the deck (a forced trigger that
    destroys your own artifacts or enchantments, a shroud that blocks your own targeting, a bonus that helps an

@@ -9,6 +9,10 @@ Like ``possible_loops``, this is the Vault's own reading of the text, with ancho
 pattern does not understand is left out rather than guessed. Every lookout names the cards, says what happens, cites the rules by
 number (quote them with get_rule: never from memory) and says what to do. Pure functions over ``CardText``; no database, no network.
 
+``plan`` reads the same patterns on the deck as it would be after a plan (cuts and adds), so a card the person is about to add
+is flagged at the point of the plan, naming the deck's cards it would hurt (bead vault-064.11). Every lookout also says which
+cards do it (``causes``) and which of the deck's own cards it hurts (``hurts``).
+
 Families (first slice, Slivers first: PRODUCT.local.md section 5, CASES K4 and TR2):
 
 - ``own_targets_blocked``: a card gives your creatures of a type shroud (702.18a), and the deck has Equipment (702.6a: equip
@@ -69,7 +73,7 @@ def own_targets_blocked(cards: list[CardText]) -> list[dict]:
         out.append({
             "kind": "own_targets_blocked", "severity": "high",
             "title": f"{grantor.name} stops your own cards from targeting your {kind}s",
-            "cards": [grantor.name] + hit,
+            "cards": [grantor.name] + hit, "causes": [grantor.name], "hurts": hit,
             "what": (f"{grantor.name} gives every {kind} shroud, yours included, so while it is on the battlefield your {kind}s can't "
                      f"be the target of your own spells or abilities: " + ", ".join(hit) + " can't be used on them."),
             "rules": rules,
@@ -96,7 +100,7 @@ def forced_self_destruction(cards: list[CardText]) -> list[dict]:
         out.append({
             "kind": "forced_self_destruction", "severity": "high",
             "title": f"{grantor.name} will destroy your own {' and '.join(what)}s",
-            "cards": [grantor.name] + victims + makers,
+            "cards": [grantor.name] + victims + makers, "causes": [grantor.name], "hurts": victims,
             "what": (f"{grantor.name} gives every {kind} 'When this enters, destroy target {m.group('what')}'. The trigger is not "
                      f"optional: when it goes on the stack a legal target must be chosen if one exists, so once opponents have none "
                      f"left, it must hit yours: " + ", ".join(victims) + "." + rate),
@@ -126,7 +130,7 @@ def shared_with_opponents(cards: list[CardText]) -> list[dict]:
         out.append({
             "kind": "shared_with_opponents", "severity": "medium" if not harmful else "high",
             "title": f"Your {kind} bonuses also work for opponents' {kind}s",
-            "cards": sorted(names),
+            "cards": sorted(names), "causes": sorted(names), "hurts": [],
             "what": what,
             "rules": ["702.28b"] if harmful else [],
             "advice": (f"Check which grants help you more than an opponent playing {kind}s; prefer cards worded 'you control'."
@@ -143,3 +147,60 @@ def read(cards: Iterable[CardText]) -> dict:
     found.sort(key=lambda x: (order[x["severity"]], x["kind"]))
     return {"lookouts": found, "source": SOURCE, "note": NOTE,
             "covers": ["own_targets_blocked", "forced_self_destruction", "shared_with_opponents"]}
+
+
+# -- at the point of the plan (bead vault-064.11) --------------------------------------------------------------------------------
+
+def _key(x: dict) -> tuple[str, str]:
+    return x["kind"], x["title"]
+
+
+def _about(x: dict, card: str) -> dict:
+    """One lookout as it concerns one card the plan brings in: whether the card does it (``cause``), is hurt by it (``hurt``) or
+    only makes it worse (``worsens``: a token maker of the type), the deck's other cards it would hurt, the rules and the advice."""
+    role = "cause" if card in x["causes"] else "hurt" if card in x["hurts"] else "worsens"
+    return {"kind": x["kind"], "severity": x["severity"], "title": x["title"], "role": role, "causes": x["causes"],
+            "hurts": [c for c in x["hurts"] if c != card], "rules": x["rules"], "what": x["what"], "advice": x["advice"]}
+
+
+def sentence(card: str, found: list[dict]) -> str:
+    """One plain sentence for a card the plan adds: what it does to this deck, the rules by number and what to do. Built from the
+    lookouts' own words (``about`` entries), so the wording of a lookout lives in one place."""
+    parts = []
+    for e in found:
+        lead = {"cause": f"Adding {card} would turn against this deck.",
+                "hurt": f"In the deck after this change, {card} would be hurt by {', '.join(e['causes'])}.",
+                "worsens": f"Adding {card} would make a problem this deck already has worse."}[e["role"]]
+        rules = f" (rules {', '.join(e['rules'])})" if e["rules"] else ""
+        parts.append(f"{lead} {e['what']}{rules} {e['advice']}")
+    return " ".join(parts)
+
+
+def plan(before: Iterable[CardText], after: Iterable[CardText], *, was: dict | None = None) -> dict:
+    """What a plan (cuts and adds) does to a deck's lookouts, read on the deck as it would be AFTER the plan, not on the deck as it
+    is plus the adds: a cut can take away the card a lookout hurts, or the card that does it.
+
+    - ``lookouts``: every lookout of the deck after the plan, worst first. ``new`` is true when the plan creates it or widens it
+      (a card it hurts joins); ``new_cards`` are the cards of it that the plan brings into the deck.
+    - ``cleared``: lookouts the deck has now and no longer has after the plan.
+    - ``by_card``: for each card the plan brings in, the new lookouts it is part of (see ``about``), and ``warnings`` one plain
+      sentence for each of those cards.
+
+    ``was`` is the ``read`` of ``before`` when the caller has it already (find_upgrades asks about many cards on one deck)."""
+    before, after = list(before), list(after)
+    names = {c.name for c in before}
+    was = was if was is not None else read(before)
+    now = read(after)
+    old = {_key(x): set(x["cards"]) for x in was["lookouts"]}
+    lookouts, by_card = [], {}
+    for x in now["lookouts"]:
+        new = _key(x) not in old or bool(set(x["cards"]) - old[_key(x)])
+        brought = sorted(c for c in x["cards"] if c not in names) if new else []
+        lookouts.append({**x, "new": new, "new_cards": brought})
+        for c in brought:
+            by_card.setdefault(c, []).append(_about(x, c))
+    kept = {_key(x) for x in now["lookouts"]}
+    cleared = [{"kind": x["kind"], "title": x["title"], "cards": x["cards"]} for x in was["lookouts"] if _key(x) not in kept]
+    return {"lookouts": lookouts, "cleared": cleared, "by_card": by_card,
+            "warnings": {c: sentence(c, found) for c, found in by_card.items()},
+            "source": SOURCE, "note": NOTE, "covers": now["covers"]}

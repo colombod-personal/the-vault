@@ -435,7 +435,9 @@ function render(root, env) {
     if (v && v.error) { planBox.appendChild(h("p", { class: "bad", text: v.error })); }
     else if (v) {
       var x = v.vr.result;
-      planBox.appendChild(h("p", { class: x.valid ? "ok" : "bad", text: (x.valid ? "Valid. " : "Not valid. ") + "The adds cost " + usd(x.added_cost_usd) + (x.budget_usd !== null ? " of " + usd(x.budget_usd) : "") + "; the deck has " + x.cards_after + " cards." }));
+      var warned = x.warnings || [];  // a card that turns against the deck (bead vault-064.11): shown above everything else, whatever `valid` says
+      warned.forEach(function (w) { planBox.appendChild(h("p", { class: "bad", text: "Warning: " + w })); });
+      planBox.appendChild(h("p", { class: x.valid && !warned.length ? "ok" : "bad", text: (x.valid ? (warned.length ? "Valid, with " + warned.length + (warned.length === 1 ? " warning" : " warnings") + ". " : "Valid. ") : "Not valid. ") + "The adds cost " + usd(x.added_cost_usd) + (x.budget_usd !== null ? " of " + usd(x.budget_usd) : "") + "; the deck has " + x.cards_after + " cards." }));
       planBox.appendChild(h("p", { text: "Net price change: " + signed(x.net_change_usd) + " (adds " + usd(x.added_cost_usd) + ", cuts " + usd(x.cut_value_usd) + "). The deck: " + usd(x.deck_cost_before_usd) + " before, " + usd(x.deck_cost_after_usd) + " after." }));
       if ((x.cut_unpriced || []).length) { planBox.appendChild(h("p", { class: "small muted", text: "No price for the cut " + x.cut_unpriced.join(", ") + ": counted as $0.00." })); }
       planBox.appendChild(h("p", { class: "small muted", text: "The budget counts the adds only: cuts are not refunded against it." }));
@@ -459,7 +461,7 @@ function render(root, env) {
         } else { plan = plan.filter(function (s) { return !(s.add && s.add.name === c.name); }); }
         changed();
       });
-      root.appendChild(h("label", { class: "box", style: "display:block" }, [box, document.createTextNode(" "), h("strong", { text: c.name }), document.createTextNode("  " + usd(c.price_usd) + " (" + (c.price_date || "") + ")  rank " + (c.edhrec_rank === null ? "n/a" : c.edhrec_rank)), h("div", { class: "small muted", text: c.why })]));
+      root.appendChild(h("label", { class: "box", style: "display:block" }, [box, document.createTextNode(" "), h("strong", { text: c.name }), document.createTextNode("  " + usd(c.price_usd) + " (" + (c.price_date || "") + ")  rank " + (c.edhrec_rank === null ? "n/a" : c.edhrec_rank)), h("div", { class: (c.lookouts || []).length ? "small bad" : "small muted", text: c.why })]));
     });
   });
   if ((r.cut_candidates || []).length) {
