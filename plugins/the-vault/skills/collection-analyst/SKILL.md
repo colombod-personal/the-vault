@@ -17,7 +17,9 @@ metadata:
 This is the person's own private data plus Scryfall's prices. Report what the tools return; do not
 estimate or fill gaps. Follow `vault-attribution` (if installed) for card data and prices.
 
-**The person's decks and collection are in the Vault: read them with the Vault's tools, never with a browser or computer.** Their saved decks, their collection and everything computed from them come from the tools named in the steps below, even when they are signed in to the Vault's website: do not open it, a browser or computer use to look. If a tool the steps name is not in your list yet, look it up by that name before saying it is missing; if it is truly not there, say so and stop, and do not fall back to a browser.
+**The person's decks and collection are in the Vault: read them with the Vault's tools, never with a browser or computer.** Their saved decks, their collection and everything computed from them come from the tools named in the steps below, even when they are signed in to the Vault's website: do not open it, a browser or computer use to look. If a tool the steps name is not in your list, look it up by that name before saying it is missing; if you have `vault_tools`, reach it through `vault_tools` (it lists the Vault's other tools and shows one in full), `vault_call` (it runs one that only reads) or `vault_write` (it runs one that changes something), each by name with its arguments; a tool that deletes or revokes is done in the Vault's web app, so say that; say a tool is missing only after you have looked, and never fall back to a browser.
+
+In a host whose tool list is compact, `delete_bucket`, `delete_tag`, `untag_cards`, `reset_collection`, `undo_collection_reset`, `stop_sharing` and `import_collection_csv` are done by the person in the Vault's web app (a file is brought in from the chat with `start_collection_upload`): say so instead of looking for them.
 
 **Check the connection when something is off.** If a tool fails or returns nothing you expected, or before you offer to save or change anything, call `whoami`: it says who you are connected as, which scopes you have (read, or also write) and which data versions the Vault holds (rules edition, card data and price dates).
 
@@ -127,7 +129,7 @@ by (a score, why you suggested a card). Nothing changes until step 4.
      back is the undo.
 5. **Check and say how to undo.**
    - Calls: `list_buckets`, `list_tags`.
-   - Show: the new counts, and the undo in one line (`untag_cards` for a tag, `move_cards` back for a move).
+   - Show: the new counts, and the undo in one line (`move_cards` back for a move; a tag is removed with `untag_cards`, which a host with a compact tool list leaves to the web app).
    - Stop: none; do not tidy anything else without being asked.
 
 ## Flow: Import a collection

@@ -22,7 +22,8 @@ show the tool's normal text answer, which has the same information.
   advertised the extension** (#50, #51). The specification says clients advertise it in `initialize`
   (`capabilities.extensions["io.modelcontextprotocol/ui"] = {"mimeTypes": ["text/html;profile=mcp-app"]}`) and that
   servers "SHOULD check client capabilities" and keep a text fallback. The server is stateless, so what the client said
-  comes back in a signed `Mcp-Session-Id` returned by `initialize` (`vault/api/mcp_session.py`: a version, one bit, a
+  comes back in a signed `Mcp-Session-Id` returned by `initialize` (`vault/api/mcp_session.py`: a version, two bits (the
+  extension, and whether the client gets the compact tool list of `docs/plugin-delivery-and-testing.md`), a
   random part and an HMAC under the server secret; no person, no token, nothing stored). Streamable HTTP clients send
   it on every later request. **Fail open:** a request with no session id (a client that ignores ids, or a connection from
   before this existed) or an id that does not verify is treated as "unknown" and gets the view links exactly as before. Only
