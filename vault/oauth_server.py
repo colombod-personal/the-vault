@@ -336,6 +336,24 @@ def connected_apps(db: Session, user_id: int) -> list[list[OAuthGrant]]:
     return list(groups.values())
 
 
+def grant_of_access(db: Session, user_id: int, bearer: str) -> OAuthGrant | None:
+    """The connection whose current access token this is, when it is this person's; None for anything else (a personal
+    access token, the app's own sign-in, an old or unknown token)."""
+    if not is_access_token(bearer or ""):
+        return None
+    return db.scalar(select(OAuthGrant).where(OAuthGrant.access_hash == _hash(bearer), OAuthGrant.user_id == user_id))
+
+
+def sign_out_connection(db: Session, user_id: int, bearer: str) -> OAuthGrant | None:
+    """Sign out the one connection behind this access token (the app asking, on this device): its access and refresh
+    tokens stop working. The person's other connections, of this app on other devices or of other apps, are untouched.
+    The revoked connection, or None when the token is not one of this person's connections."""
+    grant = grant_of_access(db, user_id, bearer)
+    if grant is not None:
+        revoke_grant(db, grant.id)
+    return grant
+
+
 def revoke_user_app(db: Session, user_id: int, grant_id: int) -> int | None:
     """Disconnect the app one of this person's connections belongs to: every connection of that app
     (each device) is revoked at once, in one transaction. The number revoked, or None when the id isn't theirs."""

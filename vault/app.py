@@ -49,7 +49,8 @@ READ_ONLY_POSTS = {"/api/v1/decks/parse", "/api/v1/imports/preview", "/api/v1/de
                    # computations on a decklist the caller sends: nothing is stored
                    "/api/v1/decks/stats", "/api/v1/decks/legality", "/api/v1/decks/upgrades",
                    "/api/v1/decks/validate-changes", "/api/v1/decks/shopping-list", "/api/v1/decks/combos",
-                   "/api/v1/decks/roles"}
+                   "/api/v1/decks/roles",
+                   "/api/v1/agent/sign-out"}  # ends the caller's own app connection, whatever its scopes
 
 
 def _origin(url: str) -> str:

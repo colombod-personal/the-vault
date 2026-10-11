@@ -9,7 +9,7 @@ access token from Account → Agents & API (or ``POST /api/v1/me/tokens``).
 Every tool is a thin wrapper around a ``/api/v1`` endpoint, called in-process with the
 caller's credentials. Tenancy, sharing, scopes, paging and validation are therefore
 enforced in one place. With a read-only token, write tools aren't listed, and calling one
-fails with the API's 403.
+fails with the API's 403; the one exception is ``sign_out``, which ends the caller's own connection.
 """
 
 from __future__ import annotations
@@ -65,6 +65,8 @@ priced daily from Scryfall, plus their saved decks and what others have shared w
   returned only when they clearly asked for that exact reset. Never reset to make an import or an edit easier. A reset can be
   undone for 7 days with undo_collection_reset, but only until anything else changes the collection: it is best-effort, so offer
   the export first. Clearing tags, notes or history and resetting with no undo are the person's, in the web app.
+- To sign out or switch Vault account, call sign_out without confirm, say which account and app it would end, and send
+  confirm true only once the person said yes.
 """
 
 
@@ -85,6 +87,13 @@ class Tool:
     # block), "catalog" / "computed" (the API already includes one), or () for the person's own data only.
     provenance: tuple[str, ...] = ()
     ui: str = ""  # the MCP Apps view (vault/api/mcp_ui.py) a host may show next to this tool's result
+    # A write tool that a read-only connection still sees and may call: sign_out ends the caller's own connection, which
+    # any connection may do (its REST route is in vault.app.READ_ONLY_POSTS).
+    any_scope: bool = False
+
+    def listed_for(self, scopes: set[str]) -> bool:
+        """Whether a connection with these scopes sees this tool in tools/list."""
+        return not self.write or self.any_scope or "write" in scopes
 
     def display_title(self) -> str:
         return self.title or self.name.replace("_", " ").capitalize()
@@ -698,6 +707,15 @@ TOOLS = [
          method=lambda a: "DELETE" if a.get("confirm") is True else "GET",
          path=lambda a: f"{V1}/shares/{int(a['share_id'])}" if a.get("confirm") is True else f"{V1}/shares",
          write=True, destructive=True),
+    Tool("sign_out", "Ends this app's connection to the Vault on this device: its access and refresh tokens are revoked, and the "
+         "app's next request asks for a sign-in, where another account can be chosen. With confirm false or absent it returns "
+         "the account this connection is signed in to (name and email), the app, and what ending it does, and changes "
+         "nothing; with confirm true it ends this one connection. The account's other apps and devices, personal access "
+         "tokens and web sign-in are not affected. Read-only connections can use it.",
+         {"confirm": CONFIRM}, [],
+         method=lambda a: "POST" if a.get("confirm") is True else "GET",
+         path=lambda a: f"{V1}/agent/sign-out", title="Sign out of the Vault here",
+         write=True, destructive=True, any_scope=True),
     Tool("where_to_buy", "Plain links to shops for one card, in the order for the country the person set (shops, then the stores they "
          "typed, the Wizards store locator and Scryfall). Each link opens a shop's own search; the Vault contacts no shop and has "
          "no price, stock or shipping, so none is given and none is the cheapest. Reading only: the person's country and stores are "
@@ -725,7 +743,7 @@ OWN_DATA_ONLY = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucke
                  "get_card_metadata", "set_card_metadata", "get_bucket_metadata", "set_bucket_metadata",
                  "get_acquisition_timeline", "parse_decklist", "save_deck", "update_deck", "list_imports",
                  "import_collection_csv", "list_export_formats", "list_shared_with_me", "get_import", "delete_deck",
-                 "list_my_shares", "accept_share", "stop_sharing", "start_collection_upload",
+                 "list_my_shares", "accept_share", "stop_sharing", "sign_out", "start_collection_upload",
                  "get_staged_upload", "confirm_staged_upload", "council_brief", "expert_brief",
                  "confirm_owned_cards_update", "undo_owned_cards_update"}
 DECK_ANALYSIS = {"deck_stats", "simulate_draws", "deck_legality", "find_upgrades", "validate_deck_changes", "find_combos",
@@ -928,7 +946,7 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
             settings = request.app.state.settings
             views = (not settings.mcp_apps_require_capability
                      or mcp_session.read(settings.session_secret, request.headers.get(mcp_session.HEADER)) is not False)
-            return _result(id_, {"tools": [t.schema(ui=views) for t in TOOLS if not t.write or "write" in scopes]})
+            return _result(id_, {"tools": [t.schema(ui=views) for t in TOOLS if t.listed_for(scopes)]})
         if method == "resources/list":  # the MCP Apps views (ui:// pages); there is nothing else to read
             return _result(id_, {"resources": mcp_ui.resources()})
         if method == "resources/templates/list":

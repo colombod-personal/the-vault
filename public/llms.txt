@@ -237,7 +237,8 @@ be revoked (Account → Connected apps for OAuth).
     big files: `start_collection_upload` (also takes `bucket_id`), `get_staged_upload`, `confirm_staged_upload`,
     (Dragon Shield, Moxfield or generic CSV), `list_export_formats`, `list_shared_with_me`,
     `get_shared_deck`, `list_my_shares`, `accept_share`, `stop_sharing` (asks first)
-  - connection check: `whoami` (who you are, your scopes, and which data versions the Vault holds)
+  - connection check: `whoami` (who you are, your scopes, and which data versions the Vault holds); signing out of
+    this app or switching account: `sign_out` (asks first; ends only this connection)
   - rules and cards, from the Comprehensive Rules and Oracle data: `get_card_oracle`, `get_rulings`,
     `find_rules_term`, `search_rules`, `rules_outline`, `get_rule` (with parent, children, siblings and
     references), `verify_citation`, `present_steps`; the rules are read live from Wizards (no copy kept, so only the current

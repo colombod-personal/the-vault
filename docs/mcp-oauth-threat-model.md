@@ -826,3 +826,31 @@ exposes, and what stops misuse:
 - **Storage and lifetime.** The record holds only `country`, `stores` and `updated_at`; it is in the data map and export
   (`buy_settings.json`) and erased with the account, and a `PUT` stores no settings in its idempotency record (only `{"saved": true}`; a replay is rebuilt from the live row, so "Remove" leaves nothing behind), "Remove" also deletes the person's stored `PUT` records, and the daily retention job deletes every stored answer past its 24 hours (found by the security review of this change: the 24 hours used to be enforced only when the same person made another keyed request).
   Writes are limited to 30 a minute per person.
+
+## Signing out from the chat: `sign_out` (bead vault-wxy.3.1, 2026-10-11)
+
+A host such as the ChatGPT desktop app gives a plugin's MCP server no sign-out control and keeps reusing its saved token, so a
+person could switch Vault accounts only through Account, "Connected apps", "Disconnect" on the web. `sign_out` (MCP) over
+`GET` / `POST /api/v1/agent/sign-out` ends the one connection the request comes from (`vault/oauth_server.py`
+`grant_of_access`, `sign_out_connection`; `vault/api/catalog_api.py`). What it changes, and what stops misuse:
+
+- **Only the caller's own grant.** The grant is found by the SHA-256 of the presented access token **and** the authenticated person's
+  id, and only that row (with its retired refresh tokens) is deleted, as RFC 7009 revocation by the client already allows. The
+  person's other connections (the same app on another device, other apps) stay (M `tests/test_sign_out.py::test_confirm_ends_only_this_connection_and_another_device_keeps_working`).
+  There is no argument naming a grant, so a prompt-injected call cannot end anyone else's connection or another app of the same person.
+- **Any scope.** A read-only connection may end itself: the `POST` is in `READ_ONLY_POSTS` and the tool is listed for read-only callers
+  (`Tool.any_scope`). Ending your own credential grants nothing; it is the same power RFC 7009 gives every client
+  (M `test_a_read_only_connection_lists_the_tool_as_destructive_and_can_sign_out`).
+- **Nothing else is ended here.** A personal access token, the native app's own sign-in and a web session get 409 with where to end
+  them (Account, "Agents & API"; the app; "Sign out"), and keep working (M `test_a_personal_access_token_is_refused_and_keeps_working`,
+  `test_a_web_session_is_refused_and_stays_signed_in`). A cross-site form POST with the cookie therefore revokes nothing.
+- **Audience unchanged.** An OAuth access token is still accepted only on `/api/mcp` and its in-process tool calls: the REST route called
+  directly with one answers 401 (M `test_the_route_called_directly_with_an_oauth_token_is_refused`).
+- **Preview first, and the host asks.** Without `confirm` it only reads; the tool carries `destructiveHint: true` and
+  `readOnlyHint: false`, and the server instructions and the collection-analyst skill say to confirm only after the person's yes.
+  The worst an injected `confirm: true` does is sign the person out of that app: no data changes, and signing in again restores it.
+- **After revocation** the old access token gets the MCP 401 with `WWW-Authenticate: Bearer realm="the-vault", error="invalid_token",
+  resource_metadata="..."`, and its refresh token gets `invalid_grant`, so the host starts the authorization again; the consent page
+  offers "Use a different account" (M `test_the_old_token_then_gets_401_with_the_resource_metadata_and_cannot_refresh`).
+- Residual: the preview tells the connected app the account's email (to show which account would be signed out); `whoami` showed only
+  the name. The app is one the person connected to that account, and the email is theirs.

@@ -17,15 +17,17 @@ import math
 import time
 from datetime import date, timedelta
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import catalog_queries as q
-from .. import card_roles, deck_tools, limited_data, role_rules, rules_changes
+from .. import card_roles, deck_tools, limited_data, oauth_server, role_rules, rules_changes, tokens
 from .. import provenance as prov
-from ..models import User
+from ..models import OAuthClient, OAuthGrant, User
 from ..ratelimit import WINDOW, hit
 from ..rules_live import LiveRules, RulesUnavailable
 from .hal import link
@@ -214,6 +216,28 @@ class WhoamiOut(BaseModel):
     links: dict = Field(default_factory=dict, alias="_links")
 
 
+class SignOutOut(BaseModel):
+    signed_out: bool = Field(description="false: a preview, nothing changed; true: this connection was ended")
+    signed_in_as: dict = Field(description="The account this connection is signed in to: id, name, email")
+    connection: dict = Field(description="This connection: the app's name and web address, its scopes, when it was made, "
+                                         "and how many other connections the account has (other devices and apps)")
+    what_happens: str
+    links: dict = Field(default_factory=dict, alias="_links")
+
+
+# Why a caller that is not an app connection made with a Vault sign-in can't be signed out here, and where it is ended.
+NOT_A_CONNECTION = {
+    "session": "This is a web sign-in, not an app connection, so nothing was signed out. Sign out on the Vault's site: Account, \"Sign out\".",
+    "pat": "This connection uses a personal access token, which is not ended here, so nothing was signed out. Remove the token on "
+           "the Vault's site: Account, \"Agents & API\".",
+    "app": "This is the Vault app's own sign-in, not a connected AI app, so nothing was signed out. Sign out in the Vault app, or "
+           "on the Vault's site: Account, \"Sign-in methods\", \"Sign out everywhere\".",
+}
+SIGN_OUT_EFFECT = ("This connection stops working: its access and refresh tokens are revoked. The next request from {app} asks "
+                   "for a sign-in to the Vault; on the Vault's page, \"Use a different account\" signs in as someone else. Other "
+                   "apps and devices, personal access tokens and the web sign-in stay signed in.")
+
+
 def build_router(get_db, optional_user, current_user, settings, rules_live=None) -> APIRouter:
     router = APIRouter(prefix=V1 + "/catalog", tags=["catalog"])
     live_rules = rules_live or LiveRules()
@@ -278,6 +302,45 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
                 "guidance": "Answer rules and card questions from the tools, quote only verified text, and repeat each result's provenance. "
                             "Material from Scryfall and Wizards of the Coast is theirs, not the Vault's.",
                 "_links": {"self": link(f"{V1}/agent/whoami"), "catalog": link(f"{V1}/catalog/status")}}
+
+    def this_connection(request: Request, user: User, db: Session) -> OAuthGrant:
+        """The OAuth connection the caller is using, or 409 saying what the caller is instead and where that is ended."""
+        bearer = getattr(request.state, "bearer", None)
+        if not bearer:
+            raise HTTPException(409, NOT_A_CONNECTION["session"])
+        if tokens.is_pat(bearer):
+            raise HTTPException(409, NOT_A_CONNECTION["pat"])
+        grant = oauth_server.grant_of_access(db, user.id, bearer)
+        if grant is None:
+            raise HTTPException(409, NOT_A_CONNECTION["app"])
+        return grant
+
+    def sign_out_body(db: Session, user: User, grant: OAuthGrant, signed_out: bool) -> dict:
+        client = db.scalar(select(OAuthClient).where(OAuthClient.client_id == grant.client_id))
+        domain = urlsplit(grant.client_id).hostname if grant.client_id.startswith("https://") else None
+        name = client.name if client else (domain or "Unknown app")
+        others = db.scalar(select(func.count()).select_from(OAuthGrant).where(
+            OAuthGrant.user_id == user.id, OAuthGrant.id != grant.id)) or 0
+        return {"signed_out": signed_out, "signed_in_as": {"id": user.id, "name": user.name, "email": user.email},
+                "connection": {"app": name, "domain": domain, "scopes": grant.scopes.split(),
+                               "connected_at": grant.created_at.isoformat() if grant.created_at else None,
+                               "other_connections": others},
+                "what_happens": ("Signed out. " if signed_out else "") + SIGN_OUT_EFFECT.format(app=name),
+                "_links": {"self": link(f"{V1}/agent/sign-out")}}
+
+    @agent.get("/sign-out", response_model=SignOutOut, response_model_by_alias=True,
+               summary="Preview signing this app connection out: who it is signed in as, which app, and what happens (changes nothing)")
+    def sign_out_preview(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        return sign_out_body(db, user, this_connection(request, user, db), signed_out=False)
+
+    @agent.post("/sign-out", response_model=SignOutOut, response_model_by_alias=True,
+                summary="Sign this app connection out: only the OAuth connection making the request is revoked (any scope)")
+    def sign_out(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        grant = this_connection(request, user, db)
+        body = sign_out_body(db, user, grant, signed_out=True)  # read before the row goes
+        if oauth_server.sign_out_connection(db, user.id, request.state.bearer) is None:  # ended meanwhile (a second call)
+            raise HTTPException(409, "This connection was already signed out.")
+        return body
 
     @router.get("/limited/{set_code}", response_model=LimitedOut, response_model_by_alias=True,
                 summary="Win rates and pick positions of a Limited set's cards, from 17Lands' public data (Magic Arena, CC BY 4.0), each with its sample size")
