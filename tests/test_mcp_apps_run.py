@@ -7,6 +7,7 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -253,3 +254,52 @@ def test_the_shopping_view_shows_copies_and_saves_whatever_formats_the_tool_retu
         {"action": "click", "tag": "button", "text": "Download as a text file"}])
     assert control(snaps[0], "select", "Plain list")["text"] == "Plain list|Card Kingdom|TCGplayer"
     assert snaps[2]["copied"] == ["1 Cheap Ramp [TCG]"] and snaps[3]["downloads"] == [{"name": "shopping-list-tcgplayer.txt", "text": "1 Cheap Ramp [TCG]"}]
+
+
+SOL_RING = "33333333-3333-3333-3333-333333333333"
+BOLT_PICTURE = "https://cards.scryfall.io/normal/front/7/6/7673784e-db4b-43a1-8d55-1bb9fc1e284f.jpg?1783903008"  # the shape Scryfall's API gives
+
+
+@pytest.fixture
+def pictures(app, agent):
+    """Scryfall's picture links where the daily sync puts them: on Lightning Bolt (for the card view) and on two printings of Sol Ring,
+    one of which the person owns (for the printing views)."""
+    from vault import catalog_sync as cs
+    from vault.models import Card, OracleCard
+
+    sol_ring = {"object": "card", "id": "p-3333", "oracle_id": SOL_RING, "name": "Sol Ring", "layout": "normal", "mana_cost": "{1}", "cmc": 1.0,
+                "type_line": "Artifact", "oracle_text": "{T}: Add {C}{C}.", "colors": [], "color_identity": [], "keywords": [],
+                "legalities": {"commander": "legal"}, "digital": False}
+    with app.state.db.sessions() as db:
+        cs._upsert(db, OracleCard, [cs.oracle_card_row(sol_ring)], ("oracle_id",))
+        db.query(OracleCard).filter(OracleCard.oracle_id == BOLT).update({"image_normal": BOLT_PICTURE, "artist": "Christopher Moeller"})
+        db.add_all([
+            Card(scryfall_id="sol-c21", oracle_id=SOL_RING, name="Sol Ring", set_code="c21", set_name="Commander 2021", collector_number="263",
+                 finishes=["nonfoil", "foil"], artist="Mike Bierek", scryfall_uri="https://scryfall.com/card/c21/263/sol-ring",
+                 image_normal="https://cards.scryfall.io/normal/front/a/b/ab12cd34-0000-4000-8000-000000000021.jpg?1783903008",
+                 image_small="https://cards.scryfall.io/small/front/a/b/ab12cd34-0000-4000-8000-000000000021.jpg?1783903008"),
+            Card(scryfall_id="sol-cmr", oracle_id=SOL_RING, name="Sol Ring", set_code="cmr", set_name="Commander Legends", collector_number="472",
+                 finishes=["nonfoil", "foil"], artist="Mike Bierek", scryfall_uri="https://scryfall.com/card/cmr/472/sol-ring",
+                 image_normal="https://cards.scryfall.io/normal/front/c/d/cd56ef78-0000-4000-8000-000000000472.jpg?1783903008",
+                 image_small="https://cards.scryfall.io/small/front/c/d/cd56ef78-0000-4000-8000-000000000472.jpg?1783903008"),
+        ])
+        db.commit()
+
+
+def test_every_picture_a_view_puts_on_the_page_comes_from_a_host_its_policy_declares(agent, bot, token, pictures, tmp_path):
+    """The views are run on what the real tools answered and every `img` they draw is read back. Its host must be one the view's
+    resource declares under both keys (`ui.csp.resourceDomains`, `openai/widgetCSP.resource_domains`): a host that is not is blocked
+    by the host app, and the person sees an empty box where the card should be (the ChatGPT desktop app, 2026-10-10)."""
+    write = make_token(agent, scopes=["read", "write"])
+    asking = answer(bot, write, "update_owned_cards", lines=[{"action": "add", "name": "Sol Ring", "quantity": 1}])
+    assert asking["lines"][0]["status"] == "choose_printing", asking
+    runs = [("card", {"name": "Lightning Bolt"}, answer(bot, token, "get_card_oracle", name="Lightning Bolt")),
+            ("printings", {"name": "Sol Ring"}, answer(bot, token, "show_owned_printings", name="Sol Ring")),  # the owned printings
+            ("printings", {"lines": [{"action": "add", "name": "Sol Ring", "quantity": 1}]}, asking)]  # the picker: every printing
+    for view, args, result in runs:
+        pictures_drawn = [img["src"] for snap in run(view, tmp_path, args, result) for img in snap["images"]]
+        assert pictures_drawn, f"{view} drew no picture on {args}: this test would prove nothing"
+        resources = {urlparse(d).hostname for d in mcp_ui.resource_meta(view)["ui"]["csp"]["resourceDomains"]}
+        legacy = {urlparse(d).hostname for d in mcp_ui.resource_meta(view)["openai/widgetCSP"]["resource_domains"]}
+        assert resources == legacy and {urlparse(src).hostname for src in pictures_drawn} <= resources, (view, pictures_drawn, resources)
+        assert {urlparse(src).scheme for src in pictures_drawn} == {"https"}, (view, pictures_drawn)
