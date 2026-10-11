@@ -116,3 +116,65 @@ def test_two_commanders_need_a_partner_ability_on_each_and_never_more_than_two()
     assert not [k for k in kinds(background) if k[0].startswith("commander_")]
     three = dt.legality(deck(("commander", 1, a), ("commander", 1, b), ("commander", 1, third), ("main", 97, FOREST)), "commander")
     assert any(k[0] == "commander_count" for k in kinds(three))
+
+
+# -- the community formats' sizes and commander rules (vault-35i; sources read 2026-10-11) --------------------------------------
+
+WALKER = card("Jace Test", "U", "", "Legendary Planeswalker — Jace", legal=("oathbreaker", "standardbrawl", "brawl"))
+SPELL = card("Counter Test", "U", "Counter target spell.", "Instant", legal=("oathbreaker",))
+OFF_COLOUR_SPELL = card("Burn Test", "R", "Burn Test deals 3 damage to any target.", "Instant", legal=("oathbreaker",))
+ISLAND = card("Island", "U", "", "Basic Land — Island", legal=("oathbreaker", "standardbrawl", "gladiator", "paupercommander"))
+
+
+def test_oathbreaker_is_exactly_sixty_cards_with_a_planeswalker_and_a_signature_spell():
+    ok = dt.legality(deck(("commander", 1, WALKER), ("commander", 1, SPELL), ("main", 58, ISLAND)), "oathbreaker")
+    assert ok["legal"] is True, ok["issues"]
+    short = dt.legality(deck(("commander", 1, WALKER), ("commander", 1, SPELL), ("main", 57, ISLAND)), "oathbreaker")
+    assert ("deck_size", None) in kinds(short)
+    no_walker = dt.legality(deck(("commander", 1, SPELL), ("main", 59, ISLAND)), "oathbreaker")
+    assert ("oathbreaker_missing", None) in kinds(no_walker)
+    no_spell = dt.legality(deck(("commander", 1, WALKER), ("main", 59, ISLAND)), "oathbreaker")
+    assert ("signature_spell_missing", None) in kinds(no_spell)
+
+
+def test_an_oathbreaker_signature_spell_outside_the_oathbreakers_colours_is_illegal():
+    bad = dt.legality(deck(("commander", 1, WALKER), ("commander", 1, OFF_COLOUR_SPELL), ("main", 58, ISLAND)), "oathbreaker")
+    assert ("color_identity", "Burn Test") in kinds(bad)
+
+
+def test_standard_brawl_is_exactly_sixty_with_a_legendary_creature_or_planeswalker_commander():
+    boss = card("Boss", "G", type_line="Legendary Creature", legal=("standardbrawl",))
+    ok = dt.legality(deck(("commander", 1, boss), ("main", 59, FOREST_SB)), "standardbrawl")
+    assert ("deck_size", None) not in kinds(ok)
+    short = dt.legality(deck(("commander", 1, boss), ("main", 58, FOREST_SB)), "standardbrawl")
+    assert ("deck_size", None) in kinds(short)
+    walker_ok = dt.legality(deck(("commander", 1, WALKER), ("main", 59, ISLAND)), "standardbrawl")
+    assert ("commander_not_eligible", "Jace Test") not in kinds(walker_ok)
+    plain = card("Plain Bear", "G", type_line="Creature", legal=("standardbrawl",))
+    not_legendary = dt.legality(deck(("commander", 1, plain), ("main", 59, FOREST_SB)), "standardbrawl")
+    assert ("commander_not_eligible", "Plain Bear") in kinds(not_legendary)
+
+
+FOREST_SB = card("Forest", "G", "", "Basic Land — Forest", legal=("standardbrawl", "gladiator"))
+
+
+def test_gladiator_is_at_least_a_hundred_cards_singleton_with_no_sideboard_and_no_commander_needed():
+    ok = dt.legality(deck(("main", 100, FOREST_SB)), "gladiator")
+    assert ok["legal"] is True, ok["issues"]
+    short = dt.legality(deck(("main", 99, FOREST_SB)), "gladiator")
+    assert ("deck_size", None) in kinds(short)
+    side = dt.legality(deck(("main", 100, FOREST_SB), ("sideboard", 1, FOREST_SB)), "gladiator")
+    assert ("sideboard_size", None) in kinds(side)
+    assert not any(k == "no_commander" for k, _ in kinds(ok))
+
+
+def test_pauper_commander_takes_a_creature_commander_that_need_not_be_legendary():
+    uncommon = card("Uncommon Bear", "G", type_line="Creature — Bear", legal=("paupercommander",))
+    spell = card("Just A Spell", "G", type_line="Sorcery", legal=("paupercommander",))
+    ok = dt.legality(deck(("commander", 1, uncommon), ("main", 99, ISLAND_PDH)), "paupercommander")
+    assert ("commander_not_eligible", "Uncommon Bear") not in kinds(ok)
+    bad = dt.legality(deck(("commander", 1, spell), ("main", 99, ISLAND_PDH)), "paupercommander")
+    assert ("commander_not_eligible", "Just A Spell") in kinds(bad)
+
+
+ISLAND_PDH = card("Forest", "G", "", "Basic Land — Forest", legal=("paupercommander",))
