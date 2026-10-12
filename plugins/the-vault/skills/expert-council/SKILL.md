@@ -7,7 +7,7 @@ description: >-
   dispute settled, or a deep look at what a deck is trying to do.
 license: MIT
 metadata:
-  vault-tools: "whoami council_brief expert_brief list_decks get_deck deck_stats simulate_draws deck_legality find_combos check_decklist get_deck_overlap validate_deck_changes verify_citation get_card_oracle get_rule rules_changes get_limited_card_stats"
+  vault-tools: "whoami council_brief expert_brief list_decks get_deck deck_stats simulate_draws deck_legality find_combos check_decklist get_deck_overlap validate_deck_changes verify_citation get_card_oracle get_rule rules_changes get_limited_card_stats get_prerelease_guide"
 ---
 
 # Expert council
@@ -140,6 +140,10 @@ settled only by a quote checked with `verify_citation`. If the rules do not sett
   compare two cards only when both are at the `ok` level and their 95% ranges do not overlap (otherwise say the data does not settle it),
   never rank, recommend or compare a card at the too_few level (a sorted list already leaves out the cards under 200 of the sort's own sample: games in hand, or packs seen for avg_last_seen_pick, or picks for avg_taken_at; its left_out says how many), and never turn a rate into a grade or a "best pick". It is Arena data
   and a correlation, not proof a card wins games; the percentages are the Vault's, computed from 17Lands' counts.
+- **Prerelease pages** (the draft or sealed expert, and the chair when the question is about a Prerelease): where Wizards' player guide and
+  store event page for a set are, the prerelease dates and the pack contents per format come only from `get_prerelease_guide`. Pass on its
+  links and the day each fact was read; a date or content marked `unverified` is not Wizards' statement; when `guide_published` is false say
+  that no guide is published yet, and never describe a guide from memory. Link to Wizards' pages rather than quoting them.
 - Popularity (EDHREC rank) is not power; roles are Scryfall Tagger tags, a community's opinion.
 - **The rules edition with every rule number**: "rule <number> (Comprehensive Rules, <version>)", the `version` a rules tool returned
   (`whoami` also names it). The rules change between editions: a member who relies on a rule that may have changed lately, or whose
