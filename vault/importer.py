@@ -20,7 +20,7 @@ from . import buckets, merge
 from .csv_safe import neutralise_csv, restore_csv
 from .models import Bucket, BucketBaseline, Card, CollectionBaseline, Entry, Import, TagAssignment, User, utcnow
 from .prices import MAX_PRICE, compute_values
-from .printing_lookup import MAX_LOOKUP_NAMES, front, printings_of
+from .printing_lookup import front, printings_of
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 EXACT = ("set_number", "id")
@@ -338,9 +338,14 @@ def _match_printings(db: Session, entries, old_rows) -> Matching:
     by_rule: dict[int, object] = {}
     if rest:
         lookup = printings_of(db, {front(entries[i].name).lower() for i in rest},
-                              [(entries[i].set_code, entries[i].collector_number) for i in rest[:MAX_LOOKUP_NAMES]])
+                              [(front(entries[i].name).lower(), entries[i].set_code, entries[i].collector_number)
+                               for i in rest])
         index = PrintingIndex(lookup.printings)
         for i in rest:
+            if front(entries[i].name).lower() in lookup.left_out:  # past the cap: left to the daily update, not matched
+                if stored[i][0] is None:
+                    why[i] = "later"
+                continue
             found = index.match(entries[i])
             if found.printing is not None:
                 if stored[i][0] is None:
@@ -466,7 +471,7 @@ def _clean(e: CollectionEntry, row: int) -> None:
         value = getattr(e, column)
         if isinstance(value, str) and "\x00" in value:
             raise ImportError_(f"Row {row}: {column.replace('_', ' ')} has a character no card file contains.")
-    if any("\x00" in v for v in (*e.extra.values(), *e.source_prices)):
+    if any("\x00" in v for v in (*e.extra, *e.extra.values(), *e.source_prices)):
         raise ImportError_(f"Row {row}: a column has a character no card file contains.")
     for column, size in CLIP.items():
         value = getattr(e, column)

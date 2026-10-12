@@ -47,10 +47,10 @@ class Lookup:
         return "later" if key in self.known or key in self.left_out else "not_found"
 
 
-def printings_of(db: Session, names: Iterable[str], numbers: Iterable[tuple[str, str]] = ()) -> Lookup:
+def printings_of(db: Session, names: Iterable[str], numbers: Iterable[tuple[str, str, str]] = ()) -> Lookup:
     """The printings of the cards named (lower-case, as the files write them), and what the lookup could say about them.
 
-    ``numbers`` are the rows' (set code, collector number) as written: the printings with those (and with the code's
+    ``numbers`` are the rows' (name, set code, collector number) as written: the printings with those (and with the code's
     fallback set), whatever the row's name is, so the preview finds an exact printing the way the daily sync does."""
     wanted = sorted({n for n in names if n})
     left_out, wanted = set(wanted[MAX_LOOKUP_NAMES:]), wanted[:MAX_LOOKUP_NAMES]
@@ -58,7 +58,8 @@ def printings_of(db: Session, names: Iterable[str], numbers: Iterable[tuple[str,
     for i in range(0, len(wanted), BATCH):
         batch = wanted[i:i + BATCH]
         rows = db.execute(select(OracleCard.oracle_id, OracleCard.name).where(
-            func.lower(OracleCard.name).in_(batch) | func.lower(func.split_part(OracleCard.name, " // ", 1)).in_(batch)))
+            func.lower(OracleCard.name).in_(batch) | func.lower(func.split_part(OracleCard.name, " // ", 1)).in_(batch)
+            | func.lower(func.split_part(OracleCard.name, " // ", 2)).in_(batch)))
         oracle.update(rows.all())
     printings: dict[str, Printing] = {}
     ids = list(oracle)
@@ -67,7 +68,10 @@ def printings_of(db: Session, names: Iterable[str], numbers: Iterable[tuple[str,
             printings[p.scryfall_id] = Printing(p.scryfall_id, oracle[p.oracle_id], p.set_code, p.collector_number, p.lang,
                                                 p.usd, p.usd_foil, p.usd_etched)
     wanted_pairs: set[tuple[str, str]] = set()
-    for code, number in numbers:
+    inside = set(wanted)
+    for name, code, number in numbers:
+        if name not in inside:  # past the cap: nobody looks at it, by name or by number
+            continue
         c, n = normalize_set_code(code), normalize_collector_number(number)
         if not (c and n):
             continue
@@ -84,13 +88,14 @@ def printings_of(db: Session, names: Iterable[str], numbers: Iterable[tuple[str,
                                                          p.usd, p.usd_foil, p.usd_etched))
     # names the catalog does not know: the printings someone owns (a deployment whose catalog is not loaded yet, or a card
     # that is new), priced from the daily snapshot
-    known = {n for name in oracle.values() for n in (name.lower(), front(name).lower())}
+    known = {n.strip() for name in oracle.values() for n in (name.lower(), *name.lower().split(" // "))}
     unknown = [n for n in wanted if n not in known]
     owned: list[Card] = []
     for i in range(0, len(unknown), BATCH):
         batch = unknown[i:i + BATCH]
         owned += db.scalars(select(Card).where(
-            func.lower(Card.name).in_(batch) | func.lower(func.split_part(Card.name, " // ", 1)).in_(batch)))
+            func.lower(Card.name).in_(batch) | func.lower(func.split_part(Card.name, " // ", 1)).in_(batch)
+            | func.lower(func.split_part(Card.name, " // ", 2)).in_(batch)))
     if owned:
         prices = latest_prices(db, {c.scryfall_id for c in owned})
         for c in owned:
@@ -98,5 +103,5 @@ def printings_of(db: Session, names: Iterable[str], numbers: Iterable[tuple[str,
             printings.setdefault(c.scryfall_id, Printing(
                 c.scryfall_id, c.name, c.set_code, c.collector_number, "en",
                 snap.usd if snap else None, snap.usd_foil if snap else None, snap.usd_etched if snap else None))
-    known |= {p.name.lower() for p in printings.values()} | {front(p.name).lower() for p in printings.values()}
+    known |= {n.strip() for p in printings.values() for n in (p.name.lower(), *p.name.lower().split(" // "))}
     return Lookup(list(printings.values()), known, left_out)

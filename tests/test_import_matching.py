@@ -292,6 +292,13 @@ def test_a_card_found_by_name_keeps_the_files_own_price_and_a_named_printing_fol
     prices = {c["name"]: c["price"] for c in signed_in.get(f"{V1}/collection/cards").json()["items"]}
     assert prices["Test Named"]["source"] == "scryfall"  # the printing is named: the catalog's price
     assert prices["Test By Name"]["source"] == "file"  # found by name: the file's own price, not the $30 printing's
+    # the SQL analytics follow the same rule: 1.00 (the file) + 9.00 (the named printing), not the $30 guess
+    from vault import analytics
+    from vault.models import User
+
+    with app.state.db.sessions() as db:
+        history = analytics.scoped_history(db, db.scalar(select(User.id)), [date(2026, 10, 12)])
+    assert history[date(2026, 10, 12)]["market"] == 10.0
     # and an unchanged re-import keeps what the sync resolved by name (the value does not flip to nothing until the next sync)
     assert preview(signed_in, exact_file)["changes"]["unchanged"] == 2
     assert signed_in.post(f"{V1}/imports", files={"file": ("n3.csv", exact_file, "text/csv")}).status_code == 201
@@ -322,3 +329,22 @@ def test_the_preview_finds_an_exact_printing_by_set_and_number_even_when_the_nam
     # and not found (the sync agrees: the library checks the name there too); the third is exact through the fallback
     assert p["matched_by"] == {"set_number": 2} and p["unmatched_rows"] == 1
     assert p["unmatched"][0]["name"] == "Localised Daxos"
+
+
+def test_a_back_face_name_and_a_nul_in_an_extra_key(signed_in, app):
+    from mtg_toolkits.models import CollectionEntry
+
+    from vault.importer import ImportError_, _clean
+
+    with app.state.db.sessions() as db:
+        db.add_all([oracle(1, "Test Fire // Test Ice"), printing(1, "fi", "mh2", "290", 0.3)])
+        db.commit()
+    p = preview(signed_in, (HEADER + row("Test Ice", "ZZZ", "1")).encode())
+    assert p["matched_by"] == {"name": 1} and p["unmatched_rows"] == 0  # the back face, as the sync reads it
+    bad = CollectionEntry("Test Bolt", extra={"Col\x00umn": "x"})
+    try:
+        _clean(bad, 3)
+    except ImportError_ as exc:
+        assert "Row 3" in str(exc)
+    else:
+        raise AssertionError("a NUL in an extra key must be refused")
