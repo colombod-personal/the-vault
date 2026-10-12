@@ -29,6 +29,10 @@
         {
           "label": "invented basic-land count (deck_stats says 54 lands)",
           "pattern": "45 basic lands"
+        },
+        {
+          "label": "devil's advocate objects to nothing",
+          "pattern": "(?i)(no|found no|without any|nothing) (material |real |significant )?(legality )?objection"
         }
       ],
       "baselines": [

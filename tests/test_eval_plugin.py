@@ -72,3 +72,17 @@ def test_markdown_emphasis_and_other_valid_tools_do_not_cause_false_failures():
     colours = CASES["sliver_council_review"]
     rows = ev.score(colours, [], "The deck's colours are not checked, so real games will be slower.")
     assert next(r for r in rows if r["check"].startswith("says simulate_draws"))["ok"]
+
+
+def test_the_advocate_is_told_to_always_raise_an_objection_and_the_chair_to_quote_the_rule():
+    """Bead vault-wxy.7.2: real-app rows V6 and V7 (12 Oct): the advocate found no objection, and a lookout was named without
+    a rule quoted in the answer."""
+    advocate = (ROOT / "agents" / "vault-devils-advocate.md").read_text(encoding="utf-8")
+    assert "always at least one" in advocate and "No objection" in advocate
+    chair = (ROOT / "skills" / "expert-council" / "SKILL.md").read_text(encoding="utf-8")
+    assert "quoted with `get_rule` in this answer" in chair and "not your own reading" in chair
+    case = CASES["sliver_council_review"]
+    rows = ev.score(case, [], "Devil's advocate: found no material legality objection.")
+    assert not next(r for r in rows if r["check"].endswith("devil's advocate objects to nothing"))["ok"]
+    rows = ev.score(case, [], "Devil's advocate: cutting 7 basics leaves 3 red sources, rule 903.4 puts red in the commander's identity.")
+    assert next(r for r in rows if r["check"].endswith("devil's advocate objects to nothing"))["ok"]
