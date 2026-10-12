@@ -12,6 +12,16 @@ agent and every session (Claude, Codex, Copilot, Cursor). `CLAUDE.md` has the co
 - Track the work in **beads**, and only in beads (section 8): claim the bead, record every step in it as it happens, and
   link every PR.
 
+**The experience rule (owner, 2026-10-12).** The owner's words (typos fixed): "the user experience must work, the
+implementation detail is not what we have customers using"; "why is not the agent helping polishing the experience? if I
+have to do it myself this product becomes only a waste of customer money (AI token) and time"; and
+"the link flow, is that a customer facing experience? no, is implementation detail". How the rule is applied (not the owner's
+words): a criterion says what the person says and sees in the app they use (ChatGPT, Claude, the website), never the
+mechanism (a link, a ticket, a tool name, a skill read, an endpoint). The agent does the polishing and the person is never
+handed homework: the only question put to them is the final yes before something changes, with a recommendation on every
+choice left. Cost in AI tokens and time is part of the experience, and a target is a number measured on a real run in the
+real app.
+
 ## 2. Done means evidence, bead by bead
 
 - A criterion is ticked only with **evidence recorded in the bead**: the CI run for a test, the production response for an
@@ -184,6 +194,11 @@ Vault's beads workspace on a shared Dolt server that starts on boot. Agents just
 `vault-check --full`. Section 7 applies: never push a pull request that `vault-check` hasn't passed. Concurrent sessions
 use different lanes (`VAULT_CHECK_LANE=a|b|c|d`, or `vault-check-local` lanes in WSL): one run per lane. The tool holds a
 lock for the whole run and refuses a busy lane; wait or take another lane, and never stop another session's run.
+
+**Polling GitHub.** The Chief of Staff's operating rule for every session (2026-10-12, given after GitHub's secondary rate
+limit failed the `943df00` deploy; not the owner's words): GitHub polling is at most one open-PR query plus one merged query
+every 4 minutes per session; merge-when-green loops no faster than that; never a loop of API calls to test a limit; use
+`gh pr checks --watch --interval 120` or fewer calls.
 
 ## 9. Read the record, never remember it
 

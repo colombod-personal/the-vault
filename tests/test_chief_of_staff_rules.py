@@ -84,3 +84,28 @@ def test_section_10_says_wintermute_is_headless_and_what_that_limits():
                    "A headless pass is a test, not evidence about production or about the assistants",
                    "the host-CLI runs of `vault-wxy.9`, run on the owner's PC"):
         assert needed in s, needed
+
+
+def _all_flat() -> str:
+    return re.sub(r"\s+", " ", AGENTS)
+
+
+def test_section_1_carries_the_experience_rule_and_the_template_asks_for_it():
+    s = _all_flat()
+    for needed in ("**The experience rule (owner, 2026-10-12).**", "(typos fixed)",
+                   "the user experience must work, the implementation detail is not what we have customers using",
+                   "never the mechanism", "never handed homework", "the final yes before something changes",
+                   "a recommendation on every choice left", "a number measured on a real run in the real app"):
+        assert needed in s, needed
+    assert s.index("The experience rule") < s.index("## 2. Done means evidence")
+    template = (Path(__file__).resolve().parent.parent / ".github" / "pull_request_template.md").read_text(encoding="utf-8")
+    assert "- [ ] Criteria: what the person does and sees in their app, not the mechanism (AGENTS.md section 1)." in template
+
+
+def test_section_8_carries_the_polling_rule_as_the_chief_of_staffs_not_the_owners():
+    s = _all_flat()
+    for needed in ("**Polling GitHub.** The Chief of Staff's operating rule", "not the owner's words",
+                   "at most one open-PR query plus one merged query every 4 minutes per session",
+                   "never a loop of API calls to test a limit", "`gh pr checks --watch --interval 120`"):
+        assert needed in s, needed
+    assert s.index("## 8. Beads is where") < s.index("**Polling GitHub.**") < s.index("## 9. Read the record")
