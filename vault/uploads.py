@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -51,6 +50,7 @@ V1 = "/api/v1"
 LIFETIME = timedelta(hours=1)
 MAX_OPEN = 5  # links a person can have open at once
 STARTS_PER_MINUTE = 10
+UPLOAD_LOCK_CLASS = 7301  # pg_advisory_xact_lock(class, user id): one start at a time per person (a number no other lock uses)
 
 
 def _hash(ticket: str) -> str:
@@ -123,23 +123,19 @@ def _supersede_oldest_waiting(db: Session, user_id: int) -> int | None:
     return gone[0] if gone else None
 
 
-def _plain(name: str | None) -> str:
-    """A file name for a sentence the assistant reads: whoever holds a link's ticket chose it, so it is cut and reduced to plain
-    characters."""
-    return re.sub(r"[^\w .,()+-]", "?", name or "file")[:60]
-
-
 def _hm(when: datetime | None) -> str:
     return when.astimezone(timezone.utc).strftime("%H:%M UTC") if when is not None else "?"
 
 
 def _held_files(db: Session, user_id: int) -> str:
-    """The person's own links that hold a file, for the plain refusal: the assistant has no list, and a new chat has no ids."""
-    rows = db.execute(select(StagedUpload.id, StagedUpload.filename, StagedUpload.uploaded_at, StagedUpload.expires_at)
+    """The person's own links with a file uploaded through them, for the plain refusal: the assistant has no list, and a new chat
+    has no ids. Size and time only, never the file's name: whoever holds a link's ticket chose that name, and the sentence is read
+    by assistants (get_staged_upload answers it as data, in its own field)."""
+    rows = db.execute(select(StagedUpload.id, func.length(StagedUpload.content).label("size"), StagedUpload.uploaded_at,
+                             StagedUpload.expires_at)
                       .where(StagedUpload.user_id == user_id, StagedUpload.content.is_not(None))
                       .order_by(StagedUpload.expires_at, StagedUpload.id)).all()
-    return "; ".join(f"id {r.id} ({_plain(r.filename)}, uploaded {_hm(r.uploaded_at)}, link ends {_hm(r.expires_at)})"
-                     for r in rows)
+    return "; ".join(f"id {r.id} ({r.size:,} bytes, uploaded {_hm(r.uploaded_at)}, link ends {_hm(r.expires_at)})" for r in rows)
 
 
 UploadId = Annotated[int, Path(ge=1, le=MAX_ID)]  # a bigger number can't exist (and would overflow the column)
@@ -157,22 +153,27 @@ def build_router(get_db, current_user, settings) -> APIRouter:
                          "the file goes into that bucket only")
     def start_upload(request: Request, bucket_id: BucketId = None, user: User = Depends(current_user),
                      db: Session = Depends(get_db)) -> dict:
-        per_user(request, "upload start", user.id, STARTS_PER_MINUTE, db)
+        per_user(request, "upload start", user.id, STARTS_PER_MINUTE, db)  # commits: the transaction below starts after it
         if bucket_id is not None and db.scalar(select(Bucket.id).where(Bucket.id == bucket_id, Bucket.user_id == user.id)) is None:
             raise HTTPException(404, "Bucket not found")  # another person's id is the same 404
+        # One start at a time per person, to the end of this transaction: the count, the replacement and the insert are then
+        # one decision. Without it, six simultaneous starts at three open links all counted three and left six rows, and two
+        # at one waiting link and four held files could both find the same waiting row (one then answered a false 409).
+        db.execute(select(func.pg_advisory_xact_lock(UPLOAD_LOCK_CLASS, user.id)))
         db.execute(delete(StagedUpload).where(StagedUpload.expires_at <= _now()))
         open_links = db.scalar(select(func.count()).select_from(StagedUpload).where(StagedUpload.user_id == user.id))
         replaced = None
         if open_links >= MAX_OPEN:
             replaced = _supersede_oldest_waiting(db, user.id)
-            if replaced is None:  # all of them hold a file the person has not confirmed: never one of those
+            if replaced is None:  # every link has a file uploaded through it: never replace one of those
                 held = _held_files(db, user.id)
                 db.commit()
-                raise HTTPException(409, f"You already have {MAX_OPEN} open upload links and each holds a file the person "
-                                    "uploaded and has not confirmed, so none can be replaced. Nothing is lost: show what is waiting "
-                                    "with get_staged_upload (the ids are listed here) and import one with confirm_staged_upload "
-                                    "once the person says yes, or let them expire (one hour from when each link was made); "
-                                    "there is no discard yet. Waiting: " + held)
+                raise HTTPException(409, f"You already have {MAX_OPEN} open upload links and a file has been uploaded through "
+                                    "each one (by the person, or by the app that made the link, which holds the link's address), so "
+                                    "none can be replaced. The files are not imported and nothing is lost. To see what one would "
+                                    "change, call get_staged_upload with an id listed here; import one with confirm_staged_upload "
+                                    "only if the person recognises it and says yes. Otherwise the links end on their own (one hour "
+                                    "from when each was made); there is no discard yet. Uploaded: " + held)
         ticket = secrets.token_urlsafe(32)
         staged = StagedUpload(user_id=user.id, ticket_hash=_hash(ticket), expires_at=_now() + LIFETIME,
                               bucket_id=bucket_id, bucket_bound=bucket_id is not None)

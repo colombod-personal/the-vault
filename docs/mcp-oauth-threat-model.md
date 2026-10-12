@@ -906,49 +906,75 @@ Residual risks, stated:
 The vault-wxy.7.1 batch ran 8 unnamed phrasings headless and used up the account's five open links; 2 of 8 answers were the 409. A
 new chat has no memory of the link it was given, and only a hash of the ticket is stored, so the link cannot be handed back: the
 player who retried was stuck for up to an hour. Now, when the person already has five open links, `start_collection_upload`
-(`POST /api/v1/uploads`) **removes the oldest link that holds no file** and issues the new one; the answer carries
-`replaced_upload_id` and says that link no longer works. A link that holds a file is never removed. When all five hold one, the
-answer is a 409 that says so, lists them (id, file name cut to plain characters, upload time, end of the link) and points to
-`get_staged_upload` and `confirm_staged_upload`; there is still no discard (vault-wxy.13).
+(`POST /api/v1/uploads`) **removes the oldest link that has no file uploaded through it** and issues the new one; the answer carries
+`replaced_upload_id` and says that link no longer works. A link with a file uploaded through it is never removed. When all five
+have one, the answer is a 409 that says so, lists them (id, size, upload time and end of the link, never the file's name) and points
+to `get_staged_upload` and `confirm_staged_upload`; there is still no discard (vault-wxy.13).
+
+**What this does not fix, said plainly (review of b833d49, 2026-10-12): the lockout.** A file "uploaded through a link" is not
+necessarily the person's: a connected app that made all five links holds all five tickets and can `POST /upload` its own file to
+each. The links then all have a file, none can be replaced, and the person's next start is a 409 until the links end, up to an hour
+from when each was made, and the person cannot discard them. This change replaces "fill" with "rotate" for links that have no file;
+the lockout remains for as long as files are held, and it is the same denial the app could cause before. The 409 therefore does not
+say "the person uploaded": it says a file was uploaded through each link, by the person or by the app that made it, that none is
+imported, and to import one only if the person recognises it. The discard is vault-wxy.13 (with attribution, list and revoke). A
+second consequence: with four files held there is one free slot, so two starts at about the same time both get a link and the
+second replaces the first (the newest request owns the slot); the first link's holder finds it expired.
 
 What a malicious connected read-only app can and cannot do with this:
 
-- **Cannot read or import anything new.** It gets the id of the link it replaced, which is a row of the person's own, no ticket and no file: the id is the
-  same number `get_staged_upload` would take from any read connection. The apply is write scope and needs the previewed
-  `content_hash`; a read-only app is refused there (`test_a_read_only_token_and_a_write_token_get_the_same_replacement`,
+- **Cannot read or import anything new.** It gets the id of the link it replaced, which is a row of the person's own, no ticket and
+  no file: the id is the same number `get_staged_upload` would take from any read connection. The apply is write scope and needs the
+  previewed `content_hash`; a read-only app is refused there (`test_a_read_only_token_and_a_write_token_get_the_same_replacement`,
   `test_a_read_only_app_can_rotate_the_persons_waiting_links_but_not_read_or_import_what_they_hold`).
-- **Can rotate the person's waiting links.** Up to ten a minute (the per-person start counter, unchanged and still counted when a
-  link is replaced: `test_the_ten_starts_a_minute_limit_still_counts_when_a_link_is_replaced`). Before, the same app could fill all
-  five slots and make the person's own assistant wait; now it can instead make a link the person was given stop working. Neither
-  reads or imports anything. A link the app replaced is a link that held no file, so no uploaded data is lost; the person has to
-  ask for a new one.
-- **Can strand a person who has the page open, in one narrow case.** The person opened an old link (the oldest waiting one) and is
-  choosing a file when a sixth link is made: their POST then finds no link. They get the ordinary "This upload link has expired,
-  ask your assistant for a new one" page, never "File received" (`test_a_file_that_arrives_after_its_link_was_replaced_is_refused_as_expired_and_not_reported_received`).
-  The oldest waiting link is the one least likely to be in use, which is why it is the one replaced, and a link that has begun
-  receiving a file is not "waiting" any more. Not mitigated further: a minimum age before a link may be replaced was considered and
-  left out, because it brings the 409 back for the person who asked for five links in a minute.
+- **Can rotate the person's waiting links, quickly.** The per-person start counter (10 a minute) is unchanged and still counts a
+  start that replaces a link (`test_the_ten_starts_a_minute_limit_still_counts_when_a_link_is_replaced`). The review of b833d49
+  measured what that allows: a hostile app makes the person's newest waiting link stop working in 5 starts (about 30 seconds), and
+  can repeat it as often as it likes; because the counter is a fixed one-minute window, up to 20 starts fit in about 2 seconds
+  across a window boundary. So "the oldest waiting link is the one replaced" is a protection against a benign assistant that asks
+  again, not against a hostile one. What it costs the person: they ask their assistant for a new link; no data is lost, because a link
+  with a file uploaded through it is never replaced. Before, the same app could fill the five slots and make the person's own
+  assistant wait; now it can make a link the person was given stop working. Neither reads or imports anything.
+- **Can strand a person who has a link's page open.** The person opened a link and is choosing a file when the link is replaced:
+  their POST finds no link. They get the ordinary "This upload link has expired, ask your assistant for a new one" page, never
+  "File received" (`test_a_file_that_arrives_after_its_link_was_replaced_is_refused_as_expired_and_not_reported_received`). A link
+  that has begun receiving a file is no longer waiting. A minimum age or a last-opened time before a link may be replaced was
+  considered and left out here (it brings the 409 back for a person who asks five times in a minute); it is logged under
+  vault-wxy.13.
 - **Cannot take another person's links**: the statement is made under the owner's id (`test_replacing_does_not_touch_another_persons_links`).
+- **Cannot put its words into the 409.** The file name is chosen by whoever holds a link's ticket, and the 409 is read by the
+  person's assistants. It carries no file name at all, only the id, the size and the times; the name is in the structured answer of
+  `get_staged_upload`, as data (`test_a_hostile_file_name_never_reaches_the_409`,
+  `test_another_persons_files_never_appear_in_the_409`).
 
-The race, and whether the replacement is a transaction. The replacement is one `DELETE ... WHERE id = (SELECT ... ORDER BY
-expires_at, id LIMIT 1 FOR UPDATE SKIP LOCKED) AND content IS NULL ... RETURNING id` in the same database transaction as the insert
-of the new link, committed once: if the insert fails the old link is still there, and two requests at the cap at the same time take
-two different rows (`SKIP LOCKED`) and each insert one, so the count stays five. The `content IS NULL` test is made on the row under
-its lock, so the three orders in which a file and a replacement can meet all end safely:
+The race, and whether the replacement is a transaction. Each start takes `pg_advisory_xact_lock(7301, user id)` after the
+per-person counter and before it reads anything, so one person's starts are one at a time to the end of their transaction. (Without
+it, 6 simultaneous starts at 3 open links all counted 3 and left 6 rows, and two starts with one waiting link and four held files
+could both find the same waiting row, one then answering a false 409: the review reported both. The lock is PostgreSQL's, which is
+what the Vault runs on.) The replacement is then one `DELETE ... WHERE id = (SELECT ... ORDER BY expires_at, id LIMIT 1 FOR UPDATE
+SKIP LOCKED) AND content IS NULL ... RETURNING id` in the same transaction as the insert of the new link, committed once: if the
+insert fails the old link is still there (`test_the_replacement_and_the_new_link_are_one_transaction`), and a bad `bucket_id` replaces
+nothing (`test_a_bad_bucket_id_replaces_nothing`). The count is five or fewer after any number of simultaneous starts
+(`test_simultaneous_starts_below_the_cap_never_leave_more_than_five_links`,
+`test_two_simultaneous_starts_at_one_waiting_link_and_four_held_files_both_get_a_link`). The `content IS NULL` test is made on the row
+under its lock, so the three orders in which a file and a replacement can meet all end safely:
 1. the file was committed first: the row is no longer waiting and is skipped (`test_a_file_that_was_committed_before_the_replacement_keeps_its_link`);
 2. the file's write is in flight (row locked, not committed): the row is skipped and the next oldest waiting one is taken, and the
-   file's commit stands (`test_a_file_being_written_while_the_sixth_link_is_made_keeps_its_link`);
+   file's commit stands (`test_a_file_being_written_while_the_sixth_link_is_made_keeps_its_link`, time-bounded so a replacement that
+   waits for the lock fails the test instead of hanging it);
 3. the replacement was committed first and the file's write comes after: the file is written with one conditional `UPDATE ... WHERE
-   id = :id AND expires_at > now()` and, if no row matched, it is not kept and the page answers as for an expired link. This
-   was an unconditional attribute write that would have raised on a missing row; the page also reads the row's plain values once,
-   before its first commit, so it never reads a row that has gone.
+   id = :id AND expires_at > now()` and, if no row matched, it is not kept and the page answers as for an expired link; a link that
+   expired while the file was being read is refused the same way
+   (`test_a_file_is_not_kept_for_a_link_that_expired_while_it_was_being_read`). This was an unconditional attribute write that would
+   have raised on a missing row; the page also reads the row's plain values once, before its first commit, so it never reads a row
+   that has gone.
 
 No oracle: the replaced row is deleted, as expired ones are, so `/uploads/{id}` and the page answer exactly as for an expired or
-made-up ticket (`test_a_sixth_link_replaces_the_oldest_waiting_one_and_the_old_one_answers_as_expired`). The 409's list of held files
-is the person's own data to their own authenticated caller; the file names are whatever the uploader chose, so they are cut to 60
-plain characters before they go into a sentence the assistant reads. Rate limits are unchanged: the 10 starts a minute are counted
-before anything is replaced (a refused start replaces nothing), and the page keeps its allowance per link
-(`test_the_page_allowance_per_link_is_unchanged`).
+made-up ticket (`test_a_sixth_link_replaces_the_oldest_waiting_one_and_the_old_one_answers_as_expired`). The 409's list is the
+person's own links to their own authenticated caller, never another person's (`test_another_persons_files_never_appear_in_the_409`).
+Rate limits are unchanged: the 10 starts a minute are counted before anything is replaced (a refused start replaces nothing), and
+the page keeps its allowance per link (`test_the_page_allowance_per_link_is_unchanged`).
+
 ## The compact tool list for the Codex family (2026-10-11, vault-wxy.5)
 
 What changed: a client whose `initialize` names it `codex-mcp-client` is shown a short list (core tools, `vault_tools`,

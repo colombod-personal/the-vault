@@ -173,7 +173,7 @@ def test_a_read_only_app_can_rotate_the_persons_waiting_links_but_not_read_or_im
         db.commit()
     for denied in (tool(read, "start_collection_upload"), tool(write, "start_collection_upload")):  # either scope
         text = denied["content"][0]["text"]
-        assert denied["isError"] is True and "each holds a file the person uploaded and has not confirmed" in text
+        assert denied["isError"] is True and "a file has been uploaded through each one" in text
         assert "confirm_staged_upload" in text and f"id {sixth['id']}" in text
 
 
