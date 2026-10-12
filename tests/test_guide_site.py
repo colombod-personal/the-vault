@@ -153,6 +153,24 @@ def test_a_page_being_written_may_not_carry_steps(tmp_path, name):
     assert "may not contain steps" in message
 
 
+def test_the_start_page_may_not_carry_steps_either(tmp_path):
+    """`status: home` is not a way round the rule: only a `checked` page may hold steps."""
+    for number, steps in enumerate(("<ol><li>Open it</li></ol>", "<p>Step 1: open the app</p>", "<pre>run this</pre>")):
+        assert "may not contain steps" in refused(tmp_path / f"case{number}", {"index.html": home(steps)})
+
+
+def test_the_link_check_reads_pages_and_stylesheets_whatever_the_case_of_the_extension(tmp_path):
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "index.html").write_text('<h1>x</h1><a href="OTHER.HTML">o</a>', encoding="utf-8")
+    (site / "OTHER.HTML").write_text('<h1>y</h1><a href="gone.html">g</a><svg></svg>', encoding="utf-8")
+    (site / "STYLE.CSS").write_text("@import 'a.css';", encoding="utf-8")
+    problems = problems_of(site)
+    assert any(p.startswith("OTHER.HTML:") and "gone.html" in p for p in problems), problems
+    assert any(p.startswith("OTHER.HTML:") and "<svg> is not allowed" in p for p in problems), problems
+    assert any(p.startswith("STYLE.CSS:") and "@import" in p for p in problems), problems
+
+
 def test_the_step_check_lets_ordinary_sentences_through(tmp_path):
     prose = "<p>Version 2 of the app, about 5 minutes, and a step by step explanation will come here. It covers 3 things.</p>"
     out = built(tmp_path, {"index.html": home(), "a.html": DRAFT.format(t="A") + prose})
@@ -215,11 +233,12 @@ def test_files_starting_with_an_underscore_are_not_published_and_allowed_assets_
 
 @pytest.mark.parametrize("name", ["notes.md", "build.py", "logo.svg", "page.htm", ".secret", ".env", "assets/.hidden.png",
                                   "draft.local.png", "plan.local.html", "notes.LOCAL.png", "plan.Local.html", "assets/run.js", "data.json",
-                                  "archive.zip", "noextension"])
+                                  "archive.zip", "noextension", "draft.local/assets/shot.png", "assets/notes.local/shot.png",
+                                  "Draft.LOCAL/page.html", "page.HTML", "style.CSS", "assets/shot.PNG"])
 def test_only_the_allow_listed_file_types_are_published(tmp_path, name):
     message = refused(tmp_path, {"index.html": home(), name: "x"})
     assert Path(name).name in message
-    assert "is never published" in message or "are not published" in message
+    assert "is never published" in message or "are not published" in message or "must be lower case" in message
 
 
 def test_a_symbolic_link_is_refused_even_when_it_points_outside_the_tree(tmp_path):
@@ -352,6 +371,7 @@ BAD = {
     "a base element": ('<base href="https://example.com/">', "<base> is not allowed"),
     "a meta refresh": ('<meta http-equiv="refresh" content="0; url=https://example.com/">', "redirect is not allowed"),
     "an inline script": ("<script>alert(1)</script>", "inline <script> is not allowed"),
+    "an inline svg that loads from another site": ('<svg><image href="https://example.com/t.png"></image></svg>', "<svg> is not allowed"),
     "an event handler": ('<p onclick="x()">x</p>', "event handler onclick="),
     "a stylesheet import": ("<style>@import url(other.css);</style>", "@import in CSS is not allowed"),
     "a css url from another site": ('<div style="background:url(https://example.com/x.png)">x</div>', "loaded from another site"),

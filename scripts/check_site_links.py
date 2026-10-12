@@ -18,7 +18,7 @@ It fails (exit 1, one line per problem) on:
 - anything *loaded* (image, stylesheet, srcset, video, CSS ``url()``) from another site or from the Vault's own domain: the guide
   makes no request to another origin, only an ``<a>`` link may point there; an ``https://`` address with no host name;
 - ``<form>`` and its fields (a guide collects nothing);
-- things a plain guide has no use for and that can load or run something: ``<base>``, ``<iframe>``, ``<object>``, ``<embed>``,
+- things a plain guide has no use for and that can load or run something: ``<base>``, ``<iframe>``, ``<object>``, ``<embed>``, ``<svg>``,
   ``<meta http-equiv="refresh">``, an inline ``<script>``, an ``on...=`` event handler, ``@import`` in CSS.
 
 Links to other sites are not fetched (CI must not depend on the network); they only have to be ``https://``, and only an ``<a>``
@@ -49,7 +49,8 @@ LINK_ATTRS = {("a", "href"), ("area", "href"), ("link", "href"), ("img", "src"),
 FORBIDDEN_TAGS = {"base": "<base> changes where every link goes", "iframe": "a guide does not embed other pages",
                   "object": "a guide does not embed objects", "embed": "a guide does not embed objects", "frame": "no frames",
                   "form": "a guide collects nothing (a form would send what is typed to another address)",
-                  "input": "a guide collects nothing", "textarea": "a guide collects nothing", "select": "a guide collects nothing"}
+                  "input": "a guide collects nothing", "textarea": "a guide collects nothing", "select": "a guide collects nothing",
+                  "svg": "inline SVG can load other files and carry script (use a PNG or JPG screenshot)"}
 CSS_URL = re.compile(r"url\(\s*(?:\"([^\"]*)\"|'([^']*)'|([^)\s]*))\s*\)", re.IGNORECASE)
 CSS_IMPORT = re.compile(r"@import\b", re.IGNORECASE)
 
@@ -141,7 +142,8 @@ class Checker:
         self.problems.append(f"{page}:{line}: {message}")
 
     def run(self) -> list[str]:
-        for path in sorted(self.site.rglob("*.html")):
+        files = sorted(p for p in self.site.rglob("*") if p.is_file())  # any case: page.HTML is a page to a browser
+        for path in (p for p in files if p.suffix.lower() in (".html", ".htm")):
             self.counts["pages"] += 1
             page = path.relative_to(self.site).as_posix()
             result = scan(path)
@@ -149,7 +151,7 @@ class Checker:
                 self.problem(page, line, message)
             for tag, attribute, value, line in result.links:
                 self.check(page, line, tag, attribute, value.strip(), result.ids)
-        for path in sorted(self.site.rglob("*.css")):
+        for path in (p for p in files if p.suffix.lower() == ".css"):
             page = path.relative_to(self.site).as_posix()
             sheet = Scan()
             sheet.css(path.read_text(encoding="utf-8"), 1)

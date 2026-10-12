@@ -80,6 +80,7 @@ def split_meta(text: str) -> tuple[dict[str, str], str]:
     return meta, "\n".join(lines[i:]).strip() + "\n"
 
 
+LOCAL_NAME = re.compile(r"\.local(\.|$)", re.IGNORECASE)  # notes.local.md, draft.local/ (a folder), page.LOCAL.html
 CHECKED = re.compile(r"^(\d{4}-\d{2}-\d{2}),\s*(.{3,200})$")
 
 
@@ -120,11 +121,14 @@ def scan_source(source: Path) -> tuple[list[Path], list[Path], list[str]]:
                 continue
             if any(part.startswith(".") for part in rel.parts):
                 problems.append(f"{rel.as_posix()}: a name that starts with '.' is never published")
-            elif ".local." in name.lower():
-                problems.append(f"{rel.as_posix()}: a '.local.' file is private notes and is never published")
-            elif path.suffix.lower() == ".html":
+            elif any(LOCAL_NAME.search(part) for part in rel.parts):  # every folder of the path, not only the file name
+                problems.append(f"{rel.as_posix()}: a '.local.' file or folder is private notes and is never published")
+            elif path.suffix != path.suffix.lower():
+                problems.append(f"{rel.as_posix()}: file extensions must be lower case (the link check and the server treat "
+                                f"{path.suffix!r} differently)")
+            elif path.suffix == ".html":
                 pages.append(path)
-            elif path.suffix.lower() in ASSET_SUFFIXES:
+            elif path.suffix in ASSET_SUFFIXES:
                 assets.append(path)
             else:
                 problems.append(f"{rel.as_posix()}: {path.suffix or name!r} files are not published (allowed: .html and "
@@ -144,8 +148,8 @@ def load_pages(source: Path) -> list[dict]:
         status = meta.get("status", "")
         if status and status not in STATUSES:
             problems.append(f"{rel}: status must be one of {', '.join(STATUSES)} (it is {status!r})")
-        if status == "being-written" and any(pattern.search(body) for pattern in STEP_PATTERNS):
-            problems.append(f"{rel}: a page that is being written may not contain steps (a numbered list, <pre>, 'Step 1', '1.'): "
+        if status != "checked" and any(pattern.search(body) for pattern in STEP_PATTERNS):  # being-written and home alike
+            problems.append(f"{rel}: a page that is not `checked` may not contain steps (a numbered list, <pre>, 'Step 1', '1.'): "
                             "only steps run on the real app are published")
         if status == "checked" and not valid_checked(meta.get("checked", "")):
             problems.append(f"{rel}: a checked page needs `<!-- checked: YYYY-MM-DD, <app and version> -->` (the real date its steps were "
