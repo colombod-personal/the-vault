@@ -624,7 +624,9 @@ TOOLS = [
          "they confirm. The uploaded file is then read by get_staged_upload. Any connection may make the link, read-only ones "
          "included, because it changes nothing in the person's collection or decks; importing the uploaded file is "
          "confirm_staged_upload, which needs the write permission. At most 5 links are open at once, and none can be listed or "
-         "cancelled yet, so use the link already given in this chat rather than making another; a file may be 20 MB. "
+         "cancelled yet, so use the link already given in this chat rather than making another; the server takes a file of "
+         "up to 20 MB, but on mtgvault.cards the hosting platform caps "
+         "a request at about 4 MB, so a bigger file is refused before the Vault sees it. "
          "With bucket_id the upload goes into that bucket only, fixed "
          "when the link is made; without it the upload page lets the person pick one of their buckets, or the whole collection.",
          {"bucket_id": IMPORT_BUCKET["bucket_id"]}, method="POST", path=lambda a: f"{V1}/uploads", query=("bucket_id",), write=True,

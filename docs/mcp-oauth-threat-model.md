@@ -838,7 +838,7 @@ scope (it keeps `write=True`, so its annotations still say it is not read-only),
 `READ_ONLY_POSTS` (`vault/app.py`; exact path, so `POST /api/v1/uploads/{id}/apply` is not). It touches one file of section 6's
 list (`vault/oauth_routes.py`, one sentence of the consent text, below). Nothing else a read-only connection may do changes, and it still gets nothing that imports.
 
-What a read-only caller can now cause, and what stops it (all in `vault/uploads.py`; the limits were already there; the review of 2026-10-11 added the per-person allowance on the page):
+What a read-only caller can now cause, and what stops it (all in `vault/uploads.py`; the limits were already there; the review of 2026-10-11 added an allowance on the page, per link):
 
 - **A row, bounded.** One `staged_uploads` row: the person's id, the hash of a random ticket, an expiry (one hour) and, if the caller
   names one, the person's own bucket (another person's is the same 404). At most 5 are open per person (409 on the sixth), at most
@@ -863,10 +863,15 @@ What a read-only caller can now cause, and what stops it (all in `vault/uploads.
   "It can also give you a one-hour link to upload a collection file, and read what importing that file would change. Importing it
   needs Write." (`tests/test_upload_read_only.py::test_the_consent_screen_tells_a_person_that_read_includes_the_upload_link`.)
   This is the one file of section 6's list that this change touches, only for that sentence.
-- **Per-person allowance on the page (review of 2026-10-11).** `POST /upload` is the one route that parses and matches up to 20 MB
-  for a ticket's holder, and it had no per-person limit; the authenticated import routes have `import_limit` a minute. It now
-  counts against the same allowance (429 page with `Retry-After`; made-up tickets are refused first and count for no one)
-  (`test_the_upload_page_counts_against_the_import_allowance_of_the_person`).
+- **An allowance of its own on the page (review of 2026-10-11, corrected after the re-review of `56939d5`).** `POST /upload` is the
+  one route that parses and matches up to 20 MB for a ticket's holder, and it had no limit; the first fix counted it against the
+  person's `import` counter. That counter counts refused tries too, so an app the person had since disconnected, still holding its
+  ticket, could loop on the page and keep the person's own `/imports` at 429 for as long as it looped. The page now has a counter
+  per link (`import_limit` a minute for each link, 429 page with `Retry-After`, a different counter key kind from the person's), so
+  a loop on a link costs the person that link only (they ask for a new one); the person's `/imports` is not touched. A made-up ticket
+  is refused first and counted nowhere. A person is bounded by 5 links x `import_limit` a minute on the page. Tests:
+  `test_a_loop_on_the_upload_page_does_not_touch_the_persons_imports`,
+  `test_a_made_up_ticket_leaves_every_counter_untouched`, `test_the_upload_page_has_its_own_allowance_per_link`.
 - **The allow-list is method-aware (review of 2026-10-11).** `READ_ONLY_POSTS` exempts only a `POST` at exactly those paths; a
   `PUT`, `PATCH` or `DELETE` at one of them, a trailing slash or a query-string variant that is another route is still a write
   (`test_the_allow_list_exempts_only_a_post_at_exactly_that_path`), and a sweep of every unsafe-method route in the app

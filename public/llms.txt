@@ -234,7 +234,7 @@ be revoked (Account → Connected apps for OAuth).
   - imports, exports and sharing: `list_imports`, `get_import`, `import_collection_csv` (preview first: it
     keeps edits made here and applies only what changed in the person's app, and lists conflicts; with
     `bucket_id` it compares with and replaces that bucket only and says what it leaves alone),
-    big files, and any file the person attaches (the one-time link, which a read-only connection can make): `start_collection_upload` (also takes `bucket_id`), `get_staged_upload`, `confirm_staged_upload` (needs write),
+    big files, and any file the person attaches (the link, good for one hour, which a read-only connection can make): `start_collection_upload` (also takes `bucket_id`), `get_staged_upload`, `confirm_staged_upload` (needs write),
     (Dragon Shield, Moxfield or generic CSV), `list_export_formats`, `list_shared_with_me`,
     `get_shared_deck`, `list_my_shares`, `accept_share`, `stop_sharing` (asks first)
   - connection check: `whoami` (who you are, your scopes, and which data versions the Vault holds)

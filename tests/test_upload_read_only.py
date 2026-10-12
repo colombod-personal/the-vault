@@ -1,4 +1,4 @@
-"""vault-wxy.6: the one-time upload link works for a read-only connection, the default grant.
+"""vault-wxy.6: the upload link works for a read-only connection, the default grant.
 
 A person attached a collection file of about 7,000 cards in ChatGPT; the assistant could not offer the upload link, because
 ``start_collection_upload`` was a write tool: a read-only connection (the default consent) neither saw it in ``tools/list``
@@ -195,22 +195,53 @@ def test_a_read_only_connection_names_only_the_persons_own_buckets(app, read):
 def test_a_link_started_by_a_read_only_connection_takes_no_more_than_twenty_megabytes(app, read):
     started = ok(read, "start_collection_upload")
     big = person_uploads(app, ticket_of(started), b"x" * (importer.MAX_UPLOAD_BYTES + 1))
-    assert big.status_code == 413 and "20 MB" in big.text
+    assert big.status_code == 413 and "20 MB" in big.text and "about 4 MB" in big.text
     with app.state.db.sessions() as db:
         assert db.get(StagedUpload, started["id"]).content is None  # nothing was kept
     assert ok(read, "get_staged_upload", upload_id=started["id"])["status"] == "waiting"
 
 
-def test_the_upload_page_counts_against_the_import_allowance_of_the_person(app, read):
-    """The page parses and matches up to 20 MB for whoever holds the ticket; it shares the import routes' per-person limit."""
+def test_the_upload_page_has_its_own_allowance_per_link(app, read):
+    """The page parses and matches up to 20 MB for whoever holds the ticket: IMPORT_LIMIT a minute for each link."""
+    limit = app.state.settings.import_limit
+    first, second = ok(read, "start_collection_upload"), ok(read, "start_collection_upload")
+    answers = [person_uploads(app, ticket_of(first), file(line(*KILLER, qty=1))) for _ in range(limit + 1)]
+    assert [a.status_code for a in answers] == [200] * limit + [429]
+    assert "Too many uploads" in answers[-1].text and "new link" in answers[-1].text
+    assert int(answers[-1].headers["retry-after"]) >= 1
+    assert person_uploads(app, ticket_of(second), file(line(*KILLER, qty=1))).status_code == 200  # another link has its own
+    assert ok(read, "get_staged_upload", upload_id=first["id"])["status"] == "uploaded"  # the last good file stays
+
+
+def test_a_loop_on_the_upload_page_does_not_touch_the_persons_imports(app, read):
+    """An app the person disconnected can still hold its ticket and loop on the page. Refused tries count, so the page's counter
+    stays above its limit for as long as it loops: that must be the link's counter, not the one the person's /imports uses."""
     limit = app.state.settings.import_limit
     started = ok(read, "start_collection_upload")
-    ticket = ticket_of(started)
-    answers = [person_uploads(app, ticket, file(line(*KILLER, qty=1))) for _ in range(limit + 1)]
-    assert [a.status_code for a in answers] == [200] * limit + [429]
-    assert "Too many uploads" in answers[-1].text and int(answers[-1].headers["retry-after"]) >= 1
-    assert person_uploads(app, "not-a-real-ticket", file(line(*KILLER, qty=1))).status_code == 404  # refused first, counts for no one
-    assert ok(read, "get_staged_upload", upload_id=started["id"])["status"] == "uploaded"  # the last good file stays
+    codes = [person_uploads(app, ticket_of(started), file(line(*KILLER, qty=1))).status_code for _ in range(limit * 3)]
+    assert codes[:limit] == [200] * limit and set(codes[limit:]) == {429}  # the loop is refused and keeps counting
+    files = {"file": ("e.csv", base_file(), "text/csv")}
+    assert read.browser.post("/api/v1/imports/preview", files=files).status_code == 200  # the person's own, untouched
+    assert read.browser.post("/api/v1/imports", files=files).status_code == 201
+    assert ok(read, "start_collection_upload")["id"] != started["id"]  # and a new link is theirs to ask for
+
+
+def test_a_made_up_ticket_leaves_every_counter_untouched(app, read):
+    from sqlalchemy import func
+    from vault.models import RateHit
+    limit = app.state.settings.import_limit
+    started = ok(read, "start_collection_upload")  # its own start was counted: take the count after it
+
+    def counted() -> int:
+        with app.state.db.sessions() as db:
+            return db.query(func.coalesce(func.sum(RateHit.hits), 0)).scalar()
+
+    before = counted()
+    for _ in range(limit * 3):
+        assert person_uploads(app, "not-a-real-ticket", file(line(*KILLER, qty=1))).status_code == 404
+    assert counted() == before  # nothing was counted: not for the person, not for any link
+    answers = [person_uploads(app, ticket_of(started), file(line(*KILLER, qty=1))) for _ in range(limit)]
+    assert [a.status_code for a in answers] == [200] * limit  # the real link still has its whole allowance
 
 
 def test_another_person_cannot_read_or_apply_an_upload_a_read_only_app_started(app, universe, read):
@@ -234,6 +265,15 @@ def test_the_tool_descriptions_state_the_limits_the_server_enforces():
     assert "read-only" in text and "confirm_staged_upload" in text and "write permission" in text
     assert "not single-use" in text and "none can be listed or cancelled" in text  # said where the link is described
     assert "changes nothing in the person's collection or decks" in text
+    # the server's own limit is 20 MB; on the hosted site the platform's request cap (docs/developing.md) is what a person meets
+    assert "mtgvault.cards" in text and "about 4 MB" in text and "before the Vault sees it" in text
+    assert "a file may be 20 MB" not in text  # the old sentence: true for the server, false for the hosted site
+
+
+def test_llms_txt_does_not_call_the_upload_link_one_time():
+    from pathlib import Path
+    text = (Path(__file__).resolve().parent.parent / "public" / "llms.txt").read_text(encoding="utf-8")
+    assert "one-time link" not in text and "link, good for one hour" in text  # it is reusable until it expires
 
 
 def test_the_consent_screen_tells_a_person_that_read_includes_the_upload_link(app, universe):
