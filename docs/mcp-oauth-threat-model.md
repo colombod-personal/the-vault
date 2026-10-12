@@ -1031,3 +1031,7 @@ person could switch Vault accounts only through Account, "Connected apps", "Disc
     test_the_account_chooser_prompt_is_not_refused_by_the_real_authorization_endpoint` (nightly, `TWINS_LIVE=1`) checks that the real
     Google and Microsoft endpoints answer the request with it as they do without it (an unknown client, so only the client can be
     complained about); the twins' own rule on prompt values is `_extra_checks`.
+  - **The conditions are each pinned** (`tests/test_sign_out_replace_rule.py`): a recent sign-in with a pending request still links another
+    provider account as before; an app flow (`app_redirect_uri`) keeps the #347 answer and goes back to the app with the error; a reviewer's
+    demo session switches accounts as before. Dropping the freshness or the app-flow condition fails its test; the reviewer condition is
+    belt and braces (`sign_in` already ignores a reviewer session for linking, so dropping it changes no outcome: a test cannot tell).
