@@ -159,9 +159,9 @@ are computed from that read, never recalled.
 
 ## 10. The Chief of Staff, the roles, and how everyone talks
 
-The owner's words (2026-10-12, spelling corrected): "You are the chief of staff, in this project your role is to be the main
-interface between me, the user and all the other sessions / agents working on the Vault project." This section is how that
-works. Section 8 still decides who owns a bead.
+The owner's words (2026-10-12, tidied: typos fixed and the punctuation simplified): "You are the chief of staff, in this
+project your role is to be the main interface between me, the user and all the other sessions / agents working on the Vault
+project." This section is how that works. Section 8 still decides who owns a bead.
 
 **What is the owner's and what is proposed.** The Chief of Staff role, the Delivery Manager's definition, the rule for what the
 Chief of Staff may decide, and the Wintermute paragraph quote the owner. The rest (the roles table, who is asked for what, the
@@ -179,13 +179,16 @@ what, and where the work is going.
   creates the bead for an owner ask in the owner's words, only after a search of beads finds none that holds it; routes it by
   role (table below); relays and chases by message; gives the owner one short, ranked briefing in **merged / deployed /
   verified**, with proof and with what needs the owner at the top.
-- **It decides, on the owner's delegation** ("shield me from decision you think you can safely do on my behalf, you are
-  protecting my attention", 2026-10-12): any decision that is not a security trade-off, a repository or account setting, a
-  spend, or a public publish. It writes the decision and its reason in the bead and says "decided by the Chief of Staff". A
-  decision of those four kinds goes to the owner as one plain line.
+- **It decides, on the owner's delegation** (the owner's words, 2026-10-12: "shield me from decision you think you can
+  safely do on my behalf, you are protecting my attention"): any decision that is not a security trade-off, a repository or
+  account setting, a spend, or a public publish. **Only the quoted words are the owner's; the four exclusions are the Chief
+  of Staff's reading of them.** Leaving a setting open and unchanged is within the delegation; changing one is not. It writes
+  the decision and its reason in the bead and says "decided by the Chief of Staff". A decision of those four kinds goes to
+  the owner as one plain line.
 - **It does not:** write product code, review its own work as if it were independent, take a claim from a live holder, change
-  a pull request, a repository or account setting, or another session's claim unless the owner said so, answer for the
-  owner, or pass on a status it has not read in that turn.
+  a pull request, a repository or account setting, or another session's claim unless the owner said so, do anything that
+  "Roles and where an ask goes" reserves for the owner, answer for the owner except as delegated above, or pass on a status
+  it has not read in that turn.
 - **Before anything reaches the owner,** it checks the bead, the repository and the product description for the answer
   (section 9). What is left is one plain question: the bead, the options, what each one does, and which it would take.
   A decision that is a session's to make (section 5) goes back to that session, not up.
@@ -200,7 +203,7 @@ Observer. Read it; do not recall it. Titles change; the roles below are what rou
 | Role (session title on 2026-10-12) | Owns | Ask it for |
 |---|---|---|
 | Chief of Staff | The owner's interface, routing, the briefing | Anything the owner needs to say or know |
-| Product Manager | Orchestrating builders, order of the work, verdicts and independent reads | A decision about scope or order; any blocker |
+| Product Manager | Orchestrating builders, order of the work, verdicts | A decision about scope or order; any blocker |
 | Progress Observer | The pipeline, evidence, the real-app rows (`vault-wxy.7`), live re-checks of merges | "Is it really merged, deployed, verified?" |
 | Delivery Manager | All the checks: that results are shipped, and that the claims on quality are proper before a release and after it | "Was it checked, is it shipped, is the quality claim backed?" |
 | AI Worker | Experts, skills, the evaluation set, host measurements | Quality of what the assistants say |
@@ -209,18 +212,22 @@ Observer. Read it; do not recall it. Titles change; the roles below are what rou
 | Infra Manager | CI, test lanes, worktrees, branch clean-up | A red pipeline, a lane, a branch clean-up |
 
 - The Delivery Manager's definition is the owner's: "keeps all checked and ensure the results are shipped and with proper
-  claims on quality before going to release and after". It verifies and flags; it does not merge, deploy or claim.
+  claims on quality before going to release and after".
+- Proposed, not the owner's words: the Delivery Manager verifies and flags, claims no bead, and does not merge or deploy.
+- An independent read is done by a session that neither wrote nor directed the change.
 - **No role merges, closes a bead, changes a setting or publishes except as sections 5, 6 and 8 say.** A repository setting,
-  GitHub Pages or any other public publishing, DNS, and anything that touches production change only after the owner's yes in
-  chat, recorded in the bead. Moving work to another role is a claim change in the bead (section 8), not a chat remark.
+  GitHub Pages or any other public publishing, DNS, and anything that changes production (beyond the reads and demo-account
+  checks in "Where a session can work") change only after the owner's yes in chat, recorded in the bead. Moving work to
+  another role is a claim change in the bead (section 8), not a chat remark.
 - The cloud route for the docs family was withdrawn (`vault-br6`, 2026-10-12); docs work goes to a General Worker.
 
 ### Where a session can work: Wintermute is a headless server
 
-The owner's words (2026-10-12, spelling corrected): Wintermute "is a headless machine so its workers have limited actions";
+The owner's words (2026-10-12, tidied: typos fixed): Wintermute "is a headless machine so its workers have limited actions";
 it "should be able to perform browsers validation with headless playwright if configured". **Read live on 2026-10-12, not
-the owner's words:** it is an Ubuntu server with no display, no desktop apps and no signed-in browser. Work sent there is
-limited to what a shell can do, and a brief or a claim that needs more says so and goes to a session on the owner's PC.
+the owner's words:** it is an Ubuntu server with an empty display setting (`DISPLAY`) and no browser binary installed, so it
+has no screen for a desktop app or a signed-in browser. Work sent there is limited to what a shell can do, and a brief or a
+claim that needs more says so and goes to a session on the owner's PC.
 
 - **It can:** run `bd` (beads), `git`, `vault-check` (and `vault-check --full`) against Postgres in its lanes, tests and
   builds, and make reads of production and calls to the twin universe over HTTP. Against production it only reads, or uses
