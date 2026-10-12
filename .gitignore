@@ -241,3 +241,6 @@ data/
 !.agents/plugins/marketplace.json
 skills-lock.json
 web/node_modules/
+
+# The built player guide (scripts/build_site.py)
+/_site/

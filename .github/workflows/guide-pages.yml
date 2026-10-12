@@ -1,0 +1,75 @@
+name: guide-pages
+# Publishes the player guide (docs/site) with GitHub Pages (bead vault-30s.3.2). The pages are plain HTML built by
+# scripts/build_site.py; the address decision and the steps that switch it on are in docs/developing.md ("The guide on GitHub Pages").
+#
+# THIS WORKFLOW PUBLISHES NOTHING UNTIL THE OWNER SWITCHES IT ON. Two jobs:
+#   build  always runs (push to main that changes the guide, or by hand): builds the site, fails on a broken link, and uploads the
+#          result as the Pages artifact (kept one day). It needs no Pages setting and changes nothing public.
+#   deploy runs only on main AND only when the repository variable GUIDE_PAGES_ENABLED is exactly 'true'. With the variable unset
+#          the job is skipped (the run is green and says so in its summary). With the variable set but Pages not enabled with the
+#          source "GitHub Actions", the job fails at configure-pages with "Get Pages site failed. Please verify that the repository
+#          has Pages enabled and configured to build using GitHub Actions" (enablement stays off: this workflow never changes a setting).
+# No secrets. The deploy job holds pages: write and id-token: write, and nothing else; every other permission is read-only.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/site/**"
+      - "scripts/build_site.py"
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: guide-pages  # one publish at a time; a publish already running finishes, only the newest waiting one runs after it
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19 (#180); move deliberately
+    timeout-minutes: 10
+    env:
+      GUIDE_PAGES_ENABLED: ${{ vars.GUIDE_PAGES_ENABLED }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.12"
+      - name: Build the guide (docs/site -> _site)
+        run: python scripts/build_site.py docs/site _site
+      - name: Check every link, screenshot and mtgvault.cards address
+        run: python scripts/check_site_links.py _site
+      - name: Say whether this run will publish
+        run: |
+          if [ "$GUIDE_PAGES_ENABLED" = "true" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            echo "Guide built and checked. The deploy job publishes it to GitHub Pages." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Guide built and checked. Nothing is published: the deploy job runs only on main with the repository variable GUIDE_PAGES_ENABLED set to 'true' (docs/developing.md, \"The guide on GitHub Pages\")." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
+        with:
+          path: _site
+          retention-days: 1
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main' && vars.GUIDE_PAGES_ENABLED == 'true'
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19 (#180); move deliberately
+    timeout-minutes: 10
+    permissions:  # this job only; the token of every other job is read-only
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # Fails with a clear message when Pages is not enabled with the "GitHub Actions" source. `enablement` is left at its default
+      # (false): this workflow never switches Pages on, a person does that in Settings -> Pages.
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d  # v6.0.0
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1
+      - name: Say what to do when the deploy failed
+        if: failure()
+        run: |
+          echo "::error::The guide was not published. Check Settings -> Pages: the source must be GitHub Actions (docs/developing.md, The guide on GitHub Pages)."

@@ -188,7 +188,8 @@ with a Neon Postgres database in Frankfurt (`fra1`) for GDPR. HTTPS is automatic
 - **Jobs that hold a secret** run only for `main`, never on `push` or `pull_request`, and don't
   install or run branch code next to the token (sync-prices runs only from `main`, with
   hash-checked dependencies installed before any secret is in the environment).
-- **Least privilege:** every workflow's `GITHUB_TOKEN` is read-only, checkouts don't keep the
+- **Least privilege:** every workflow's `GITHUB_TOKEN` is read-only (the budget guard's alert jobs add `issues: write`; the guide's
+  deploy job adds `pages: write` and `id-token: write`, only for main and only once the owner sets `GUIDE_PAGES_ENABLED`), checkouts don't keep the
   token, the Vercel CLI version is pinned, and values reach scripts through `env`, never
   `${{ }}` inside the script.
 - **Protect `main`:** Settings → Branches → add a rule (or ruleset) for `main`: require a pull
@@ -355,6 +356,77 @@ Check each provider:
 5. Account → Delete my account, then sign in again: you get a fresh, empty vault.
 6. Facebook: Meta's app dashboard → *Data Deletion Request Callback* test.
 
+
+## The guide on GitHub Pages
+
+The player guide (how to install the Vault in each assistant app, sign in and use it) lives in `docs/site/` and is published with
+GitHub Pages (bead vault-30s.3.2). **It is not live yet: merging the workflow publishes nothing** (see "Switching it on").
+
+**How it is made.** Plain HTML, no framework: each page in `docs/site/` is a fragment with a few comment lines at the top
+(`title`, `summary`, `nav`, `order`, `status`), and `scripts/build_site.py` (standard library, about 150 lines) wraps it in the
+shared header, navigation and footer (`docs/site/_layout.html`, which links back to https://mtgvault.cards) and writes plain
+files to `_site/`. Chosen over Jekyll or a Node generator because the guide is a handful of pages, nothing has to be installed
+or pinned, and the same script builds it locally, in CI and in the publishing job. Screenshots go in `docs/site/assets/`; every
+image needs alt text.
+
+**Nothing unverified ships (the owner asked for correct guidance).** A page's `status` is `being-written` (a banner, no
+steps: the builder refuses a numbered list, and the page is marked `noindex`) or `checked` (steps were run on the real app; the page
+must carry `<!-- checked: <date>, <app and version> -->`, shown to the reader). `status: home` is the start page. The content
+is vault-30s.3.1's job and only rows that passed on the real app (vault-wxy.7) may be written as working.
+
+**The link check** (`python scripts/check_site_links.py`, standard library, run first in `tests.yml` and again in the publishing
+workflow; `tests/test_guide_site.py` holds its cases) fails on: a broken internal link or `#anchor`; a missing screenshot; an image
+with no alt text or loaded from another site; a link that starts with `/` (the project address is a sub-path, so it would leave
+the guide); `http://`; and a link to https://mtgvault.cards that is not a file in `public/` (or `/`, `/api/mcp`) or whose `#anchor`
+is not on that page. Links to other sites are not fetched.
+
+**The workflow** (`.github/workflows/guide-pages.yml`): on a push to `main` that changes `docs/site/**` (or
+`scripts/build_site.py`), or by hand, the `build` job builds the guide, checks the links and uploads the Pages artifact (kept one
+day). The `deploy` job (official `actions/configure-pages` and `actions/deploy-pages`, pinned by commit, in the `github-pages`
+environment) runs **only on `main` and only when the repository variable `GUIDE_PAGES_ENABLED` is `true`**, so by default it is
+skipped and the run is green. Only that job holds `pages: write` and `id-token: write`; the workflow has no secret and never
+passes `enablement`, so it cannot switch Pages on. One publish runs at a time (concurrency group `guide-pages`). If the variable
+is `true` but Pages is not set to the "GitHub Actions" source, `configure-pages` fails with "Get Pages site failed. Please verify
+that the repository has Pages enabled and configured to build using GitHub Actions", and the job adds a line saying where to look.
+
+**llms.txt stays at https://mtgvault.cards/llms.txt** (a file at the root of the domain by convention; `public/llms.txt`, generated
+by `scripts/build_plugin.py`). The guide does not carry a copy; add one only if the owner asks.
+
+### The address (decision recorded 2026-10-12)
+
+| | A. Project address | B. Custom domain |
+|---|---|---|
+| Address | `https://colombod-personal.github.io/the-vault/` | `https://docs.mtgvault.cards/` |
+| Owner steps | Two settings in GitHub (below). No DNS | The same two, plus: verify the domain for the organisation, one DNS record at Vercel (the domain's DNS is `ns1/ns2.vercel-dns.com`), the custom-domain setting, wait for the certificate (up to a day), then "Enforce HTTPS" |
+| Reversible | Unset the variable and switch Pages off | Remove the DNS record **before** switching Pages off: a record left pointing at GitHub lets someone else host a page on the subdomain (GitHub's own warning); verifying the domain prevents it |
+| Stability | Changes if the organisation or repository is renamed | Independent of GitHub names, and the guide can move host later |
+| Looks like | A GitHub page | Part of mtgvault.cards |
+| Risk to the app | None | A sibling subdomain of the app's domain on third-party hosting. The app's cookies are host-only (no `Domain=`), so the guide cannot read them; it could set a cookie for the parent domain, which is harmless while the guide runs no script |
+
+**Recommendation: A, the project address, now.** It needs no DNS and nothing that can dangle, it can be switched off in one
+setting, and every link in the guide is relative, so moving to B later is one setting and one record, plus the few links from the
+app (vault-30s.3.3, which should keep the address in one place). B is better for the brand but it is a permanent public record in
+the domain's DNS and a second thing for the owner to keep up to date; there is no player-facing reason to pay that before the guide
+has any content. I could not confirm in GitHub's documentation whether the old project address redirects to the custom domain
+once one is set, so do not rely on a redirect: choose before the links in the app (vault-30s.3.3) are published, or plan to update
+them.
+
+### Switching it on (only with the owner's yes: it makes the guide public)
+
+For address A (nothing else is needed, no DNS):
+
+1. GitHub → the-vault → Settings → Pages → Build and deployment → Source: **GitHub Actions**.
+2. Settings → Secrets and variables → Actions → Variables → New repository variable `GUIDE_PAGES_ENABLED` = `true`.
+3. Recommended: Settings → Environments → `github-pages` (created by step 1) → Deployment branches → Selected branches → `main`.
+4. Actions → guide-pages → Run workflow on `main`. The first publish does not wait for a push to `docs/site`.
+5. Check it signed out: `curl -sSI https://colombod-personal.github.io/the-vault/` returns 200, and the page shows the guide.
+
+For address B, after A works: verify `mtgvault.cards` for the organisation (organisation Settings → Pages → Add a domain; GitHub shows
+the TXT record to add), add the `CNAME` record `docs` → `colombod-personal.github.io` in Vercel (Domains → mtgvault.cards → DNS
+records), set Settings → Pages → Custom domain to `docs.mtgvault.cards`, wait for the DNS check, tick Enforce HTTPS.
+
+To take the guide down: unset `GUIDE_PAGES_ENABLED` (stops new publishes), then Settings → Pages → Unpublish site (after removing
+the DNS record, if B).
 
 ## Attribution rules for contributors
 

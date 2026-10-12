@@ -39,6 +39,12 @@ ISSUE_WRITERS = {("sync-prices.yml", "alert"), ("sync-catalog.yml", "alert"), ("
 PACKAGE_WRITERS = {("mirror-postgres.yml", "mirror")}  # copies postgres:16 to ghcr.io for the test services (vault-1dm)
 
 
+# The only job that may publish to GitHub Pages (bead vault-30s.3.2): the guide's deploy job. `pages: write` and `id-token: write` are what
+# actions/deploy-pages needs; the job holds no secret, runs only for main and only when the owner has set GUIDE_PAGES_ENABLED
+# (test_only_the_guide_deploy_job_can_publish_pages).
+PAGES_DEPLOYERS = {("guide-pages.yml", "deploy")}
+
+
 @pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
 def test_least_privilege(path):
     wf = load(path)
@@ -50,6 +56,8 @@ def test_least_privilege(path):
             assert job["permissions"] == {"contents": "read", "packages": "write"}, f"{name}: contents read and packages write, nothing more"
             assert job.get("if") == MAIN_ONLY[0], f"{name}: pushes the package only from main"
             assert not {"push", "pull_request", "pull_request_target"} & set(wf["on"]), f"{name}: no push/PR triggers"
+        elif (path.name, name) in PAGES_DEPLOYERS:
+            assert job["permissions"] == {"pages": "write", "id-token": "write"}, f"{name}: pages and id-token write, nothing more"
         else:
             assert "permissions" not in job or all(v in ("read", "none") for v in job["permissions"].values())
         for step in job.get("steps", []):
@@ -363,3 +371,29 @@ def test_vercel_check_smokes_only_deployments_vercel_made():
     assert " ".join(condition.split()) == (
         "github.event.deployment_status.state == 'success' && "
         "github.event.deployment.creator.login == 'vercel[bot]'")
+
+
+def test_only_the_guide_deploy_job_can_publish_pages():
+    """GitHub Pages is public. The one job that may write to it is the guide's deploy job: it holds no secret, no checkout and no
+    other permission, runs only for main and only when the repository variable GUIDE_PAGES_ENABLED is 'true' (so merging the
+    workflow publishes nothing by itself), and waits for the build job that checked the links. Nothing may switch Pages on
+    (`enablement` stays off: a person does that in Settings)."""
+    found = set()
+    for path in WORKFLOWS:
+        for name, job in load(path)["jobs"].items():
+            for step in job.get("steps", []):
+                assert "enablement" not in (step.get("with") or {}), f"{path.name}: a workflow must not enable Pages by itself"
+            if {"pages", "id-token"} & set(job.get("permissions") or {}):
+                found.add((path.name, name))
+    assert found == PAGES_DEPLOYERS
+    wf = load(ROOT / ".github" / "workflows" / "guide-pages.yml")
+    deploy = wf["jobs"]["deploy"]
+    assert "secrets." not in yaml.safe_dump(wf), "the guide's workflow holds no secret"
+    assert deploy["needs"] == "build"
+    assert deploy["environment"]["name"] == "github-pages"
+    assert deploy["if"] == "github.ref == 'refs/heads/main' && vars.GUIDE_PAGES_ENABLED == 'true'"
+    assert not any("checkout" in str(s.get("uses", "")) for s in deploy["steps"]), "the deploy job runs no repository code"
+    assert [s["uses"].split("@")[0] for s in deploy["steps"] if "uses" in s] == ["actions/configure-pages", "actions/deploy-pages"]
+    assert wf["concurrency"]["group"] == "guide-pages" and wf["concurrency"]["cancel-in-progress"] is False
+    assert set(wf["on"]) == {"push", "workflow_dispatch"} and wf["on"]["push"]["branches"] == ["main"]
+    assert "docs/site/**" in wf["on"]["push"]["paths"]
