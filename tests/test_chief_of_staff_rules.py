@@ -36,3 +36,10 @@ def test_section_10_says_how_sessions_talk():
 
 def test_section_10_carries_no_session_ids():
     assert not re.search(r"local_[0-9a-f]{8}-", _section_10())
+
+
+def test_section_10_says_wintermute_is_headless_and_what_that_limits():
+    s = _section_10()
+    for needed in ("### Where a session can work: Wintermute is a headless server", "no display, no desktop apps",
+                   "headless Playwright", "not configured", "`vault-csw`", "It cannot:", "A headless pass is evidence for the web pages only"):
+        assert needed in s, needed

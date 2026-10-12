@@ -198,6 +198,25 @@ Observer. Read it; do not recall it. Titles change; the roles below are what rou
 | Infra Manager | CI, test lanes, worktrees, repository settings | A red pipeline, a lane, a branch clean-up |
 | Documentation Manager (cloud) | The docs family; it can receive a message but cannot answer one | Read its pull requests, not its replies |
 
+### Where a session can work: Wintermute is a headless server
+
+The owner's words (2026-10-12): Wintermute "is a headless machine so its workers have limited actions". It is an Ubuntu
+server with no display, no desktop apps and no signed-in browser. Work sent there is limited to what a shell can do, and
+a brief or a claim that needs more says so and goes to a session on the owner's PC instead.
+
+- **It can:** run `bd` (beads), `git`, `vault-check` (and `vault-check --full`) against Postgres in its lanes, tests and
+  builds, calls to production and the twin universe over HTTP, and, where a host CLI is logged in there, headless host
+  runs (bead `vault-wxy.9`).
+- **It can, once configured: browser validation of the Vault's own web pages** (website, sign-in, upload page, the twin
+  universe in `twins/server.py`) with headless Playwright (headless Chromium, screenshots at 1400 and 390 px). **Read on
+  2026-10-12 it is not configured**: no Playwright package, no browser binary, no display. Configuring it is bead
+  `vault-csw`. Until that bead is verified, nobody reports a browser check as run on Wintermute.
+- **It cannot:** drive the ChatGPT or Claude desktop apps, use the owner's signed-in claude.ai or ChatGPT, click a consent
+  screen, or use computer use. Those checks run on the owner's PC (the real-app rows of `vault-wxy.7`, one session at a
+  time), and the owner's own check is the last word. Tests on the owner's PC also run in WSL with `vault-check-local`.
+- **A headless pass is evidence for the web pages only.** It does not stand in for a real-app row: the test is the
+  artifact players get, in the app they use (section 2).
+
 ### How sessions talk
 
 1. **The bead is the record; a message is only the nudge.** Decisions, claims, blockers and proof are written in the bead
