@@ -20,12 +20,12 @@ def test_case_ids_are_unique_and_every_case_has_a_prompt_and_a_check():
     assert len({c["id"] for c in raw}) == len(raw)
     for c in raw:
         assert c["prompt"].strip() and c["why"].strip()
-        assert any(c.get(k) for k in ("must_call", "must_name", "must_cite", "must_match", "must_not")), c["id"]
+        assert any(c.get(k) for k in ("must_call", "must_call_any", "must_name", "must_cite", "must_match", "must_not")), c["id"]
 
 
 def test_every_tool_a_case_requires_exists():
     for c in CASES.values():
-        for tool in c.get("must_call", []):
+        for tool in c.get("must_call", []) + [t for g in c.get("must_call_any", []) for t in g]:
             assert tool in mcp.BY_NAME, f"{c['id']}: no tool named {tool}"
 
 
@@ -59,3 +59,16 @@ def test_a_rule_number_is_not_matched_inside_a_longer_number():
     case = {"must_cite": ["702.18a"]}
     assert not ev.score(case, [], "see rule 1702.18a")[0]["ok"]
     assert ev.score(case, [], "see rule 702.18a (Comprehensive Rules)")[0]["ok"]
+
+
+def test_markdown_emphasis_and_other_valid_tools_do_not_cause_false_failures():
+    # found scoring nine real Codex runs (bead vault-85p.5): **not** broke "would not", and search_rules answers a rules question
+    harmonic = CASES["harmonic_sliver_add"]
+    rows = ev.score(harmonic, ["validate_deck_changes"], "I would **not** add `Harmonic Sliver`; it destroys your Sol Ring.")
+    assert next(r for r in rows if r["check"] == "advises against it plainly")["ok"]
+    rules = CASES["rules_unnamed_vault"]
+    assert all(r["ok"] for r in ev.score(rules, ["search_rules"], "Rule 702.19b: assign lethal damage first."))
+    assert not all(r["ok"] for r in ev.score(rules, [], "Rule 702.19b: assign lethal damage first."))
+    colours = CASES["sliver_council_review"]
+    rows = ev.score(colours, [], "The deck's colours are not checked, so real games will be slower.")
+    assert next(r for r in rows if r["check"].startswith("says simulate_draws"))["ok"]
