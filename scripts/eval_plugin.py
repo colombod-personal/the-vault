@@ -41,12 +41,21 @@ def read_codex(text: str) -> tuple[list[str], str]:
     return tools, answer
 
 
+def plain(text: str) -> str:
+    """The answer without markdown emphasis and code ticks, so that **not** and `get_rule` match the words they are."""
+    return re.sub(r"[*_`]+", "", text)
+
+
 def score(case: dict, tools: list[str], answer: str) -> list[dict]:
     """One row per check: ``{"check", "ok", "detail"}``."""
     rows = []
     called = set(tools)
+    answer = plain(answer)
     for tool in case.get("must_call", []):
         rows.append({"check": f"calls {tool}", "ok": tool in called, "detail": f"{tools.count(tool)} call(s)"})
+    for group in case.get("must_call_any", []):
+        hit = [t for t in group if t in called]
+        rows.append({"check": f"calls one of {'/'.join(group)}", "ok": bool(hit), "detail": ",".join(hit)})
     low = answer.lower()
     for name in case.get("must_name", []):
         rows.append({"check": f"names {name}", "ok": name.lower() in low, "detail": ""})
