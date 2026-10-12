@@ -942,7 +942,7 @@ a size budget. The choice is carried in the existing signed `Mcp-Session-Id` (on
 A host such as the ChatGPT desktop app gives a plugin's MCP server no sign-out control and keeps reusing its saved token, so a
 person could switch Vault accounts only through Account, "Connected apps", "Disconnect" on the web. `sign_out` (MCP) over
 `GET` / `POST /api/v1/agent/sign-out` ends the one connection the request comes from (`vault/oauth_server.py`
-`grant_of_access`, `sign_out_connection`; `vault/api/catalog_api.py`). What it changes, and what stops misuse:
+`grant_of_access`, `revoke_user_grant`; `vault/api/catalog_api.py`). What it changes, and what stops misuse:
 
 - **Only the caller's own grant.** The grant is found by the SHA-256 of the presented access token **and** the authenticated person's
   id, and only that row (with its retired refresh tokens) is deleted, as RFC 7009 revocation by the client already allows. The
@@ -960,15 +960,20 @@ person could switch Vault accounts only through Account, "Connected apps", "Disc
   `readOnlyHint: false`, and the server instructions and the collection-analyst skill say to confirm only after the person's yes.
   The worst an injected `confirm: true` does is sign the person out of that app: no data changes, and signing in again restores it.
 - **After revocation** the old access token gets the MCP 401 with `WWW-Authenticate: Bearer realm="the-vault", error="invalid_token",
-  resource_metadata="..."`, and its refresh token gets `invalid_grant`, so the host starts the authorization again; the consent page
-  offers "Use a different account" (M `test_the_old_token_then_gets_401_with_the_resource_metadata_and_cannot_refresh`).
+  resource_metadata="..."`, and its refresh token gets `invalid_grant`, so the host starts the authorization again (M `test_the_old_token_then_gets_401_with_the_resource_metadata_and_cannot_refresh`).
+  What the person then meets depends on the age of this browser's Vault sign-in: within the recent-sign-in window (#347) the consent page, which
+  offers "Use a different account"; older (the usual case: the cookie lives 30 days) the sign-in page, which offers it as links (the last bullets).
 - **The email is masked.** The preview names the account by its name and the email with all but the first letter hidden (`d***@example.com`),
   so a connected app that calls the tool is not handed the whole address; it is enough for the person to tell their accounts apart
   (M `test_an_email_is_masked_to_its_first_letter_and_domain`, `test_the_preview_says_who_which_app_and_what_happens_and_changes_nothing`).
+  A local part of one letter is shown whole (`a***@b.example` reveals `a`): for such an address the mask hides nothing, and the domain is always shown.
 - **Revoked by id, so a refresh cannot misreport it.** The connection found for the request is revoked by its id and the person's
   id, not looked up again by an access token a refresh may just have replaced (M `test_a_token_refresh_between_the_lookup_and_the_revoke_still_signs_the_connection_out`);
   a connection ended meanwhile answers "already signed out", never the native app's message (M `test_a_connection_ended_meanwhile_says_already_signed_out_*`).
   The preview shows the scopes the current token carries (`access_scopes`), which a refresh may have narrowed (M `test_the_preview_shows_what_this_token_carries_*`).
+  A token a refresh replaced between the request's authentication and the lookup finds no connection by its hash, and answers the same
+  "already signed out (or its token was just renewed)... ask again" (`ALREADY_SIGNED_OUT`, 409): nothing is revoked, and asking again finds the
+  connection under its new token (M `test_a_connection_ended_meanwhile_says_already_signed_out_*`).
 - **The compact tool list (Codex family) lists it directly.** `sign_out` is one of the core tools, so the ChatGPT desktop app, where this
   was asked for, sees it with its own `destructiveHint`; `vault_call` and `vault_write` refuse it ("listed directly") like every core tool, so
   a host's "always allow" for `vault_write` never covers signing out. The list has 30 tools and 29,549 bytes with the view links (28,970
@@ -978,8 +983,34 @@ person could switch Vault accounts only through Account, "Connected apps", "Disc
   metadata, and a call that loses a race answers "already signed out"; neither touches another connection (M
   `test_a_second_sign_out_with_the_same_token_is_a_plain_401_and_nothing_else_is_touched`,
   `test_a_connection_removed_between_the_lookup_and_the_revoke_answers_already_signed_out`).
-- **Residual, not a change of this section.** Signing out ends the app's token, not the browser's Vault session. The consent page shows
-  "Use a different account" only while the web sign-in is fresh (the recent-sign-in window, #347); an older one is asked to sign in
-  first, on the Vault's sign-in page, and the account that provider (Google, Microsoft, ...) offers there is the provider's choice.
-  The Vault does not send `prompt=select_account`. The person switching accounts therefore signs in with the other account, or uses
-  "Use a different account" when it is shown.
+- **Switching account from a browser whose Vault sign-in is older than ten minutes (found by the review of the first version of this
+  change, which only worked through the developer sign-in).** Signing out ends the app's token, not the browser's Vault session, and that
+  session is usually older than the recent-sign-in window (#347). `/oauth/authorize` already treats such a session as signed out and shows the
+  sign-in page, but the old cookie stayed, so signing in at the provider as another person hit the provider callback's link check
+  (current account, other owner, not fresh) and ended at `/?link_error=recent_sign_in_required` with the pending request lost; signing
+  in as the same person proceeded silently. Now:
+  - **The provider's answer replaces the old sign-in, only there.** `vault/auth.py` `callback`: when the session's sign-in is stale **and** the
+    session carries a live `oauth_pending` request (set by `/oauth/authorize`, kept only by a login started with `continue=oauth`, ten
+    minutes) **and** this is not an app (`app_flow`) or reviewer sign-in, the old `uid`/`sk`/`auth_at` are dropped before the sign-in, so it is
+    a sign-in as whoever the provider authenticated, never a link or a claim. The pending request is then resumed (consent for that person).
+    Every other path is unchanged: a stale cookie signing in at a provider without the pending request still gets `recent_sign_in_required`
+    (M `test_the_pending_request_cannot_be_used_to_link_a_provider_from_another_page`, `tests/test_recent_signin.py`).
+  - **What this can and cannot do.** A copied stale cookie that goes through the consent flow ends up signed in as the provider account it
+    authenticated with (its own account, or a new one), not as the cookie's owner and with nothing linked to the owner's account; it learns
+    nothing it did not have (M `test_a_copied_stale_cookie_in_the_consent_flow_signs_in_as_the_provider_account_and_links_nothing`). It is
+    the same outcome as signing in from an empty browser. The provider's `state` and `nonce` still bind the answer to this browser.
+  - **No logout by link.** `GET /oauth/authorize` clears nothing (an earlier design cleared the session there, which would let any page that
+    can send a person's browser to the authorization URL of a registered client end their Vault sign-in as a nuisance). The old sign-in is
+    replaced only after a provider answered, in a flow this browser began (M `test_a_link_to_the_authorization_page_does_not_end_the_browsers_sign_in`).
+    The one place the session is cleared on purpose is the consent page's "Use a different account" button, a POST that needs the page's
+    one-time nonce and a fresh sign-in, as before.
+  - **The sign-in page offers a different account.** For a browser with an older sign-in the page says so and links "use a different
+    account" per provider that supports it (`account=choose`); after "Use a different account" on the consent page every provider button
+    carries it. `GET /api/auth/login/{provider}?continue=oauth&account=choose` adds `prompt=select_account` for Google and Microsoft (the
+    documented value; the twins reject any other prompt), so a provider with one signed-in account does not silently continue as the
+    account being left. It is sent only on request and only for the OAuth sign-in (M `test_only_the_oauth_sign_in_asks_for_the_account_chooser`),
+    so the common reconnect as the same person costs no extra click. Apple and Facebook have no such prompt: their sign-in is unchanged.
+    The page does not name the earlier account (a shared computer's next user would see it).
+  - **Residual.** The provider decides which accounts its chooser lists. A person with a single Google account who wants a second Vault
+    account must sign in to the provider with it (the chooser's "Use another account"). The tests go through the Google twin, which
+    answers with the account it is told to: the chooser's behaviour at Google is the documented one, not exercised.

@@ -156,3 +156,13 @@ def test_only_the_oauth_sign_in_asks_for_the_account_chooser(client):
         asked[query] = query_of(location).get("prompt")
     assert asked == {"continue=oauth&account=choose": "select_account", "account=choose": None, "continue=oauth": None,
                      "continue=oauth&account=anything": None}
+
+
+def test_the_provider_twins_accept_only_the_prompt_values_the_providers_document(universe):
+    """Conformance: Google documents none, consent and select_account; Microsoft adds login and create. A value outside the list is
+    an error at the real provider, so the twin must not let a wrong one pass in the tests."""
+    for twin, ok, bad in ((universe.google, "select_account", "login_please"), (universe.microsoft, "select_account", "always")):
+        assert twin._extra_checks({"prompt": ok}) is None
+        assert twin._extra_checks({"prompt": bad}) is not None
+    assert universe.google._extra_checks({"prompt": "login"}) is not None  # Google's list has no "login"
+    assert universe.microsoft._extra_checks({"prompt": "login"}) is None

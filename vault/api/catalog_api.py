@@ -247,7 +247,7 @@ def mask_email(email: str | None) -> str | None:
 
 
 SIGN_OUT_EFFECT = ("This connection stops working: its access and refresh tokens are revoked. The next request from {app} asks "
-                   "for a sign-in to the Vault; on the Vault's page, \"Use a different account\" signs in as someone else. Other "
+                   "for a sign-in to the Vault; to use another account, choose \"Use a different account\" on the Vault's sign-in or consent page. Other "
                    "apps and devices, personal access tokens and the web sign-in stay signed in.")
 
 
