@@ -161,12 +161,37 @@ def test_the_step_check_lets_ordinary_sentences_through(tmp_path):
 
 def test_a_checked_page_must_say_when_and_where_it_was_run(tmp_path):
     page = DRAFT.format(t="A").replace("being-written", "checked") + "<ol><li>Click here</li></ol>"
-    assert "checked: <date>" in refused(tmp_path, {"index.html": home(), "a.html": page})
+    assert "checked: YYYY-MM-DD" in refused(tmp_path, {"index.html": home(), "a.html": page})
     ok = page.replace("<!-- status: checked -->", "<!-- status: checked -->\n<!-- checked: 2026-10-14, Claude 1.2.3 -->")
     out = tmp_path / "out2"
     build_site.build(source_site(tmp_path / "src2", {"index.html": home(), "a.html": ok}), out)
     html = (out / "a.html").read_text(encoding="utf-8")
     assert "Checked on the real app: 2026-10-14, Claude 1.2.3." in html and "being written" not in html
+
+
+@pytest.mark.parametrize("value", ["yes", "done", "2026-10-14", "2026-10-14,", "2026-13-40, Claude 1.2", "2026-02-30, Claude 1.2",
+                                   "2026-10-14, Claude", "2026-10-14, 1.2.3", "14 October 2026, Claude 1.2", "2026-10-14 Claude 1.2"])
+def test_a_checked_line_must_be_a_real_date_and_an_app_with_a_version(tmp_path, value):
+    page = DRAFT.format(t="A").replace("being-written", "checked").replace("<h1>", f"<!-- checked: {value} -->\n<h1>", 1)
+    assert "checked: YYYY-MM-DD" in refused(tmp_path, {"index.html": home(), "a.html": page})
+
+
+@pytest.mark.parametrize("value", ["2026-10-14, Claude 1.2.3", "2026-10-14, ChatGPT desktop app 1.2025.280", "2026-12-31,Claude Desktop 0.14"])
+def test_a_checked_line_with_a_date_and_an_app_version_builds(tmp_path, value):
+    page = DRAFT.format(t="A").replace("being-written", "checked").replace("<h1>", f"<!-- checked: {value} -->\n<h1>", 1)
+    out = built(tmp_path, {"index.html": home(), "a.html": page})
+    assert f"Checked on the real app: {value}." in (out / "a.html").read_text(encoding="utf-8")
+
+
+def test_the_step_patterns_stay_fast_on_hostile_input():
+    import time
+
+    hostile = ["<li " + " " * 200000 + "x", "<li>" + "<b>" * 50000, "\n" + "<" + "a" * 100000, "1" * 100000 + "x", "step" + " " * 100000,
+               "<li><b>" * 20000, ("<p " * 30000) + "\n" + "<i>" * 30000]
+    started = time.monotonic()
+    for text in hostile:
+        any(pattern.search(text) for pattern in build_site.STEP_PATTERNS)
+    assert time.monotonic() - started < 5
 
 
 @pytest.mark.parametrize("missing", ["title", "summary", "status"])
@@ -189,7 +214,8 @@ def test_files_starting_with_an_underscore_are_not_published_and_allowed_assets_
 
 
 @pytest.mark.parametrize("name", ["notes.md", "build.py", "logo.svg", "page.htm", ".secret", ".env", "assets/.hidden.png",
-                                  "draft.local.png", "plan.local.html", "assets/run.js", "data.json", "archive.zip", "noextension"])
+                                  "draft.local.png", "plan.local.html", "notes.LOCAL.png", "plan.Local.html", "assets/run.js", "data.json",
+                                  "archive.zip", "noextension"])
 def test_only_the_allow_listed_file_types_are_published(tmp_path, name):
     message = refused(tmp_path, {"index.html": home(), name: "x"})
     assert Path(name).name in message
@@ -243,6 +269,39 @@ def test_a_folder_it_did_not_make_is_never_deleted(tmp_path):
     assert (precious / "keep.txt").read_text(encoding="utf-8") == "keep"
     assert build_site.main([str(SOURCE), str(precious)]) == 1
     assert (precious / "keep.txt").is_file()
+
+
+def test_an_output_folder_that_is_a_symbolic_link_is_refused_before_it_is_followed(tmp_path):
+    """resolve() would hide the link: a link to an empty folder was written through, and one to a folder this script had made was
+    deleted. The path as given is checked first."""
+    src = source_site(tmp_path / "src", {"index.html": home()})
+    target = tmp_path / "target"
+    target.mkdir()
+    link = tmp_path / "out"
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available here")
+    with pytest.raises(build_site.SiteError) as caught:
+        build_site.build(src, link)
+    assert "is a symbolic link: refused" in str(caught.value)
+    assert list(target.iterdir()) == [], "nothing was written through the link"
+    build_site.build(src, target)  # a folder this script made earlier, reached through the link, must survive the refusal
+    with pytest.raises(build_site.SiteError):
+        build_site.build(src, link)
+    assert (target / "index.html").is_file() and (target / build_site.MARKER).is_file()
+
+
+def test_a_source_folder_that_is_a_symbolic_link_is_refused(tmp_path):
+    real = source_site(tmp_path / "real", {"index.html": home()})
+    link = tmp_path / "linked"
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available here")
+    with pytest.raises(build_site.SiteError) as caught:
+        build_site.build(link, tmp_path / "out")
+    assert "source folder" in str(caught.value) and "symbolic link" in str(caught.value)
 
 
 def test_a_folder_it_made_is_replaced_and_an_empty_one_is_used(tmp_path):
@@ -306,6 +365,16 @@ BAD = {
     "a link out of the site": ('<a href="../../etc/passwd">x</a>', "points outside the site"),
     "an app script as a page": ('<a href="https://mtgvault.cards/app.bundle.js">x</a>', "is not a page the Vault serves"),
     "a javascript link": ('<a href="javascript:alert(1)">x</a>', "are not allowed"),
+    "a form posting to another site": ('<form action="https://example.com/post"><button>go</button></form>', "<form> is not allowed"),
+    "a form with no action": ("<form><input name=q></form>", "<input> is not allowed"),
+    "an image from the Vault's own domain": ('<img src="https://mtgvault.cards/og-image.jpg" alt="">', "loaded from the Vault's own domain"),
+    "a stylesheet from the Vault's own domain": ('<link rel="stylesheet" href="https://mtgvault.cards/styles.css">',
+                                                  "loaded from the Vault's own domain"),
+    "an image from a Vault subdomain": ('<img src="https://www.mtgvault.cards/a.png" alt="">', "loaded from the Vault's own domain"),
+    "a css url from the Vault's own domain": ('<div style="background:url(https://mtgvault.cards/og-image.jpg)">x</div>',
+                                              "loaded from the Vault's own domain"),
+    "an https address with no host name": ('<a href="https:///example.com">x</a>', "has no host name"),
+    "a style element that is never closed": ("<style>.a{background:url(https://example.com/x.png)}", "loaded from another site"),
     "an e-mail link": ('<a href="mailto:someone@example.com">mail</a>', "mailto: links are not allowed"),
     "a phone link": ('<a href="tel:+441234567">call</a>', "tel: links are not allowed"),
 }

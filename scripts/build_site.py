@@ -41,6 +41,7 @@ import os
 import re
 import shutil
 import sys
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -57,9 +58,9 @@ BANNER = ('<div class="status" role="note"><p><strong>This page is being written
 STEP_PATTERNS = (
     re.compile(r"<ol\b", re.IGNORECASE),                                              # a numbered list
     re.compile(r"<pre\b", re.IGNORECASE),                                             # a block of commands or text to copy
-    re.compile(r"<li[^>]*>\s*(?:<[^>]+>\s*)*(?:step\s*)?\d+\s*[.):]", re.IGNORECASE),  # <li>1. ...</li>
-    re.compile(r"\bstep\s*\d+\b", re.IGNORECASE),                                     # "Step 1", "step 2:"
-    re.compile(r"^\s*(?:<[^>]+>\s*)*\d+\s*[.)]\s", re.MULTILINE),                     # a line that starts "1. "
+    re.compile(r"<li[^>]{0,200}>\s{0,50}(?:<[^>]{1,200}>\s{0,50}){0,5}(?:step\s{0,5})?\d{1,3}\s{0,5}[.):]", re.IGNORECASE),  # <li>1. ...</li>
+    re.compile(r"\bstep\s{0,5}\d{1,3}\b", re.IGNORECASE),                             # "Step 1", "step 2:"
+    re.compile(r"^[ \t]{0,50}(?:<[^>]{1,200}>[ \t]{0,50}){0,5}\d{1,3}[ \t]{0,5}[.)]\s", re.MULTILINE),  # a line that starts "1. "
 )
 
 
@@ -77,6 +78,22 @@ def split_meta(text: str) -> tuple[dict[str, str], str]:
             meta[found.group(1)] = found.group(2)
         i += 1
     return meta, "\n".join(lines[i:]).strip() + "\n"
+
+
+CHECKED = re.compile(r"^(\d{4}-\d{2}-\d{2}),\s*(.{3,200})$")
+
+
+def valid_checked(value: str) -> bool:
+    """`2026-10-14, Claude desktop 1.2.3`: a real calendar date, then an app name with a version (a letter and a digit)."""
+    found = CHECKED.match(value.strip())
+    if not found:
+        return False
+    try:
+        date.fromisoformat(found.group(1))
+    except ValueError:
+        return False
+    app = found.group(2)
+    return bool(re.search(r"[A-Za-z]", app) and re.search(r"\d", app))
 
 
 class SiteError(Exception):
@@ -103,7 +120,7 @@ def scan_source(source: Path) -> tuple[list[Path], list[Path], list[str]]:
                 continue
             if any(part.startswith(".") for part in rel.parts):
                 problems.append(f"{rel.as_posix()}: a name that starts with '.' is never published")
-            elif ".local." in name:
+            elif ".local." in name.lower():
                 problems.append(f"{rel.as_posix()}: a '.local.' file is private notes and is never published")
             elif path.suffix.lower() == ".html":
                 pages.append(path)
@@ -130,8 +147,9 @@ def load_pages(source: Path) -> list[dict]:
         if status == "being-written" and any(pattern.search(body) for pattern in STEP_PATTERNS):
             problems.append(f"{rel}: a page that is being written may not contain steps (a numbered list, <pre>, 'Step 1', '1.'): "
                             "only steps run on the real app are published")
-        if status == "checked" and not meta.get("checked"):
-            problems.append(f"{rel}: a checked page needs `<!-- checked: <date>, <app and version> -->` (when its steps were run on the real app)")
+        if status == "checked" and not valid_checked(meta.get("checked", "")):
+            problems.append(f"{rel}: a checked page needs `<!-- checked: YYYY-MM-DD, <app and version> -->` (the real date its steps were "
+                            f"run on the real app, then the app and its version, e.g. 'Claude desktop 1.2.3'); got {meta.get('checked', '')!r}")
         if status == "home" and rel != "index.html":
             problems.append(f"{rel}: only index.html can have the status 'home'")
         if "<h1" not in body:
@@ -200,6 +218,9 @@ def prepare_out(out: Path) -> None:
 
 def build(source: Path = SOURCE, out: Path = OUT) -> list[str]:
     """Write the site to ``out`` and return the paths written (relative, sorted). Raises SiteError for a page that breaks a rule."""
+    for given, what in ((source, "source"), (out, "output")):  # before resolve(), which would follow the link and hide it
+        if given.is_symlink():
+            raise SiteError([f"the {what} folder {given} is a symbolic link: refused"])
     source, out = source.resolve(), out.resolve()
     if out == source or out in source.parents or source in out.parents:
         raise SiteError([f"the output folder {out} must be separate from the source folder {source}"])

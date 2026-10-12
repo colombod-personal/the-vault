@@ -376,7 +376,7 @@ in a file or folder whose name starts with `_`: it is never copied. The build al
 
 **Nothing unverified ships (the owner asked for correct guidance).** A page's `status` is `being-written` (a banner, no steps, and
 the page is marked `noindex`) or `checked` (steps were run on the real app; the page must carry
-`<!-- checked: <date>, <app and version> -->`, shown to the reader). `status: home` is the start page. "No steps" is a heuristic:
+`<!-- checked: YYYY-MM-DD, <app and version> -->`, shown to the reader). `status: home` is the start page. "No steps" is a heuristic:
 the builder refuses a numbered list, `<pre>`, "Step 1" and a line or bullet that starts "1."; it cannot prove a page holds no
 instruction, so whoever reviews a change to the guide reads the pages. The content is vault-30s.3.1's job and only rows that passed
 on the real app (vault-wxy.7) may be written as working. Until then the pages may point at the Vault's Connect page but do not
@@ -384,7 +384,7 @@ vouch for it.
 
 **The link check** (`python scripts/check_site_links.py`, standard library, run first in `tests.yml` and again in the publishing
 workflow; `tests/test_guide_site.py` holds its cases) fails on: a broken internal link or `#anchor`; a missing screenshot; an image
-with no alt text; anything loaded from another site (image, `srcset`, video, CSS `url(...)`); a link that starts with `/` (the project
+with no alt text; anything loaded from another site or from the Vault's own domain (image, `srcset`, video, CSS `url(...)`; only an `<a>` may point there); a `<form>`; an `https://` address with no host name; a link that starts with `/` (the project
 address is a sub-path, so it would leave the guide); `http://`; `mailto:` and `tel:` (the guide carries no e-mail address: reports go
 through the support page); `<base>`, `<iframe>`, `<object>`, `<embed>`, a meta refresh, an inline `<script>`, an `on...=` handler and
 `@import`; and a link to https://mtgvault.cards that is not written exactly as a file in `public/` is named (or `/`, `/api/mcp`), or

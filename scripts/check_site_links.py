@@ -15,6 +15,9 @@ It fails (exit 1, one line per problem) on:
 - a root-relative link (``/page.html``: the guide is served under a project path on GitHub Pages, so it would leave the guide),
   a protocol-relative one, ``http://``, ``javascript:`` and ``data:``;
 - ``mailto:`` and ``tel:`` (the guide carries no e-mail address or phone number: reports go through the Vault's support page);
+- anything *loaded* (image, stylesheet, srcset, video, CSS ``url()``) from another site or from the Vault's own domain: the guide
+  makes no request to another origin, only an ``<a>`` link may point there; an ``https://`` address with no host name;
+- ``<form>`` and its fields (a guide collects nothing);
 - things a plain guide has no use for and that can load or run something: ``<base>``, ``<iframe>``, ``<object>``, ``<embed>``,
   ``<meta http-equiv="refresh">``, an inline ``<script>``, an ``on...=`` event handler, ``@import`` in CSS.
 
@@ -42,9 +45,11 @@ ROUTES = {"", "/", "/api/mcp"}
 # What a guide may point at in public/: pages, text and media, never the app's scripts, styles or sources.
 PAGE_SUFFIXES = {".html", ".txt", ".md", ".jpg", ".jpeg", ".png", ".svg", ".ico", ".mp4"}
 LINK_ATTRS = {("a", "href"), ("area", "href"), ("link", "href"), ("img", "src"), ("script", "src"), ("source", "src"),
-              ("video", "src"), ("video", "poster"), ("audio", "src"), ("track", "src"), ("input", "src"), ("form", "action")}
+              ("video", "src"), ("video", "poster"), ("audio", "src"), ("track", "src")}
 FORBIDDEN_TAGS = {"base": "<base> changes where every link goes", "iframe": "a guide does not embed other pages",
-                  "object": "a guide does not embed objects", "embed": "a guide does not embed objects", "frame": "no frames"}
+                  "object": "a guide does not embed objects", "embed": "a guide does not embed objects", "frame": "no frames",
+                  "form": "a guide collects nothing (a form would send what is typed to another address)",
+                  "input": "a guide collects nothing", "textarea": "a guide collects nothing", "select": "a guide collects nothing"}
 CSS_URL = re.compile(r"url\(\s*(?:\"([^\"]*)\"|'([^']*)'|([^)\s]*))\s*\)", re.IGNORECASE)
 CSS_IMPORT = re.compile(r"@import\b", re.IGNORECASE)
 
@@ -103,6 +108,12 @@ class Scan(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "style" and self._style:
+            self.css("".join(self._style_text), self._style_line)
+            self._style = False
+
+    def close(self) -> None:
+        super().close()
+        if self._style:  # a <style> that is never closed still runs to the end of the page in a browser: check what it holds
             self.css("".join(self._style_text), self._style_line)
             self._style = False
 
@@ -198,6 +209,12 @@ class Checker:
 
     def check_absolute(self, page: str, line: int, loaded: bool, parts, url: str) -> None:
         host = (parts.hostname or "").lower()
+        if not host:
+            return self.problem(page, line, f"{url} has no host name: write the full address, https://host/path")
+        if host == MTGVAULT_HOST or host.endswith("." + MTGVAULT_HOST):
+            if loaded:  # before the Vault checks: a file that exists in public/ is still a request to the app's domain
+                return self.problem(page, line, f"{url} is loaded from the Vault's own domain: keep images and styles in the guide itself "
+                                    "(a page of the guide should make no request to another origin); only a link may point there")
         if host == MTGVAULT_HOST:
             self.counts["mtgvault.cards"] += 1
             return self.check_mtgvault(page, line, parts, url)

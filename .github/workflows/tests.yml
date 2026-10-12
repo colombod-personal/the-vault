@@ -5,6 +5,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-24.04  # pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19 (#180); move deliberately
+    timeout-minutes: 60  # the suite takes about 30 minutes; a hung step must not run for GitHub's default six hours
     services:
       postgres:  # the Vault runs on Postgres only (Neon in production): so do the tests
         image: public.ecr.aws/docker/library/postgres:16  # the official image from AWS public ECR: Docker Hub rate-limits anonymous runners (#424)
