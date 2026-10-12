@@ -372,6 +372,27 @@ BAD = {
     "a meta refresh": ('<meta http-equiv="refresh" content="0; url=https://example.com/">', "redirect is not allowed"),
     "an inline script": ("<script>alert(1)</script>", "inline <script> is not allowed"),
     "an inline svg that loads from another site": ('<svg><image href="https://example.com/t.png"></image></svg>', "<svg> is not allowed"),
+    "a body background": ('<body background="https://example.com/tracker.png"><p>x</p></body>', "attribute background= on <body>"),
+    "a table cell background": ('<table><tr><td background="https://example.com/t.png">x</td></tr></table>',
+                                "attribute background= on <td>"),
+    "a link ping": ('<a href="https://example.com/" ping="https://tracker.example/p">x</a>', "attribute ping= on <a>"),
+    "a link download": ('<a href="https://example.com/f" download="f">x</a>', "attribute download= on <a>"),
+    "a blockquote cite": ('<blockquote cite="https://example.com/q">x</blockquote>', "attribute cite= on <blockquote>"),
+    "a q cite": ('<q cite="https://example.com/q">x</q>', "attribute cite= on <q>"),
+    "a deleted text cite": ('<del cite="https://example.com/q">x</del>', "attribute cite= on <del>"),
+    "an image longdesc": ('<img src="style.css" alt="" longdesc="https://example.com/d">', "attribute longdesc= on <img>"),
+    "an image lowsrc": ('<img src="style.css" alt="" lowsrc="https://example.com/l.png">', "attribute lowsrc= on <img>"),
+    "an image usemap": ('<img src="style.css" alt="" usemap="#m">', "attribute usemap= on <img>"),
+    "a manifest": ('<html manifest="https://example.com/m.appcache"></html>', "attribute manifest= on <html>"),
+    "a button formaction": ('<button formaction="https://example.com/post">x</button>', "attribute formaction= on <button>"),
+    "a form action": ('<form action="https://example.com/post"></form>', "attribute action= on <form>"),
+    "an object data": ('<object data="https://example.com/x.swf"></object>', "attribute data= on <object>"),
+    "a data attribute": ('<div data-src="https://example.com/x.png">x</div>', "attribute data-src= on <div>"),
+    "a video autoplay": ('<video src="style.css" autoplay></video>', "attribute autoplay= on <video>"),
+    "an image map area": ('<map name="m"><area href="https://example.com/" shape="rect"></map>', "<area> is not allowed"),
+    "an input of type image": ('<input type="image" src="https://example.com/b.png">', "<input> is not allowed"),
+    "an icon on html": ('<html icon="https://example.com/i.png"></html>', "attribute icon= on <html>"),
+    "a poster on an image": ('<img src="style.css" alt="" poster="https://example.com/p.png">', "attribute poster= on <img>"),
     "an event handler": ('<p onclick="x()">x</p>', "event handler onclick="),
     "a stylesheet import": ("<style>@import url(other.css);</style>", "@import in CSS is not allowed"),
     "a css url from another site": ('<div style="background:url(https://example.com/x.png)">x</div>', "loaded from another site"),
@@ -525,3 +546,13 @@ def test_the_switch_on_steps_make_the_environment_the_first_required_step():
     assert section.index("github-pages") < section.index("GUIDE_PAGES_ENABLED")
     assert "gh api repos/colombod-personal/the-vault/environments/github-pages --jq .deployment_branch_policy" in section
     assert section.index("Required") < section.index("GUIDE_PAGES_ENABLED")
+
+
+def test_the_attributes_the_real_guide_uses_are_all_on_the_allow_list():
+    """The allow-list is default-deny; the layout and the pages must pass it as they are (no attribute added to the guide without
+    deciding that it cannot make a request)."""
+    files = sorted(SOURCE.rglob("*.html"))
+    assert len(files) >= 7
+    for path in files:
+        scan = check_site_links.scan(path)
+        assert not [p for p in scan.problems if "attribute" in p[1]], (path.name, scan.problems)

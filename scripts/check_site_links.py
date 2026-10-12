@@ -19,7 +19,10 @@ It fails (exit 1, one line per problem) on:
   makes no request to another origin, only an ``<a>`` link may point there; an ``https://`` address with no host name;
 - ``<form>`` and its fields (a guide collects nothing);
 - things a plain guide has no use for and that can load or run something: ``<base>``, ``<iframe>``, ``<object>``, ``<embed>``, ``<svg>``,
-  ``<meta http-equiv="refresh">``, an inline ``<script>``, an ``on...=`` event handler, ``@import`` in CSS.
+  ``<meta http-equiv="refresh">``, an inline ``<script>``, an ``on...=`` event handler, ``@import`` in CSS;
+- any attribute that is not on the allow-list (GLOBAL_ATTRS, TAG_ATTRS): default-deny, because attributes such as ``background``,
+  ``ping``, ``cite``, ``longdesc``, ``manifest``, ``formaction`` and ``usemap`` can make the browser request an address the
+  checker would not otherwise see.
 
 Links to other sites are not fetched (CI must not depend on the network); they only have to be ``https://``, and only an ``<a>``
 may point at another site: nothing is loaded from one.
@@ -50,8 +53,25 @@ FORBIDDEN_TAGS = {"base": "<base> changes where every link goes", "iframe": "a g
                   "object": "a guide does not embed objects", "embed": "a guide does not embed objects", "frame": "no frames",
                   "form": "a guide collects nothing (a form would send what is typed to another address)",
                   "input": "a guide collects nothing", "textarea": "a guide collects nothing", "select": "a guide collects nothing",
-                  "svg": "inline SVG can load other files and carry script (use a PNG or JPG screenshot)"}
-CSS_URL = re.compile(r"url\(\s*(?:\"([^\"]*)\"|'([^']*)'|([^)\s]*))\s*\)", re.IGNORECASE)
+                  "svg": "inline SVG can load other files and carry script (use a PNG or JPG screenshot)",
+                  "area": "an image map is not needed", "map": "an image map is not needed", "button": "a guide collects nothing"}
+# Default-deny on attributes. Many attributes can carry a URL a browser fetches or posts to (background, ping, cite, longdesc,
+# manifest, formaction, usemap, lowsrc, ...) and the list of them grows with the HTML standard, so the checker does not try to know
+# them all: an attribute is accepted only when it is on this list (for any element) or on its element's list. Anything else is a
+# problem. Adding an attribute here means deciding that it cannot make a request, or that its value is checked as a link above.
+GLOBAL_ATTRS = {"id", "class", "lang", "dir", "title", "style", "role", "hidden", "tabindex"}  # and aria-*
+TAG_ATTRS = {
+    "html": {"lang", "dir"}, "meta": {"charset", "name", "content", "http-equiv"}, "link": {"rel", "href", "type", "media"},
+    "a": {"href", "rel", "target", "hreflang", "name"},
+    "img": {"src", "alt", "width", "height", "srcset", "sizes", "loading", "decoding"},
+    "source": {"src", "srcset", "type", "media", "sizes"},
+    "video": {"src", "poster", "controls", "width", "height", "preload", "muted", "loop", "playsinline"},
+    "audio": {"src", "controls", "preload", "loop", "muted"}, "track": {"src", "kind", "srclang", "label", "default"},
+    "script": {"src", "type"}, "style": {"media", "type"},
+    "td": {"colspan", "rowspan", "headers"}, "th": {"colspan", "rowspan", "headers", "scope", "abbr"},
+    "ol": {"start", "type", "reversed"}, "li": {"value"}, "details": {"open"}, "time": {"datetime"},
+}
+CSS_URL =re.compile(r"url\(\s*(?:\"([^\"]*)\"|'([^']*)'|([^)\s]*))\s*\)", re.IGNORECASE)
 CSS_IMPORT = re.compile(r"@import\b", re.IGNORECASE)
 
 
@@ -82,6 +102,10 @@ class Scan(HTMLParser):
         for attribute in values:
             if attribute.startswith("on"):
                 self.problems.append((line, f"the event handler {attribute}= is not allowed: a guide runs no script"))
+            elif not (attribute in GLOBAL_ATTRS or attribute.startswith("aria-") or attribute in TAG_ATTRS.get(tag, ())):
+                self.problems.append((line, f"the attribute {attribute}= on <{tag}> is not allowed: an attribute that can carry an address "
+                                      "(background, ping, cite, longdesc, formaction, ...) could make the browser request another "
+                                      "site, so only the attributes on the checker's allow-list may be used"))
         for attribute in ("href", "src", "poster", "action", "data"):
             if (tag, attribute) in LINK_ATTRS and attribute in values:
                 self.links.append((tag, attribute, values[attribute], line))

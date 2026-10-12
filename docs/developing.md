@@ -386,7 +386,7 @@ vouch for it.
 workflow; `tests/test_guide_site.py` holds its cases) fails on: a broken internal link or `#anchor`; a missing screenshot; an image
 with no alt text; anything loaded from another site or from the Vault's own domain (image, `srcset`, video, CSS `url(...)`; only an `<a>` may point there); a `<form>`; an `https://` address with no host name; a link that starts with `/` (the project
 address is a sub-path, so it would leave the guide); `http://`; `mailto:` and `tel:` (the guide carries no e-mail address: reports go
-through the support page); `<base>`, `<iframe>`, `<object>`, `<embed>`, a meta refresh, an inline `<script>`, an `on...=` handler and
+through the support page); `<base>`, `<iframe>`, `<object>`, `<embed>`, a meta refresh, an inline `<script>`, an `on...=` handler, any attribute not on the checker's allow-list (default-deny: `background`, `ping`, `cite`, `formaction` and the like can fetch an address) and
 `@import`; and a link to https://mtgvault.cards that is not written exactly as a file in `public/` is named (or `/`, `/api/mcp`), or
 whose `#anchor` is not on that page. Links to other sites are not fetched.
 
