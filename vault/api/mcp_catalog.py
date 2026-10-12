@@ -211,8 +211,10 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
         Tool("find_upgrades", "Upgrade candidates for a deck within a budget: legal, inside the deck's colors, not already in it, each priced "
              "at or under budget_usd, for the roles the deck is short of (or the roles you name). Ordered by popularity, which is "
              "not power. A candidate that would turn against the deck as it is (a forced trigger that destroys its own artifacts, a shroud "
-             "that blocks its own Equipment, a bonus shared with opponents) carries `lookouts`, read by the Vault from the card text, "
-             "each with the deck's cards it would hurt, the rule numbers and what to do, and is named in `warnings`. Also lists the "
+             "that blocks its own Equipment, a shadow grant) carries `lookouts`, read by the Vault from the card text, "
+             "each with the deck's cards it would hurt, the rule numbers and what to do, and is named in `warnings`. A lookout that "
+             "names no card of the deck it hurts and is not high severity (a second lord of a tribe: its bonus is shared with "
+             "opponents) is not reported on a candidate. Also lists the "
              "deck's least-played untagged cards as cut candidates. The candidates are not checked as one "
              "change; validate_deck_changes checks a list of cuts and adds." + TAKES_DECK,
              {"text": deck, "deck_id": DECK_ID, "format": fmt,
@@ -229,8 +231,9 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              "only when every check passes. It also reads the deck as it would be after the cuts and adds: `lookouts` lists the cards that can "
              "turn against their owner (read by the Vault from the card text, with the cards each hurts and the rule numbers), each marked "
              "`new` when the plan creates or widens it, `lookouts_cleared` those the cuts remove, and an add that turns against the deck "
-             "carries `lookouts` in its `added_cards` entry and a sentence in `warnings`. A lookout is a warning and does not change "
-             "`valid`. Each cut or add is a card name; a quantity ('2 Mind Stone', '2x Mind Stone') repeats it and a set and "
+             "carries `lookouts` in its `added_cards` entry and a sentence in `warnings`: only a lookout that names a card of the deck "
+             "it hurts, or is high severity, is a warning, and a warning does not change `valid`. A lookout that is only listed "
+             "(a second lord of a tribe: its bonus is shared with opponents) stays in `lookouts`, marked `new`. Each cut or add is a card name; a quantity ('2 Mind Stone', '2x Mind Stone') repeats it and a set and "
              "number are ignored." + TAKES_DECK,
              {"text": deck, "deck_id": DECK_ID, "format": fmt, "adds": {"type": "array", "maxItems": 60, "items": {"type": "string", "maxLength": 300}},
               "cuts": {"type": "array", "maxItems": 60, "items": {"type": "string", "maxLength": 300}},
