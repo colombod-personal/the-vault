@@ -1130,7 +1130,9 @@ the conversation. That is an SSRF surface, so every step is bounded (C = `tests/
   The first real run decides the real host, and a refused host costs a whole iteration, so OpenAI's own domains and their subdomains
   are allowed and the **resolved address is what protects** (next point). Residual: a subdomain of an allowed domain that OpenAI lets
   a third party serve content from would be fetchable; what is fetched is only ever parsed as a CSV by the existing importer.
-  A refused host is logged **by host name only** (`file_intake` event, `host`), never with its path or query, which carry the token.
+  A refused host is logged **by host name only** (`file_intake` event, `host`), never with its path or query, which carry the token,
+  and only its **last three labels** (`*.files.example.com` for `<token>.files.example.com`), so a secret in the first labels of a
+  name stays out of the log (C `test_a_host_name_is_logged_by_its_last_three_labels_so_a_secret_in_the_first_ones_stays_out`).
 - **The name is resolved here and every address must be public** (`oauth_clients.public_address`: private, loopback, link-local
   including the cloud metadata address, shared 100.64/10, multicast, reserved, unspecified, IPv4-mapped, NAT64 and 6to4 forms, Teredo;
   one bad address among good ones refuses the host), and **the connection goes to the address that was checked**, with the name kept
@@ -1171,6 +1173,15 @@ A staged file belongs to the person, not to the app: another person's id is the 
 anything is fetched. The same residual as the link applies: a write-scope assistant told an upload id could confirm what a read-only
 app staged, with the preview's `content_hash`, and the person's yes in the chat (text, not verified by the server).
 
+**One at a time.** The replace-or-reuse decision is made under the per-person advisory lock the upload links use (5 s lock timeout,
+then the usual 503 with Retry-After), so simultaneous drops cannot leave two fetched files or two ids for one file (C
+`test_two_drops_at_once_leave_one_row_and_one_upload_id`).
+
+**The twin.** `twins/openai_files.py` answers on `files.oaiusercontent.com` as OpenAI's GPT Actions documentation describes it (a
+signed link, valid five minutes). It is the documentation's reading, **not a recording**: nothing real has been captured, so the
+conformance check (`tests/conformance/test_openai_files_live.py`) is by hand and has not run; the log of the first real run is
+its first evidence.
+
 **Egress and time from a Vercel function.** The fetch is an outbound HTTPS request from the same function that answers the tool call
 (60 seconds maximum, `vercel.json`): the fetch is capped at 15 seconds, leaving the rest for the preview of up to 20 MB. Memory for a
 20 MB file (the bytes, then the decoded text, then the parsed rows) is not measured on the platform; the existing upload page holds the
@@ -1181,6 +1192,8 @@ Residual risks, stated:
 - The fetch has no wall-clock limit **inside** a worker that is blocked in a socket read: the caller is released at 15 seconds, the
   worker ends at its own read timeouts and gives its slot back then; a host that drips response headers can hold up to 4 slots of a
   process for as long as it drips. Only allow-listed hosts can do this.
+- A host name with two or three labels is logged whole, and the first labels of a longer one are cut: a secret kept in a short
+  host name (the apex a third party chose) would be logged. The address's path and query, where signed tokens are, never are.
 - The allow-list includes subdomains of three OpenAI domains (above). It can be narrowed with `FILE_INTAKE_HOSTS` once the real host
   is known from the log (`file_intake` events, `outcome: staged` or `cannot_hand_over` with `host`).
 - What ChatGPT really sends a remote plugin is not known before the first real run: the R1 probe on the desktop app handed a
