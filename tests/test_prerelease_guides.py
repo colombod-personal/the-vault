@@ -537,8 +537,8 @@ def test_the_job_never_follows_a_redirect_or_reaches_a_host_it_was_not_given(uni
 
 
 def test_the_twins_pages_have_the_shape_the_real_ones_have(universe):
-    """What tests/conformance compares with the real site: the sitemap's shape, the origin host in WPN's sitemap, the meta refresh
-    without a Location header, no robots file on WPN, and the two sentences the Vault reads."""
+    """What tests/conformance compares with the real site: the sitemap's shape, the origin host in WPN's sitemap, the redirect
+    (a Location and a meta refresh), no robots file on WPN, and the two sentences the Vault reads."""
     w = universe.wizards
     guide = w.publish_guide("novelty-set-prerelease-guide", "Novelty Set Prerelease Guide")
     event = w.publish_event("prerelease-novelty-set", "Prerelease – Novelty Set | WPN", date(2026, 11, 13), date(2026, 11, 19), two_headed_giant=(1, 2))
@@ -551,7 +551,8 @@ def test_the_twins_pages_have_the_shape_the_real_ones_have(universe):
         listing = c.get("https://wpn.wizards.com/__sitemap__/en/sitemap.xml").text
         assert "https://wpn.web-prod.tiamat-origin.cloud/en/event/prerelease-novelty-set" in listing
         refresh = c.get("https://wpn.wizards.com/event/prerelease-novelty-set")
-        assert refresh.status_code == 302 and "location" not in refresh.headers and 'http-equiv="refresh"' in refresh.text
+        assert refresh.status_code == 302 and refresh.headers["location"] == "/en/event/prerelease-novelty-set"
+        assert 'http-equiv="refresh"' in refresh.text
         assert c.get("https://wpn.wizards.com/en/robots.txt").status_code == 404
         page = c.get(event)
         lines = pg.page_lines(page.text)

@@ -18,8 +18,8 @@ prerelease pages ``jobs/sync_prerelease_guides.py`` reads, each as the real host
 * ``magic.wizards.com``: ``/robots.txt`` (``User-agent: *`` with no ``Disallow``, and a ``Sitemap:`` line per language), ``/en/sitemap.xml`` (a
   ``urlset`` of ``<url><loc>..</loc><lastmod>..</lastmod></url>``), and articles under ``/en/news/feature/<slug>`` whose slugs are not uniform
   (``spider-man-prerelease-guide``, ``the-guide-to-your-first-prerelease-with-aetherdrift``);
-* ``wpn.wizards.com``: a path without the language answers with a small HTML page that redirects by ``<meta http-equiv="refresh">``
-  (status 302 or 307, no ``Location`` header), ``/sitemap.xml`` goes to ``/sitemap_index.xml``, whose entries name WPN's *origin* host
+* ``wpn.wizards.com``: a path without the language answers 302 (or 307) with a ``Location`` header to the ``/en`` path and a small HTML
+  body that says the same by ``<meta http-equiv="refresh">``; ``/sitemap.xml`` goes to ``/sitemap_index.xml``, whose entries name WPN's *origin* host
   (``wpn.web-prod.tiamat-origin.cloud``, which the Vault never contacts), and the same paths on ``wpn.wizards.com`` answer 200:
   ``/__sitemap__/en/sitemap.xml`` and ``/en/event/prerelease-<slug>``. There is no robots file (``/en/robots.txt`` is a 404 page).
 
@@ -179,7 +179,7 @@ class WizardsTwin(Twin):
 
 
 def _refresh(path: str, status: int) -> httpx.Response:
-    """How wpn.wizards.com sends a path without the language: a 3xx status with an HTML body whose meta tag does the redirect and no
-    ``Location`` header (read 2026-10-12)."""
+    """How wpn.wizards.com sends a path without the language: a 302 or 307 with a ``Location`` header and an HTML body whose meta tag says
+    the same (checked 2026-10-12 against the live site: the header is there, the body is the 100-odd bytes below)."""
     return httpx.Response(status, content=f'<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0; url={path}"></head></html>'.encode(),
-                          headers={"content-type": "text/html"})
+                          headers={"content-type": "text/html", "location": path})

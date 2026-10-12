@@ -42,8 +42,8 @@ Microsoft's `amplifier-bundle-digital-twin-universe`.
 - **Wizards' prerelease pages, as the two sites really answer** (`twins/wizards.py`, read 2026-10-12; `jobs/sync_prerelease_guides.py`): a sitemap
   on `magic.wizards.com` (`/en/sitemap.xml`, a `urlset` with `lastmod`) and one on `wpn.wizards.com` reached through `/sitemap_index.xml`, whose
   entries name WPN's origin host (`wpn.web-prod.tiamat-origin.cloud`, never contacted: the job takes the path and asks `wpn.wizards.com`);
-  a path without the language redirects by a `<meta http-equiv="refresh">` page with a 302 or 307 and no `Location` header (the job does
-  not follow it); no robots file on WPN, none disallowing on `magic.wizards.com`. The invented articles and event pages carry the title, the
+  a path without the language answers 302 or 307 with a `Location` and a `<meta http-equiv="refresh">` body (the job follows no
+  redirect: it asks the `/en` paths); no robots file on WPN, none disallowing on `magic.wizards.com`. The invented articles and event pages carry the title, the
   list after "Prerelease Pack contains the following", the "Scheduling :" line and the Two-Headed Giant sentence, which are the only
   things the Vault reads. `tests/conformance` compares the shapes and runs the Vault's own readers on real pages.
 - **Archidekt is never contacted by a schedule**: the live Archidekt conformance checks run by hand only

@@ -663,11 +663,11 @@ def test_the_sitemaps_list_the_pages_the_job_matches_and_the_twin_lists_them_in_
     assert t_magic.status_code == 200 and "<url><loc>" in t_magic.text and "<lastmod>" in t_magic.text
     t_index = twin.get(pg.WPN_SITEMAP_INDEX, headers=PRERELEASE_HEADERS)
     assert [u for u in pg.parse_sitemap(t_index.text) if u.endswith(pg.WPN_SITEMAP_PATH)]
-    # a path without the language answers 3xx with a meta refresh and no Location, on both
+    # a path without the language answers 3xx with a Location to the /en path and a meta refresh body, on both
     for who, client in (("real", real), ("twin", twin)):
         slug = httpx.URL(events[0]).path.rsplit("/", 1)[-1] if who == "real" else "prerelease-novelty-set"
         r = client.get(f"https://wpn.wizards.com/event/{slug}", headers=PRERELEASE_HEADERS, follow_redirects=False)
-        assert r.status_code in (301, 302, 307) and "location" not in r.headers and "refresh" in r.text.lower(), who
+        assert r.status_code in (301, 302, 307) and r.headers.get("location") == f"/en/event/{slug}" and "refresh" in r.text.lower(), who
 
 
 def test_the_vaults_readers_find_the_facts_on_real_prerelease_pages(real):
