@@ -203,7 +203,7 @@ against it and what is built (a recent sign-in, re-confirmed by a passkey, a pro
 - No `scope` means `read`. `write` is offered only when the client asks for it and is an **unticked** box on the
   consent page; whatever the client asks, the grant holds only what the person ticked (M `test_write_is_never_granted_without_the_person_choosing_it`).
 - Unknown scopes are `invalid_scope`. A refresh may narrow scopes, never widen them (M `test_refresh_cannot_widen_the_scopes`).
-- The REST layer enforces scopes: a read grant gets 403 `insufficient_scope` on writes, and write tools are not listed, with one exception: `start_collection_upload` and `POST /api/v1/uploads` (a link that waits for the person; the section "The upload link for a read-only connection" below says what it can cause).
+- The REST layer enforces scopes: a read grant gets 403 `insufficient_scope` on writes, and write tools are not listed, with two exceptions: `start_collection_upload` and `POST /api/v1/uploads` (a link that waits for the person; the section "The upload link for a read-only connection" below says what it can cause), and `sign_out` with `POST /api/v1/agent/sign-out` (ends only the caller's own OAuth connection; the section "Signing out from the chat" below).
 
 ### 10. SSRF through Client ID Metadata Documents
 A stranger sets `client_id=https://x/...` and the Vault fetches it. Mitigations in `vault.oauth_clients.ClientFetcher`:
@@ -969,3 +969,17 @@ person could switch Vault accounts only through Account, "Connected apps", "Disc
   id, not looked up again by an access token a refresh may just have replaced (M `test_a_token_refresh_between_the_lookup_and_the_revoke_still_signs_the_connection_out`);
   a connection ended meanwhile answers "already signed out", never the native app's message (M `test_a_connection_ended_meanwhile_says_already_signed_out_*`).
   The preview shows the scopes the current token carries (`access_scopes`), which a refresh may have narrowed (M `test_the_preview_shows_what_this_token_carries_*`).
+- **The compact tool list (Codex family) lists it directly.** `sign_out` is one of the core tools, so the ChatGPT desktop app, where this
+  was asked for, sees it with its own `destructiveHint`; `vault_call` and `vault_write` refuse it ("listed directly") like every core tool, so
+  a host's "always allow" for `vault_write` never covers signing out. The list has 30 tools and 29,549 bytes with the view links (28,970
+  without), against the guards of 30 and 30,000 (M `tests/test_mcp_profile.py::test_the_compact_list_stays_within_both_guards_with_and_without_the_views`,
+  `test_sign_out_is_listed_directly_to_every_sign_in_and_the_runners_will_not_run_it`; M `tests/test_sign_out.py::test_a_codex_client_with_the_compact_list_is_offered_sign_out_and_it_ends_only_its_connection`).
+- **A second call, or two at once.** The first call ends the connection, so the same token's second call is the MCP 401 with the resource
+  metadata, and a call that loses a race answers "already signed out"; neither touches another connection (M
+  `test_a_second_sign_out_with_the_same_token_is_a_plain_401_and_nothing_else_is_touched`,
+  `test_a_connection_removed_between_the_lookup_and_the_revoke_answers_already_signed_out`).
+- **Residual, not a change of this section.** Signing out ends the app's token, not the browser's Vault session. The consent page shows
+  "Use a different account" only while the web sign-in is fresh (the recent-sign-in window, #347); an older one is asked to sign in
+  first, on the Vault's sign-in page, and the account that provider (Google, Microsoft, ...) offers there is the provider's choice.
+  The Vault does not send `prompt=select_account`. The person switching accounts therefore signs in with the other account, or uses
+  "Use a different account" when it is shown.

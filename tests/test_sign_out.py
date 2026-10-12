@@ -189,3 +189,55 @@ def test_the_native_apps_own_sign_in_is_refused_and_keeps_working(app, client):
 def test_an_email_is_masked_to_its_first_letter_and_domain(email, masked):
     from vault.api.catalog_api import mask_email
     assert mask_email(email) == masked
+
+
+def test_a_codex_client_with_the_compact_list_is_offered_sign_out_and_it_ends_only_its_connection(app, client):
+    """The ChatGPT desktop app and Codex get the short tool list (vault/api/mcp_profile.py): sign_out is one of its core tools,
+    listed to a read-only connection too, and it works there exactly as in the full list."""
+    first = client.connect()
+    client.initialize(name="codex-mcp-client")
+    second = another_device(client)
+    listed = {t["name"]: t for t in client.mcp("tools/list", token=first["access_token"]).json()["result"]["tools"]}
+    assert {"vault_tools", "vault_call"} <= set(listed) and "vault_write" not in listed  # the short list, for a read-only connection
+    assert listed["sign_out"]["annotations"]["destructiveHint"] is True
+    preview = result(client, first["access_token"], "sign_out")["structuredContent"]
+    assert preview["signed_out"] is False and grants(app) == 2
+    done = result(client, first["access_token"], "sign_out", confirm=True)["structuredContent"]
+    assert done["signed_out"] is True and done["connection"]["other_connections"] == 1
+    assert grants(app) == 1
+    assert client.mcp("tools/list", token=first["access_token"]).status_code == 401
+    assert result(client, second, "whoami")["isError"] is False
+
+
+def test_a_second_sign_out_with_the_same_token_is_a_plain_401_and_nothing_else_is_touched(app, client):
+    """A host that retries, or a person who asks twice: the first call ended the connection, so the second finds no sign-in
+    (the host's cue to sign in again), never a server error and never another connection of the person's."""
+    first = client.connect()["access_token"]
+    second = another_device(client)
+    assert result(client, first, "sign_out", confirm=True)["structuredContent"]["signed_out"] is True
+    assert grants(app) == 1
+    again = call(client, first, "sign_out", confirm=True)
+    assert again.status_code == 401 and METADATA in again.headers["www-authenticate"] and 'error="invalid_token"' in again.headers["www-authenticate"]
+    assert call(client, first, "sign_out").status_code == 401  # the preview too
+    assert grants(app) == 1
+    assert result(client, second, "whoami")["isError"] is False
+
+
+def test_a_connection_removed_between_the_lookup_and_the_revoke_answers_already_signed_out(app, client, monkeypatch):
+    """Two calls at once: the other one wins. The loser says so plainly, and the person's other connection is not touched."""
+    first = client.connect()
+    second = another_device(client)
+    real = oauth_server.grant_of_access
+
+    def removed_by_the_other_call(db, user_id, bearer):
+        grant = real(db, user_id, bearer)
+        if grant is not None:
+            db_do(app, lambda other: oauth_server.revoke_user_grant(other, user_id, grant.id))  # the concurrent call finishes first
+        return grant
+
+    monkeypatch.setattr(oauth_server, "grant_of_access", removed_by_the_other_call)
+    answer = result(client, first["access_token"], "sign_out", confirm=True)
+    assert answer["isError"] is True and "already signed out" in answer["structuredContent"]["detail"]
+    assert grants(app) == 1
+    monkeypatch.undo()
+    assert result(client, second, "whoami")["isError"] is False

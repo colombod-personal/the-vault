@@ -82,9 +82,10 @@ def test_a_read_only_connection_is_offered_the_upload_link_and_nothing_that_chan
     # the tool is honest about what it is: it creates a link, so it is not marked read-only; it destroys nothing
     notes = tools["start_collection_upload"]["annotations"]
     assert notes["readOnlyHint"] is False and notes["destructiveHint"] is False
-    # and it is the only write tool a read-only connection is given: a new one has to be added here on purpose
-    assert {t.name for t in mcp.TOOLS if t.write and t.any_scope} == {"start_collection_upload"}
-    assert {n for n in tools if mcp.BY_NAME[n].write} == {"start_collection_upload"}
+    # and these are the only write tools a read-only connection is given (the link, and ending its own sign-in: vault-wxy.3.1):
+    # a new one has to be added here on purpose
+    assert {t.name for t in mcp.TOOLS if t.write and t.any_scope} == {"start_collection_upload", "sign_out"}
+    assert {n for n in tools if mcp.BY_NAME[n].write} == {"start_collection_upload", "sign_out"}
 
 
 def test_a_read_only_connection_can_start_an_upload_and_read_it_waiting(read):
@@ -296,6 +297,9 @@ BEFORE_THIS_CHANGE = {("POST", p) for p in (
 TAKE_NO_ACCESS_TOKEN = {("POST", "/api/v1/auth/native/{provider}"), ("POST", "/api/v1/auth/token"),
                         ("POST", "/api/v1/catalog/walkthrough"), ("POST", "/api/v1/catalog/verify-citation")}
 THE_ONE_EXEMPTION = {("POST", "/api/v1/uploads")}
+# ...and the one that ends the caller's own app connection (vault-wxy.3.1): any connection may end itself, and nothing else.
+ENDS_ITS_OWN_CONNECTION = {("POST", "/api/v1/agent/sign-out")}
+END_THE_TOKEN = ("/api/v1/auth/revoke", "/api/v1/agent/sign-out")
 
 
 def in_process(app) -> TestClient:
@@ -318,7 +322,7 @@ def concrete(path: str) -> str:
 def test_a_read_only_oauth_token_is_refused_on_every_unsafe_route_but_the_upload_link(app, read):
     token = read.tokens["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
-    routes = sorted(unsafe_routes(app), key=lambda r: r[1] == "/api/v1/auth/revoke")  # revoking ends the token: last
+    routes = sorted(unsafe_routes(app), key=lambda r: r[1] in END_THE_TOKEN)  # these two end the token: last
     assert len(routes) > 40  # the sweep really saw the API
     not_refused = set()
     with in_process(app) as c:
@@ -329,8 +333,8 @@ def test_a_read_only_oauth_token_is_refused_on_every_unsafe_route_but_the_upload
             else:
                 not_refused.add((method, path))
     # nothing new is open to a read-only token, and the one thing this change opens is exactly the upload link
-    assert not_refused == BEFORE_THIS_CHANGE | TAKE_NO_ACCESS_TOKEN | THE_ONE_EXEMPTION, (
-        not_refused ^ (BEFORE_THIS_CHANGE | TAKE_NO_ACCESS_TOKEN | THE_ONE_EXEMPTION))
+    assert not_refused == BEFORE_THIS_CHANGE | TAKE_NO_ACCESS_TOKEN | THE_ONE_EXEMPTION | ENDS_ITS_OWN_CONNECTION, (
+        not_refused ^ (BEFORE_THIS_CHANGE | TAKE_NO_ACCESS_TOKEN | THE_ONE_EXEMPTION | ENDS_ITS_OWN_CONNECTION))
 
 
 def test_an_oauth_token_is_not_accepted_on_the_rest_route_directly(app, read):

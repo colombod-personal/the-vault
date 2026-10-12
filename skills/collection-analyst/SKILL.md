@@ -7,7 +7,8 @@ description: >-
   bought". The Vault gives a private upload link at once; never answer "attach the file here". Also answers
   questions about a person's own collection: what it is worth, gains and losses, what they own, what is shared with
   them, how a deck fits it, price changes, sets or colors, spare copies, small edits when they bought, sold or
-  traded cards, organising it into buckets and tags, sharing, and starting over or undoing a change.
+  traded cards, organising it into buckets and tags, sharing, starting over or undoing a change, and signing out of the Vault or
+  switching to another Vault account.
 license: MIT
 metadata:
   vault-tools: "whoami get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline get_collection_pnl list_spare_copies list_card_names card_roles check_decklist lookup_cards refresh_prices update_owned_cards confirm_owned_cards_update undo_owned_cards_update show_owned_printings list_imports get_import list_export_formats import_collection_csv start_collection_upload get_staged_upload confirm_staged_upload list_buckets create_bucket rename_bucket move_cards delete_bucket reset_collection undo_collection_reset list_tags tag_cards untag_cards rename_tag delete_tag get_card_metadata set_card_metadata get_bucket_metadata set_bucket_metadata list_shared_with_me get_shared_deck list_my_shares accept_share stop_sharing sign_out"
@@ -20,7 +21,7 @@ estimate or fill gaps. Follow `vault-attribution` (if installed) for card data a
 
 **The person's decks and collection are in the Vault: read them with the Vault's tools, never with a browser or computer.** Their saved decks, their collection and everything computed from them come from the tools named in the steps below, even when they are signed in to the Vault's website: do not open it, a browser or computer use to look. If a tool the steps name is not in your list, look it up by that name before saying it is missing; if you have `vault_tools`, reach it through `vault_tools` (it lists the Vault's other tools and shows one in full), `vault_call` (it runs one that only reads) or `vault_write` (it runs one that changes something), each by name with its arguments; a tool that deletes or revokes is done in the Vault's web app, so say that; say a tool is missing only after you have looked, and never fall back to a browser.
 
-In a host whose tool list is compact, `delete_bucket`, `delete_tag`, `untag_cards`, `reset_collection`, `undo_collection_reset`, `stop_sharing` and `import_collection_csv` are done by the person in the Vault's web app (a file is brought in from the chat with `start_collection_upload`): say so instead of looking for them.
+In a host whose tool list is compact, `delete_bucket`, `delete_tag`, `untag_cards`, `reset_collection`, `undo_collection_reset`, `stop_sharing` and `import_collection_csv` are done by the person in the Vault's web app (a file is brought in from the chat with `start_collection_upload`): say so instead of looking for them. `sign_out` also ends a sign-in, but it is listed directly: call it by its own name, never through `vault_call` or `vault_write`.
 
 **Check the connection when something is off.** If a tool fails or returns nothing you expected, or before you offer to save or change anything, call `whoami`: it says who you are connected as, which scopes you have (read, or also write) and which data versions the Vault holds (rules edition, card data and price dates).
 
@@ -83,7 +84,8 @@ collection).
 
 When the person asks to sign out of the Vault or switch to another Vault account, call `sign_out` without `confirm`: say which
 account (name and masked email) and which app it would sign out, then send `confirm` only after they say yes. The next request asks them
-to sign in; on the Vault's page they choose "Use a different account" to switch.
+to sign in again: they sign in with the other account, or choose "Use a different account" on the Vault's page, which signs the
+browser out first. A personal access token or a web sign-in cannot be signed out here: the tool says where to end it, so pass that on.
 
 ## Editing what they own
 
