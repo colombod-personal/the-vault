@@ -93,7 +93,7 @@ def _all_flat() -> str:
 def test_section_1_carries_the_experience_rule_and_the_template_asks_for_it():
     s = _all_flat()
     for needed in ("**The experience rule (owner, 2026-10-12).**", "(typos fixed)",
-                   "the user experience must work, the implementation detail is not what we have customers using",
+                   "the user experience must work, the implementation detail is not what we have customer using",
                    "never the mechanism", "never handed homework", "the final yes before something changes",
                    "a recommendation on every choice left", "a number measured on a real run in the real app"):
         assert needed in s, needed

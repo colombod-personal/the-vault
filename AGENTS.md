@@ -13,7 +13,7 @@ agent and every session (Claude, Codex, Copilot, Cursor). `CLAUDE.md` has the co
   link every PR.
 
 **The experience rule (owner, 2026-10-12).** The owner's words (typos fixed): "the user experience must work, the
-implementation detail is not what we have customers using"; "why is not the agent helping polishing the experience? if I
+implementation detail is not what we have customer using"; "why is not the agent helping polishing the experience? if I
 have to do it myself this product becomes only a waste of customer money (AI token) and time"; and
 "the link flow, is that a customer facing experience? no, is implementation detail". How the rule is applied (not the owner's
 words): a criterion says what the person says and sees in the app they use (ChatGPT, Claude, the website), never the
@@ -195,10 +195,9 @@ Vault's beads workspace on a shared Dolt server that starts on boot. Agents just
 use different lanes (`VAULT_CHECK_LANE=a|b|c|d`, or `vault-check-local` lanes in WSL): one run per lane. The tool holds a
 lock for the whole run and refuses a busy lane; wait or take another lane, and never stop another session's run.
 
-**Polling GitHub.** The Chief of Staff's operating rule for every session (2026-10-12, given after GitHub's secondary rate
-limit failed the `943df00` deploy; not the owner's words): GitHub polling is at most one open-PR query plus one merged query
-every 4 minutes per session; merge-when-green loops no faster than that; never a loop of API calls to test a limit; use
-`gh pr checks --watch --interval 120` or fewer calls.
+**Polling GitHub.** The Chief of Staff's operating rule for every session (2026-10-12; not the owner's words): GitHub
+polling is at most one open-PR query plus one merged query every 4 minutes per session; merge-when-green loops no faster
+than that; never a loop of API calls to test a limit; use `gh pr checks --watch --interval 120` or fewer calls.
 
 ## 9. Read the record, never remember it
 
