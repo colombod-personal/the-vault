@@ -53,7 +53,9 @@ READ_ONLY_POSTS = {"/api/v1/decks/parse", "/api/v1/imports/preview", "/api/v1/de
                    "/api/v1/decks/roles",
                    # a one-time link for a file that then waits for the person's confirmation: nothing is imported or changed
                    # (vault/uploads.py; the apply, /uploads/{id}/apply, is not here and needs the write scope)
-                   "/api/v1/uploads"}
+                   "/api/v1/uploads",
+                   # ends the caller's own app connection (an OAuth grant), whatever its scopes (vault/api/catalog_api.py, sign_out)
+                   "/api/v1/agent/sign-out"}
 
 
 def is_write(method: str, path: str) -> bool:

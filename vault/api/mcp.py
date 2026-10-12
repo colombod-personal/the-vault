@@ -9,7 +9,8 @@ access token from Account → Agents & API (or ``POST /api/v1/me/tokens``).
 Every tool is a thin wrapper around a ``/api/v1`` endpoint, called in-process with the
 caller's credentials. Tenancy, sharing, scopes, paging and validation are therefore
 enforced in one place. With a read-only token, write tools aren't listed, and calling one
-fails with the API's 403; the exception is ``start_collection_upload`` (``Tool.any_scope``), which only makes a link.
+fails with the API's 403; the exceptions are ``start_collection_upload`` (it only makes a link) and ``sign_out`` (it ends the
+caller's own connection), both ``Tool.any_scope``.
 """
 
 from __future__ import annotations
@@ -70,6 +71,8 @@ priced daily from Scryfall, plus their saved decks and what others have shared w
   returned only when they clearly asked for that exact reset. Never reset to make an import or an edit easier. A reset can be
   undone for 7 days with undo_collection_reset, but only until anything else changes the collection: it is best-effort, so offer
   the export first. Clearing tags, notes or history and resetting with no undo are the person's, in the web app.
+- To sign out or switch Vault account, call sign_out without confirm, say which account and app it would end, and send
+  confirm true only once the person said yes.
 """
 
 
@@ -92,8 +95,9 @@ class Tool:
     ui: str = ""  # the MCP Apps view (vault/api/mcp_ui.py) a host may show next to this tool's result
     # A write tool that a read-only connection still sees and may call, because what it does imports and changes nothing the
     # person has: start_collection_upload makes a link (good for one hour) for a file that then waits for the person's confirmation
-    # (its REST route is in vault.app.READ_ONLY_POSTS; confirm_staged_upload stays write-scoped). It keeps ``write`` so the
-    # annotations stay honest: it is not read-only, it creates a link.
+    # (its REST route is in vault.app.READ_ONLY_POSTS; confirm_staged_upload stays write-scoped), and sign_out ends only the
+    # caller's own OAuth connection, which any connection may do (its REST route is in READ_ONLY_POSTS too). They keep ``write``
+    # so the annotations stay honest: neither is read-only.
     any_scope: bool = False
 
     def listed_for(self, scopes: set[str]) -> bool:
@@ -623,8 +627,10 @@ TOOLS = [
          "person attached or names (an export from their app) needs, of any size. Nothing is imported: the file waits until "
          "they confirm. The uploaded file is then read by get_staged_upload. Any connection may make the link, read-only ones "
          "included, because it changes nothing in the person's collection or decks; importing the uploaded file is "
-         "confirm_staged_upload, which needs the write permission. At most 5 links are open at once, and none can be listed or "
-         "cancelled yet, so use the link already given in this chat rather than making another; the server takes a file of "
+         "confirm_staged_upload, which needs the write permission. A person has at most 5 open links: asking for a sixth makes the "
+         "oldest link that holds no file stop working (the answer names its id); a link that holds an uploaded file is never "
+         "replaced, and when all five hold one the call is refused and lists them. There is no list or cancel yet, so use the link "
+         "already given in this chat when there is one; the server takes a file of "
          "up to 20 MB, but on mtgvault.cards the hosting platform caps "
          "a request at about 4 MB, so a bigger file is refused before the Vault sees it. "
          "With bucket_id the upload goes into that bucket only, fixed "
@@ -726,6 +732,15 @@ TOOLS = [
          method=lambda a: "DELETE" if a.get("confirm") is True else "GET",
          path=lambda a: f"{V1}/shares/{int(a['share_id'])}" if a.get("confirm") is True else f"{V1}/shares",
          write=True, destructive=True),
+    Tool("sign_out", "Ends this app's connection to the Vault on this device: its access and refresh tokens are revoked, and the "
+         "app's next request asks for a sign-in, where another account can be chosen. With confirm false or absent it returns "
+         "the account this connection is signed in to (name and masked email), the app, and what ending it does, and changes "
+         "nothing; with confirm true it ends this one connection. The account's other apps and devices, personal access "
+         "tokens and web sign-in are not affected. Read-only connections can use it.",
+         {"confirm": CONFIRM}, [],
+         method=lambda a: "POST" if a.get("confirm") is True else "GET",
+         path=lambda a: f"{V1}/agent/sign-out", title="Sign out of the Vault here",
+         write=True, destructive=True, any_scope=True),
     Tool("where_to_buy", "Plain links to shops for one card, in the order for the country the person set (shops, then the stores they "
          "typed, the Wizards store locator and Scryfall). Each link opens a shop's own search; the Vault contacts no shop and has "
          "no price, stock or shipping, so none is given and none is the cheapest. Reading only: the person's country and stores are "
@@ -753,7 +768,7 @@ OWN_DATA_ONLY = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucke
                  "get_card_metadata", "set_card_metadata", "get_bucket_metadata", "set_bucket_metadata",
                  "get_acquisition_timeline", "parse_decklist", "save_deck", "update_deck", "list_imports",
                  "import_collection_csv", "list_export_formats", "list_shared_with_me", "get_import", "delete_deck",
-                 "list_my_shares", "accept_share", "stop_sharing", "start_collection_upload",
+                 "list_my_shares", "accept_share", "stop_sharing", "sign_out", "start_collection_upload",
                  "get_staged_upload", "confirm_staged_upload", "council_brief", "expert_brief",
                  "confirm_owned_cards_update", "undo_owned_cards_update"}
 DECK_ANALYSIS = {"deck_stats", "simulate_draws", "deck_legality", "find_upgrades", "validate_deck_changes", "find_combos",

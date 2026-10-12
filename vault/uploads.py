@@ -13,7 +13,8 @@ picks the file on a plain page, the file waits (staged, not imported), the assis
   file that was previewed (#352: the link can be used again until it expires, so what is stored when apply runs may not be
   what the person was shown; the hash covers the bucket too). Like every import it applies only what changed in the person's
   app and keeps edits made in the Vault (``vault.merge``).
-- At most 5 open links per person and 10 started a minute (a retry makes another link and uses a slot); each file posted to
+- At most 5 open links per person: a sixth replaces the oldest one that holds no file (never one that holds a file; when all five
+  do, 409 listing them); 10 started a minute (a retry makes another link and uses a slot); each file posted to
   the page counts against its own per-link allowance (``import_limit`` a minute for each link, 429, not the person's /imports
   counter); expired files are deleted by the daily
   job (``vault.retention``). A link is not single-use: it works until it expires and a second file replaces the first. Links
@@ -33,9 +34,10 @@ from typing import Annotated
 from dataclasses import replace
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, Request, UploadFile
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.orm import Session
 
+from . import locks
 from .api.idempotency import idempotent
 from .api.import_params import BucketId, answer_options
 from .api.schemas import MAX_ID
@@ -49,6 +51,7 @@ V1 = "/api/v1"
 LIFETIME = timedelta(hours=1)
 MAX_OPEN = 5  # links a person can have open at once
 STARTS_PER_MINUTE = 10
+UPLOAD_LOCK_CLASS = 7301  # pg_advisory_xact_lock(class, user id): one start at a time per person (a number no other lock uses)
 
 
 def _hash(ticket: str) -> str:
@@ -112,6 +115,36 @@ def _preview_html(preview: dict) -> str:
                f"<ul>{rows}</ul>" + (f"<p>and {more} more.</p>" if more > 0 else "") + "</details>" if rows else ""))
 
 
+def _supersede_oldest_waiting(db: Session, user_id: int) -> int | None:
+    """At the cap of open links: remove the person's oldest link that holds no file, and return its id (``None`` when every
+    link holds one). One statement, so what is checked is what is removed: the ``content IS NULL`` test is made on the row
+    under its lock, so a file that was committed a moment earlier keeps its link, and one that is being written (its row is
+    locked) is skipped for the next oldest. The removed row answers exactly as an expired one does (the page and
+    ``/uploads/{id}`` both say no such link), so the replacement tells nothing about the old one to whoever holds its ticket.
+    The caller commits the removal together with the new link."""
+    oldest = (select(StagedUpload.id).where(StagedUpload.user_id == user_id, StagedUpload.content.is_(None))
+              .order_by(StagedUpload.expires_at, StagedUpload.id).limit(1).with_for_update(skip_locked=True).scalar_subquery())
+    gone = db.execute(delete(StagedUpload).where(StagedUpload.id == oldest, StagedUpload.content.is_(None),
+                                                 StagedUpload.user_id == user_id)
+                      .returning(StagedUpload.id).execution_options(synchronize_session=False)).first()
+    return gone[0] if gone else None
+
+
+def _hm(when: datetime | None) -> str:
+    return when.astimezone(timezone.utc).strftime("%H:%M UTC") if when is not None else "?"
+
+
+def _held_files(db: Session, user_id: int) -> str:
+    """The person's own links with a file uploaded through them, for the plain refusal: the assistant has no list, and a new chat
+    has no ids. Size and time only, never the file's name: whoever holds a link's ticket chose that name, and the sentence is read
+    by assistants (get_staged_upload answers it as data, in its own field)."""
+    rows = db.execute(select(StagedUpload.id, func.length(StagedUpload.content).label("size"), StagedUpload.uploaded_at,
+                             StagedUpload.expires_at)
+                      .where(StagedUpload.user_id == user_id, StagedUpload.content.is_not(None))
+                      .order_by(StagedUpload.expires_at, StagedUpload.id)).all()
+    return "; ".join(f"id {r.id} ({r.size:,} bytes, uploaded {_hm(r.uploaded_at)}, link ends {_hm(r.expires_at)})" for r in rows)
+
+
 UploadId = Annotated[int, Path(ge=1, le=MAX_ID)]  # a bigger number can't exist (and would overflow the column)
 
 
@@ -127,25 +160,45 @@ def build_router(get_db, current_user, settings) -> APIRouter:
                          "the file goes into that bucket only")
     def start_upload(request: Request, bucket_id: BucketId = None, user: User = Depends(current_user),
                      db: Session = Depends(get_db)) -> dict:
-        per_user(request, "upload start", user.id, STARTS_PER_MINUTE, db)
+        per_user(request, "upload start", user.id, STARTS_PER_MINUTE, db)  # commits: the transaction below starts after it
         if bucket_id is not None and db.scalar(select(Bucket.id).where(Bucket.id == bucket_id, Bucket.user_id == user.id)) is None:
             raise HTTPException(404, "Bucket not found")  # another person's id is the same 404
+        # One start at a time per person, to the end of this transaction: the count, the replacement and the insert are then
+        # one decision. Without it, six simultaneous starts at three open links all counted three and left six rows, and two
+        # at one waiting link and four held files could both find the same waiting row (one then answered a false 409).
+        # Bounded wait (vault.locks: 5 s, then the usual 503 with Retry-After, as for every other lock in the Vault): a stalled
+        # transaction of this person's must not hold a request and a database connection for as long as it likes. SET LOCAL ends
+        # with the transaction, so it also bounds the row waits below.
+        db.execute(text(f"SET LOCAL lock_timeout = '{locks.LOCK_TIMEOUT}'"))
+        db.execute(select(func.pg_advisory_xact_lock(UPLOAD_LOCK_CLASS, user.id)))
         db.execute(delete(StagedUpload).where(StagedUpload.expires_at <= _now()))
         open_links = db.scalar(select(func.count()).select_from(StagedUpload).where(StagedUpload.user_id == user.id))
+        replaced = None
         if open_links >= MAX_OPEN:
-            db.commit()
-            raise HTTPException(409, f"You already have {MAX_OPEN} open upload links (each works for one hour, and again until "
-                                "it expires). The person can finish uploading to one of the links already given in this chat, or "
-                                "let them expire; there is no list of open links yet, and none can be cancelled.")
+            replaced = _supersede_oldest_waiting(db, user.id)
+            if replaced is None:  # every link has a file uploaded through it: never replace one of those
+                held = _held_files(db, user.id)
+                db.commit()
+                raise HTTPException(409, f"You already have {MAX_OPEN} open upload links and a file has been uploaded through "
+                                    "each one (by the person, or by the app that made the link, which holds the link's address), so "
+                                    "none can be replaced. The files are not imported and nothing is lost. To see what one would "
+                                    "change, call get_staged_upload with an id listed here; import one with confirm_staged_upload "
+                                    "only if the person recognises it and says yes. Otherwise the links end on their own (one hour "
+                                    "from when each was made); there is no discard yet. Uploaded: " + held)
         ticket = secrets.token_urlsafe(32)
         staged = StagedUpload(user_id=user.id, ticket_hash=_hash(ticket), expires_at=_now() + LIFETIME,
                               bucket_id=bucket_id, bucket_bound=bucket_id is not None)
         db.add(staged)
-        db.commit()
-        return {"id": staged.id, "url": f"{settings.base_url}/upload?ticket={ticket}",
-                "expires_at": staged.expires_at.isoformat(), "bucket": bucket_ref(db, staged),
-                "next": "Give the person the link. When they say they uploaded the file, call get_staged_upload: its "
-                        "matching_line says how the rows matched, and nothing in it is for the person to fix."}
+        db.commit()  # the replacement and the new link are one transaction: if the insert fails, the old link is still there
+        answer = {"id": staged.id, "url": f"{settings.base_url}/upload?ticket={ticket}",
+                  "expires_at": staged.expires_at.isoformat(), "bucket": bucket_ref(db, staged),
+                  "next": "Give the person the link. When they say they uploaded the file, call get_staged_upload: its "
+                          "matching_line says how the rows matched, and nothing in it is for the person to fix."}
+        if replaced is not None:
+            answer["replaced_upload_id"] = replaced
+            answer["next"] += (f" The person had {MAX_OPEN} open links, so the oldest one that held no file (id {replaced}) no "
+                               "longer works: use this link only.")
+        return answer
 
     def owned(db: Session, user: User, upload_id: int) -> StagedUpload:
         staged = db.get(StagedUpload, upload_id)
@@ -246,27 +299,30 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         if staged is None:
             return page("Upload link expired", "<h1>This upload link has expired</h1>"
                         "<p>Ask your assistant for a new one.</p>", status=404)
+        # Plain values, read once: the session commits below (the rate counter) and the link may be replaced meanwhile, so no
+        # attribute of the row is read after this point.
+        staged_id, owner_id, bound, bound_bucket = staged.id, staged.user_id, staged.bucket_bound, staged.bucket_id
         # Up to 20 MB of parsing and matching, limited to IMPORT_LIMIT a minute per link, on a counter of its own: the shared
         # per-person "import" counter counts refused tries too, so whoever still holds a link (an app the person has since
         # disconnected) could loop here and keep the person's own /imports at 429. A made-up ticket was refused above and is
         # counted nowhere. A person is bounded by 5 links x IMPORT_LIMIT, and a link that is being looped is replaced by a new one.
         try:
-            per_user(request, "upload page", staged.id, settings.import_limit, db, kind="ticket")
+            per_user(request, "upload page", staged_id, settings.import_limit, db, kind="ticket")
         except HTTPException as exc:
             limited = page("Too many uploads", "<h1>Too many uploads just now</h1><p>Wait a minute, then upload the file "
                            "again with the same link. If this keeps happening, ask your assistant for a new link.</p>", status=429)
             limited.headers["Retry-After"] = (exc.headers or {}).get("Retry-After", "60")
             return limited
-        chosen, asked = staged.bucket_id, bucket.strip()
-        if staged.bucket_bound:  # made for a bucket by the assistant: the page cannot send it elsewhere
-            if asked and asked != str(staged.bucket_id):
+        chosen, asked = bound_bucket, bucket.strip()
+        if bound:  # made for a bucket by the assistant: the page cannot send it elsewhere
+            if asked and asked != str(bound_bucket):
                 return page("Wrong bucket", "<h1>This link is for another bucket</h1><p>This upload link was made for one bucket. "
                             "Ask your assistant for a new link to send the file somewhere else.</p>", status=400)
         else:
             chosen = None
             if asked:  # one of this person's own buckets, nobody else's
                 number = int(asked) if asked.isascii() and asked.isdecimal() and len(asked) < 10 else 0
-                found = db.scalar(select(Bucket.id).where(Bucket.id == number, Bucket.user_id == staged.user_id)) if number else None
+                found = db.scalar(select(Bucket.id).where(Bucket.id == number, Bucket.user_id == owner_id)) if number else None
                 if found is None:
                     return page("Unknown bucket", "<h1>That bucket was not found</h1><p>Go back and pick one of your buckets, "
                                 "or the whole collection.</p>", status=400)
@@ -275,12 +331,20 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         if len(content) > MAX_UPLOAD_BYTES:
             return page("File too large", "<h1>The file is too large</h1><p>20 MB at most, and about 4 MB on mtgvault.cards, "
                         "where the hosting platform refuses a bigger request first.</p>", status=413)
-        staged.content, staged.filename, staged.uploaded_at = content, (file.filename or "upload.csv")[:255], _now()
-        staged.bucket_id = chosen
+        # One conditional UPDATE, not an attribute write: the link may have been replaced (a sixth link at the cap removes the
+        # oldest one that held no file, see _supersede_oldest_waiting) or may have expired while the file was being read. If no
+        # row matched, the file is not kept and the person is told so, never "File received".
+        stored = db.execute(update(StagedUpload).where(StagedUpload.id == staged_id, StagedUpload.expires_at > _now())
+                            .values(content=content, filename=(file.filename or "upload.csv")[:255], uploaded_at=_now(),
+                                    bucket_id=chosen).execution_options(synchronize_session=False))
+        if stored.rowcount != 1:
+            db.rollback()
+            return page("Upload link expired", "<h1>This upload link has expired</h1>"
+                        "<p>Ask your assistant for a new one.</p>", status=404)
         db.commit()
-        user = db.get(User, staged.user_id)
+        user = db.get(User, owner_id)
         try:
-            summary = _preview_html(preview_import(db, user, content, ImportOptions(bucket_id=staged.bucket_id)))
+            summary = _preview_html(preview_import(db, user, content, ImportOptions(bucket_id=chosen)))
         except ImportError_ as exc:
             summary = f"<p>The file could not be read: {esc(exc)}</p>"
         return page("File received", "<h1>File received</h1><p>Nothing has been imported. Go back to your assistant: "
