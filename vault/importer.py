@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import csv
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date
 
 from mtg_toolkits import delta, formats
 from mtg_toolkits import normalize_collector_number, normalize_set_code
+from mtg_toolkits.matching import PrintingIndex
 from mtg_toolkits.models import CollectionEntry, Finish
 from sqlalchemy import delete, func, select, tuple_, update
 from sqlalchemy.orm import Session
@@ -19,6 +20,7 @@ from . import buckets, merge
 from .csv_safe import neutralise_csv, restore_csv
 from .models import Bucket, BucketBaseline, Card, CollectionBaseline, Entry, Import, TagAssignment, User, utcnow
 from .prices import MAX_PRICE, compute_values
+from .printing_lookup import front, printings_of
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 EXACT = ("set_number", "id")
@@ -96,7 +98,10 @@ def import_collection(db: Session, user: User, filename: str, content: bytes, op
     - exact matches from the previous import are carried over
     - Scryfall ids in the file are used
     - set + collector number is looked up among the cards the server already knows
-    Everything else is resolved by the next daily sync.
+    - the rest by the library's ladder (``mtg_toolkits.matching``) over the catalog the Vault holds: the set a retired
+      code went to, then the card's name with the set, with the collector number, then the name alone (a row matched
+      so is marked by its ``match_method`` as not naming the printing, and the daily sync matches it again)
+    A row nothing finds is kept as written; the daily sync looks again.
     """
     options = options or ImportOptions()
     scope = scope_of(db, user, options)  # a bucket that is not the person's is refused before the file is read
@@ -198,33 +203,69 @@ def preview_import(db: Session, user: User, content: bytes, options: ImportOptio
     scope = scope_of(db, user, options)
     source, entries = read_file(content)
     prep = _prepare(db, user, source, entries, options, scope)
-    matches = _match_printings(db, entries, prep.old_rows)
-    unmatched = [{"row": i, "name": e.name, "set": e.set_code, "number": e.collector_number, "quantity": e.quantity}
-                 for i, (e, (sid, _, _)) in enumerate(zip(entries, matches), 1) if sid is None]
+    matching = _match_printings(db, entries, prep.old_rows)
+    by_method = Counter(method or "id" for sid, method, _ in matching.results if sid is not None)
+    unmatched = [{"row": i, "name": e.name, "set": e.set_code, "number": e.collector_number, "quantity": e.quantity,
+                  "why": matching.why.get(i - 1, "later")}
+                 for i, (e, (sid, _, _)) in enumerate(zip(entries, matching.results), 1) if sid is None]
+    not_found = sum(1 for u in unmatched if u["why"] == "not_found")
     # into one bucket (#124): the answer names it and totals everything left alone (absent for the whole collection)
     scoped = ({"bucket": {"id": scope.id, "name": scope.name, "rows": len(prep.old_rows),
                           "copies": sum(r.quantity for r in prep.old_rows)},
                "untouched": untouched(db, user, scope)} if scope is not None else {})
+    exact = sum(by_method.get(m, 0) for m in EXACT)
+    by_rule = len(entries) - len(unmatched) - exact
     return {"source": source, "rows": len(entries), "copies": sum(e.quantity for e in entries),
             **scoped, "changes": prep.changes,
             "merge": merge.describe(prep.plan, prep.baseline, bucket=scope.name if scope else None),
             "matched_rows": len(entries) - len(unmatched),
+            "matched_by": dict(by_method),
+            "printing_not_in_file_rows": by_rule,
             "unmatched_rows": len(unmatched), "unmatched": unmatched[:PREVIEW_UNMATCHED],
+            "not_found_rows": not_found, "left_for_daily_update_rows": len(unmatched) - not_found,
+            "matching_line": matching_line(len(entries), exact, by_rule, len(unmatched) - not_found, not_found),
             "note": "row is the n-th card row of the file, not counting header lines. "
                     "`changes` is what happens to the collection; `merge` says what comes from the person's app, which "
                     "edits made in the Vault are kept and which cards changed on both sides (conflicts keep the "
                     "Vault's edit unless the person answers otherwise). "
-                    "Unmatched rows have no printing the Vault can identify (missing or unknown set and number). "
-                    "They are kept and matched later by name, which can pick the wrong printing and price. "
-                    "Fix the set code and collector number in the file before importing if you can."}
+                    "Every row is kept as written. `matching_line` says in one line how the rows were matched: "
+                    "`matched_by` counts them by method (`id` and `set_number` name the printing the file has; `name_set`, "
+                    "`name_number` and `name` found the card and the Vault's rule chose the printing, which the file did "
+                    "not name). `unmatched` lists rows with no printing, each with `why`: `not_found` (no card of that "
+                    "name in the catalog the Vault holds: kept as written, unpriced) or `later` (the daily update "
+                    "matches it). Nothing in this answer is for the person to do."}
+
+
+def matching_line(rows: int, exact: int, by_rule: int, later: int, not_found: int) -> str:
+    """How the rows of a file were matched, in one sentence (the same words in the upload page and the assistant's answer)."""
+    n = lambda count, one, many: f"{count:,} {one if count == 1 else many}"  # noqa: E731
+    parts = [f"{n(exact, 'row names', 'rows name')} a printing the Vault knows"]
+    if by_rule:
+        parts.append(f"{n(by_rule, 'was', 'were')} matched by card name or collector number because the file's set or "
+                     "number is not the catalog's (priced as the cheapest printing, shown as not named by the file)")
+    if later:
+        parts.append(f"{n(later, 'row is', 'rows are')} matched by the daily update")
+    if not_found:
+        parts.append(f"{n(not_found, 'row is', 'rows are')} not in the card catalog, kept as written without a price")
+    return f"All {n(rows, 'row is', 'rows are')} kept: " + "; ".join(parts) + "."
 
 
 PREVIEW_UNMATCHED = 100
 
 
-def _match_printings(db: Session, entries, old_rows) -> list[tuple]:
+@dataclass
+class Matching:
+    """Each entry's (scryfall_id, match_method, price_finish), and why an entry with no printing has none."""
+    results: list[tuple]
+    why: dict[int, str]  # entry index -> "not_found" | "later" (vault.printing_lookup.Lookup.why_not)
+
+
+def _match_printings(db: Session, entries, old_rows) -> Matching:
     """Each entry's (scryfall_id, match_method, price_finish): carried over from the previous import, the id in the
-    file, or set + collector number among the printings the server knows; (None, None, None) otherwise."""
+    file, set + collector number among the printings the server knows, then the library's ladder over the catalog
+    (a retired code's set, name + set, name + collector number, name; ``vault.printing_lookup``).
+    (None, None, None) when nothing finds the card; ``why`` says whether the catalog does not hold it or it is for the
+    daily sync."""
     known = {}
     for row in old_rows:
         if row.scryfall_id and row.match_method in EXACT:
@@ -240,7 +281,7 @@ def _match_printings(db: Session, entries, old_rows) -> list[tuple]:
             tuple_(Card.set_code, Card.collector_number).in_(wanted[i:i + 500]))
         for sid, set_code, number in db.execute(query):
             by_number[(set_code, normalize_collector_number(number))] = sid
-    out = []
+    out: list[tuple] = []
     for e in entries:
         scryfall_id, method, price_finish = known.get(delta.key_of(e), (None, None, None))
         if scryfall_id is None and e.scryfall_id:
@@ -248,12 +289,24 @@ def _match_printings(db: Session, entries, old_rows) -> list[tuple]:
         elif scryfall_id is None and e.set_code and e.collector_number and printing(e) in by_number:
             scryfall_id, method = by_number[printing(e)], "set_number"
         out.append((scryfall_id, method, price_finish))
-    return out
+    # The rest: the card is found by the ladder over the catalog (the rule that picks the printing is the library's).
+    rest = [i for i, (sid, _, _) in enumerate(out) if sid is None]
+    why: dict[int, str] = {}
+    if rest:
+        lookup = printings_of(db, {front(entries[i].name).lower() for i in rest})
+        index = PrintingIndex(lookup.printings)
+        for i in rest:
+            found = index.match(entries[i])
+            if found.printing is not None:
+                out[i] = (found.printing.id, found.method, None)
+            else:
+                why[i] = lookup.why_not(entries[i].name)
+    return Matching(out, why)
 
 
 def _replace(db: Session, user: User, filename: str, version, prep: Prepared) -> Import:
     entries, plan, scope = prep.entries, prep.plan, prep.scope
-    matches = _match_printings(db, entries, prep.old_rows)
+    matches = _match_printings(db, entries, prep.old_rows).results
     # ``rows`` and ``copies`` are those of what the import covers: the whole collection, or the one bucket (#124)
     imp = Import(
         user_id=user.id, filename=filename[:255], source=prep.source, rows=prep.result_rows,

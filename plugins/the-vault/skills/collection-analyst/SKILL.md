@@ -36,6 +36,12 @@ said yes. When they say the file is uploaded, call `get_staged_upload` and show 
 Any connection can make the link and read the preview, read-only ones included; only the final import (`confirm_staged_upload`)
 needs write access, so a read-only connection is told at that step to reconnect the Vault and tick Write on its consent page.
 
+**A file from an app the Vault knows is never handed back as homework.** The Vault matches the rows itself (a set code that is the
+app's own, a collector number the catalog numbers differently, a card whose printing the file does not name) and keeps every row.
+Never ask the person to fix, edit, re-export or re-upload the file, and never ask them which printing of a card they have in it: the
+preview's `matching_line` says in one line how many rows were matched by name and how many are set aside and why; say that line,
+nothing more about it, and list rows only if they ask. The one question they are asked is the final yes.
+
 ## Answering questions
 
 1. **Start with `get_collection_summary`.** It has copies, printings, market value, amount paid, P&L (only
@@ -146,17 +152,20 @@ changed. An import applies only what changed in their app since their last impor
    - Show: what they have today (copies, value, the price date) and when the last import ran and what it changed.
    - Stop: none. A read-only connection (`whoami` says so) can still get the upload link and the preview; say before step 4
      that the import itself needs write access.
-2. **Choose the route and the bucket.**
-   - Calls: `list_buckets`.
+2. **Choose the route.**
+   - Calls: `list_buckets`, only when the person names a binder, box or folder.
    - Show: a file the person attached or named, or one too big to paste, gets an upload link; only a few pasted lines of CSV
-     go straight to the preview. By default a file is the whole collection; if it is one binder, box or folder, ask which bucket it is for and show the choices.
-   - Stop: do not guess a bucket. If the person did not pick one, the preview says `bucket: null`: the whole collection.
+     go straight to the preview. State the default in one line and do not ask first: "into your collection; say a bucket name if
+     you want it kept apart". A bucket the person names is looked up in `list_buckets` and passed as `bucket_id`.
+   - Stop: none. If no bucket was named, the preview says `bucket: null`: the whole collection.
 3. **Preview, with nothing changed.**
    - Calls: `import_collection_csv` (no `confirm`; `bucket_id` for one bucket), or `start_collection_upload` (give them the
      link) and then `get_staged_upload` once they say it is uploaded. The file is never read, pasted or opened in a browser.
    - Show: from `merge`, three things: what their app changed (the only part applied), the edits made here that are kept, and
-     each conflict. With a bucket, the preview names it and totals what is left alone: say both. Rows that match no known
-     printing are listed: fix them in the file and upload again.
+     each conflict. With a bucket, the preview names it and totals what is left alone: say both. Then `matching_line`, as it is:
+     every row is kept; rows the file's set or number does not identify are matched by card name (priced as the cheapest
+     printing, which the file did not name), and any row the catalog does not hold is kept as written without a price. Never
+     ask the person to fix, re-export or re-upload the file; do not list rows unless they ask.
    - Stop: a conflict is a card changed in both places, or dropped by their app but edited here. Ask about each one, one card at a
      time, with copies at the last import, in their app and here. If they do not choose, the edit made here is kept. Send their
      answers as `use_app_value` (the conflict ids where they want their app's value) or `conflicts`.
@@ -217,6 +226,8 @@ answer other people's questions. Credit the artist and Scryfall when you show a 
 
 ## Do not
 
+- Ask the person to fix, edit, re-export or re-upload a file from an app the Vault knows, or to choose a printing the file does not
+  name: the Vault matches by card name and says how many rows that was.
 - Present a tag or note an assistant wrote as the person's own: the Vault records it as that app's.
 - Add up values yourself when a tool gives the total, or round away the date.
 - Assume a missing price is zero; say it is unknown.

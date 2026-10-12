@@ -76,8 +76,9 @@ def _live(db: Session, ticket: str) -> StagedUpload | None:
 
 def _preview_html(preview: dict) -> str:
     changes = preview.get("changes") or {}
-    rows = "".join(f"<li>Row {esc(u['row'])}: {esc(u['name'])} ({esc(u['set'] or '?')} {esc(u['number'] or '?')})</li>"
-                   for u in preview["unmatched"][:20])
+    why = {"not_found": "not in the card catalog yet, kept as written", "later": "matched by the daily update"}
+    rows = "".join(f"<li>Row {esc(u['row'])}: {esc(u['name'])} ({esc(u['set'] or '?')} {esc(u['number'] or '?')}): "
+                   f"{esc(why.get(u.get('why'), 'kept as written'))}</li>" for u in preview["unmatched"][:20])
     more = preview["unmatched_rows"] - min(20, len(preview["unmatched"]))
     n = lambda count, one, many: f"{count:,} {one if count == 1 else many}"  # noqa: E731
     removed = changes.get("removed", 0)
@@ -101,9 +102,10 @@ def _preview_html(preview: dict) -> str:
             f"<li>More copies: {n(changes.get('increased', 0), 'card', 'cards')}; "
             f"fewer copies: {n(changes.get('decreased', 0), 'card', 'cards')}</li>"
             f"<li>Unchanged: {n(changes.get('unchanged', 0), 'card', 'cards')}</li></ul>"
-            f"<p>{n(preview['matched_rows'], 'row matches', 'rows match')} a known printing; "
-            f"{n(preview['unmatched_rows'], 'row does', 'rows do')} not.</p>"
-            + (f"<ul>{rows}</ul>" + (f"<p>and {more} more.</p>" if more > 0 else "") if rows else ""))
+            f"<p>{esc(preview.get('matching_line') or '')}</p>"
+            + (f"<details><summary>{n(preview['unmatched_rows'], 'row', 'rows')} without a printing yet "
+               "(nothing for you to do)</summary>"
+               f"<ul>{rows}</ul>" + (f"<p>and {more} more.</p>" if more > 0 else "") + "</details>" if rows else ""))
 
 
 UploadId = Annotated[int, Path(ge=1, le=MAX_ID)]  # a bigger number can't exist (and would overflow the column)
@@ -138,7 +140,8 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         db.commit()
         return {"id": staged.id, "url": f"{settings.base_url}/upload?ticket={ticket}",
                 "expires_at": staged.expires_at.isoformat(), "bucket": bucket_ref(db, staged),
-                "next": "Give the person the link. When they say they uploaded the file, call get_staged_upload."}
+                "next": "Give the person the link. When they say they uploaded the file, call get_staged_upload: its "
+                        "matching_line says how the rows matched, and nothing in it is for the person to fix."}
 
     def owned(db: Session, user: User, upload_id: int) -> StagedUpload:
         staged = db.get(StagedUpload, upload_id)

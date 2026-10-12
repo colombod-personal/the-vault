@@ -2,6 +2,10 @@
 
 Status: agreed by the owner on 2026-10-08 (#287: decisions 1 to 4, all as recommended; the owner's "all as recommended" on 2026-10-09 covers the sub-designs below). It is the root of the Collections epic (#117): the schema (#121), buckets (#123) and tags (#127) are built (see "What is built" at the end); #122, #124, #125, #128, #129 and #130 follow.
 
+## Matching an import's rows (vault-0n9.1, 2026-10-12)
+
+A file from a known app is never given back to the person to fix. **The row is kept exactly as written** (name, set code, collector number, so the Dragon Shield round trip stays byte for byte); the Vault only decides which printing to tie it to, with the library's one ladder (`mtg_toolkits.matching`, the same the daily sync uses): the printing in the file (`id`, `set_number`, also through a retired code's set), then the card by name with the set, with the collector number, then by name alone. A row matched without naming the printing carries `match_method` `name_set`, `name_number` or `name` (not exact: the daily sync matches it again, and exports never write it as the printing), and the printing is chosen by one stated rule: the row's language, then the cheapest in its finish, then a fixed order (too low is a lesser mistake than too high). A row nothing finds stays as written, unpriced; the preview says so in one line (`matching_line`) and lists such rows in `unmatched` with the reason, which nobody has to act on.
+
 ## What exists today (checked in the code, 2026-10-06)
 
 - `entries` holds one row per printing, finish, condition, language and **folder**, with `quantity` and `trade_quantity`. Every import **replaces all of a person's entries**; the change against the old collection is stored on `imports.summary`.
