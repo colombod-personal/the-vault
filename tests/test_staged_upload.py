@@ -121,13 +121,16 @@ def test_apply_imports_only_the_file_that_was_previewed(agent):
 def test_a_person_holds_at_most_five_open_links_and_starts_at_most_ten_a_minute(app, agent):
     from vault.models import StagedUpload
     first = [start(agent) for _ in range(5)]
-    over = agent.post(f"{V1}/uploads")
-    assert over.status_code == 409 and "5 open upload links" in over.json()["detail"]
-    with app.state.db.sessions() as db:  # one expires: room again
-        row = db.get(StagedUpload, first[0]["id"])
+    sixth = agent.post(f"{V1}/uploads")  # vault-73p: at the cap the oldest link that holds no file is replaced, not refused
+    assert sixth.status_code == 201 and sixth.json()["replaced_upload_id"] == first[0]["id"]
+    with app.state.db.sessions() as db:
+        assert db.query(StagedUpload).count() == 5  # still five open, never six
+        assert db.get(StagedUpload, first[0]["id"]) is None
+        row = db.get(StagedUpload, first[1]["id"])  # one expires: room again, so no link is replaced
         row.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
         db.commit()
-    assert agent.post(f"{V1}/uploads").status_code == 201
+    seventh = agent.post(f"{V1}/uploads")
+    assert seventh.status_code == 201 and "replaced_upload_id" not in seventh.json()
     with TestClient(agent.app) as bob:  # another person has their own allowance
         bob.post("/api/auth/dev-login", params={"email": "bob@example.com"})
         assert bob.post(f"{V1}/uploads").status_code == 201

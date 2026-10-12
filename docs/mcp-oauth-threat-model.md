@@ -841,9 +841,9 @@ list (`vault/oauth_routes.py`, one sentence of the consent text, below). Nothing
 What a read-only caller can now cause, and what stops it (all in `vault/uploads.py`; the limits were already there; the review of 2026-10-11 added an allowance on the page, per link):
 
 - **A row, bounded.** One `staged_uploads` row: the person's id, the hash of a random ticket, an expiry (one hour) and, if the caller
-  names one, the person's own bucket (another person's is the same 404). At most 5 are open per person (409 on the sixth), at most
+  names one, the person's own bucket (another person's is the same 404). At most 5 are open per person (a sixth replaces the oldest one that holds no file, see below; 409 only when all five hold one), at most
   10 are started a minute per person (429), expired rows are deleted by the next start and by the daily retention job
-  (`tests/test_staged_upload.py`, `tests/test_upload_read_only.py::test_a_read_only_app_can_hold_the_five_links_and_the_409_says_what_the_person_can_do`, `test_a_read_only_connection_names_only_the_persons_own_buckets`).
+  (`tests/test_staged_upload.py`, `tests/test_upload_read_only.py::test_a_read_only_app_can_rotate_the_persons_waiting_links_but_not_read_or_import_what_they_hold`, `test_a_read_only_connection_names_only_the_persons_own_buckets`).
 - **Storage, bounded and not new.** A file is stored only by `POST /upload`, which needs the ticket, which the tool answer gives the
   caller as it gives a write caller. One file per link (a new one replaces it), 20 MB at most (413, nothing kept:
   `test_a_link_started_by_a_read_only_connection_takes_no_more_than_twenty_megabytes`), so at most 5 x 20 MB for one hour per person,
@@ -893,15 +893,62 @@ Residual risks, stated:
   a retry of `start_collection_upload` (an `Idempotency-Key` is not honoured on that route) makes another link and uses a slot.
   Attribution, a list, a revoke and removal on disconnect are bead vault-wxy.13 (P1); the upload page cannot yet say which app
   asked for the file for the same reason.
-- A read-only app can fill the person's five links for an hour and use the ten starts a minute (both are per person, shared by every
-  app they connected), so a write connection's `start_collection_upload` answers 409 or 429 until they expire; the 409 text now says
-  the person can finish a link or let them expire and that there is no list yet
-  (`test_a_read_only_app_can_use_up_the_persons_start_budget_and_the_denial_is_plain`). That is the same denial a write app could
-  already cause, and it is the reason for vault-wxy.13.
+- A read-only app can use the ten starts a minute (a budget per person, shared by every app they connected), so a write connection's
+  `start_collection_upload` answers 429 until the minute turns (`test_a_read_only_app_can_use_up_the_persons_start_budget_and_the_denial_is_plain`). It could
+  already fill the five links; since vault-73p it can instead rotate the waiting ones (next section). Both are the reason for vault-wxy.13.
 - `POST /upload` has no body-size limit before the ticket is checked (read from the code, not measured): the framework reads the multipart body before the handler
   rejects a made-up ticket. That is independent of scopes (the route takes no credential) and unchanged here; it is tracked as its own
   bead (vault-wxy.8).
 
+
+### The sixth link replaces the oldest waiting one (vault-73p, 2026-10-12)
+
+The vault-wxy.7.1 batch ran 8 unnamed phrasings headless and used up the account's five open links; 2 of 8 answers were the 409. A
+new chat has no memory of the link it was given, and only a hash of the ticket is stored, so the link cannot be handed back: the
+player who retried was stuck for up to an hour. Now, when the person already has five open links, `start_collection_upload`
+(`POST /api/v1/uploads`) **removes the oldest link that holds no file** and issues the new one; the answer carries
+`replaced_upload_id` and says that link no longer works. A link that holds a file is never removed. When all five hold one, the
+answer is a 409 that says so, lists them (id, file name cut to plain characters, upload time, end of the link) and points to
+`get_staged_upload` and `confirm_staged_upload`; there is still no discard (vault-wxy.13).
+
+What a malicious connected read-only app can and cannot do with this:
+
+- **Cannot read or import anything new.** It gets the id of the link it replaced, which is a row of the person's own, no ticket and no file: the id is the
+  same number `get_staged_upload` would take from any read connection. The apply is write scope and needs the previewed
+  `content_hash`; a read-only app is refused there (`test_a_read_only_token_and_a_write_token_get_the_same_replacement`,
+  `test_a_read_only_app_can_rotate_the_persons_waiting_links_but_not_read_or_import_what_they_hold`).
+- **Can rotate the person's waiting links.** Up to ten a minute (the per-person start counter, unchanged and still counted when a
+  link is replaced: `test_the_ten_starts_a_minute_limit_still_counts_when_a_link_is_replaced`). Before, the same app could fill all
+  five slots and make the person's own assistant wait; now it can instead make a link the person was given stop working. Neither
+  reads or imports anything. A link the app replaced is a link that held no file, so no uploaded data is lost; the person has to
+  ask for a new one.
+- **Can strand a person who has the page open, in one narrow case.** The person opened an old link (the oldest waiting one) and is
+  choosing a file when a sixth link is made: their POST then finds no link. They get the ordinary "This upload link has expired,
+  ask your assistant for a new one" page, never "File received" (`test_a_file_that_arrives_after_its_link_was_replaced_is_refused_as_expired_and_not_reported_received`).
+  The oldest waiting link is the one least likely to be in use, which is why it is the one replaced, and a link that has begun
+  receiving a file is not "waiting" any more. Not mitigated further: a minimum age before a link may be replaced was considered and
+  left out, because it brings the 409 back for the person who asked for five links in a minute.
+- **Cannot take another person's links**: the statement is made under the owner's id (`test_replacing_does_not_touch_another_persons_links`).
+
+The race, and whether the replacement is a transaction. The replacement is one `DELETE ... WHERE id = (SELECT ... ORDER BY
+expires_at, id LIMIT 1 FOR UPDATE SKIP LOCKED) AND content IS NULL ... RETURNING id` in the same database transaction as the insert
+of the new link, committed once: if the insert fails the old link is still there, and two requests at the cap at the same time take
+two different rows (`SKIP LOCKED`) and each insert one, so the count stays five. The `content IS NULL` test is made on the row under
+its lock, so the three orders in which a file and a replacement can meet all end safely:
+1. the file was committed first: the row is no longer waiting and is skipped (`test_a_file_that_was_committed_before_the_replacement_keeps_its_link`);
+2. the file's write is in flight (row locked, not committed): the row is skipped and the next oldest waiting one is taken, and the
+   file's commit stands (`test_a_file_being_written_while_the_sixth_link_is_made_keeps_its_link`);
+3. the replacement was committed first and the file's write comes after: the file is written with one conditional `UPDATE ... WHERE
+   id = :id AND expires_at > now()` and, if no row matched, it is not kept and the page answers as for an expired link. This
+   was an unconditional attribute write that would have raised on a missing row; the page also reads the row's plain values once,
+   before its first commit, so it never reads a row that has gone.
+
+No oracle: the replaced row is deleted, as expired ones are, so `/uploads/{id}` and the page answer exactly as for an expired or
+made-up ticket (`test_a_sixth_link_replaces_the_oldest_waiting_one_and_the_old_one_answers_as_expired`). The 409's list of held files
+is the person's own data to their own authenticated caller; the file names are whatever the uploader chose, so they are cut to 60
+plain characters before they go into a sentence the assistant reads. Rate limits are unchanged: the 10 starts a minute are counted
+before anything is replaced (a refused start replaces nothing), and the page keeps its allowance per link
+(`test_the_page_allowance_per_link_is_unchanged`).
 ## The compact tool list for the Codex family (2026-10-11, vault-wxy.5)
 
 What changed: a client whose `initialize` names it `codex-mcp-client` is shown a short list (core tools, `vault_tools`,

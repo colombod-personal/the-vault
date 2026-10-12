@@ -31,7 +31,7 @@ A person who has the Vault and wants cards or a file in their collection uses th
 to you" and "how do I load my export". A collection file the person attaches or mentions (a CSV or text export from Dragon Shield,
 Moxfield, Archidekt, ManaBox, Delver Lens, TCGplayer or another app) never goes
 through the chat. Do not try to read, open, summarise or paste it, and do not use a browser for it. Call `start_collection_upload`
-at once and give them the upload link (good for one hour: it works until it expires, and uploading again replaces the file; use the link already given in this chat rather than making another, there is no list of links); say that nothing is imported until they have seen the preview and
+at once and give them the upload link (good for one hour: it works until it expires, and uploading again replaces the file; use the link already given in this chat if there is one; asking for another is fine when there is none to hand: a person has five open links, and a sixth makes the oldest one that holds no file stop working, never one that holds a file); say that nothing is imported until they have seen the preview and
 said yes. When they say the file is uploaded, call `get_staged_upload` and show the preview (see "Flow: Import a collection").
 Any connection can make the link and read the preview, read-only ones included; only the final import (`confirm_staged_upload`)
 needs write access, so a read-only connection is told at that step to reconnect the Vault and tick Write on its consent page.

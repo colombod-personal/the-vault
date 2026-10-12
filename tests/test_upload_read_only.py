@@ -155,14 +155,26 @@ def test_a_read_only_personal_token_can_start_and_read_but_not_import(app):
 
 # -- limits hold for a read-only connection, and the denial is plain -----------------------------------------------------
 
-def test_a_read_only_app_can_hold_the_five_links_and_the_409_says_what_the_person_can_do(app, read, write):
+def test_a_read_only_app_can_rotate_the_persons_waiting_links_but_not_read_or_import_what_they_hold(app, read, write):
     links = [ok(read, "start_collection_upload") for _ in range(uploads.MAX_OPEN)]
-    for refused in (tool(read, "start_collection_upload"), tool(write, "start_collection_upload")):  # one budget per person
-        text = refused["content"][0]["text"]
-        assert refused["isError"] is True and "5 open upload links" in text
-        assert "let them expire" in text and "no list of open links" in text  # what can be done, and that there is no list
+    sixth = ok(read, "start_collection_upload")  # vault-73p: replaced, not refused
+    assert sixth["replaced_upload_id"] == links[0]["id"]
+    assert ok(write, "start_collection_upload")["replaced_upload_id"] == links[1]["id"]  # the person's write app too
     with app.state.db.sessions() as db:
-        assert db.query(StagedUpload).count() == len(links)  # the refused calls stored nothing
+        assert db.query(StagedUpload).count() == uploads.MAX_OPEN  # five open, never six
+    # a link that holds a file: the read-only app sees only what the person's own read grant shows, and cannot import it
+    assert person_uploads(app, ticket_of(sixth), file(line(*KILLER, qty=1))).status_code == 200
+    staged = ok(read, "get_staged_upload", upload_id=sixth["id"])
+    refused = tool(read, "confirm_staged_upload", upload_id=sixth["id"], confirm=True, content_hash=staged["content_hash"])
+    assert refused["isError"] is True and "read-only" in refused["content"][0]["text"]
+    with app.state.db.sessions() as db:  # make every other link hold a file too: now the refusal is plain and lists them
+        for row in db.query(StagedUpload).filter(StagedUpload.content.is_(None)):
+            row.content, row.filename, row.uploaded_at = b"x", "a.csv", row.expires_at
+        db.commit()
+    for denied in (tool(read, "start_collection_upload"), tool(write, "start_collection_upload")):  # either scope
+        text = denied["content"][0]["text"]
+        assert denied["isError"] is True and "each holds a file the person uploaded and has not confirmed" in text
+        assert "confirm_staged_upload" in text and f"id {sixth['id']}" in text
 
 
 def test_a_read_only_app_can_use_up_the_persons_start_budget_and_the_denial_is_plain(app, read, write):
@@ -261,9 +273,10 @@ def test_another_person_cannot_read_or_apply_an_upload_a_read_only_app_started(a
 
 def test_the_tool_descriptions_state_the_limits_the_server_enforces():
     text = mcp.BY_NAME["start_collection_upload"].description
-    assert f"At most {uploads.MAX_OPEN} links" in text and f"{importer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB" in text
+    assert f"at most {uploads.MAX_OPEN} open links" in text and f"{importer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB" in text
     assert "read-only" in text and "confirm_staged_upload" in text and "write permission" in text
-    assert "not single-use" in text and "none can be listed or cancelled" in text  # said where the link is described
+    assert "not single-use" in text and "There is no list or cancel yet" in text  # said where the link is described
+    assert "oldest link that holds no file stop working" in text and "is never replaced" in text  # the cap, as it behaves
     assert "changes nothing in the person's collection or decks" in text
     # the server's own limit is 20 MB; on the hosted site the platform's request cap (docs/developing.md) is what a person meets
     assert "mtgvault.cards" in text and "about 4 MB" in text and "before the Vault sees it" in text
