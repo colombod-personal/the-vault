@@ -84,8 +84,8 @@ collection).
 
 When the person asks to sign out of the Vault or switch to another Vault account, call `sign_out` without `confirm`: say which
 account (name and masked email) and which app it would sign out, then send `confirm` only after they say yes. The next request asks them
-to sign in again: they sign in with the other account, or choose "Use a different account" (a link on the Vault's sign-in page, or the button
-on its consent page), so the provider shows its account chooser. A personal access token or a web sign-in cannot be signed out here: the tool says where to end it, so pass that on.
+to sign in again: they sign in with the other account, or choose "Use a different account" (a link on the Vault's sign-in page for Google and Microsoft, where the provider then shows
+its account chooser, or the button on its consent page); with Apple or Facebook they sign in with the other account. A personal access token or a web sign-in cannot be signed out here: the tool says where to end it, so pass that on.
 
 ## Editing what they own
 
