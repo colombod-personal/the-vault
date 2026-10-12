@@ -308,3 +308,17 @@ def test_a_nul_character_in_a_file_is_refused_not_a_server_error(signed_in):
     page = signed_in.post("/upload", data={"ticket": started["url"].split("ticket=")[1]},
                           files={"file": ("n.csv", bad, "text/csv")})
     assert page.status_code == 200 and "could not be read" in page.text
+
+
+def test_the_preview_finds_an_exact_printing_by_set_and_number_even_when_the_name_is_not_the_catalogs(signed_in, app):
+    """The daily sync matches M11/149 exactly whatever the row's name is; the preview must say the same (review thread)."""
+    with app.state.db.sessions() as db:
+        db.add_all([oracle(1, "Test Bolt"), printing(1, "bolt-m11", "m11", "149", 1.0), oracle(2, "Test Daxos"),
+                    printing(2, "dax-258", "thb", "258", 0.4)])
+        db.commit()
+    p = preview(signed_in, (HEADER + row("Tést Bolt", "M11", "149") + row("Localised Daxos", "VTHB", "258")
+                            + row("Test Daxos", "VTHB", "258")).encode())
+    # the first row is exact by its set and number; a fallback code needs the card's name, so the second is not exact
+    # and not found (the sync agrees: the library checks the name there too); the third is exact through the fallback
+    assert p["matched_by"] == {"set_number": 2} and p["unmatched_rows"] == 1
+    assert p["unmatched"][0]["name"] == "Localised Daxos"

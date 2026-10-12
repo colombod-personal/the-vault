@@ -17,8 +17,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
+from mtg_toolkits import normalize_collector_number, normalize_set_code
 from mtg_toolkits.matching import Printing
-from sqlalchemy import func, select
+from mtg_toolkits.normalize import fallback_set_code
+from sqlalchemy import func, select, tuple_
 from sqlalchemy.orm import Session
 
 from .models import Card, OracleCard, OraclePrinting
@@ -45,8 +47,11 @@ class Lookup:
         return "later" if key in self.known or key in self.left_out else "not_found"
 
 
-def printings_of(db: Session, names: Iterable[str]) -> Lookup:
-    """The printings of the cards named (lower-case, as the files write them), and what the lookup could say about them."""
+def printings_of(db: Session, names: Iterable[str], numbers: Iterable[tuple[str, str]] = ()) -> Lookup:
+    """The printings of the cards named (lower-case, as the files write them), and what the lookup could say about them.
+
+    ``numbers`` are the rows' (set code, collector number) as written: the printings with those (and with the code's
+    fallback set), whatever the row's name is, so the preview finds an exact printing the way the daily sync does."""
     wanted = sorted({n for n in names if n})
     left_out, wanted = set(wanted[MAX_LOOKUP_NAMES:]), wanted[:MAX_LOOKUP_NAMES]
     oracle: dict[str, str] = {}  # oracle id -> the card's full name
@@ -61,6 +66,22 @@ def printings_of(db: Session, names: Iterable[str]) -> Lookup:
         for p in db.scalars(select(OraclePrinting).where(OraclePrinting.oracle_id.in_(ids[i:i + BATCH * 2]))):
             printings[p.scryfall_id] = Printing(p.scryfall_id, oracle[p.oracle_id], p.set_code, p.collector_number, p.lang,
                                                 p.usd, p.usd_foil, p.usd_etched)
+    wanted_pairs: set[tuple[str, str]] = set()
+    for code, number in numbers:
+        c, n = normalize_set_code(code), normalize_collector_number(number)
+        if not (c and n):
+            continue
+        forms = {n, (number or "").strip().lower()}
+        for set_code in {c, fallback_set_code(c)} - {None}:
+            wanted_pairs |= {(set_code, f) for f in forms}
+    pairs = sorted(wanted_pairs)
+    for i in range(0, len(pairs), BATCH):
+        rows = db.execute(
+            select(OraclePrinting, OracleCard.name).join(OracleCard, OracleCard.oracle_id == OraclePrinting.oracle_id)
+            .where(tuple_(OraclePrinting.set_code, func.lower(OraclePrinting.collector_number)).in_(pairs[i:i + BATCH])))
+        for p, name in rows:
+            printings.setdefault(p.scryfall_id, Printing(p.scryfall_id, name, p.set_code, p.collector_number, p.lang,
+                                                         p.usd, p.usd_foil, p.usd_etched))
     # names the catalog does not know: the printings someone owns (a deployment whose catalog is not loaded yet, or a card
     # that is new), priced from the daily snapshot
     known = {n for name in oracle.values() for n in (name.lower(), front(name).lower())}

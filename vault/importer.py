@@ -20,7 +20,7 @@ from . import buckets, merge
 from .csv_safe import neutralise_csv, restore_csv
 from .models import Bucket, BucketBaseline, Card, CollectionBaseline, Entry, Import, TagAssignment, User, utcnow
 from .prices import MAX_PRICE, compute_values
-from .printing_lookup import front, printings_of
+from .printing_lookup import MAX_LOOKUP_NAMES, front, printings_of
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 EXACT = ("set_number", "id")
@@ -337,7 +337,8 @@ def _match_printings(db: Session, entries, old_rows) -> Matching:
     why: dict[int, str] = {}
     by_rule: dict[int, object] = {}
     if rest:
-        lookup = printings_of(db, {front(entries[i].name).lower() for i in rest})
+        lookup = printings_of(db, {front(entries[i].name).lower() for i in rest},
+                              [(entries[i].set_code, entries[i].collector_number) for i in rest[:MAX_LOOKUP_NAMES]])
         index = PrintingIndex(lookup.printings)
         for i in rest:
             found = index.match(entries[i])

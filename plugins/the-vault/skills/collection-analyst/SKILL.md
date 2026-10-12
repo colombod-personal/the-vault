@@ -40,7 +40,7 @@ needs write access, so a read-only connection is told at that step to reconnect 
 app's own, a collector number the catalog numbers differently, a card whose printing the file does not name) and keeps every row.
 Never ask the person to fix, edit, re-export or re-upload the file, and never ask them which printing of a card they have in it: the
 preview's `matching_line` says in one line how many rows were matched by name and how many are set aside and why; say that line,
-nothing more about it, and list rows only if they ask. The one question they are asked is the final yes.
+nothing more about it, and list rows only if they ask. Matching the rows asks them nothing: what is left to ask is only the conflicts the preview lists (a card changed both in their app and here) and the final yes.
 
 ## Answering questions
 

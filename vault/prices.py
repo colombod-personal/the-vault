@@ -73,7 +73,7 @@ def unit_price(row: Entry, snap: PriceSnapshot | None) -> tuple[float, bool]:
     # the printing the person owns is more truthful than the cheapest printing the Vault would pick, which would show a loss
     # that is not there. It follows the catalog's price once the printing is named (an exact match).
     file_price = plausible_price((row.source_prices or {}).get("market"))
-    if row.match_method in RULE_METHODS and file_price is not None:
+    if getattr(row, "match_method", None) in RULE_METHODS and file_price is not None:
         return file_price, False
     if snap is not None:
         price = plausible_price(snap.for_finish(row.price_finish or row.finish))
