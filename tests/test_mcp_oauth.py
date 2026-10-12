@@ -708,6 +708,22 @@ def test_the_window_is_for_the_same_client_and_the_same_scopes_only(app, client,
     assert other.status_code == 400 and grant_of(app) is None
 
 
+def test_a_retry_naming_another_resource_is_refused_and_ends_the_grant(app, client):  # vault-wxy.12, review F5
+    first = client.connect()
+    assert client.refresh(first["refresh_token"]).status_code == 200
+    res = client.refresh(first["refresh_token"], resource="http://testserver/other")  # inside the window, same client
+    assert res.status_code == 400 and res.json()["error"] == "invalid_grant" and grant_of(app) is None
+
+
+def test_a_retry_inside_the_window_never_revives_a_grant_past_its_life(app, client):  # vault-wxy.12, review F5
+    first = client.connect()
+    assert client.refresh(first["refresh_token"]).status_code == 200
+    past = datetime.now(timezone.utc) - oauth_server.GRANT_MAX_AGE - timedelta(days=1)  # the grant is now older than its 90 days
+    db_do(app, lambda db: (db.execute(update(OAuthGrant).values(created_at=past)), db.commit()))
+    res = client.refresh(first["refresh_token"])  # seconds after the rotation, same client, same scopes
+    assert res.status_code == 400 and res.json()["error"] == "invalid_grant" and grant_of(app) is None
+
+
 def test_a_stolen_refresh_token_cannot_be_used_by_another_client(app, client, universe):
     tokens = client.connect()
     thief_id = universe.client_hosts.publish("other.example")

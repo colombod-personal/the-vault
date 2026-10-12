@@ -180,8 +180,9 @@ against it and what is built (a recent sign-in, re-confirmed by a passkey, a pro
   from `SESSION_SECRET` under its own label (`vault:oauth-refresh-successor-key:v1`), so it is a different key from the
   session secret but not an independent secret: the owner may set `OAUTH_REFRESH_KEY` to take it out of the session secret's
   reach, a deployment step this change does not require. It lives only in the process environment (Vercel project
-  environment), is never stored or logged. **Rotating it** invalidates no token (only hashes are stored): a retry that
-  falls inside the window across the change is refused as reuse, once; nothing else is affected.
+  environment), is never stored or logged. **Rotating it** invalidates no stored token (only hashes are stored), but a retry
+  that falls inside the window across the change cannot be matched, goes down the reuse path and **ends that grant** (the
+  person signs in again); nothing else is affected.
 - **What a leak of the key allows (the cost of derived tokens).** Random tokens make a copied *old* refresh token worthless.
   With derived tokens, someone who holds the key **and** a copy of any refresh token of a grant can compute every later token
   of the chain **without presenting anything to the Vault**, so reuse detection never sees them: they follow the owner's
@@ -193,9 +194,21 @@ against it and what is built (a recent sign-in, re-confirmed by a passkey, a pro
   at the price of a migration and a stored ciphertext. Not built; the reviewer may prefer it.
 - **What the window costs.** A thief who holds a copy of the token and presents it within 60 seconds of the owner's rotation,
   naming the same client, receives the same pair as the owner and is **not detected**; the same holds the other way round
-  (the owner, within 60 seconds of a thief's refresh, receives the thief's pair). After the window the next presentation of an
-  old token by either side is reuse and ends the grant, so a stolen copy cannot be kept quietly beyond that. A `client_id` is
-  public, so the "same client" check does not stop a thief by itself; the length of the window is what limits this.
+  (the owner, within 60 seconds of a thief's refresh, receives the thief's pair). **A thief can keep a stolen copy quietly,
+  with no end:** one who holds the owner's token (R_k and its access token), checks that the access token stopped working
+  (the owner rotated), and presents R_k **inside the window after every rotation** gets the owner's exact next pair every
+  time, never presents a token older than the window, and is never detected or revoked. Shown by the independent review
+  (4 rotations: every thief presentation answered 200 with the owner's tokens, grant alive). It is one pair, not a second
+  lineage, and the 90 day cap on the grant still holds. Before this change a copy was always exposed at the owner's next
+  refresh; with the window, theft is no longer self-revealing. This is inherent to any same-successor grace window and is
+  the exact cost of the owner's decision (OD-07). The only signal is an `info` log line, which nobody reads; a real
+  detection signal (for example, binding the replay to the caller's network address and refusing a replay from another one)
+  is a follow-up bead, not part of this change. A `client_id` is public, so the "same client" check does not stop a thief by
+  itself; the length of the window limits how fast a thief must act, not whether he can keep going.
+- **On a deployment without https the key is derivable.** `SESSION_SECRET` defaults to `dev-insecure-secret` and `check()`
+  refuses that default only when `BASE_URL` is https. With the default secret the derived key is computable from the source,
+  and any successor is forgeable from one old token. Production is https and refuses the default at start; do not run a
+  public http deployment on it.
 - Not settled here: what a person sees and does when a grant is revoked anyway. In the ChatGPT desktop app on 2026-10-11 the
   tools stayed gone with no re-login prompt; criterion (e) of vault-wxy.12 records the observed path.
 - **A grant has an absolute age of 90 days from first consent**: refreshing never extends it, the refresh token's expiry is
