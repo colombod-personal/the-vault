@@ -1,0 +1,61 @@
+"""The plugin evaluation set stays honest (bead vault-85p.6): every tool a case names exists, ids are unique, and the scorer
+passes the recorded good run and fails a run that answers from memory."""
+
+import json
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+import eval_plugin as ev  # noqa: E402
+
+from vault.api import mcp  # noqa: E402
+
+CASES = ev.load_cases()
+
+
+def test_case_ids_are_unique_and_every_case_has_a_prompt_and_a_check():
+    raw = json.loads(ev.CASES.read_text(encoding="utf-8"))["cases"]
+    assert len({c["id"] for c in raw}) == len(raw)
+    for c in raw:
+        assert c["prompt"].strip() and c["why"].strip()
+        assert any(c.get(k) for k in ("must_call", "must_name", "must_cite", "must_match", "must_not")), c["id"]
+
+
+def test_every_tool_a_case_requires_exists():
+    for c in CASES.values():
+        for tool in c.get("must_call", []):
+            assert tool in mcp.BY_NAME, f"{c['id']}: no tool named {tool}"
+
+
+def test_patterns_compile_and_rule_numbers_look_like_rule_numbers():
+    for c in CASES.values():
+        for m in c.get("must_match", []) + c.get("must_not", []):
+            re.compile(m["pattern"])
+        for rule in c.get("must_cite", []):
+            assert re.fullmatch(r"\d{3}\.\d+[a-z]?", rule), (c["id"], rule)
+
+
+def _run(tools, answer):
+    lines = [json.dumps({"type": "item.completed", "item": {"type": "mcp_tool_call", "tool": t}}) for t in tools]
+    lines.append(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": answer}}))
+    return "\n".join(lines)
+
+
+def test_the_scorer_passes_a_good_run_and_fails_one_answered_from_memory():
+    case = CASES["sliver_council_review"]
+    good_answer = ("Shadow Sliver gives every Sliver shadow, rule 702.28b. Sliver Overlord is the commander. simulate_draws does not "
+                   "check colours, so its mana numbers are optimistic.")
+    tools, answer = ev.read_codex(_run(["council_brief", "deck_stats", "get_rule", "validate_deck_changes"], good_answer))
+    assert all(r["ok"] for r in ev.score(case, tools, answer))
+    tools, answer = ev.read_codex(_run(["deck_stats"], "Your deck has 45 basic lands and looks fine."))
+    failed = {r["check"] for r in ev.score(case, tools, answer) if not r["ok"]}
+    assert {"calls council_brief", "calls get_rule", "cites rule 702.28b",
+            "does not: invented basic-land count (deck_stats says 54 lands)"} <= failed
+
+
+def test_a_rule_number_is_not_matched_inside_a_longer_number():
+    case = {"must_cite": ["702.18a"]}
+    assert not ev.score(case, [], "see rule 1702.18a")[0]["ok"]
+    assert ev.score(case, [], "see rule 702.18a (Comprehensive Rules)")[0]["ok"]
