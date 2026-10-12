@@ -192,6 +192,7 @@ Observer. Read it; do not recall it. Titles change; the roles below are what rou
 | Chief of Staff | The owner's interface, routing, the briefing | Anything the owner needs to say or know |
 | Product Manager | Orchestrating builders, turning owner requests into beads, verdicts | A decision about scope or order; any blocker |
 | Progress Observer | The pipeline, evidence, the real-app rows (`vault-wxy.7`), live re-checks of merges | "Is it really merged, deployed, verified?" |
+| Delivery Manager | All the checks: that results are shipped, and that the claims on quality are proper before a release and after it | "Was it checked, is it shipped, is the quality claim backed?" |
 | AI Worker | Experts, skills, the evaluation set, host measurements | Quality of what the assistants say |
 | General Worker 1, 2 | Building bug fixes and features, each in its own worktree | A bead with criteria, ready to build |
 | Spike Researcher | Research and options, sourced, no building | "What are the options for ...?" |

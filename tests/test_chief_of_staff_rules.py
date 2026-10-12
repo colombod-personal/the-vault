@@ -21,7 +21,7 @@ def test_section_10_names_the_chief_of_staff_and_what_it_does_not_do():
 
 def test_section_10_routes_by_role_and_reads_the_roster_live():
     s = _section_10()
-    for role in ("Product Manager", "Progress Observer", "AI Worker", "General Worker", "Spike Researcher", "Infra Manager",
+    for role in ("Product Manager", "Progress Observer", "Delivery Manager", "AI Worker", "General Worker", "Spike Researcher", "Infra Manager",
                  "Documentation Manager"):
         assert role in s, role
     assert "bead **vault-br6**" in s and "do not recall it" in s
