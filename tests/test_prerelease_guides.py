@@ -9,7 +9,7 @@ from datetime import date
 
 import httpx
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from jobs import sync_catalog, sync_prerelease_guides
 from tests.test_agents import call_tool, make_token
@@ -151,8 +151,15 @@ def test_two_headed_giant_is_one_pack_and_two_boosters_from_reality_fracture_and
     assert rows["trk"]["status"] == "unverified"
 
 
+def empty_table(db):
+    """The migration seeds the table, and the first test after a schema rebuild would see those rows: tests start from none."""
+    db.execute(delete(SetPrereleaseGuide))
+    db.commit()
+
+
 def test_the_seed_adds_missing_rows_and_never_touches_one_that_exists(app):
     with app.state.db.sessions() as db:
+        empty_table(db)
         db.add(SetPrereleaseGuide(set_code="fra", set_name="Edited by hand", dates_status="unverified", player_guide_status="unverified",
                                   wpn_event_status="unverified", composition={}, status="unverified"))
         db.flush()
@@ -169,6 +176,7 @@ def test_the_seed_adds_missing_rows_and_never_touches_one_that_exists(app):
 def seeded(signed_in, app, monkeypatch):
     monkeypatch.setattr(pg, "today", lambda: TODAY)
     with app.state.db.sessions() as db:
+        empty_table(db)
         prerelease_seed.apply_seed(db)
         db.commit()
     return signed_in
@@ -311,6 +319,10 @@ def env(database_url, monkeypatch):
     monkeypatch.delenv("CATALOG_SOURCES", raising=False)
     monkeypatch.delenv("NEON_STORAGE_LIMIT_MB", raising=False)
     monkeypatch.setattr(pg, "sleep", lambda seconds: None)
+    db = Database(database_url)
+    with db.sessions() as s:
+        empty_table(s)
+    db.engine.dispose()
     return database_url
 
 
