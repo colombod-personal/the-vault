@@ -156,6 +156,6 @@ def test_no_tool_description_or_skill_asks_the_person_to_fix_a_file_from_a_known
     for where, text in texts.items():
         # the skill may say "never ask ... to fix, re-export or re-upload": only an instruction to do it is a defect
         bad = [m.group(0) for m in FORBIDDEN.finditer(text)
-               if not re.search(r"never|not |do not|don't", text[max(0, m.start() - 160):m.start()], re.I)]
+               if not re.search(r"never|not |do not|don't", text[max(0, m.start() - 80):m.start()], re.I)]
         assert not bad, (where, bad)
     assert "fix them in the file" not in texts["get_staged_upload"] and "matching_line" in texts["get_staged_upload"]
