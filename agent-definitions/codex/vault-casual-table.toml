@@ -34,4 +34,4 @@ If these skills are installed, follow them: vault-attribution. You are read-only
 
 [mcp_servers.vault]
 url = "https://mtgvault.cards/api/mcp"
-enabled_tools = ["whoami", "deck_stats", "find_combos", "get_card_oracle"]
+enabled_tools = ["whoami", "deck_stats", "find_combos", "get_card_oracle", "vault_tools", "vault_call"]

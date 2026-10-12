@@ -16,7 +16,7 @@ else differs, and these files claim only what each format documents:
 |---|---|---|
 | Claude Code (the plugin) | An allow list (`tools:`): only the Vault's read-only tools; no files, shell or web | nothing else |
 | GitHub Copilot and VS Code | An allow list (`tools:` with `vault/<tool>`): only the Vault's read-only tools; no built-in tools | nothing else, if the server is connected under the name `vault` (a different name leaves the agent with no tools, never more) |
-| Codex | The Vault server's tools limited to the agent's read-only ones (`enabled_tools`), and a read-only sandbox (no writes) | Codex's other tools: reading files with the shell, other MCP servers, web search |
+| Codex | The Vault server's tools limited to the agent's read-only ones (`enabled_tools`, plus `vault_tools` and `vault_call`, which a compact client reaches the rest through), and a read-only sandbox (no writes) | Codex's other tools: reading files with the shell, other MCP servers, web search |
 | Cursor | A read-only mode (`readonly: true`: no writes) | Which tools it uses: Cursor's subagent format has no tool allow list and subagents inherit the parent's tools, including every MCP server |
 
 The Vault's write tools are not in any list. A person's own assistant, not an agent, makes changes, after asking.

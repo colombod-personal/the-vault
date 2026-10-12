@@ -9,6 +9,8 @@ scopes decide; what they refuse first is presentation policy.
 
 import json
 import re
+import sys
+import tomllib
 from pathlib import Path
 
 import yaml
@@ -354,6 +356,9 @@ def test_every_skill_that_names_a_tool_outside_the_core_list_tells_the_assistant
 # the briefs the connector's expert_brief / council_brief hand out did not.
 
 ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+import build_plugin as bp  # noqa: E402  (which agents are also skills)
+
 NAMED = re.compile(r"`([a-z][a-z_]+)`")
 
 
@@ -388,18 +393,47 @@ def agent_texts() -> dict[str, tuple[str, list[str]]]:
     return out
 
 
+AGENT_PARAGRAPH = ("A tool named below that is not in your list is not missing: look it up by that name "
+                   "(`vault_tools` finds it, `vault_call` runs it).")
+# Every place one agent's brief reaches an assistant (the keys of agent_texts()).
+RENDITIONS = ("agents/{n}.md", "agent-definitions/codex/{n}.toml", "agent-definitions/copilot/{n}.agent.md",
+              "agent-definitions/cursor/{n}.md", "plugins/the-vault/agents/{n}.md", "plugins/the-vault-openai/agents/{n}.md",
+              "plugins/the-vault/com.github.copilot/agents/{n}.agent.md", "plugins/the-vault-openai/skills/{n}/SKILL.md",
+              "experts_data:{n}")
+
+
 def test_every_expert_brief_and_agent_definition_that_names_a_tool_outside_the_core_list_tells_the_assistant_how_to_reach_it():
+    """Any text that names a non-core tool says how to reach it; and each agent that names one carries the paragraph, word for word
+    (so a reworded vault_call clause fails), once, in each of its renditions (nine for an expert, eight for the others). ``vault-synergy-analyst`` names its non-core
+    tools (``get_rulings``, ``present_steps``) only in its ``vault-tools`` list, so the declared list counts as naming them."""
     texts = agent_texts()
-    missing, checked = {}, 0
-    for where, (text, declared) in texts.items():
-        outside = outside_the_core(text, declared)
-        if outside:
-            checked += 1
-            if not says_how_to_reach_them(text):
-                missing[where] = outside[:3]
+    missing = {where: outside_the_core(text, declared)[:3] for where, (text, declared) in texts.items()
+               if outside_the_core(text, declared) and not says_how_to_reach_them(text)}
     assert not missing, f"names a tool a compact client does not list, with no way to reach it: {missing}"
-    assert checked >= 13 * 3, f"only {checked} texts name a tool outside the core list: the globs no longer see the agent definitions"
-    assert any(w.startswith("agent-definitions/codex/") for w in texts) and any(w.startswith("experts_data:") for w in texts)
+    names = sorted(p.stem for p in (ROOT / "agents").glob("*.md") if outside_the_core(*texts[f"agents/{p.name}"]))
+    assert len(names) >= 13 and "vault-casual-table" not in names, names  # the casual table names no tool outside the core list
+    flat = {where: " ".join(text.split()) for where, (text, _) in texts.items()}
+    for name in names:
+        for template in RENDITIONS:
+            if "/skills/" in template and name not in bp.EXPERT_SKILLS:
+                continue  # only the council's experts are also skills for ChatGPT and Codex (the buyer, curator and deckbuilder are not)
+            where = template.format(n=name)
+            assert where in texts, f"{where} is missing: the agent has a rendition the check does not see"
+            assert flat[where].count(AGENT_PARAGRAPH) == 1, f"{where} does not carry the paragraph, once, word for word"
+
+
+def test_every_codex_agent_enables_the_two_tools_a_compact_client_reaches_the_rest_through_and_not_vault_write():
+    """Codex is the compact-list client and ``enabled_tools`` is its allow list for the server: without ``vault_tools`` and
+    ``vault_call`` in it, a subagent sees only the core tools among its own and the paragraph in its brief is inert."""
+    files = sorted((ROOT / "agent-definitions" / "codex").glob("*.toml"))
+    assert len(files) >= 14
+    for path in files:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        enabled = data["mcp_servers"]["vault"]["enabled_tools"]
+        assert mcp_profile.LOOKUP in enabled and mcp_profile.CALL in enabled, f"{path.name} cannot reach its non-core tools"
+        assert mcp_profile.WRITE not in enabled, f"{path.name} is read-only"
+        if says_how_to_reach_them(data["developer_instructions"]):
+            assert enabled.count(mcp_profile.LOOKUP) == 1 and enabled.count(mcp_profile.CALL) == 1
 
 
 def test_a_brief_that_names_a_tool_outside_the_core_list_without_the_paragraph_fails_the_check():
