@@ -169,6 +169,8 @@ def test_only_the_newest_ten_retired_refresh_tokens_are_kept_and_reuse_of_the_la
     count = lambda db: db.scalar(select(func.count()).select_from(OAuthRetiredRefresh))  # noqa: E731
     assert db_do(app, count) == 10  # not 15
     assert client.refresh(used[0]).status_code == 400 and len(oauth_server_ids(app)) == 1  # too old to know: refused, no revoke
+    for grant_id in oauth_server_ids(app):  # (seconds later: right after the rotation it would be a retry, vault-wxy.12)
+        age(app, grant_id, access_expires=now() + timedelta(hours=1) - oauth_server.REFRESH_GRACE - timedelta(seconds=30))
     assert client.refresh(used[-1]).status_code == 400 and oauth_server_ids(app) == []  # a copy of the latest: grant revoked
 
 

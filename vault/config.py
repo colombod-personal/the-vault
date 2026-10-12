@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 from dataclasses import dataclass, field
 
@@ -71,6 +73,10 @@ class Settings:
     oauth_cimd_cap: int = field(default_factory=lambda: int(_env("OAUTH_CIMD_CAP", "5000")))  # cached client metadata documents
     oauth_fetch_ip_limit: int = field(default_factory=lambda: int(_env("OAUTH_FETCH_IP_LIMIT", "10")))  # ... per caller
     oauth_fetch_limit: int = field(default_factory=lambda: int(_env("OAUTH_FETCH_LIMIT", "60")))  # metadata fetches a minute, all callers
+    # The key a retried refresh (vault.oauth_server, the retry window) derives its successor tokens with. Unset, it is derived from
+    # SESSION_SECRET under its own label, so a separate value is optional; set it to take that key out of the session secret's
+    # blast radius. Changing it invalidates no token (only hashes are stored): it breaks a retry that is in flight, as reuse.
+    oauth_refresh_key: str = field(default_factory=lambda: _env("OAUTH_REFRESH_KEY"), repr=False)
     # Calls per minute per user to POST /api/v1/collection/refresh (each fetches up to 300
     # printings from Scryfall, so a whole collection takes a few calls).
     refresh_rate_limit: int = field(default_factory=lambda: int(_env("REFRESH_RATE_LIMIT", "20")))
@@ -109,6 +115,13 @@ class Settings:
     def secure_cookies(self) -> bool:
         return self.base_url.startswith("https://")
 
+    def oauth_refresh_secret(self) -> str:
+        """The key for the refresh retry window's successor tokens: OAUTH_REFRESH_KEY, else a key derived from SESSION_SECRET
+        under its own label (never the session secret itself, so the two are different keys)."""
+        if self.oauth_refresh_key:
+            return self.oauth_refresh_key
+        return hmac.new(self.session_secret.encode(), b"vault:oauth-refresh-successor-key:v1", hashlib.sha256).hexdigest()
+
     def check(self) -> None:
         if not self.database_url:
             raise RuntimeError(
@@ -124,6 +137,8 @@ class Settings:
             raise RuntimeError("VAULT_TWINS_URL is for local development only")
         if self.secure_cookies and self.dev_login:
             raise RuntimeError("DEV_LOGIN must not be enabled on a public deployment")
+        if self.oauth_refresh_key and len(self.oauth_refresh_key) < 32:
+            raise RuntimeError("OAUTH_REFRESH_KEY must be at least 32 characters (or left unset)")
         if not 60 <= self.recent_signin_seconds <= 3600:
             raise RuntimeError("RECENT_SIGNIN_SECONDS must be between 60 and 3600")
         if self.resend_api_key and "@" not in self.email_from:

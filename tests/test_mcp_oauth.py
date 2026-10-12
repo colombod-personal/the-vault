@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from twins import Universe
 from twins.mcp_client import McpClient
@@ -25,7 +25,7 @@ from vault import oauth_server
 from vault.api.mcp import _marked_as_mcp
 from vault.app import create_app
 from vault.config import Settings
-from vault.models import OAuthCode, OAuthGrant, User
+from vault.models import OAuthCode, OAuthGrant, OAuthRetiredRefresh, User
 
 CSV = (Path(__file__).parent / "fixtures" / "collection.csv").read_bytes()
 V1 = "/api/v1"
@@ -604,6 +604,110 @@ def test_a_reused_refresh_token_revokes_the_whole_grant(app, client):
     assert client.refresh(third["refresh_token"]).status_code == 400  # the legitimate one is revoked too
 
 
+def age_the_last_rotation(app, seconds):
+    """Make the grant's current token pair look as if it was issued `seconds` earlier (its access token's expiry is
+    what says when the last rotation happened)."""
+    db_do(app, lambda db: (db.execute(update(OAuthGrant).values(access_expires=OAuthGrant.access_expires - timedelta(seconds=seconds))),
+                           db.commit()))
+
+
+def test_the_same_refresh_token_again_within_seconds_gets_the_same_answer(app, client):  # vault-wxy.12
+    """Two processes of one app (the desktop app's servers, a CLI run) refresh with the token they both read from the
+    shared store. The second arrives after the first committed: it is the same app, not a thief, so it gets the very
+    answer the first got, and the grant lives."""
+    first = client.connect()
+    one = client.refresh(first["refresh_token"])
+    two = client.refresh(first["refresh_token"])
+    assert one.status_code == 200 and two.status_code == 200
+    assert {k: v for k, v in two.json().items() if k != "expires_in"} == \
+        {k: v for k, v in one.json().items() if k != "expires_in"}  # the same access and refresh token, nothing new minted
+    assert grant_of(app) is not None
+    client.tokens = one.json()
+    assert client.mcp("ping").status_code == 200
+    assert client.refresh().status_code == 200  # and the chain goes on from the one successor
+
+
+def test_a_replay_within_the_window_stores_nothing_new(app, client):  # vault-wxy.12
+    count = lambda db: db.scalar(select(func.count()).select_from(OAuthRetiredRefresh))  # noqa: E731
+    first = client.connect()
+    client.refresh(first["refresh_token"])
+    before = (db_do(app, count), grant_of(app).refresh_hash, grant_of(app).access_hash)
+    assert client.refresh(first["refresh_token"]).status_code == 200
+    assert (db_do(app, count), grant_of(app).refresh_hash, grant_of(app).access_hash) == before
+
+
+def test_a_retired_refresh_token_after_the_window_still_revokes_the_grant(app, client):  # vault-wxy.12
+    first = client.connect()
+    second = client.refresh(first["refresh_token"]).json()
+    age_the_last_rotation(app, oauth_server.REFRESH_GRACE.total_seconds() + 5)
+    res = client.refresh(first["refresh_token"])  # not a moment later: a copy
+    assert res.status_code == 400 and res.json()["error"] == "invalid_grant"
+    assert grant_of(app) is None
+    assert client.mcp("ping", token=second["access_token"]).status_code == 401
+
+
+def test_the_window_ends_at_sixty_seconds(app, client):  # vault-wxy.12
+    assert oauth_server.REFRESH_GRACE == timedelta(seconds=60)  # the owner decides this number: changing it is a decision, not a tweak
+    first = client.connect()
+    client.refresh(first["refresh_token"])
+    age_the_last_rotation(app, 55)
+    assert client.refresh(first["refresh_token"]).status_code == 200  # 55 s after the rotation: still a retry
+    age_the_last_rotation(app, 10)  # 65 s
+    res = client.refresh(first["refresh_token"])
+    assert res.status_code == 400 and res.json()["error"] == "invalid_grant" and grant_of(app) is None
+
+
+def test_the_replayed_access_token_works_and_reports_what_it_has_left(app, client):  # vault-wxy.12
+    first = client.connect()
+    one = client.refresh(first["refresh_token"]).json()
+    age_the_last_rotation(app, 30)
+    two = client.refresh(first["refresh_token"]).json()
+    assert two["access_token"] == one["access_token"] and two["refresh_token"] == one["refresh_token"]
+    assert 3500 < two["expires_in"] <= 3570  # what the one access token has left, not a fresh hour
+    assert client.mcp("ping", token=two["access_token"]).status_code == 200
+    assert client.mcp("ping", token=first["access_token"]).status_code == 401  # the token before the rotation is dead
+
+
+def test_the_retry_key_is_its_own_key_and_decides_the_successor():  # vault-wxy.12
+    pair = oauth_server._successor("k" * 32, "vault_ort_a")
+    assert pair == oauth_server._successor("k" * 32, "vault_ort_a")  # the same token and key: the same pair
+    assert pair != oauth_server._successor("j" * 32, "vault_ort_a")  # another key: another pair
+    assert pair != oauth_server._successor("k" * 32, "vault_ort_b")  # another token: another pair
+    assert pair[0].startswith(oauth_server.ACCESS_PREFIX) and pair[1].startswith(oauth_server.REFRESH_PREFIX)
+    assert len(pair[0]) == len(oauth_server.ACCESS_PREFIX) + 43 and len(pair[1]) == len(oauth_server.REFRESH_PREFIX) + 64
+    own = Settings(session_secret="a" * 40, oauth_refresh_key="")
+    assert own.oauth_refresh_secret() != own.session_secret  # derived under its own label, never the session secret itself
+    assert Settings(session_secret="b" * 40, oauth_refresh_key="").oauth_refresh_secret() != own.oauth_refresh_secret()
+    assert Settings(session_secret="a" * 40, oauth_refresh_key="r" * 32).oauth_refresh_secret() == "r" * 32
+    with pytest.raises(RuntimeError, match="OAUTH_REFRESH_KEY"):
+        Settings(database_url="postgresql://x", session_secret="a" * 40, oauth_refresh_key="short").check()
+
+
+def test_the_window_does_not_cover_a_token_two_rotations_back(app, client):  # vault-wxy.12
+    first = client.connect()
+    client.tokens = client.refresh(first["refresh_token"]).json()
+    client.tokens = client.refresh().json()  # the first token is now two steps behind
+    res = client.refresh(first["refresh_token"])
+    assert res.status_code == 400 and grant_of(app) is None
+
+
+def test_the_window_is_for_the_same_client_and_the_same_scopes_only(app, client, universe):  # vault-wxy.12
+    client.sign_in()
+    client.tokens = client.redeem(client.approve(write=True, scope="read write")["code"]).json()
+    old = client.tokens["refresh_token"]
+    assert client.refresh(old).status_code == 200
+    narrower = client.refresh(old, scope="read")  # the first answer carried read write: this is not a retry of it
+    assert narrower.status_code == 400 and grant_of(app) is None
+
+    client.sign_in()
+    client.tokens = client.redeem(client.approve(write=True, scope="read write")["code"]).json()
+    old = client.tokens["refresh_token"]
+    assert client.refresh(old).status_code == 200
+    thief_id = universe.client_hosts.publish("other.example")
+    other = client.refresh(old, client_id=thief_id)
+    assert other.status_code == 400 and grant_of(app) is None
+
+
 def test_a_stolen_refresh_token_cannot_be_used_by_another_client(app, client, universe):
     tokens = client.connect()
     thief_id = universe.client_hosts.publish("other.example")
@@ -1018,30 +1122,34 @@ def test_two_parallel_redemptions_of_one_code(app, client, round_):
 
 @pytest.mark.parametrize("round_", range(6))
 def test_two_parallel_refreshes_with_one_token(app, client, round_):
-    """Exactly one rotates the token. A loser that lost the swap is not treated as theft (it may be a
-    retry), one that arrives after the rotation is a reuse and revokes the grant; either way the old
-    token never works again, and the state is consistent."""
+    """Exactly one rotates the token. The other, whether it lost the swap itself or arrived just after the rotation,
+    is the same app asking twice (vault-wxy.12): it gets the same answer and the grant lives. Seconds later the old
+    token is a copy: it revokes the grant."""
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
     client.connect()
     old = client.tokens["refresh_token"]
     form = client.token_form({"grant_type": "refresh_token", "refresh_token": old}, {})
-    barrier = threading.Barrier(2)
+    barrier = threading.Barrier(4)
 
     def refresh():
         c = TestClient(app)
         barrier.wait()
         return c.post("/oauth/token", data=form)
 
-    with ThreadPoolExecutor(2) as pool:
-        results = [f.result() for f in [pool.submit(refresh), pool.submit(refresh)]]
-    assert sorted(r.status_code for r in results) == [200, 400]
-    winner = next(r for r in results if r.status_code == 200).json()
-    alive = grant_of(app) is not None
-    assert (client.mcp("ping", token=winner["access_token"]).status_code == 200) is alive
+    with ThreadPoolExecutor(4) as pool:
+        results = [f.result() for f in [pool.submit(refresh) for _ in range(4)]]
+    assert [r.status_code for r in results] == [200, 200, 200, 200]
+    winner = results[0].json()
+    for other in results[1:]:  # one successor, whichever got there first (only the time left on the access token may differ)
+        assert {k: v for k, v in other.json().items() if k != "expires_in"} == {k: v for k, v in winner.items() if k != "expires_in"}
+    assert db_do(app, lambda db: db.scalar(select(func.count()).select_from(OAuthRetiredRefresh))) == 1  # one rotation
+    assert grant_of(app) is not None
+    assert client.mcp("ping", token=winner["access_token"]).status_code == 200
+    age_the_last_rotation(app, oauth_server.REFRESH_GRACE.total_seconds() + 5)
     assert client.refresh(old).status_code == 400  # the old token is dead for good
-    assert grant_of(app) is None  # and presenting it again is reuse: the grant is gone
+    assert grant_of(app) is None  # and presenting it later is reuse: the grant is gone
     assert client.mcp("ping", token=winner["access_token"]).status_code == 401
 
 

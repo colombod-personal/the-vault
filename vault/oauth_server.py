@@ -4,7 +4,11 @@
   challenge, resource and person. Redeeming one twice revokes what the first redemption issued.
 * **Grants** (``oauth_grants``): one person's consent to one app. Each holds the current access
   token (1 hour) and refresh token (30 days, **rotated on every use**; a rotated one coming back
-  revokes the whole grant, RFC 9700 section 4.14). Only SHA-256 hashes are stored.
+  revokes the whole grant, RFC 9700 section 4.14). Only SHA-256 hashes are stored. One exception, a
+  mitigation and not a cure (vault-wxy.12): the same client presenting the token again within
+  ``REFRESH_GRACE`` of the rotation, for the same resource and scopes, is taken for the same app refreshing
+  from several processes. It gets the same answer back (the successor is derived from the presented token
+  with a key, so nothing is kept) and the grant lives. Docs: ``docs/mcp-oauth-threat-model.md`` section 6.
 * **Scopes** ``read`` and ``write``. Tokens never carry the ``account`` power: they can't create
   tokens, export or delete the account, or manage sign-ins (``account_user`` in ``vault.app``).
 * **Audience**: tokens are for one resource, the MCP server (RFC 8707), and are accepted nowhere else.
@@ -14,7 +18,10 @@ Personal access tokens (``vault.tokens``) are separate and unchanged.
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import hmac
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -27,6 +34,7 @@ from .tokens import PKCE_VERIFIER, _touch, s256
 
 ACCESS_TTL = timedelta(hours=1)
 REFRESH_TTL = timedelta(days=30)
+REFRESH_GRACE = timedelta(seconds=60)  # a rotated refresh token coming back this soon, from the same client, is a retry: it gets the same answer. Fixed from the rotation, never extended; the owner decides the length (vault-wxy.12)
 MAX_RETIRED_PER_GRANT = 10  # rotated refresh hashes kept per grant to catch a copied token; older ones are dropped
 GRANT_MAX_AGE = timedelta(days=90)  # from first consent: refreshing never extends a grant past this
 CONSENT_TTL = timedelta(minutes=10)
@@ -37,6 +45,9 @@ REFRESH_PREFIX = "vault_ort_"
 SCOPES = ("read", "write")
 IGNORED_SCOPES = ("offline_access",)  # refresh tokens are always issued
 MAX_APPS = 50  # connected apps per person
+
+
+log = logging.getLogger(__name__)
 
 
 class OAuthError(Exception):
@@ -98,8 +109,9 @@ def _new_pair() -> tuple[dict, str, str]:
     return values, access, refresh
 
 
-def _response(access: str, refresh: str, scopes: str) -> dict:
-    return {"access_token": access, "token_type": "Bearer", "expires_in": int(ACCESS_TTL.total_seconds()),
+def _response(access: str, refresh: str, scopes: str, expires_in: int | None = None) -> dict:
+    return {"access_token": access, "token_type": "Bearer",
+            "expires_in": int(ACCESS_TTL.total_seconds()) if expires_in is None else expires_in,
             "refresh_token": refresh, "scope": scopes}
 
 
@@ -183,11 +195,70 @@ def _narrow(requested: str | None, allowed: str) -> str:
     return " ".join(s for s in SCOPES if s in asked)
 
 
+def _successor(key: str, presented: str) -> tuple[str, str]:
+    """The (access, refresh) token pair that rotating ``presented`` produces. It is derived from the **presented token itself**
+    (the plaintext only its holder has, never the stored hash) with the retry key, instead of drawn at random, so the same app
+    asking twice within REFRESH_GRACE gets the same pair while the Vault keeps no token: only hashes are stored, as before.
+    A database read, even with the key, gives no token. The key is the one thing that lets a copied old token follow the
+    chain without being presented: see the threat model, section 6. Lengths match a first connection's random tokens."""
+    def mac(label: str) -> bytes:
+        return hmac.new(key.encode(), f"{label}:{presented}".encode(), hashlib.sha256).digest()
+
+    def b64(raw: bytes) -> str:
+        return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+    return (ACCESS_PREFIX + b64(mac("oauth-access-v1")),
+            REFRESH_PREFIX + b64((mac("oauth-refresh-v1a") + mac("oauth-refresh-v1b"))[:48]))
+
+
+def _replay(db: Session, token_hash: str, token: str, client_id: str, scope: str | None, resource: str | None,
+            key: str) -> dict | None:
+    """The answer a rotated refresh token already got, when it comes back within REFRESH_GRACE from the same client
+    asking for the same resource and scopes (the desktop app's several servers and a CLI run share one credential store
+    and refresh at once: vault-wxy.12). Anything else is None, and the caller treats it as a copied token. Logged without
+    any token: the grant, the client, how long after the rotation, and why it was refused."""
+    retired = db.scalar(select(OAuthRetiredRefresh).where(OAuthRetiredRefresh.token_hash == token_hash))
+    if retired is None or _aware(retired.expires_at) < _now():
+        return None
+    grant = db.get(OAuthGrant, retired.grant_id)
+    if grant is None:
+        return None
+    age = _now() - (_aware(grant.access_expires) - ACCESS_TTL)  # the current pair's issue time = the last rotation
+    refuse = None
+    if grant.client_id != client_id:
+        refuse = "another client"
+    elif resource is not None and resource != grant.resource:
+        refuse = "another resource"
+    elif _aware(grant.refresh_expires) < _now() or _now() > _aware(grant.created_at) + GRANT_MAX_AGE:
+        refuse = "the grant is past its life"  # never revived by a retry
+    elif age > REFRESH_GRACE:
+        refuse = "after the window"
+    else:
+        access, refresh_new = _successor(key, token)
+        if grant.refresh_hash != _hash(refresh_new) or grant.access_hash != _hash(access):
+            refuse = "not the grant's previous token"  # the grant moved on (two rotations back) or was never rotated from this token
+        else:
+            try:
+                if _narrow(scope, grant.scopes) != grant.access_scopes:
+                    refuse = "not the same scopes as the first answer"
+            except OAuthError:
+                refuse = "wider scopes than the grant allows"
+    if refuse:
+        log.warning("oauth refresh reuse refused (%s): grant=%s client=%.60s age=%.1fs", refuse, grant.id, grant.client_id,
+                    age.total_seconds())
+        return None
+    log.info("oauth refresh retried inside the window, same answer returned: grant=%s client=%.60s age=%.1fs", grant.id,
+             grant.client_id, age.total_seconds())
+    remaining = max(1, int((_aware(grant.access_expires) - _now()).total_seconds()))  # the winner's access token: what it has left
+    return _response(access, refresh_new, grant.access_scopes, expires_in=remaining)
+
+
 def _unknown_refresh(db: Session, token_hash: str) -> None:
     """A refresh token nobody holds: if it was rotated, it was copied, so its grant is revoked.
     Always ends in invalid_grant."""
     retired = db.scalar(select(OAuthRetiredRefresh).where(OAuthRetiredRefresh.token_hash == token_hash))
     if retired is not None and _aware(retired.expires_at) >= _now():
+        log.warning("oauth grant revoked: a rotated refresh token came back: grant=%s", retired.grant_id)
         revoke_grant(db, retired.grant_id)
     elif retired is not None:
         db.delete(retired)
@@ -195,10 +266,13 @@ def _unknown_refresh(db: Session, token_hash: str) -> None:
     raise OAuthError("invalid_grant", "The refresh token is invalid, expired or revoked")
 
 
-def refresh(db: Session, client_id: str, refresh_token: str, scope: str | None, resource: str | None) -> dict:
+def refresh(db: Session, client_id: str, refresh_token: str, scope: str | None, resource: str | None, key: str) -> dict:
     h = _hash(refresh_token or "")
     grant = db.scalar(select(OAuthGrant).where(OAuthGrant.refresh_hash == h))
     if grant is None:
+        replayed = _replay(db, h, refresh_token, client_id, scope, resource, key)
+        if replayed is not None:
+            return replayed
         _unknown_refresh(db, h)
     ends = _aware(grant.created_at) + GRANT_MAX_AGE
     if grant.client_id != client_id or _aware(grant.refresh_expires) < _now() or _now() > ends:
@@ -207,12 +281,17 @@ def refresh(db: Session, client_id: str, refresh_token: str, scope: str | None, 
     if resource is not None and resource != grant.resource:
         raise OAuthError("invalid_target", "resource does not match the grant")
     scopes = _narrow(scope, grant.scopes)
-    values, access, refresh_new = _new_pair()
-    values["refresh_expires"] = min(values["refresh_expires"], ends)  # refreshing never outlives the grant
-    # Compare-and-swap: of two refreshes racing with the same token, only one rotates it.
+    access, refresh_new = _successor(key, refresh_token)  # not random: the same token asked twice gets the same pair
+    values = {"access_hash": _hash(access), "access_expires": _now() + ACCESS_TTL, "refresh_hash": _hash(refresh_new),
+              "refresh_expires": min(_now() + REFRESH_TTL, ends)}  # refreshing never outlives the grant
+    # Compare-and-swap: of two refreshes racing with the same token, only one rotates it. The other is the same app
+    # asking twice: it gets the winner's answer (vault-wxy.12), not a revoked grant.
     if not db.execute(update(OAuthGrant).where(OAuthGrant.id == grant.id, OAuthGrant.refresh_hash == h)
                       .values(access_scopes=scopes, **values)).rowcount:
         db.rollback()
+        replayed = _replay(db, h, refresh_token, client_id, scope, resource, key)
+        if replayed is not None:
+            return replayed
         raise OAuthError("invalid_grant", "The refresh token is invalid, expired or revoked")
     db.execute(delete(OAuthRetiredRefresh).where(OAuthRetiredRefresh.grant_id == grant.id,
                                                  OAuthRetiredRefresh.expires_at < _now()))
