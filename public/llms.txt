@@ -249,6 +249,10 @@ be revoked (Account → Connected apps for OAuth).
     for the sets the Vault has loaded; each figure has its sample (`too_few` under 200 games in hand, `low`, `ok` from 1,000) and an exact
     warning, and the answer's `attribution` is the credit to repeat. Computed by the Vault from 17Lands' counts, so it can differ from
     17lands.com; Arena data, not paper; a correlation, not proof a card wins; never a grade or a "best pick"; not endorsed by 17Lands
+  - Prerelease pages: `get_prerelease_guide` (`set` code or name, or none for the prerelease under way or next): where Wizards' player
+    guide (magic.wizards.com) and store event page (wpn.wizards.com) for a set are, with the prerelease dates and the pack contents per
+    format (traditional, Two-Headed Giant), each fact with its source page, the day it was read and `verified` or `unverified`; says
+    plainly when no guide is published yet. Links and a few facts only: no text of a Wizards page is kept
   - the expert council (the same experts the plugin installs): `council_brief` (the panel for a format and
     goal, each member's brief, the chair's procedure), `expert_brief` (one expert)
   - deck analysis, computed by the Vault: `deck_stats` (with a Commander Bracket floor from Wizards' published rules;

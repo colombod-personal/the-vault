@@ -39,6 +39,13 @@ Microsoft's `amplifier-bundle-digital-twin-universe`.
   such a file existing. `tests/conformance` checks the two answers with one HEAD each; the tests never reach the host. The rolling window
   (#417) also reads Scryfall's list of sets (one request, `GET /sets`: code, set type, release day), which the Scryfall twin builds from the cards
   it holds (`add_card(..., set_type=..., released_at=...)`); a conformance check compares its shape with the real list's.
+- **Wizards' prerelease pages, as the two sites really answer** (`twins/wizards.py`, read 2026-10-12; `jobs/sync_prerelease_guides.py`): a sitemap
+  on `magic.wizards.com` (`/en/sitemap.xml`, a `urlset` with `lastmod`) and one on `wpn.wizards.com` reached through `/sitemap_index.xml`, whose
+  entries name WPN's origin host (`wpn.web-prod.tiamat-origin.cloud`, never contacted: the job takes the path and asks `wpn.wizards.com`);
+  a path without the language redirects by a `<meta http-equiv="refresh">` page with a 302 or 307 and no `Location` header (the job does
+  not follow it); no robots file on WPN, none disallowing on `magic.wizards.com`. The invented articles and event pages carry the title, the
+  list after "Prerelease Pack contains the following", the "Scheduling :" line and the Two-Headed Giant sentence, which are the only
+  things the Vault reads. `tests/conformance` compares the shapes and runs the Vault's own readers on real pages.
 - **Archidekt is never contacted by a schedule**: the live Archidekt conformance checks run by hand only
   (`TWINS_LIVE_ARCHIDEKT=1`), fetch one named public deck and never search (docs/compliance.md).
 - **Archidekt decks are as heavy as real ones**: the twin sends every field of the real API (captured 2026-10-06 in

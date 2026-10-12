@@ -92,6 +92,8 @@ jobs/sync_limited.py  17Lands per-card statistics (streams their files, keeps co
 jobs/limited_window.py  which sets are in the rolling window of 8 (pure rules);  jobs/limited_terms.py  the 120-day terms re-read the job checks
                       and the text of the monthly reminder issue (.github/workflows/limited-terms-monthly.yml)
 vault/limited_stats.py, vault/limited_data.py  the sample-size rules, the counters, and the Limited statistics answer (get_limited_card_stats)
+jobs/sync_prerelease_guides.py  finds Wizards' prerelease guide and event page for upcoming sets (a step of sync-catalog; docs/prerelease-guides.md)
+vault/prerelease_guides.py, vault/prerelease_seed.py  the table's answer (get_prerelease_guide), the page matching and reading, the manual seed
 twins/                digital twins of every outside service, for tests and offline development
 public/               front end (React, JSX compiled into public/app.bundle.js by web/build.mjs)
 web/                  the front-end build (esbuild): npm --prefix web ci && npm --prefix web run build

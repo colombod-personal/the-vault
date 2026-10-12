@@ -82,6 +82,9 @@ CATALOG_SOURCES = {
                             licence={"name": "CC BY 4.0", "url": "https://creativecommons.org/licenses/by/4.0/"},
                             changes="Reduced to per-card counts; percentages, intervals and sample-size warnings computed by the Vault.",
                             notice=GENERIC_17LANDS_NOTICE),
+    "prerelease_guides": dict(name="Wizards of the Coast", origin="Prerelease player guides and Wizards Play Network event pages (links and a few "
+                               "facts: dates, pack counts; no page text)", url="https://magic.wizards.com/en/play-events/prerelease",
+                               wizards_material=True, changes="Only links, dates and pack counts were read from the pages; no text of them is kept."),
     "rules": dict(name="Wizards of the Coast", origin="Magic: The Gathering Comprehensive Rules", url="https://magic.wizards.com/en/rules", wizards_material=True),
 }
 

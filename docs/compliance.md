@@ -31,6 +31,7 @@ list, so production can only enable sources the test has checked.
 | `oracle_prices` | Scryfall prices (TCGplayer, Cardmarket via Scryfall) | read | 2026-10-05 | https://scryfall.com/docs/api | Shown as Scryfall's, with date and marketplace |
 | `oracle_printings` | Scryfall bulk `default_cards`: one priced paper printing per row | read | 2026-10-05 | https://scryfall.com/docs/api | Same terms as the prices it carries: shown as Scryfall's with date and marketplace; used to pick the cheapest acceptable printing, never a shop's price; off until `CATALOG_SOURCES` lists it |
 | `limited_17lands` | 17Lands public data sets (game and draft files of recent sets): reduced to per-card counts, the files themselves never stored | read | 2026-10-09 | https://www.17lands.com/public_datasets | CC BY 4.0: credit 17Lands, name the licence and link it, say what the Vault changed, no endorsement; every figure shown with its sample size and as Arena data (see "17Lands" below). Off until `CATALOG_SOURCES` names it; read by `jobs/sync_limited.py`, run only by the `sync-limited` Action |
+| `prerelease_guides` | Wizards' prerelease player guides (magic.wizards.com) and Wizards Play Network event pages (wpn.wizards.com): links and a few facts, no page text | read | 2026-10-12 | https://company.wizards.com/tou | General Terms clause 2.2 limits scripts and links "except as expressly authorized" and no express authorisation was found: the reading taken is in "Wizards' prerelease pages" below (two published sitemaps and the pages they list, once a day, nothing stored but links and facts, off until `CATALOG_SOURCES` names it, the owner's switch) |
 | `rules` | Wizards' Comprehensive Rules | read | 2026-10-04 | https://company.wizards.com/en/legal/fancontentpolicy | Read live, nothing stored (#142); Fan Content notice shown |
 
 Sources the Vault does **not** load, recorded so the next person does not have to find out again:
@@ -88,6 +89,38 @@ creating additional Magic software", under the Fan Content Policy, with these gu
 
 No email to Scryfall is needed to load the card data on these terms.
 
+### Wizards' prerelease pages (vault-064.10.8, read 2026-10-12)
+
+What is built: a table of each set's prerelease **player guide** (a feature article on magic.wizards.com) and **WPN event page** (wpn.wizards.com),
+with the prerelease dates and the number of packs and boosters per format, each fact with its source page, the day it was read and
+`verified`/`unverified` (`docs/prerelease-guides.md`). The tool `get_prerelease_guide` answers from it with links; the first rows are a manual
+seed and `jobs/sync_prerelease_guides.py` finds the rest.
+
+What was read, first-hand, on 2026-10-12 (the builder session, with a scripted fetch and a text extraction; the WPN terms page, below, could not be read):
+
+| Page | What it says (short) | What it means for us |
+|---|---|---|
+| [General Terms](https://company.wizards.com/tou), "Last Updated: December 10, 2025", clause 2.2(i) | no "unauthorized means, process, or software that accesses, collects, reads ... data scrapes, including without limitation, agents, robots, scripts, or spiders" | An automated read of Wizards' site is a use the terms restrict unless Wizards authorises it. Nothing in the terms, the Fan Content Policy or either site's robots file expressly authorises it |
+| same, clause 2.2(ii) | no "derivative works ... including links or frames to content, images or artwork (except as expressly authorized by Wizards)" | The same unclear reach over a plain hyperlink as the locator (see "Where to buy links"); a link to a page is what the person is given, with the page named as Wizards' |
+| same, clause 2.2(vii) | no action that "imposes an unreasonable or disproportionately large load on infrastructure" | One daily run: two sitemaps and, for the few sets inside the 45-day window, one request per page found (at most about ten requests a day); a descriptive User-Agent; no retries, no redirect followed |
+| [Fan Content Policy](https://company.wizards.com/en/legal/fancontentpolicy), "Last Updated: November 15, 2017" | the Wizards Terms "win" over the policy; Fan Content "does not include the verbatim copying and reposting of Wizards' IP"; free, with the unofficial notice | **No text of a guide or event page is stored or returned**: links, each page's title as the link's label, dates and pack counts in the Vault's words. The notice is on every answer |
+| `https://magic.wizards.com/robots.txt` | `User-agent: *`, no `Disallow`, a `Sitemap:` line per language (`/en/sitemap.xml`, 660 KB, with `lastmod`) | The sitemap is the published way to discover pages. `tests/conformance` checks each night that robots still disallows nothing |
+| `https://wpn.wizards.com/robots.txt` | redirects (HTML meta refresh) to `/en/robots.txt`, which is a 404 page: no robots file. `/sitemap.xml` leads to `/sitemap_index.xml` and `/__sitemap__/en/sitemap.xml`, whose entries name WPN's origin host | No restriction published. The job asks only `wpn.wizards.com` (the paths are taken from the sitemap) |
+| [WPN Terms and Conditions](https://wpn.wizards.com/en/terms-and-conditions) | **not read**: the page opened in a browser with an empty body (header, footer and a location picker only) | Open. The event pages are public (no sign-in); the Wizards General Terms above are the terms relied on |
+
+**Reading taken.** Wizards' pages are public, their sitemaps exist to be read by machines, and the owner asked for the Vault to know where
+the guides are (2026-10-12). Clause 2.2 is nonetheless broad, and no express authorisation was found. So: the discovery job is **off until the
+owner names `prerelease_guides` in the repository variable `CATALOG_SOURCES`** (the switch, and the quick way to stop: remove the name); it contacts
+only `magic.wizards.com` and `wpn.wizards.com`; it reads the two sitemaps and, for a set within 45 days of its prerelease, the pages found for
+it (a test asserts the hosts and the request count); it never logs in, follows no redirect, and keeps no page text. The manual rows in
+the seed were opened by a person (the builder session) on 2026-10-12 and need no job. If Wizards objects, or the owner reads clause 2.2 more
+strictly, switch the job off: the tool then still answers from the seeded and earlier rows, and says when it last looked.
+
+**What the Vault must not claim**: that Wizards endorses the Vault; that a worked-out date (marked `unverified`, "worked out by the Vault from the
+release date") is Wizards'; that "no guide found" means Wizards has none (the answer says "no prerelease player guide has been published yet" only
+as the Vault's last look, with its date). Dates and contents can differ by region and by store: the answer says the store's listing decides.
+
+### Moxfield
 ### Moxfield
 
 Read first-hand on **2026-10-07**: [moxfield.com/help/terms](https://moxfield.com/help/terms) ("Effective Date: July 9, 2026";
@@ -326,6 +359,7 @@ sends them.
 | Scryfall: do the planned tools count as added value? (#62) | Their terms require "additional value"; the answer shapes the lookup tools | **Not sent** | Send the Scryfall draft from the contact route on https://scryfall.com/docs/api, record the answer here with date and who answered |
 | Moxfield: legitimate access before any automated deck fetching (#62) | Their terms forbid robots without written approval (read 2026-10-07) | **Sent 2026-10-10** by the owner to support@moxfield.com (also asked about searching public decks, counts only); the owner says it had been sent before too, but no date was recorded. No answer yet | Record the answer here with date and who answered; until then nothing is fetched |
 | Archidekt: is one public deck per person's request acceptable? (#79) | Their terms exclude "automated searches, requests, or queries"; the owner's position is that one request on a person's action is within them | **Written 2026-10-10** to contact@archidekt.com (also asked about searching public decks, counts only); the owner says it had been sent before too, but no date was recorded. No answer yet | Record the answer here with date and who answered; until then no search is built |
+| Wizards: automated reading of two sitemaps and the pages they list, for the prerelease table (vault-064.10.8) | General Terms clause 2.2 restricts scripts and links "except as expressly authorized"; the reading taken is in "Wizards' prerelease pages" | **Built, off**: the job runs only when `CATALOG_SOURCES` names `prerelease_guides` | Read the "Wizards' prerelease pages" section; decide whether to name the source in the repository variable, and whether to ask Wizards in writing first (not sent). The WPN Terms and Conditions page would not render: read it in a browser if it matters |
 | Wizards: Fan Content Policy (optional since #142) | The rules are read live and nothing is stored, so nothing needs their permission today | Not sent, optional | Only if the owner wants it in writing |
 | Cardmarket's terms | Read in a browser on 2026-10-07 (the earlier "bot check" was a wrong address) | **Read** | Recorded in `docs/data-sources.md`: showing Cardmarket's own prices needs its prior written agreement (clause 9); nothing from Cardmarket is stored or shown today |
 | Fan Content monetisation terms | Needed before joining an affiliate programme | Not read | Read https://company.wizards.com/en/legal/fancontentpolicy before joining |

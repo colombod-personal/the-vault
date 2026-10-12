@@ -52,6 +52,14 @@ jobs:
         env:
           CATALOG_SOURCES: ${{ vars.CATALOG_SOURCES }}
         run: python -m jobs.sync_catalog  # refuses at 85% storage, fails at the end at 70% (jobs/db_budget.py)
+      - name: Find prerelease guides
+        # vault-064.10.8: a row per upcoming set and, within 45 days of its prerelease, Wizards' player guide and event page (links and a
+        # few facts, no page text). Off until the repository variable CATALOG_SOURCES names prerelease_guides (docs/compliance.md).
+        # It runs even when the catalog load failed: it does not depend on it.
+        if: ${{ always() && steps.load.conclusion != 'skipped' }}
+        env:
+          CATALOG_SOURCES: ${{ vars.CATALOG_SOURCES }}
+        run: python -m jobs.sync_prerelease_guides
 
   alert:
     # Opens or updates a GitHub issue when the budget guard failed the job (jobs/budget_alert.py, docs/catalog-design.md "Neon budget").

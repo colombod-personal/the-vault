@@ -130,6 +130,16 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
               "cursor": PAGING["cursor"]}, ["set"],
              path=lambda a: f"{V1}/catalog/limited/{quote(a['set'], safe='')}", query=("format", "cards", "sort", "limit", "cursor"),
              provenance=("catalog",), title="Limited card statistics (17Lands)"),
+        Tool("get_prerelease_guide", "Where Wizards' prerelease pages for a set are: the player guide on magic.wizards.com and the store "
+             "event page on wpn.wizards.com, with the prerelease dates and the pack contents per format (traditional, Two-Headed Giant) read "
+             "from them, each fact with its source page, the day it was read and whether it is verified. The Vault keeps links and these few "
+             "facts, not the text of the pages. A set with no guide published answers `guide_published` false and a plain message; a set the "
+             "table does not hold answers `found` false and names the nearest upcoming prerelease. With no `set` it returns the prerelease "
+             "under way or next. Read-only; the dates and contents can differ by region and by store.",
+             {"set": {"type": "string", "minLength": 1, "maxLength": 100,
+                      "description": "A set code (such as FRA) or the set's name (such as Reality Fracture); leave out for the prerelease under way or next"}},
+             path=lambda a: f"{V1}/catalog/prerelease", query=("set",), provenance=("catalog",),
+             title="Prerelease guide for a set (Wizards' pages)"),
         Tool("get_rulings", "A card's rulings (Wizards' text via Scryfall), newest first, at most 25 a page. More "
              "remain when `next_offset` is not null; that value as `offset` reads the next page.",
              {"oracle_id": {"type": "string", "minLength": 36, "maxLength": 36, "description": "From get_card_oracle"},

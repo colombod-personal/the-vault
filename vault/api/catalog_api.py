@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from .. import catalog_queries as q
-from .. import card_roles, deck_tools, limited_data, role_rules, rules_changes
+from .. import card_roles, deck_tools, limited_data, prerelease_guides, role_rules, rules_changes
 from .. import provenance as prov
 from ..models import User
 from ..ratelimit import WINDOW, hit
@@ -170,6 +170,31 @@ class LimitedOut(BaseModel):
     links: dict = Field(default_factory=dict, alias="_links")
 
 
+class PrereleaseGuideOut(BaseModel):
+    found: bool = Field(description="False when the Vault's table has no record of the set asked for (then `message` says so)")
+    set: dict | None = Field(default=None, description="code, name and release date of the set")
+    guide_published: bool = Field(description="Whether the Vault holds a link to a Wizards prerelease player guide for the set. False means "
+                                              "none was found at the last look, not that the Vault knows Wizards has none")
+    message: str = Field(description="One plain sentence for the person: what was found, or that no guide is published yet")
+    row_status: str | None = Field(default=None, description="verified when the dates were read from a Wizards page and a page of the set is verified; else unverified")
+    prerelease: dict | None = Field(default=None, description="start and end date, with status, source_url and fetched_at; basis says whether Wizards or the Vault worked them out")
+    prerelease_state: str | None = Field(default=None, description="upcoming, ongoing or past, from today's date")
+    player_guide: dict | None = Field(default=None, description="url, title, status, source_url and fetched_at of Wizards' player guide; null when none is published")
+    wpn_event_page: dict | None = Field(default=None, description="the same for the Wizards Play Network event page (written for stores)")
+    pack_composition: dict = Field(default_factory=dict, description="Per format (traditional, two_headed_giant): packs per player or team, "
+                                   "boosters in each pack, the Vault's one-line summary, source_url, fetched_at and status; null for a format not known")
+    note: str | None = Field(default=None, description="Why the row is unverified or has no guide, with the day it was looked at")
+    source_change_note: str | None = Field(default=None, description="A source now says something else than a verified fact: the row was not changed")
+    last_looked_at: str | None = None
+    chosen_because: str | None = Field(default=None, description="Present when no set was named: why this set was chosen")
+    nearest_upcoming: dict | None = Field(default=None, description="The prerelease under way or next, offered when the set asked for is not found or is past")
+    candidates: list[dict] = Field(default_factory=list, description="Sets that fit a name that fits several")
+    caveats: list[str]
+    as_of: str
+    provenance: list[prov.Provenance]
+    links: dict = Field(default_factory=dict, alias="_links")
+
+
 class StatusOut(BaseModel):
     sources: dict[str, dict]
     rules_version: str | None
@@ -294,6 +319,16 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
         if body.get("next_cursor"):
             links["next"] = link(f"{V1}/catalog/limited/{body['set']}" + _query(params, cards, body["next_cursor"]))
         return body | {"_links": links}
+
+    @router.get("/prerelease", response_model=PrereleaseGuideOut, response_model_by_alias=True,
+                summary="Where Wizards' prerelease player guide and store event page for a set are, with the dates and pack contents read from them")
+    def prerelease(set: str | None = Query(default=None, min_length=1, max_length=100,
+                                           description="A set code (FRA) or name (Reality Fracture); leave out for the prerelease under way or next"),
+                   user=Depends(access), db: Session = Depends(get_db)) -> dict:
+        """Global data, nothing of the person's is read. Links and short facts, never the text of a Wizards page."""
+        body = prerelease_guides.answer(db, set)
+        code = (body.get("set") or {}).get("code")
+        return body | {"_links": {"self": link(f"{V1}/catalog/prerelease" + (f"?set={code}" if code else ""))}}
 
     @router.get("/cards", response_model=CardOut, response_model_by_alias=True,
                 summary="A card's Oracle text, types, legalities and tags, by exact name or Oracle id")

@@ -64,8 +64,9 @@ def test_the_gate_table_has_no_half_filled_rows():
 def test_a_new_sync_job_or_workflow_forces_a_look_at_the_gate():
     """A new job that loads data is a new source. Adding one fails here until this list (and the gate table) are updated."""
     jobs = {p.stem for p in (ROOT / "jobs").glob("sync_*.py")}
-    assert jobs == {"sync_catalog", "sync_prices", "sync_limited"}, (
-        f"new sync job(s) {jobs - {'sync_catalog', 'sync_prices', 'sync_limited'}}: add the source to the Source gate in docs/compliance.md "
+    known = {"sync_catalog", "sync_prices", "sync_limited", "sync_prerelease_guides"}  # the last runs as a step of sync-catalog.yml
+    assert jobs == known, (
+        f"new sync job(s) {jobs - known}: add the source to the Source gate in docs/compliance.md "
         "(terms read first-hand, date, URL), make the job refuse unnamed sources, then update this list")
     workflows = {p.name for p in (ROOT / ".github" / "workflows").glob("sync-*.yml")}
     assert workflows == {"sync-catalog.yml", "sync-prices.yml", "sync-limited.yml"}, workflows

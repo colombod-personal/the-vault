@@ -609,3 +609,86 @@ def test_neon_project_consumption_fields_the_usage_check_reads(real, twin):
     t = twin.get("https://console.neon.tech/api/v2/projects/twin-project", headers={"Authorization": "Bearer twin-neon-key"}).json()["project"]
     assert missing(r, ["compute_time_seconds", "data_transfer_bytes", "synthetic_storage_size", "consumption_period_start", "consumption_period_end"]) == []
     assert invented(t, r) == []
+
+
+# -- Wizards of the Coast: the prerelease sitemaps, guides and event pages (twins/wizards.py, vault-064.10.8) ---------------------
+
+PRERELEASE_HEADERS = {"User-Agent": HEADERS["User-Agent"], "Accept": "text/html,application/xml;q=0.9,*/*;q=0.5"}
+
+
+def _prerelease_sitemaps(real):
+    """The two sitemaps the discovery job reads, fetched the way it fetches them (no redirect followed). Returns (urls on
+    magic.wizards.com, urls on wpn.wizards.com)."""
+    from vault import prerelease_guides as pg
+
+    magic = real.get(pg.MAGIC_SITEMAP, headers=PRERELEASE_HEADERS, follow_redirects=False)
+    assert magic.status_code == 200, "the magic.wizards.com sitemap moved"
+    index = real.get(pg.WPN_SITEMAP_INDEX, headers=PRERELEASE_HEADERS, follow_redirects=False)
+    assert index.status_code == 200, "the WPN sitemap index moved"
+    english = [u for u in pg.parse_sitemap(index.text) if u.endswith(pg.WPN_SITEMAP_PATH)]
+    assert english, "the WPN sitemap index no longer names the English sitemap"
+    wpn = real.get(f"https://{pg.WPN_SITE}{pg.WPN_SITEMAP_PATH}", headers=PRERELEASE_HEADERS, follow_redirects=False)
+    assert wpn.status_code == 200
+    return pg.parse_sitemap(magic.text), [f"https://{pg.WPN_SITE}{httpx.URL(u).path}" for u in pg.parse_sitemap(wpn.text)]
+
+
+def test_wizards_robots_files_still_allow_the_two_sitemaps_the_prerelease_job_reads(real):
+    """docs/compliance.md ("Wizards' prerelease pages") relies on magic.wizards.com's robots.txt disallowing nothing and WPN having no
+    robots file. If either changes, the job must stop until a person reads the new rules."""
+    magic = real.get("https://magic.wizards.com/robots.txt", headers=PRERELEASE_HEADERS)
+    assert magic.status_code == 200 and "User-agent: *" in magic.text
+    assert not [l for l in magic.text.splitlines() if l.strip().lower().startswith("disallow:") and l.split(":", 1)[1].strip()]
+    wpn = real.get("https://wpn.wizards.com/en/robots.txt", headers=PRERELEASE_HEADERS, follow_redirects=False)
+    assert wpn.status_code == 404 or ("disallow:" not in wpn.text.lower())
+
+
+def test_the_sitemaps_list_the_pages_the_job_matches_and_the_twin_lists_them_in_the_same_shape(real, twin):
+    import re
+
+    from vault import prerelease_guides as pg
+
+    magic, wpn = _prerelease_sitemaps(real)
+    guides = [u for u in magic if "/news/feature/" in u and "prerelease" in u]
+    events = [u for u in wpn if "/en/event/prerelease-" in u]
+    assert len(guides) >= 5 and len(events) >= 5, "the sitemaps no longer list prerelease pages in the places the job looks"
+    assert re.search(r"<lastmod>20\d\d-\d\d-\d\dT", real.get(pg.MAGIC_SITEMAP, headers=PRERELEASE_HEADERS).text)
+    # the real WPN sitemap names its origin host: the job takes the path and asks wpn.wizards.com
+    raw = real.get(f"https://{pg.WPN_SITE}{pg.WPN_SITEMAP_PATH}", headers=PRERELEASE_HEADERS).text
+    assert "https://wpn.web-prod.tiamat-origin.cloud/en/event/prerelease-" in raw or "https://wpn.wizards.com/en/event/prerelease-" in raw
+    # the twin answers the same questions the same way
+    w = twin.universe.wizards
+    w.publish_guide("novelty-set-prerelease-guide", "Novelty Set Prerelease Guide")
+    w.publish_event("prerelease-novelty-set", "Prerelease – Novelty Set | WPN", None, None)
+    t_magic = twin.get(pg.MAGIC_SITEMAP, headers=PRERELEASE_HEADERS)
+    assert t_magic.status_code == 200 and "<url><loc>" in t_magic.text and "<lastmod>" in t_magic.text
+    t_index = twin.get(pg.WPN_SITEMAP_INDEX, headers=PRERELEASE_HEADERS)
+    assert [u for u in pg.parse_sitemap(t_index.text) if u.endswith(pg.WPN_SITEMAP_PATH)]
+    # a path without the language answers 3xx with a meta refresh and no Location, on both
+    for who, client in (("real", real), ("twin", twin)):
+        slug = httpx.URL(events[0]).path.rsplit("/", 1)[-1] if who == "real" else "prerelease-novelty-set"
+        r = client.get(f"https://wpn.wizards.com/event/{slug}", headers=PRERELEASE_HEADERS, follow_redirects=False)
+        assert r.status_code in (301, 302, 307) and "location" not in r.headers and "refresh" in r.text.lower(), who
+
+
+def test_the_vaults_readers_find_the_facts_on_real_prerelease_pages(real):
+    """pg.page_title, parse_event_dates, parse_pack_contents and parse_two_headed_giant on the live pages of the sets the seed holds: if
+    Wizards redesigns a page this fails the night it happens, not when a person asks. Nothing is kept."""
+    from vault import prerelease_guides as pg
+    from vault import prerelease_seed
+
+    rows = {r["set_code"]: r for r in prerelease_seed.seed_rows()}
+    magic, wpn = _prerelease_sitemaps(real)
+    for code in ("fra", "hob", "msh", "sos", "fdn"):
+        row = rows[code]
+        assert row["player_guide_url"] in magic, f"{code}: the guide is no longer in magic.wizards.com's sitemap"
+        assert row["wpn_event_url"] in wpn, f"{code}: the event page is no longer in WPN's sitemap"
+        guide = real.get(row["player_guide_url"], headers=PRERELEASE_HEADERS, follow_redirects=False)
+        assert guide.status_code == 200 and "prerelease" in (pg.page_title(guide.text) or "").lower(), code
+        contents = pg.parse_pack_contents(pg.page_lines(guide.text))
+        assert contents and contents["play_boosters_in_each_pack"] == row["composition"]["traditional"]["play_boosters_in_each_pack"], code
+        event = real.get(row["wpn_event_url"], headers=PRERELEASE_HEADERS, follow_redirects=False)
+        assert event.status_code == 200 and "prerelease" in (pg.page_title(event.text) or "").lower(), code
+        lines = pg.page_lines(event.text)
+        assert pg.parse_event_dates(lines, row["released_at"]) == (row["prerelease_start"], row["prerelease_end"]), code
+    fra = real.get(rows["fra"]["wpn_event_url"], headers=PRERELEASE_HEADERS)
+    assert pg.parse_two_headed_giant(pg.page_lines(fra.text)) == {"prerelease_packs": 1, "loose_play_boosters": 2}

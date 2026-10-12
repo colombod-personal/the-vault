@@ -935,3 +935,40 @@ def _entries_get_their_bucket(session, flush_context, instances):
         from . import buckets
 
         buckets.assign(session, fresh)
+
+
+class SetPrereleaseGuide(Base):
+    """Where Wizards' prerelease pages for a set are, and the few facts read from them (vault-064.10.8, docs/prerelease-guides.md).
+
+    One row per set (the lower-case Scryfall code). Links and short facts only: **no text of a Wizards page is stored**
+    (docs/compliance.md, "Wizards' prerelease pages"). Every fact carries the page it came from, the day it was read and a
+    status: ``verified`` (read from that page, by a person or by the discovery job) or ``unverified`` (derived, or not found).
+    Shared data, no user column: nothing here is personal data."""
+
+    __tablename__ = "set_prerelease_guides"
+
+    set_code: Mapped[str] = mapped_column(String(10), primary_key=True)
+    set_name: Mapped[str] = mapped_column(String(200))
+    released_at: Mapped[date | None] = mapped_column(Date)  # Scryfall's release date at the last look
+    prerelease_start: Mapped[date | None] = mapped_column(Date)
+    prerelease_end: Mapped[date | None] = mapped_column(Date)
+    dates_status: Mapped[str] = mapped_column(String(12), default="unverified")  # verified: read from a Wizards page; else derived from the release date
+    dates_source_url: Mapped[str | None] = mapped_column(Text)
+    dates_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    player_guide_url: Mapped[str | None] = mapped_column(Text)  # magic.wizards.com/en/news/feature/...
+    player_guide_title: Mapped[str | None] = mapped_column(String(300))
+    player_guide_status: Mapped[str] = mapped_column(String(12), default="unverified")
+    player_guide_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    wpn_event_url: Mapped[str | None] = mapped_column(Text)  # wpn.wizards.com/en/event/prerelease-...
+    wpn_event_title: Mapped[str | None] = mapped_column(String(300))
+    wpn_event_status: Mapped[str] = mapped_column(String(12), default="unverified")
+    wpn_event_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # {"traditional": {...}, "two_headed_giant": {...}}: per format the packs given, the Vault's own one-line summary, source_url,
+    # fetched_at and status (see vault/prerelease_guides.py, ``composition_entry``)
+    composition: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(12), default="unverified")  # verified when the dates and a guide or event page are verified
+    note: Mapped[str | None] = mapped_column(Text)  # why a row is unverified or has no guide, in plain words, with the day it was looked at
+    source_change_note: Mapped[str | None] = mapped_column(Text)  # a source now says something else than a verified fact: the row was not changed
+    last_looked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # the last discovery run that looked for this set
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
