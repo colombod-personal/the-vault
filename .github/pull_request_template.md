@@ -8,7 +8,7 @@ Closes #<issue>   <!-- a real link: GitHub shows this PR in the issue and closes
 
 - [ ] I claimed the issue (`in-progress`, assignee, comment) before starting, and it was `status:ready`.
 - [ ] Every criterion above is from the issue, with evidence; anything not met is listed as not met.
-- [ ] My branch contains today's `origin/main`, and I read and answered every review thread (AGENTS.md section 8, own worktree).
+- [ ] Agents only: I worked in my own worktree and merged `origin/main` into this branch just before opening it (AGENTS.md section 8).
 - [ ] Twins and conformance checks updated if the Vault now talks to an outside service differently (`docs/twins.md`).
 - [ ] **Auth and security changes only** (a change to `vault/oauth_*.py`, `vault/client_auth.py`, `vault/auth.py`, `vault/passkeys.py`, `vault/tokens.py`, `vault/native.py`, `vault/reviewer*.py`, `vault/privacy.py` or `vault/sharing.py`): fill in both lines below, or this pull request fails its check (`scripts/check_pr_rules.py`).
 

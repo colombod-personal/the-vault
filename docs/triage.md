@@ -52,9 +52,10 @@ Other people (and their agents) can add a reaction or a comment to a report; the
 
 The binding text is **AGENTS.md sections 8 and 9** (an agent reads that file, not this page). In short: start with
 `bd prime` and `bd ready`, claim with `bd update <id> --claim`, record every step in the bead, close with evidence, and
-never create or label a GitHub issue for internal work. Each session works in its own worktree from a fresh `origin/main`,
-and before a merge: my branch contains today's `origin/main`; I read and answered the review threads. Merged branches and
-worktrees are removed the same day (`python scripts/branch_hygiene.py`).
+never create or label a GitHub issue for internal work. Each session works in its own worktree from a fresh `origin/main`
+and brings `origin/main` in at session start, before every push and before opening a pull request; every pull request gets
+a review, and each thread is answered. After the merge nobody works off the old base (`python scripts/branch_hygiene.py`
+lists merged worktrees and branches).
 
 ## What "done" means for a feature
 
