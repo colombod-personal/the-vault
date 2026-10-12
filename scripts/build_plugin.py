@@ -967,9 +967,17 @@ def claude_agent(agent: dict) -> str:
 
 # Codex is the compact-list client (vault/api/mcp_profile.py: it lists 26 core tools plus these). ``enabled_tools`` is an allow
 # list of what the server lists, so an agent whose allow list names only its own tools sees just the core ones among them and
-# cannot reach any other tool its brief names: it also needs the lookup and the reader. vault_write is not here: the agents
-# are read-only. For a client that gets the full list the two names are harmless.
+# cannot reach any other tool its brief names: an agent that names one also needs the lookup and the reader. The reader runs
+# any read tool the token may use, not only the agent's own: for that agent the tool list is guidance and the read-only sandbox,
+# the token's scopes and the API are the walls (DEFS_README says so). An agent whose tools are all core gets neither, and
+# vault_write is never here: the agents are read-only. For a client that gets the full list the two names are harmless.
 COMPACT_READERS = ("vault_tools", "vault_call")
+
+
+def _readers_for(agent: dict) -> tuple:
+    from vault.api import mcp_profile
+
+    return COMPACT_READERS if any(t not in mcp_profile.CORE for t in agent["tools"]) else ()
 
 
 def codex_agent(agent: dict) -> str:
@@ -978,7 +986,7 @@ def codex_agent(agent: dict) -> str:
     tools (shell reads, other MCP servers) from one agent, so those are limited by the instructions only: see DEFS_README."""
     body = agent["body"] + _skills_note(agent)
     assert "'''" not in body
-    tools = ", ".join(json.dumps(t) for t in [*agent["tools"], *COMPACT_READERS])
+    tools = ", ".join(json.dumps(t) for t in [*agent["tools"], *_readers_for(agent)])
     return (f"name = {json.dumps(agent['name'])}\ndescription = {json.dumps(agent['description'])}\nsandbox_mode = \"read-only\"\n"
             f"developer_instructions = '''\n{body}\n'''\n\n[mcp_servers.vault]\nurl = {json.dumps(MCP_URL)}\n"
             f"enabled_tools = [{tools}]\n")
@@ -1016,7 +1024,7 @@ else differs, and these files claim only what each format documents:
 |---|---|---|
 | Claude Code (the plugin) | An allow list (`tools:`): only the Vault's read-only tools; no files, shell or web | nothing else |
 | GitHub Copilot and VS Code | An allow list (`tools:` with `vault/<tool>`): only the Vault's read-only tools; no built-in tools | nothing else, if the server is connected under the name `vault` (a different name leaves the agent with no tools, never more) |
-| Codex | The Vault server's tools limited to the agent's read-only ones (`enabled_tools`, plus `vault_tools` and `vault_call`, which a compact client reaches the rest through), and a read-only sandbox (no writes) | Codex's other tools: reading files with the shell, other MCP servers, web search |
+| Codex | The Vault server's tools limited to the agent's read-only ones (`enabled_tools`); an agent that names a tool outside the compact list also gets `vault_tools` and `vault_call`, which run any read tool the token may use, so for it the list is guidance and not a wall; and a read-only sandbox (no writes) | Codex's other tools: reading files with the shell, other MCP servers, web search |
 | Cursor | A read-only mode (`readonly: true`: no writes) | Which tools it uses: Cursor's subagent format has no tool allow list and subagents inherit the parent's tools, including every MCP server |
 
 The Vault's write tools are not in any list. A person's own assistant, not an agent, makes changes, after asking.

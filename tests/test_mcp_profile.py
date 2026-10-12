@@ -422,18 +422,34 @@ def test_every_expert_brief_and_agent_definition_that_names_a_tool_outside_the_c
             assert flat[where].count(AGENT_PARAGRAPH) == 1, f"{where} does not carry the paragraph, once, word for word"
 
 
-def test_every_codex_agent_enables_the_two_tools_a_compact_client_reaches_the_rest_through_and_not_vault_write():
+def test_a_codex_agent_that_names_a_tool_outside_the_core_list_can_actually_reach_it_and_one_that_does_not_gets_no_readers():
     """Codex is the compact-list client and ``enabled_tools`` is its allow list for the server: without ``vault_tools`` and
-    ``vault_call`` in it, a subagent sees only the core tools among its own and the paragraph in its brief is inert."""
+    ``vault_call`` in it, a subagent sees only the core tools among its own and the paragraph in its brief is inert. The
+    effective set is computed here: what the compact list shows (core tools) among ``enabled_tools``, plus the readers. An agent
+    whose tools are all core gets neither reader (vault_call runs any read tool, so it is not handed out for nothing), and none
+    gets vault_write."""
     files = sorted((ROOT / "agent-definitions" / "codex").glob("*.toml"))
     assert len(files) >= 14
+    readers = {mcp_profile.LOOKUP, mcp_profile.CALL}
+    needs_readers = 0
     for path in files:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
         enabled = data["mcp_servers"]["vault"]["enabled_tools"]
-        assert mcp_profile.LOOKUP in enabled and mcp_profile.CALL in enabled, f"{path.name} cannot reach its non-core tools"
+        own = [t for t in enabled if t not in readers]
         assert mcp_profile.WRITE not in enabled, f"{path.name} is read-only"
-        if says_how_to_reach_them(data["developer_instructions"]):
-            assert enabled.count(mcp_profile.LOOKUP) == 1 and enabled.count(mcp_profile.CALL) == 1
+        assert len(set(enabled)) == len(enabled), path.name
+        listed = {t for t in enabled if t in mcp_profile.CORE}  # what the compact list shows this agent directly
+        outside = [t for t in own if t not in mcp_profile.CORE]
+        if outside:
+            needs_readers += 1
+            assert readers <= set(enabled), f"{path.name} names {outside[:3]} and cannot reach them"
+            for name in outside:  # reachable: the lookup lists it and the reader runs it
+                assert mcp_profile.refusal(mcp.BY_NAME[name], mcp_profile.CALL, scopes=("read",)) is None, f"{path.name}: {name}"
+            assert says_how_to_reach_them(data["developer_instructions"]), path.name
+        else:
+            assert not readers & set(enabled), f"{path.name} names only core tools and does not need the readers"
+            assert set(own) == listed
+    assert needs_readers >= 13
 
 
 def test_a_brief_that_names_a_tool_outside_the_core_list_without_the_paragraph_fails_the_check():

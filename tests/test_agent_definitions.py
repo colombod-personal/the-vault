@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from vault.api import mcp
+from vault.api import mcp, mcp_profile
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -131,8 +131,8 @@ def test_the_copilot_agent_has_an_allow_list_of_only_the_vaults_read_only_tools(
 def test_the_codex_agent_limits_the_vault_server_to_its_tools(agent):
     """Codex: `enabled_tools` is the allow list of one MCP server; a custom agent file may carry its own mcp_servers."""
     data = tomllib.loads((bp.DEFS / "codex" / f"{agent['name']}.toml").read_text(encoding="utf-8"))
-    assert data["mcp_servers"]["vault"] == {"url": "https://mtgvault.cards/api/mcp",
-                                            "enabled_tools": [*agent["tools"], "vault_tools", "vault_call"]}  # the compact list's two readers
+    readers = ["vault_tools", "vault_call"] if any(t not in mcp_profile.CORE for t in agent["tools"]) else []  # the compact list's two readers
+    assert data["mcp_servers"]["vault"] == {"url": "https://mtgvault.cards/api/mcp", "enabled_tools": [*agent["tools"], *readers]}
     assert set(data) == {"name", "description", "sandbox_mode", "developer_instructions", "mcp_servers"}
 
 
