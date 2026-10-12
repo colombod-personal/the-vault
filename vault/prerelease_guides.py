@@ -283,7 +283,8 @@ def provenance_for(row: SetPrereleaseGuide, body: dict) -> list[prov.Provenance]
         page(entry.get("source_url"), f"Pack contents, {FORMAT_NAMES[fmt]} (Wizards page)",
              datetime.fromisoformat(entry["fetched_at"]) if entry.get("fetched_at") else None)
         for extra in entry.get("corroborated_by") or []:
-            page(extra, f"Pack contents, {FORMAT_NAMES[fmt]} (Wizards announcement)", None)
+            page(extra, f"Pack contents, {FORMAT_NAMES[fmt]} (Wizards announcement)",
+                 datetime.fromisoformat(entry["fetched_at"]) if entry.get("fetched_at") else None)
     inputs = [prov.source("Scryfall", origin="the set's release date", url=f"https://scryfall.com/sets/{row.set_code}",
                           as_of=row.updated_at)]
     if row.dates_status != "verified" and row.prerelease_start:
@@ -483,8 +484,9 @@ def discover(db: Session, client: httpx.Client, sets: list[dict], day: date | No
     now = now or datetime.now(timezone.utc)
     report = Report()
     rows = ensure_rows(db, sets, day, now, report)
-    wanted = [r for r in rows.values() if r.prerelease_start and r.prerelease_end and r.prerelease_end >= day - timedelta(days=RECENT_DAYS)
-              and r.prerelease_start <= day + timedelta(days=SEARCH_WINDOW_DAYS) and not _complete(r)]
+    in_window = [r for r in rows.values() if r.prerelease_start and r.prerelease_end and r.prerelease_end >= day - timedelta(days=RECENT_DAYS)
+                 and r.prerelease_start <= day + timedelta(days=SEARCH_WINDOW_DAYS)]
+    wanted = [r for r in in_window if not _complete(r)]  # only these make the job read the sitemaps; the others are compared when it does
     magic_urls: list[str] | None = None
     wpn_urls: list[str] | None = None
     if wanted:
@@ -502,8 +504,14 @@ def discover(db: Session, client: httpx.Client, sets: list[dict], day: date | No
             wpn_urls = [f"https://{WPN_SITE}{httpx.URL(u).path}" for u in parse_sitemap(sitemap)]
         except FetchError as exc:
             report.problems.append(f"wpn.wizards.com sitemap: {exc}")
-    for row in sorted(wanted, key=lambda r: (r.prerelease_start, r.set_code)):
-        _look(db, client, row, magic_urls, wpn_urls, day, now, report)
+    for row in sorted(in_window, key=lambda r: (r.prerelease_start, r.set_code)):
+        if _complete(row):
+            if magic_urls is not None:
+                _check_differs(row, "guide", match_pages(row.set_name, magic_urls, "guide"), day, report)
+            if wpn_urls is not None:
+                _check_differs(row, "event", match_pages(row.set_name, wpn_urls, "event"), day, report)
+        else:
+            _look(db, client, row, magic_urls, wpn_urls, day, now, report)
     for row in rows.values():  # a set close to its prerelease with no verified guide is a job for a person
         if row.prerelease_start and row.prerelease_end and row.prerelease_end >= day and row.prerelease_start <= day + timedelta(days=PRERELEASE_LEAD_DAYS * 2) \
                 and row.player_guide_status != "verified":

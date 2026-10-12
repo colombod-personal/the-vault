@@ -137,7 +137,7 @@ def test_the_seed_holds_the_two_years_and_the_next_set_each_fact_with_its_source
             assert fmt in pg.FORMATS and entry["source_url"].startswith("https://") and entry["fetched_at"] and entry["summary"], (code, fmt)
             assert entry["status"] in ("verified", "unverified"), (code, fmt)
             assert entry["source_url"].split("/")[2] in ALLOWED, (code, fmt)
-    assert rows["trk"]["player_guide_url"] is None and rows["trk"]["status"] == "unverified" and "not in magic.wizards.com's sitemap" in rows["trk"]["note"]
+    assert rows["trk"]["player_guide_url"] is None and rows["trk"]["status"] == "verified" and "not in magic.wizards.com's sitemap" in rows["trk"]["note"]
 
 
 def test_two_headed_giant_is_one_pack_and_two_boosters_from_reality_fracture_and_two_packs_before():
@@ -237,7 +237,7 @@ def test_a_set_with_no_guide_published_says_so_plainly_and_gives_the_event_page(
     assert body["found"] and body["guide_published"] is False and body["player_guide"] is None
     assert body["message"].startswith("No prerelease player guide has been published yet for Star Trek")
     assert body["wpn_event_page"]["url"] == "https://wpn.wizards.com/en/event/prerelease-star-trek"
-    assert body["prerelease_state"] == "upcoming" and body["row_status"] == "unverified" and body["note"]
+    assert body["prerelease_state"] == "upcoming" and body["row_status"] == "verified" and body["note"]  # all it holds was read; no guide is out
     assert body["pack_composition"]["traditional"]["status"] == "unverified"
     assert body["pack_composition"]["two_headed_giant"]["status"] == "unverified"
 
@@ -410,7 +410,7 @@ def test_a_set_with_no_guide_near_its_prerelease_is_listed_for_a_person_and_neve
     assert report["needs_a_person"] == [{"set": "trk", "name": "Star Trek", "prerelease_start": "2026-11-06", "why": "no verified player guide"}]
     assert "::warning::Star Trek (TRK): prerelease starts 2026-11-06 and no player guide is verified yet" in capsys.readouterr().out
     trk = table(env)["trk"]
-    assert trk.status == "unverified" and trk.player_guide_url is None and "no player guide found for Star Trek" in trk.note
+    assert trk.status == "verified" and trk.player_guide_url is None and "no player guide found for Star Trek" in trk.note
     assert trk.wpn_event_status == "verified"  # the seeded event page is not asked about again
     assert "wpn.wizards.com" in wizards_hosts(universe)
 

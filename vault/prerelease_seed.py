@@ -146,7 +146,7 @@ def _star_trek() -> dict:
                 TWO_HG_ANNOUNCEMENT, "One Prerelease Pack plus two Play Boosters per team, the arrangement that starts with Reality "
                 "Fracture; this set's event page does not repeat it.", packs=1, loose=2, status="unverified",
                 note="Not stated on this set's own pages yet.")},
-        "status": "unverified",
+        "status": "verified",  # everything the row holds was read from the event page; the missing guide is said in the note
         "note": "Seeded 2026-10-12: the WPN event page is published and gives the dates; Wizards had not published a player guide for "
                 "Star Trek when this row was written (it was not in magic.wizards.com's sitemap).",
         "source_change_note": None, "last_looked_at": CHECKED,
