@@ -342,3 +342,57 @@ def test_find_upgrades_does_not_flag_a_candidate_for_being_one_more_lord_of_the_
     out = res.json()["result"]
     assert {c["name"] for c in out["candidates"]["ramp"]} == set(RAMP)
     assert out["warnings"] == [] and all("lookouts" not in c and "WARNING" not in c["why"] for c in out["candidates"]["ramp"])
+
+
+# -- wording (follow-up to the review of PR 457): a bonus shared with opponents is listed, never a refusal ---------------------------
+# A tribe lord added to its own tribe is true of nearly every tribal deck and hurts no card of the deck: `lookouts` lists it, and
+# `warnings` does not. A skill, an agent or a brief that tells the assistant to refuse it ("do not add this") would make every
+# Sliver deck review refuse its own lords.
+
+import re  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+WORDING_SOURCES = (sorted((ROOT / "skills").glob("*/SKILL.md")) + sorted((ROOT / "agents").glob("*.md"))
+                   + [ROOT / "vault" / "experts.py", ROOT / "vault" / "api" / "mcp_catalog.py"])
+OLD_REFUSALS = (r"helps an opponent'?s? tribe", r"a lookout warns against", r"a bonus shared with opponents\) carries")
+
+
+def _flat(path):
+    return " ".join(path.read_text(encoding="utf-8").split())
+
+
+def test_no_skill_agent_or_brief_text_calls_a_shared_with_opponents_bonus_a_refusal():
+    bad = {}
+    for path in WORDING_SOURCES:
+        text = _flat(path)
+        for pattern in OLD_REFUSALS:
+            if re.search(pattern, text, re.IGNORECASE):
+                bad.setdefault(path.name, []).append(pattern)
+        for sentence in re.split(r"(?<=[.!?])\s", text):
+            shared = re.search(r"shared with (?:the )?opponents|opponents' creatures|opponent's tribe", sentence, re.IGNORECASE)
+            refuses = re.search(r"do not add|never adds|refus", sentence, re.IGNORECASE)
+            if shared and refuses and not re.search(r"not refused|not a refusal", sentence, re.IGNORECASE):
+                bad.setdefault(path.name, []).append(sentence[:140])
+    assert not bad, bad
+
+
+def test_the_council_deck_upgrader_and_agents_say_what_warnings_lists_and_that_a_tribe_lord_is_listed_not_refused():
+    council = _flat(ROOT / "skills" / "expert-council" / "SKILL.md")
+    assert "listed, not refused" in council and "never adds a card that `warnings` lists" in council
+    assert "opponent's tribe" not in council  # it is no longer one of the 'do not add this' cases
+    assert "not refused" in _flat(ROOT / "vault" / "experts.py") and "`warnings` of validate_deck_changes" in _flat(ROOT / "vault" / "experts.py")
+    upgrader = _flat(ROOT / "skills" / "deck-upgrader" / "SKILL.md")
+    assert "carries `lookouts`" in upgrader and "WARNING line" in upgrader
+    for agent in ("vault-devils-advocate", "vault-buyer"):
+        assert "`warnings`" in _flat(ROOT / "agents" / f"{agent}.md"), agent
+
+
+def test_the_tool_descriptions_say_that_only_a_lookout_that_hurts_a_card_or_is_high_severity_is_a_warning():
+    from vault.api import mcp
+
+    said = {t.name: " ".join(t.description.split()) for t in mcp.TOOLS}
+    for name in ("find_upgrades", "validate_deck_changes"):
+        assert "names no card of the deck it hurts" in said[name] or "names a card of the deck it hurts, or is high severity" in said[name], name
+        assert "shared with opponents" in said[name] and "bonus shared with opponents) carries" not in said[name], name
+    assert "A lookout is a warning and does not change" not in said["validate_deck_changes"]

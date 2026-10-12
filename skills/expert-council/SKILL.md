@@ -37,10 +37,12 @@ Do not send the answer until every line is true. If one is not, go back and do i
    beside it.
 8. **Every card you propose to add was read against the deck.** Read its text with `get_card_oracle` and ask what it does to
    the cards already in the deck, not only to the opponents. If it can turn against the deck (a forced trigger that
-   destroys your own artifacts or enchantments, a shroud that blocks your own targeting, a bonus that helps an
-   opponent's tribe), do not soften it into "consider a more controllable option": say plainly "do not add this", name
-   the cards in the deck it would hurt, and quote the rule with `get_rule`. Harmonic Sliver in a deck with Sol Ring,
-   Arcane Signet, Rhystic Study or Smothering Tithe is the model case.
+   destroys your own artifacts or enchantments, a shroud that blocks your own targeting, a shadow grant that stops your own
+   blocks), do not soften it into "consider a more controllable option": say plainly "do not add this", name the cards in the
+   deck it would hurt, and quote the rule with `get_rule`. Harmonic Sliver in a deck with Sol Ring, Arcane Signet, Rhystic
+   Study or Smothering Tithe is the model case. A tribe lord added to a deck of its own tribe is listed, not refused: its
+   bonus is also given to the opponents' creatures of that type, so it is in `lookouts` (marked new, with its rules) and the
+   answer says what it does for the opponents; the person decides.
 
 ## Members
 
@@ -85,7 +87,9 @@ checked plan. Nothing in this flow changes the person's collection or decks.
      list and, apart from it, `possible_loops` (the Vault's reading of the card text, labelled as the Vault's and not Spellbook's).
      Every `lookout` the deck answer or the council brief carries (cards that can turn against their owner: a shroud that blocks
      your own Equipment, a forced trigger that destroys your own artifacts, a bonus shared with opponents), with its cards and its
-     rule numbers quoted with `get_rule`; the plan never adds a card a lookout warns against.
+     rule numbers quoted with `get_rule`. The plan never adds a card that `warnings` lists (a lookout that names a card of the
+     deck it hurts, or is high severity); a lookout that is only listed, such as a tribe lord's shared bonus, is named in the
+     answer and is not a refusal.
    - Stop: if a tool fails or the catalog is not loaded, say so; do not fill the gap from memory.
 4. **Independent views.**
    - Calls: `get_card_oracle` for any card text a member quotes.

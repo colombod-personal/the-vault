@@ -90,7 +90,9 @@ def council(fmt: str | None, goal: str | None = None, team_format: str | None = 
                        "rules tool returned, as \"rule <number> (Comprehensive Rules, <version>)\"; a member who relies on a rule that "
                        "may have changed lately calls rules_changes first and says which two editions it compared. When the brief carries "
                        "`lookouts` (what in the deck can turn against its owner, read by the Vault from the card text), every "
-                       "member weighs them, the plan never adds a card a lookout warns against, and the answer names each lookout "
+                       "member weighs them, the plan never adds a card that the `warnings` of validate_deck_changes list (a lookout that names "
+                       "a card of the deck it hurts, or is high severity), a lookout that is only listed (a tribe lord added to its own "
+                       "tribe: its bonus is shared with opponents) is named and not refused, and the answer names each lookout "
                        "with its cards and rule numbers (quoted with get_rule)."),
     }
     if key and key not in FORMAT_EXPERTS:

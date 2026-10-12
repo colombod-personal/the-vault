@@ -66,6 +66,8 @@ enforces it in code: you choose well among what it returns and show only a plan 
    - Calls: `find_upgrades` with the budget (and `roles` if the person named a weak area).
    - Show: candidates are legal, inside the deck's colours, not already in the deck, and priced within budget. They are ordered by
      popularity (EDHREC rank). **Popularity is not power or fit**: say that once, and choose by how a card serves the plan.
+     A candidate that carries `lookouts` (a WARNING line in its `why`, and a sentence in the answer's `warnings`) would turn
+     against the deck as it is: list it under "do not add" with that sentence, not as a swap.
    - Stop: none.
 7. **Choose swaps.**
    - Calls: none.
