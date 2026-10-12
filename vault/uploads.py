@@ -34,9 +34,10 @@ from typing import Annotated
 from dataclasses import replace
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, Request, UploadFile
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.orm import Session
 
+from . import locks
 from .api.idempotency import idempotent
 from .api.import_params import BucketId, answer_options
 from .api.schemas import MAX_ID
@@ -159,6 +160,10 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         # One start at a time per person, to the end of this transaction: the count, the replacement and the insert are then
         # one decision. Without it, six simultaneous starts at three open links all counted three and left six rows, and two
         # at one waiting link and four held files could both find the same waiting row (one then answered a false 409).
+        # Bounded wait (vault.locks: 5 s, then the usual 503 with Retry-After, as for every other lock in the Vault): a stalled
+        # transaction of this person's must not hold a request and a database connection for as long as it likes. SET LOCAL ends
+        # with the transaction, so it also bounds the row waits below.
+        db.execute(text(f"SET LOCAL lock_timeout = '{locks.LOCK_TIMEOUT}'"))
         db.execute(select(func.pg_advisory_xact_lock(UPLOAD_LOCK_CLASS, user.id)))
         db.execute(delete(StagedUpload).where(StagedUpload.expires_at <= _now()))
         open_links = db.scalar(select(func.count()).select_from(StagedUpload).where(StagedUpload.user_id == user.id))

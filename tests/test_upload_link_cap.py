@@ -306,3 +306,31 @@ def test_two_simultaneous_starts_at_one_waiting_link_and_four_held_files_both_ge
     assert len(rows(app)) == uploads.MAX_OPEN
     held = rows(app)
     assert all(held[l["id"]] is True for l in links[:4])  # and no file was touched
+
+
+def test_a_stalled_start_of_the_same_person_is_a_bounded_wait_and_a_503_not_a_hang(app, agent, monkeypatch):
+    """Review thread on PR 469: the advisory lock was an unbounded wait. It uses the Vault's lock timeout (vault.locks) and
+    answers the usual 503 with Retry-After. Time-bounded here too, so an unbounded wait fails the test instead of hanging it."""
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as Waited
+
+    from sqlalchemy import func, select
+
+    from vault import locks
+    monkeypatch.setattr(locks, "LOCK_TIMEOUT", "300ms")
+    first = start(agent)
+    with app.state.db.sessions() as db:
+        user_id = db.scalar(select(StagedUpload.user_id).where(StagedUpload.id == first["id"]))
+    with app.state.db.sessions() as holder, ThreadPoolExecutor(1) as pool:
+        holder.execute(select(func.pg_advisory_xact_lock(uploads.UPLOAD_LOCK_CLASS, user_id)))  # another start, stalled
+        pending = pool.submit(agent.post, f"{V1}/uploads")
+        try:
+            res = pending.result(timeout=20)
+        except Waited:
+            holder.rollback()  # let the blocked request go, then fail
+            pending.result(timeout=15)
+            pytest.fail("a start waited for the person's lock without a bound")
+        assert res.status_code == 503 and res.headers.get("retry-after")
+        assert set(rows(app)) == {first["id"]}  # nothing was changed by the refused start
+        holder.rollback()
+    assert agent.post(f"{V1}/uploads").status_code == 201  # and once the lock is free the next start goes through

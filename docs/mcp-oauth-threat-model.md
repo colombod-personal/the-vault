@@ -951,7 +951,7 @@ The race, and whether the replacement is a transaction. Each start takes `pg_adv
 per-person counter and before it reads anything, so one person's starts are one at a time to the end of their transaction. (Without
 it, 6 simultaneous starts at 3 open links all counted 3 and left 6 rows, and two starts with one waiting link and four held files
 could both find the same waiting row, one then answering a false 409: the review reported both. The lock is PostgreSQL's, which is
-what the Vault runs on.) The replacement is then one `DELETE ... WHERE id = (SELECT ... ORDER BY expires_at, id LIMIT 1 FOR UPDATE
+what the Vault runs on. The wait for it is bounded by the Vault's lock timeout, `SET LOCAL lock_timeout` from `vault.locks` (5 s), and past it the start answers the usual 503 with Retry-After: `test_a_stalled_start_of_the_same_person_is_a_bounded_wait_and_a_503_not_a_hang`.) The replacement is then one `DELETE ... WHERE id = (SELECT ... ORDER BY expires_at, id LIMIT 1 FOR UPDATE
 SKIP LOCKED) AND content IS NULL ... RETURNING id` in the same transaction as the insert of the new link, committed once: if the
 insert fails the old link is still there (`test_the_replacement_and_the_new_link_are_one_transaction`), and a bad `bucket_id` replaces
 nothing (`test_a_bad_bucket_id_replaces_nothing`). The count is five or fewer after any number of simultaneous starts
