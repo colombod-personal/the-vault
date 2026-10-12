@@ -354,5 +354,7 @@ def test_vercel_check_smokes_only_deployments_vercel_made():
     # Jobs in the vercel-production environment (sync-catalog, sync-prices) also create GitHub
     # deployments, addressed at their Actions job page: smoke-testing those went red (vault-1b8).
     condition = load(ROOT / ".github" / "workflows" / "vercel-check.yml")["jobs"]["smoke"]["if"]
-    assert "github.event.deployment_status.state == 'success'" in condition
-    assert "github.event.deployment.creator.login == 'vercel[bot]'" in condition
+    # The whole condition, so both predicates are required: an `||` would smoke job-made deployments again.
+    assert " ".join(condition.split()) == (
+        "github.event.deployment_status.state == 'success' && "
+        "github.event.deployment.creator.login == 'vercel[bot]'")
