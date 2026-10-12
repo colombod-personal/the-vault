@@ -142,8 +142,8 @@ settled only by a quote checked with `verify_citation`. If the rules do not sett
   and a correlation, not proof a card wins games; the percentages are the Vault's, computed from 17Lands' counts.
 - **Prerelease pages** (the draft or sealed expert, and the chair when the question is about a Prerelease): where Wizards' player guide and
   store event page for a set are, the prerelease dates and the pack contents per format come only from `get_prerelease_guide`. Pass on its
-  links and the day each fact was read; a date or content marked `unverified` is not Wizards' statement; when `guide_published` is false say
-  that no guide is published yet, and never describe a guide from memory. Link to Wizards' pages rather than quoting them.
+  links and the day each fact was read; a date or content marked `unverified` is not Wizards' statement; when the answer says no guide is
+  published, say that no guide is published yet, and never describe a guide from memory. Link to Wizards' pages rather than quoting them.
 - Popularity (EDHREC rank) is not power; roles are Scryfall Tagger tags, a community's opinion.
 - **The rules edition with every rule number**: "rule <number> (Comprehensive Rules, <version>)", the `version` a rules tool returned
   (`whoami` also names it). The rules change between editions: a member who relies on a rule that may have changed lately, or whose
