@@ -179,8 +179,11 @@ def check_url(url: str, hosts: tuple[str, ...]) -> str:
 
 
 def _host_for_log(host: str) -> str:
-    """A host name as it may go to the log: printable, short. Never a path or a query."""
-    return re.sub(r"[^a-z0-9.\-]", "?", host.lower())[:100]
+    """A host name as it may go to the log: printable, and only its last three labels (``*.`` marks what was left off), so a
+    name that carries a secret in its first labels (``<token>.files.example.com``) does not reach the log. Never a path or a
+    query. Three labels keep what the first real run needs: ``files.oaiusercontent.com`` is shown whole."""
+    labels = re.sub(r"[^a-z0-9.\-]", "?", host.lower()).split(".")
+    return ("*." if len(labels) > 3 else "") + ".".join(labels[-3:])[:80]
 
 
 def text_like(content_type: str, handoff: Handoff) -> bool:

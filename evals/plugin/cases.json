@@ -191,14 +191,17 @@
     {
       "id": "unnamed_collection_upload",
       "prompt": "I want to update my collection from an export file from my app. How do I get the file to you?",
-      "why": "The owner's original complaint: having to use the website to upload. Unnamed phrasing must reach the upload flow (vault-wxy.7.1).",
-      "must_call": [
-        "start_collection_upload"
+      "why": "The owner's complaint (vault-0n9): the person drops the file in the chat and the Vault does it from there, no link and no website. Unnamed phrasing must reach the Vault's flow (vault-wxy.7.1); with no file attached yet the answer says to drop it here, and gives no link to open and come back from.",
+      "must_match": [
+        {
+          "label": "says the file can be dropped in this chat",
+          "pattern": "(?i)(drop|attach|add|send|share|paste|upload)[^.\n]{0,60}\b(here|this chat|the chat|this conversation)\b"
+        }
       ],
       "must_not": [
         {
-          "label": "tells the player to drag the file into the chat",
-          "pattern": "(?i)drag (and drop )?(the|your) file"
+          "label": "sends the player to a link or page and back",
+          "pattern": "(?i)(open|go to|click|visit)[^.\n]{0,40}(link|page|website|browser)[^.\n]{0,80}(tell me|let me know|come back|say (it is )?(done|uploaded))"
         }
       ],
       "baselines": [

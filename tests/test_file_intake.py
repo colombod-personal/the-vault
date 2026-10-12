@@ -351,7 +351,7 @@ def test_the_tool_declares_the_file_parameter_the_way_chatgpt_reads_it():
     assert file["required"] == ["download_url", "file_id"]
     assert schema["annotations"]["destructiveHint"] is False and schema["annotations"]["readOnlyHint"] is False
     assert tool.any_scope and tool.write
-    assert {t.name for t in mcp.TOOLS if t.write and t.any_scope} == {"start_collection_upload", "import_collection_file"}
+    assert {t.name for t in mcp.TOOLS if t.write and t.any_scope} == {"start_collection_upload", "import_collection_file", "sign_out"}
     # the view of another tool keeps its own _meta
     assert "_meta" in mcp.BY_NAME["show_owned_printings"].schema(ui=True) and "_meta" not in mcp.BY_NAME["get_deck"].schema()
 
@@ -628,3 +628,82 @@ def test_a_fetched_upload_has_no_link_the_upload_page_could_open(app, agent, bot
         for guess in (ticket_hash, ticket_hash[len(intake.MARKER):], "intake-"):
             assert browser.get(f"/upload?ticket={guess}").status_code == 404
             assert browser.post("/upload", data={"ticket": guess}, files={"file": ("a.csv", CSV, "text/csv")}).status_code == 404
+
+
+# ---- review of PR #478: the log, the race, the contract, the twin -------------------------------------------------------------
+
+def test_a_host_name_is_logged_by_its_last_three_labels_so_a_secret_in_the_first_ones_stays_out():
+    assert file_fetch._host_for_log("files.oaiusercontent.com") == "files.oaiusercontent.com"
+    assert file_fetch._host_for_log("tok-9f2c71d4e0a5.files.oaiusercontent.com") == "*.files.oaiusercontent.com"
+    assert file_fetch._host_for_log("a.b.c.d.example-storage.net") == "*.d.example-storage.net"
+    assert file_fetch._host_for_log("FILES.Example.COM") == "files.example.com"
+    assert len(file_fetch._host_for_log("x" * 400 + ".example.com")) <= 80
+
+
+def test_a_refused_host_with_a_secret_in_its_name_does_not_reach_the_log(app, agent, bot, caplog):
+    caplog.set_level(logging.DEBUG)
+    intake_with(app)
+    url = "https://tok-9f2c71d4e0a5.region-7.files.example-storage.net/file?sig=abc"
+    out = call_tool(bot, token_of(agent), "import_collection_file", file=file_arg(url))
+    assert out["structuredContent"]["status"] == "cannot_receive"
+    assert "tok-9f2c71d4e0a5" not in caplog.text and "region-7" not in caplog.text
+    assert event_lines(caplog)[-1]["host"] == "*.files.example-storage.net"
+
+
+def test_two_drops_at_once_leave_one_row_and_one_upload_id(app, agent):
+    """The decision (is there an identical row? replace the earlier one) is made once at a time per person: two simultaneous drops
+    both found no row and each inserted one, so a host's duplicate call got two ids and a person held two fetched files."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from vault.models import User
+    with app.state.db.sessions() as db:
+        uid = db.query(User.id).first()[0]
+    barrier = threading.Barrier(6)
+
+    def drop(content: bytes) -> int:
+        with app.state.db.sessions() as db:
+            user = db.get(User, uid)
+            barrier.wait()
+            return intake.stage(db, user, content, "a.csv", None).id
+
+    with ThreadPoolExecutor(6) as pool:
+        same = list(pool.map(drop, [CSV] * 6))
+    assert len(set(same)) == 1 and staged_rows(app) == 1
+    barrier = threading.Barrier(6)
+    with ThreadPoolExecutor(6) as pool:
+        different = list(pool.map(drop, [CSV + b"\n" * i for i in range(1, 7)]))
+    assert len(set(different)) == 6 and staged_rows(app) == 1  # each replaced the one before: one fetched file
+
+
+def test_the_route_has_a_response_model_in_openapi(app):
+    with TestClient(app) as c:
+        spec = c.get("/api/openapi.json").json()
+    op = spec["paths"]["/api/v1/uploads/from-file"]["post"]
+    ref = op["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+    model = spec["components"]["schemas"][ref.rsplit("/", 1)[1]]
+    assert {"status", "changed", "say", "id", "content_hash"} <= set(model["properties"]) and model["required"] == ["status"]
+
+
+def test_the_file_host_twin_serves_a_file_the_way_the_documentation_says_and_the_vault_reads_it(app, agent, bot):
+    """Not a recording (twins/openai_files.py says so): the host, a signed link valid for five minutes, a CSV content type."""
+    from twins import Universe
+    universe = Universe()
+    token = token_of(agent, "read", "write")
+    app.state.file_fetcher = FileFetcher(file_fetch.DEFAULT_HOSTS, universe.transport, universe.resolve)
+    handed = universe.openai_files.attach(CSV, file_name="my_cards.csv")
+    assert handed["download_url"].startswith("https://files.oaiusercontent.com/file-") and set(handed) == {
+        "download_url", "file_id", "mime_type", "file_name"}
+    out = call_tool(bot, token, "import_collection_file", file=handed)
+    assert not out["isError"] and out["structuredContent"]["status"] == "uploaded", out
+    assert universe.openai_files.calls[-1].path == "/" + handed["file_id"] and not universe.escapes
+    # the link has run out (five minutes), or is answered with another type, or redirects away: nothing is staged
+    universe.openai_files.expire(handed["file_id"])
+    assert call_tool(bot, token, "import_collection_file", file=handed)["structuredContent"]["status"] == "fetch_failed"
+    other = universe.openai_files.attach(CSV, file_name="other.csv")
+    universe.openai_files.serve_as(other["file_id"], "application/json")
+    assert call_tool(bot, token, "import_collection_file", file=other)["structuredContent"]["status"] == "not_text"
+    away = universe.openai_files.attach(CSV + b"\n", file_name="away.csv")
+    universe.openai_files.redirect(away["file_id"], "http://169.254.169.254/latest/meta-data")
+    assert call_tool(bot, token, "import_collection_file", file=away)["structuredContent"]["status"] == "fetch_failed"
+    assert not universe.escapes

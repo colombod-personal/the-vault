@@ -36,6 +36,7 @@ def load(path):
 # holds no secret and no environment (test_the_issue_writers_hold_nothing_else): a read-only token everywhere else.
 ISSUE_WRITERS = {("sync-prices.yml", "alert"), ("sync-catalog.yml", "alert"), ("sync-limited.yml", "alert"), ("neon-monthly-check.yml", "remind"),
                  ("limited-terms-monthly.yml", "remind"), ("issue-progress.yml", "progress")}  # writes the Progress block of the issues a PR names (AGENTS.md section 8)
+PACKAGE_WRITERS = {("mirror-postgres.yml", "mirror")}  # copies postgres:16 to ghcr.io for the test services (vault-1dm)
 
 
 @pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
@@ -45,6 +46,10 @@ def test_least_privilege(path):
     for name, job in wf["jobs"].items():
         if (path.name, name) in ISSUE_WRITERS:
             assert job["permissions"] == {"contents": "read", "issues": "write"}, f"{name}: contents read and issues write, nothing more"
+        elif (path.name, name) in PACKAGE_WRITERS:
+            assert job["permissions"] == {"contents": "read", "packages": "write"}, f"{name}: contents read and packages write, nothing more"
+            assert job.get("if") == MAIN_ONLY[0], f"{name}: pushes the package only from main"
+            assert not {"push", "pull_request", "pull_request_target"} & set(wf["on"]), f"{name}: no push/PR triggers"
         else:
             assert "permissions" not in job or all(v in ("read", "none") for v in job["permissions"].values())
         for step in job.get("steps", []):

@@ -23,16 +23,16 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session
 
-from . import file_fetch, observability
+from . import file_fetch, locks, observability
 from .api.schemas import MAX_ID
 from .importer import ImportError_, ImportOptions, NoSuchBucket, preview_import
 from .models import Bucket, StagedUpload, User
 from .ratelimit import per_user
-from .uploads import LIFETIME, content_hash
+from .uploads import LIFETIME, UPLOAD_LOCK_CLASS, content_hash
 
 V1 = "/api/v1"
 MARKER = "intake-"  # the start of a fetched row's ticket_hash: 7 + 56 hex characters = 63, never a sha256 digest
@@ -56,6 +56,25 @@ class FileIntake(BaseModel):
     bucket_id: int | None = Field(None, ge=1, le=MAX_ID)
 
 
+class IntakeAnswer(BaseModel):
+    """What the tool answers, for OpenAPI. ``status`` is ``uploaded`` (staged, with ``id``, ``content_hash`` and the preview's own
+    fields: rows, copies, changes, merge, matched and unmatched rows ...), or one of ``cannot_receive``, ``fetch_failed``, ``busy``,
+    ``too_large``, ``not_text``, ``unreadable``: then ``say`` is the sentence to give the person and nothing was changed."""
+
+    model_config = ConfigDict(extra="allow")  # the preview's fields are the import preview's, as GET /uploads/{id} answers them
+
+    status: str
+    changed: bool = False
+    say: str | None = None
+    detail: str | None = None
+    id: int | None = None
+    filename: str | None = None
+    expires_at: str | None = None
+    bucket: dict | None = None
+    content_hash: str | None = None
+    next: str | None = None
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -74,7 +93,7 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         log(request, kind, **fields)
         return {"status": "cannot_receive" if kind == "cannot_hand_over" else kind, "say": SAY[kind], "changed": False}
 
-    @router.post(f"{V1}/uploads/from-file", tags=["imports"],
+    @router.post(f"{V1}/uploads/from-file", tags=["imports"], response_model=IntakeAnswer, response_model_exclude_none=True,
                  summary="Stage a collection file the chat app hands over by address (fetched by the Vault, previewed, not imported)")
     def stage_from_file(request: Request, body: FileIntake, user: User = Depends(current_user),
                         db: Session = Depends(get_db)) -> dict:
@@ -118,7 +137,13 @@ def build_router(get_db, current_user, settings) -> APIRouter:
 
 
 def stage(db: Session, user: User, content: bytes, filename: str, bucket_id: int | None) -> StagedUpload:
-    """Store the fetched file for the person: one fetched file at a time (an identical one is the same row), no ticket."""
+    """Store the fetched file for the person: one fetched file at a time (an identical one is the same row), no ticket.
+
+    One decision at a time per person, to the end of this transaction (the same advisory lock the upload links use, so a start
+    and a drop are ordered too): without it two simultaneous drops both found no row and each inserted one, which broke "one
+    fetched file" and "a duplicate call is the same upload id". Bounded wait, then the usual 503 with Retry-After."""
+    db.execute(text(f"SET LOCAL lock_timeout = '{locks.LOCK_TIMEOUT}'"))
+    db.execute(select(func.pg_advisory_xact_lock(UPLOAD_LOCK_CLASS, user.id)))
     now = _now()
     db.execute(delete(StagedUpload).where(StagedUpload.expires_at <= now))
     wanted = content_hash(content, bucket_id)

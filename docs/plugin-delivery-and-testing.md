@@ -66,13 +66,14 @@ so the assistant said they were "not available" and used the browser.
 
 - A client whose `initialize` names it `codex-mcp-client` (the CLI and the desktop app both do) gets the **compact list**
   (`vault/api/mcp_profile.py`): the core tools with one-sentence descriptions (a write tool among them only for a token that may
-  write; `start_collection_upload`, which only makes a link, for every token), then `vault_tools` (lists the other tools,
+  write; `start_collection_upload`, which only makes a link, and `sign_out`, which ends only the caller's own connection, for every token), then `vault_tools` (lists the other tools,
   or shows one in full), `vault_call` (runs another tool that only reads) and, for a token that may write, `vault_write`
   (runs another non-destructive write tool; it carries a destructive hint, because it can run `update_deck`,
   `set_*_metadata` and `rename_tag`, so the host asks before it). Every other client gets the full list.
 - Both runners take the same path as a direct call: same argument check, same API, same token scopes, same
   preview-then-confirm. They are two tools so that a host's "always allow" for reading never pre-approves changing data.
-- Through the runners, tools that delete or revoke are refused (the web app does those), and so are the core tools
+- Through the runners, tools that delete or revoke are refused (the web app does those; `sign_out`, which ends only the
+  caller's own app connection, is a core tool instead), and so are the core tools
   (called by name) and the runners themselves. That refusal is **presentation policy, not enforcement**: a direct
   `tools/call` by name behaves as it always did and the API decides. `tests/test_mcp_profile.py` derives from the catalog
   (every HTTP method a tool can use, including those built by a function) which tools must be marked destructive or recorded

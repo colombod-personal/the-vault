@@ -606,6 +606,9 @@ def session_user(db: Session, request: Request) -> User | None:
 
 
 APP_FLOW_KEYS = ("app_redirect_uri", "code_challenge")
+# Providers that take a prompt asking the person to choose the account instead of silently continuing as the one signed in to the
+# provider (Google and Microsoft document `prompt=select_account`); the others keep their usual sign-in.
+SELECT_ACCOUNT = {"google": "select_account", "microsoft": "select_account"}
 OAUTH_PENDING_SECONDS = 600  # how long an MCP client's authorization request waits for sign-in
 
 HANDOFF_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -634,13 +637,23 @@ def build_router(auth: Auth, get_db) -> APIRouter:
     @router.get("/login/{provider}", dependencies=limited("oauth-login"))
     async def login(provider: str, request: Request, app_redirect_uri: str | None = None,
                     code_challenge: str | None = None, code_challenge_method: str | None = None,
-                    continue_: str | None = Query(None, alias="continue")):
+                    continue_: str | None = Query(None, alias="continue"), account: str | None = Query(None, max_length=16),
+                    pending: str | None = Query(None, max_length=64)):
         """Browser sign-in. Native apps open this in ASWebAuthenticationSession with
         ``app_redirect_uri`` (one of APP_REDIRECT_URIS) and a PKCE ``code_challenge`` (S256);
         they get ``<app_redirect_uri>?code=...`` back and redeem it at POST /api/v1/auth/token."""
         request.session.pop("app_flow", None)
         if continue_ != "oauth":  # only the OAuth consent page's sign-in resumes a pending request
             request.session.pop("oauth_pending", None)
+        elif isinstance(request.session.get("oauth_pending"), dict):
+            # The sign-in page rendered a one-time token into its links. Only a link that carries it may let the provider's answer replace
+            # an old Vault sign-in (the callback checks `ok`): a page on another site can start this login, but cannot read the token.
+            held = dict(request.session["oauth_pending"])
+            tokens_ = [t for t in held.get("n", []) if isinstance(t, str)] if isinstance(held.get("n"), list) else []
+            proved = bool(pending) and any(hmac.compare_digest(pending.encode(), t.encode()) for t in tokens_)
+            held.pop("n", None)  # spent, or never meant for this link: the page must be shown again for another
+            held.pop("ok", None)
+            request.session["oauth_pending"] = {**held, **({"ok": True} if proved else {})}
         if app_redirect_uri is not None:
             if app_redirect_uri not in auth.settings.app_redirect_uris:
                 raise HTTPException(400, "app_redirect_uri is not allowed")
@@ -651,8 +664,11 @@ def build_router(auth: Auth, get_db) -> APIRouter:
             request.session["app_flow"] = {"app_redirect_uri": app_redirect_uri, "code_challenge": code_challenge}
         redirect_uri = f"{auth.settings.base_url}/api/auth/callback/{provider}"
         client = auth.client(provider)
+        # "Use a different account" on the OAuth sign-in page: the provider is asked to show its account chooser, so a provider with one
+        # signed-in account does not silently continue as the one the person is leaving (only for the OAuth sign-in, and only on request).
+        extra = {"prompt": SELECT_ACCOUNT[provider]} if continue_ == "oauth" and account == "choose" and provider in SELECT_ACCOUNT else {}
         try:
-            response = await client.authorize_redirect(request, redirect_uri)
+            response = await client.authorize_redirect(request, redirect_uri, **extra)
         except SIGN_IN_ERRORS as exc:  # e.g. the provider's discovery document is unreachable
             log.warning("sign-in with %s could not start: %s", provider, exc)
             app_flow = request.session.pop("app_flow", None)
@@ -684,6 +700,18 @@ def build_router(auth: Auth, get_db) -> APIRouter:
             """The database work, in a worker thread: it can wait for the account lock, which an async handler must not do on the
             event loop (#347)."""
             current = session_user(db, request)
+            pending = request.session.get("oauth_pending")
+            if (current is not None and "rv" not in request.session and not app_flow and isinstance(pending, dict)
+                    and pending.get("ok") is True and time.time() - pending.get("t", 0) < OAUTH_PENDING_SECONDS
+                    and not recent_signin.is_fresh(db, request, auth.settings)):
+                # The consent flow treated this browser as signed out (its sign-in is older than the window), the person chose a provider
+                # link on the sign-in page (it carries a one-time token, `ok`), and the provider has now answered for someone: this is a sign-in
+                # as that person, never a link to the old account (#347 stays for every other path: a copied cookie still cannot link or claim
+                # anything). The old sign-in is dropped only now, after the provider authenticated, so a link on another site, which cannot read
+                # the token, logs no one out.
+                for key in ("uid", "sk", "auth_at"):
+                    request.session.pop(key, None)
+                current = None
             owner = db.scalar(select(Identity.user_id).where(
                 Identity.provider == profile.provider, Identity.subject == profile.subject)) if current else None
             # Linking a provider (or moving one over from an empty account) is a serious account action: only a recent sign-in (#347).

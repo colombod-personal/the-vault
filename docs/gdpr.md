@@ -151,7 +151,9 @@ own window, as for any deletion (see the checklist below). **Erasure** (`DELETE 
       DPA covers them), Neon, GitHub (the price job), the four sign-in providers in `vault/auth.py` (Google, Microsoft, Apple,
       Facebook) and passkeys (no third party), Scryfall (card images in the browser; identifiers only from the server),
       Commander Spellbook (`vault/combos.py` sends a deck's card names and nothing that identifies the person), Archidekt
-      (a GET of a public deck by number), Resend (`vault/email.py`: the account's e-mail address and a one-time code, only when the
+      (a GET of a public deck by number), the file host of the chat app (`vault/file_fetch.py`, vault-0n9.3: a GET of the temporary
+      address ChatGPT hands the tool for a file the person dropped in the chat, on OpenAI's own domains; it sends nothing about the person
+      and the bytes land in the existing staged upload, deleted when applied or after an hour), Resend (`vault/email.py`: the account's e-mail address and a one-time code, only when the
       person asks for one and only once `RESEND_API_KEY` is set) and the AI assistant the person connects (their own choice, scoped, revocable).
       `tests/test_legal_pages.py` fails if the notice stops naming one of them. Add any new outbound host here and in the notice.
 - [ ] **Resend** (`vault/email.py`, only when `RESEND_API_KEY` is set) receives the account's e-mail address and the confirmation

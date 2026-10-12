@@ -55,7 +55,9 @@ READ_ONLY_POSTS = {"/api/v1/decks/parse", "/api/v1/imports/preview", "/api/v1/de
                    # (vault/uploads.py; the apply, /uploads/{id}/apply, is not here and needs the write scope)
                    "/api/v1/uploads",
                    # a file the chat app hands over by address: fetched and staged for the person, not imported (vault/intake.py)
-                   "/api/v1/uploads/from-file"}
+                   "/api/v1/uploads/from-file",
+                   # ends the caller's own app connection (an OAuth grant), whatever its scopes (vault/api/catalog_api.py, sign_out)
+                   "/api/v1/agent/sign-out"}
 
 
 def is_write(method: str, path: str) -> bool:

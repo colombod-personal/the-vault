@@ -79,13 +79,49 @@ def test_the_codex_client_gets_the_core_tools_and_the_dispatchers_within_the_bud
     assert not set(mcp_profile.DISPATCHERS) & set(mcp.BY_NAME), "a runner must not share a name with a catalog tool"
 
 
+def test_the_compact_list_stays_within_both_guards_with_and_without_the_views():
+    """The two guards, measured the way the host counts them, for the largest list (a token that may write), with the MCP Apps
+    view links in the tool definitions (ui=True) and without (ui=False). The core list is at the limit: a new core tool is a
+    trade for one that is rarely needed, never a raise of these numbers."""
+    for ui in (False, True):
+        tools = mcp_profile.tool_list(mcp.BY_NAME, ("read", "write"), ui=ui)
+        size = len(json.dumps(tools))
+        assert len(tools) <= 30, f"ui={ui}: {len(tools)} tools"
+        assert size < BUDGET_BYTES, f"ui={ui}: {size} bytes"
+
+
+def test_sign_out_is_listed_directly_to_every_sign_in_and_the_runners_will_not_run_it(agent, bot):  # noqa: F811
+    """It ends the caller's own OAuth connection, so a read-only sign-in has it too (Tool.any_scope); it is destructive, so it is
+    listed with its own approval hint and never reached through vault_call or vault_write (vault-wxy.3.1)."""
+    for scopes in (("read",), ("read", "write")):
+        token = make_token(agent, scopes=scopes)
+        session = hello(bot, token, "codex-mcp-client")
+        by = {t["name"]: t for t in listed(bot, token, session)}
+        assert "sign_out" in by and "sign_out" in mcp_profile.CORE
+        assert by["sign_out"]["annotations"]["destructiveHint"] is True and by["sign_out"]["annotations"]["readOnlyHint"] is False
+        assert by["sign_out"]["description"] == mcp_profile.COMPACT["sign_out"] and "confirm" in by["sign_out"]["description"]
+        for via in (C, W):
+            refused = run(bot, token, session, via, "sign_out", {"confirm": True})
+            assert refused["error"]["code"] == -32602 and "listed directly" in refused["error"]["message"], (scopes, via)
+        one = send(bot, token, session, "tools/call", {"name": L, "arguments": {"name": "sign_out"}})["result"]["structuredContent"]
+        assert "listed directly" in one["run_with"]
+        rows = send(bot, token, session, "tools/call", {"name": L, "arguments": {}})["result"]["structuredContent"]["tools"]
+        assert "sign_out" not in {r["name"] for r in rows}  # it is in the list already, not behind a runner
+    # a direct call behaves as in the full list: this personal access token is not an app connection, so it is refused with where
+    # to remove it, and keeps working
+    direct = send(bot, token, session, "tools/call", {"name": "sign_out", "arguments": {"confirm": True}})["result"]
+    assert direct["isError"] is True and "Agents & API" in json.dumps(direct["structuredContent"])
+    assert call_tool(bot, token, "whoami")["isError"] is False
+
+
 def test_a_token_that_may_only_read_is_shown_no_write_tool_and_no_writer(agent, bot):  # noqa: F811
     token = make_token(agent)
     session = hello(bot, token, "codex-mcp-client")
     names = [t["name"] for t in listed(bot, token, session)]
-    # the upload link (Tool.any_scope) is the one write tool a read-only sign-in is shown
+    # the upload link and signing out (Tool.any_scope) are the only write tools a read-only sign-in is shown
     assert names == [n for n in mcp_profile.CORE if mcp.BY_NAME[n].listed_for({"read"})] + [L, C]
-    assert "start_collection_upload" in names
+    assert {"start_collection_upload", "sign_out"} <= set(names)
+    assert {n for n in names if n in mcp.BY_NAME and mcp.BY_NAME[n].write} == {"start_collection_upload", "import_collection_file", "sign_out"}
 
 
 def test_every_other_client_and_an_older_client_keep_the_full_list(agent, bot):  # noqa: F811
