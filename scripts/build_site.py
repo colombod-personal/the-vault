@@ -4,7 +4,16 @@
 
 Standard library only. There is no framework: every page in the source folder is an HTML fragment with a few comment
 lines at the top, and this script wraps it in the shared header, navigation and footer (``_layout.html``) and copies
-the other files (``style.css``, ``assets/``) next to it. Files and folders whose name starts with ``_`` are not copied.
+the allowed asset files (``style.css``, screenshots in ``assets/``) next to it.
+
+What is published is an allow-list, because everything in the output becomes public:
+
+- pages (``.html``) and these assets only: ``.css``, ``.png``, ``.jpg``, ``.jpeg``, ``.webp``, ``.ico``, ``.txt`` (no SVG: it can
+  carry script; no ``.md``, ``.py``, ``.htm`` and so on). Any other file is an error, not a silent skip, so nobody assumes
+  it was published;
+- a name that starts with ``.`` or contains ``.local.`` (the repository's private-notes convention) is refused;
+- a symbolic link anywhere in the source is refused (it could publish a file from outside the tree);
+- files and folders whose name starts with ``_`` are never copied (put notes in ``_notes/``).
 
 The comment lines at the top of a page:
 
@@ -15,14 +24,20 @@ The comment lines at the top of a page:
     <!-- status: being-written -->                        required: home | being-written | checked
     <!-- checked: 2026-10-14, Claude desktop 1.2.3 -->    required when the status is "checked": the date and app version
 
-The rule this enforces (the owner asked for *correct* guidance): a page that is **being written** carries a banner and may
-not contain a numbered list or any other steps; a page that is **checked** must say on what date and which app version its
-steps were run on the real app. ``{{pages}}`` in a page is replaced by the list of the guide's pages with their status.
+The rule this enforces (the owner asked for *correct* guidance): a page that is **being written** carries a banner and may not
+contain steps; a page that is **checked** must say on what date and which app version its steps were run on the real app.
+"No steps" is a heuristic (STEP_PATTERNS: a numbered list, ``<pre>``, "Step 1", a line starting "1."): it stops the usual ways of
+writing steps, it cannot prove a page holds no instruction, so a reviewer still reads every page that changes.
+``{{pages}}`` in a page is replaced by the list of the guide's pages with their status.
+
+The output folder is only ever replaced when it is new, empty or was made by this script (it holds MARKER): pointing the script
+at a folder that holds anything else is refused, never deleted.
 """
 
 from __future__ import annotations
 
 import html
+import os
 import re
 import shutil
 import sys
@@ -31,12 +46,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "docs" / "site"
 OUT = ROOT / "_site"
+MARKER = ".build_site_output"  # a dotfile: GitHub's artifact upload leaves it out
 
 STATUSES = ("home", "being-written", "checked")
+ASSET_SUFFIXES = (".css", ".png", ".jpg", ".jpeg", ".webp", ".ico", ".txt")
 META_LINE = re.compile(r"^<!--\s*([a-z-]+):\s*(.*?)\s*-->$")
 BANNER = ('<div class="status" role="note"><p><strong>This page is being written.</strong> '
           "Only steps that were run on the real app are published, so there are no steps here yet.</p></div>")
-STEP_MARKERS = re.compile(r"<ol\b", re.IGNORECASE)  # a numbered list is how steps are written: none while being written
+# The usual ways of writing steps. A heuristic, said so in the module docstring: a page being written may match none of them.
+STEP_PATTERNS = (
+    re.compile(r"<ol\b", re.IGNORECASE),                                              # a numbered list
+    re.compile(r"<pre\b", re.IGNORECASE),                                             # a block of commands or text to copy
+    re.compile(r"<li[^>]*>\s*(?:<[^>]+>\s*)*(?:step\s*)?\d+\s*[.):]", re.IGNORECASE),  # <li>1. ...</li>
+    re.compile(r"\bstep\s*\d+\b", re.IGNORECASE),                                     # "Step 1", "step 2:"
+    re.compile(r"^\s*(?:<[^>]+>\s*)*\d+\s*[.)]\s", re.MULTILINE),                     # a line that starts "1. "
+)
 
 
 def split_meta(text: str) -> tuple[dict[str, str], str]:
@@ -61,13 +85,40 @@ class SiteError(Exception):
         self.problems = problems
 
 
-def pages_of(source: Path) -> list[Path]:
-    return sorted(p for p in source.rglob("*.html") if not any(part.startswith("_") for part in p.relative_to(source).parts))
+def scan_source(source: Path) -> tuple[list[Path], list[Path], list[str]]:
+    """The page files and the asset files that will be published, and what in the source tree is refused."""
+    pages, assets, problems = [], [], []
+    for folder, dirs, files in os.walk(source, followlinks=False):
+        here = Path(folder)
+        for name in sorted(dirs + files):
+            path = here / name
+            if path.is_symlink():
+                problems.append(f"{path.relative_to(source).as_posix()}: a symbolic link is refused "
+                                "(it could publish a file from outside docs/site)")
+        dirs[:] = sorted(d for d in dirs if not (here / d).is_symlink())
+        for name in sorted(files):
+            path = here / name
+            rel = path.relative_to(source)
+            if path.is_symlink() or any(part.startswith("_") for part in rel.parts):
+                continue
+            if any(part.startswith(".") for part in rel.parts):
+                problems.append(f"{rel.as_posix()}: a name that starts with '.' is never published")
+            elif ".local." in name:
+                problems.append(f"{rel.as_posix()}: a '.local.' file is private notes and is never published")
+            elif path.suffix.lower() == ".html":
+                pages.append(path)
+            elif path.suffix.lower() in ASSET_SUFFIXES:
+                assets.append(path)
+            else:
+                problems.append(f"{rel.as_posix()}: {path.suffix or name!r} files are not published (allowed: .html and "
+                                f"{', '.join(ASSET_SUFFIXES)}); rename a note to start with '_' to keep it out of the site")
+    return sorted(pages), sorted(assets), problems
 
 
 def load_pages(source: Path) -> list[dict]:
-    pages, problems = [], []
-    for path in pages_of(source):
+    page_files, _assets, problems = scan_source(source)
+    pages = []
+    for path in page_files:
         rel = path.relative_to(source).as_posix()
         meta, body = split_meta(path.read_text(encoding="utf-8"))
         for key in ("title", "summary", "status"):
@@ -76,8 +127,9 @@ def load_pages(source: Path) -> list[dict]:
         status = meta.get("status", "")
         if status and status not in STATUSES:
             problems.append(f"{rel}: status must be one of {', '.join(STATUSES)} (it is {status!r})")
-        if status == "being-written" and STEP_MARKERS.search(body):
-            problems.append(f"{rel}: a page that is being written may not contain steps (a numbered list): only steps run on the real app are published")
+        if status == "being-written" and any(pattern.search(body) for pattern in STEP_PATTERNS):
+            problems.append(f"{rel}: a page that is being written may not contain steps (a numbered list, <pre>, 'Step 1', '1.'): "
+                            "only steps run on the real app are published")
         if status == "checked" and not meta.get("checked"):
             problems.append(f"{rel}: a checked page needs `<!-- checked: <date>, <app and version> -->` (when its steps were run on the real app)")
         if status == "home" and rel != "index.html":
@@ -102,12 +154,9 @@ def page_list(pages: list[dict], root: str) -> str:
     for p in pages:
         if p["status"] == "home":
             continue
-        label = html.escape(p["meta"].get("nav") or p["meta"]["title"])
         tag = "being written" if p["status"] == "being-written" else "checked on the real app"
-        items.append(f'  <li><a href="{root}{p["rel"]}">{html.escape(p["meta"]["title"])}</a> <span class="tag">({tag})</span>'
-                     f'<br><span class="tag">{html.escape(p["meta"]["summary"])}</span></li>' if False else
-                     f'  <li><a href="{root}{p["rel"]}">{html.escape(p["meta"]["title"])}</a> <span class="tag">({tag})</span></li>')
-        del label
+        href = html.escape(root + p["rel"], quote=True)
+        items.append(f'  <li><a href="{href}">{html.escape(p["meta"]["title"])}</a> <span class="tag">({tag})</span></li>')
     return '<ul class="pages">\n' + "\n".join(items) + "\n</ul>"
 
 
@@ -116,7 +165,8 @@ def nav_html(pages: list[dict], current: str, root: str) -> str:
     for p in pages:
         label = html.escape(p["meta"].get("nav") or p["meta"]["title"])
         here = ' aria-current="page"' if p["rel"] == current else ""
-        links.append(f'    <a href="{root}{p["rel"]}"{here}>{label}</a>')
+        href = html.escape(root + p["rel"], quote=True)
+        links.append(f'    <a href="{href}"{here}>{label}</a>')
     return "\n".join(links)
 
 
@@ -129,9 +179,23 @@ def render(page: dict, pages: list[dict], layout: str) -> str:
     if status == "checked":
         banner = f'<p class="checked">Checked on the real app: {html.escape(meta["checked"])}.</p>'
     robots = '<meta name="robots" content="noindex">' if status == "being-written" else ""
-    values = {"title": html.escape(meta["title"]), "summary": html.escape(meta["summary"]), "root": root, "robots": robots,
+    values = {"title": html.escape(meta["title"]), "summary": html.escape(meta["summary"], quote=True), "root": root, "robots": robots,
               "nav": nav_html(pages, page["rel"], root), "status_banner": banner, "content": content}
     return re.sub(r"\{\{(\w+)\}\}", lambda m: values.get(m.group(1), m.group(0)), layout)
+
+
+def prepare_out(out: Path) -> None:
+    """Make ``out`` an empty folder, deleting only what this script itself made earlier."""
+    if out.is_symlink():
+        raise SiteError([f"the output folder {out} is a symbolic link: refused"])
+    if out.exists():
+        if not out.is_dir():
+            raise SiteError([f"the output path {out} exists and is not a folder"])
+        if any(out.iterdir()):
+            if not (out / MARKER).is_file():
+                raise SiteError([f"the output folder {out} is not empty and was not made by build_site.py: refusing to delete it"])
+            shutil.rmtree(out)
+    out.mkdir(parents=True, exist_ok=True)
 
 
 def build(source: Path = SOURCE, out: Path = OUT) -> list[str]:
@@ -140,28 +204,25 @@ def build(source: Path = SOURCE, out: Path = OUT) -> list[str]:
     if out == source or out in source.parents or source in out.parents:
         raise SiteError([f"the output folder {out} must be separate from the source folder {source}"])
     layout_path = source / "_layout.html"
-    if not layout_path.is_file():
+    if not layout_path.is_file() or layout_path.is_symlink():
         raise SiteError([f"{layout_path} is missing"])
     layout = layout_path.read_text(encoding="utf-8")
     pages = load_pages(source)
-    if out.exists():
-        shutil.rmtree(out)
-    out.mkdir(parents=True)
+    _page_files, assets, _problems = scan_source(source)
+    prepare_out(out)
     written = []
     for page in pages:
         target = out / page["rel"]
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(render(page, pages, layout), encoding="utf-8")
         written.append(page["rel"])
-    page_paths = {p["rel"] for p in pages}
-    for path in sorted(source.rglob("*")):
+    for path in assets:
         rel = path.relative_to(source)
-        if path.is_dir() or any(part.startswith("_") for part in rel.parts) or rel.as_posix() in page_paths:
-            continue
         target = out / rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, target)
+        shutil.copyfile(path, target)  # the bytes only: no permissions, no metadata
         written.append(rel.as_posix())
+    (out / MARKER).write_text("made by scripts/build_site.py; safe to delete and rebuild\n", encoding="utf-8")
     return sorted(written)
 
 

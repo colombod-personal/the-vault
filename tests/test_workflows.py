@@ -393,7 +393,20 @@ def test_only_the_guide_deploy_job_can_publish_pages():
     assert deploy["environment"]["name"] == "github-pages"
     assert deploy["if"] == "github.ref == 'refs/heads/main' && vars.GUIDE_PAGES_ENABLED == 'true'"
     assert not any("checkout" in str(s.get("uses", "")) for s in deploy["steps"]), "the deploy job runs no repository code"
-    assert [s["uses"].split("@")[0] for s in deploy["steps"] if "uses" in s] == ["actions/configure-pages", "actions/deploy-pages"]
-    assert wf["concurrency"]["group"] == "guide-pages" and wf["concurrency"]["cancel-in-progress"] is False
+    # The deploy job is exactly these three steps and nothing else: no `with:` or `env:` on the two actions (an input could change what
+    # they do), and the one `run` step is a fixed message. A step that fetches or runs anything (a `curl` of the OIDC URL, say) must
+    # fail this comparison, so it is written out in full rather than checked for the absence of known bad words.
+    assert deploy["steps"] == [
+        {"uses": "actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d"},
+        {"id": "deployment", "uses": "actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346"},
+        {"name": "Say what to do when the deploy failed", "if": "failure()",
+         "run": 'echo "::error::The guide was not published. Check Settings -> Pages: the source must be GitHub Actions '
+                '(docs/developing.md, The guide on GitHub Pages)."\n'},
+    ]
+    assert deploy["environment"] == {"name": "github-pages", "url": "${{ steps.deployment.outputs.page_url }}"}
+    assert set(deploy) == {"needs", "if", "runs-on", "timeout-minutes", "concurrency", "permissions", "environment", "steps"}, \
+        "no `env`, `container`, `services` or `defaults` on the job that holds the Pages token"
+    assert deploy["concurrency"] == {"group": "guide-pages", "cancel-in-progress": False} and "concurrency" not in wf
     assert set(wf["on"]) == {"push", "workflow_dispatch"} and wf["on"]["push"]["branches"] == ["main"]
     assert "docs/site/**" in wf["on"]["push"]["paths"]
+    assert wf["jobs"]["build"]["if"] == "github.ref == 'refs/heads/main'", "a run from a branch does nothing"

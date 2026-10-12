@@ -33,6 +33,18 @@ def test_the_public_pages_carry_no_email_address_or_personal_data():
         assert "mailto:" not in page(name), name
 
 
+def test_the_guide_pages_carry_no_email_address_or_personal_data():
+    """The same rule for the guide (docs/site, published with GitHub Pages): its pages and the shared layout name no e-mail address
+    and link no mailto:, because the owner's own address must never appear (reports go through the support page)."""
+    guide = ROOT / "docs" / "site"
+    files = sorted(guide.rglob("*.html"))
+    assert (guide / "_layout.html") in files and len(files) >= 6
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        assert not re.search(r"[\w.+-]+@[\w-]+\.[\w.]+", text), path.name
+        assert "mailto:" not in text.lower(), path.name
+
+
 def test_the_pages_link_each_other_and_the_footer_and_the_manifest_names_the_terms():
     for name in ("privacy.html", "connect.html", "support.html"):
         assert "terms.html" in page(name), name

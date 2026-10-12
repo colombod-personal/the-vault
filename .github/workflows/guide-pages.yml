@@ -2,13 +2,17 @@ name: guide-pages
 # Publishes the player guide (docs/site) with GitHub Pages (bead vault-30s.3.2). The pages are plain HTML built by
 # scripts/build_site.py; the address decision and the steps that switch it on are in docs/developing.md ("The guide on GitHub Pages").
 #
-# THIS WORKFLOW PUBLISHES NOTHING UNTIL THE OWNER SWITCHES IT ON. Two jobs:
-#   build  always runs (push to main that changes the guide, or by hand): builds the site, fails on a broken link, and uploads the
-#          result as the Pages artifact (kept one day). It needs no Pages setting and changes nothing public.
+# THIS WORKFLOW PUBLISHES NOTHING UNTIL THE OWNER SWITCHES IT ON. Two jobs, both only for main:
+#   build  runs on a push to main that changes the guide (or the link check, or public/, which the link check reads) and on a
+#          manual run from main: builds the site, fails on a broken link, and uploads the result as the Pages artifact (kept one
+#          day). It needs no Pages setting and changes nothing public.
 #   deploy runs only on main AND only when the repository variable GUIDE_PAGES_ENABLED is exactly 'true'. With the variable unset
 #          the job is skipped (the run is green and says so in its summary). With the variable set but Pages not enabled with the
 #          source "GitHub Actions", the job fails at configure-pages with "Get Pages site failed. Please verify that the repository
-#          has Pages enabled and configured to build using GitHub Actions" (enablement stays off: this workflow never changes a setting).
+#          has Pages enabled and configured to build using GitHub Actions" (the workflow never changes a setting).
+# THE BOUNDARY IS THE github-pages ENVIRONMENT, not the `if` lines in this file: anyone with write access can push a branch whose
+# copy of this file has no `if`. The environment's deployment branches must be limited to main (docs/developing.md: create it BEFORE
+# setting the variable); then GitHub itself refuses a deploy from any other branch.
 # No secrets. The deploy job holds pages: write and id-token: write, and nothing else; every other permission is read-only.
 on:
   push:
@@ -16,15 +20,16 @@ on:
     paths:
       - "docs/site/**"
       - "scripts/build_site.py"
+      - "scripts/check_site_links.py"
+      - "public/**"
+      - ".github/workflows/guide-pages.yml"
   workflow_dispatch: {}
 permissions:
   contents: read
-concurrency:
-  group: guide-pages  # one publish at a time; a publish already running finishes, only the newest waiting one runs after it
-  cancel-in-progress: false
 
 jobs:
   build:
+    if: github.ref == 'refs/heads/main'  # a manual run from a branch does nothing (and cannot queue ahead of a publish)
     runs-on: ubuntu-24.04  # pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19 (#180); move deliberately
     timeout-minutes: 10
     env:
@@ -42,10 +47,10 @@ jobs:
         run: python scripts/check_site_links.py _site
       - name: Say whether this run will publish
         run: |
-          if [ "$GUIDE_PAGES_ENABLED" = "true" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
+          if [ "$GUIDE_PAGES_ENABLED" = "true" ]; then
             echo "Guide built and checked. The deploy job publishes it to GitHub Pages." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "Guide built and checked. Nothing is published: the deploy job runs only on main with the repository variable GUIDE_PAGES_ENABLED set to 'true' (docs/developing.md, \"The guide on GitHub Pages\")." >> "$GITHUB_STEP_SUMMARY"
+            echo "Guide built and checked. Nothing is published: the deploy job runs only with the repository variable GUIDE_PAGES_ENABLED set to 'true' (docs/developing.md, \"The guide on GitHub Pages\")." >> "$GITHUB_STEP_SUMMARY"
           fi
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
         with:
@@ -57,6 +62,11 @@ jobs:
     if: github.ref == 'refs/heads/main' && vars.GUIDE_PAGES_ENABLED == 'true'
     runs-on: ubuntu-24.04  # pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19 (#180); move deliberately
     timeout-minutes: 10
+    # One publish at a time. Only this job is in the group, so nothing else (a build, a run from a branch) can take the place of a
+    # publish that is waiting; a publish already running is never cancelled.
+    concurrency:
+      group: guide-pages
+      cancel-in-progress: false
     permissions:  # this job only; the token of every other job is read-only
       pages: write
       id-token: write
@@ -64,8 +74,8 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      # Fails with a clear message when Pages is not enabled with the "GitHub Actions" source. `enablement` is left at its default
-      # (false): this workflow never switches Pages on, a person does that in Settings -> Pages.
+      # Fails with a clear message when Pages is not enabled with the "GitHub Actions" source. Its switch to enable Pages is left at
+      # the default (off): this workflow never switches Pages on, a person does that in Settings -> Pages.
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d  # v6.0.0
       - id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1
