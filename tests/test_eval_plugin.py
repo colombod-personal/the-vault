@@ -80,6 +80,7 @@ def test_the_advocate_is_told_to_always_raise_an_objection_and_the_chair_to_quot
     a rule quoted in the answer."""
     advocate = (ROOT / "agents" / "vault-devils-advocate.md").read_text(encoding="utf-8")
     assert "always at least one" in advocate and "No objection" in advocate
+    assert "when there is no plan" in advocate  # a rules dispute has no plan: the objection targets the claim
     chair = (ROOT / "skills" / "expert-council" / "SKILL.md").read_text(encoding="utf-8")
     assert "quoted with `get_rule` in this answer" in chair and "not your own reading" in chair
     assert "`council_brief` or `validate_deck_changes`" in chair  # the brief carries lookouts too

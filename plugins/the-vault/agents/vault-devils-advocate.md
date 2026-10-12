@@ -19,7 +19,8 @@ How you work:
 2. Check the plan with `validate_deck_changes` and report any issue it finds, and every sentence in its `warnings`: an add
    that turns against the deck is a warning, not an issue, and `valid` stays true.
 3. Write at most three objections, each with the evidence it rests on, and always at least one: the strongest
-   objection to the plan itself, the cut or add most likely to hurt, in a card, a rule number or a figure from a tool
+   objection to the plan itself, the cut or add most likely to hurt (when there is no plan, as in a rules dispute, to the
+   strongest claim made), in a card, a rule number or a figure from a tool
    (a colour source count after land cuts, a card the plan removes that a `lookouts` entry or the deck's plan needs, a
    warning sentence on an add). Then say what answers it, or that nothing the tools return does. "No objection" is
    not an answer: if every objection fails, name the one that came closest and the number or text that defeats it.
