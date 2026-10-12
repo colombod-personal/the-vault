@@ -2,6 +2,7 @@
 (AGENTS.md section 8, "Each agent and each session works in its own worktree")."""
 
 import datetime
+import subprocess
 import sys
 from pathlib import Path
 
@@ -49,3 +50,23 @@ def test_a_remote_branch_is_deleted_only_when_its_tip_was_merged_and_nothing_is_
                          {"open"}, tips, NOW, DAY)
     assert r.delete_branches == [("done", 10)]  # no age rule for remote branches: the local worktree keeps its own
     assert [b for b, _ in r.keep_branches] == ["open", "reused", "wip"]
+
+
+def test_a_remote_branch_pushed_to_after_the_report_is_not_deleted(tmp_path):
+    def git(*args, cwd):
+        return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+    remote, work = tmp_path / "remote.git", tmp_path / "work"
+    git("init", "-q", "--bare", str(remote), cwd=tmp_path)
+    git("clone", "-q", str(remote), str(work), cwd=tmp_path)
+    for k, v in (("user.email", "t@example.com"), ("user.name", "t"), ("commit.gpgsign", "false")):
+        git("config", k, v, cwd=work)
+    git("commit", "-q", "--allow-empty", "-m", "base", cwd=work)
+    git("push", "-q", "origin", "HEAD:refs/heads/done", "HEAD:refs/heads/moved", cwd=work)
+    reported = git("rev-parse", "HEAD", cwd=work)
+    git("commit", "-q", "--allow-empty", "-m", "pushed after the report", cwd=work)
+    git("push", "-q", "origin", "HEAD:refs/heads/moved", cwd=work)
+
+    assert hygiene.delete_remote_branch("moved", reported, cwd=work) is False  # refused: the new commit survives
+    assert hygiene.delete_remote_branch("done", reported, cwd=work) is True
+    assert git("ls-remote", "--heads", "origin", cwd=work).split()[1::2] == ["refs/heads/moved"]

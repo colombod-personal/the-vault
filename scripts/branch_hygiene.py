@@ -47,6 +47,14 @@ def tip(ref: str) -> str:
     return run("git", "rev-parse", "--verify", "--quiet", ref, check=False).strip()
 
 
+def delete_remote_branch(branch: str, expected: str, remote: str = "origin", cwd: str | None = None) -> bool:
+    """Delete ``branch`` on ``remote`` only while it still points at ``expected`` (the commit that was classified as
+    merged): a push made since then makes git refuse, so nobody's new commits are deleted."""
+    ref = f"refs/heads/{branch}"
+    return subprocess.run(["git", "push", f"--force-with-lease={ref}:{expected}", remote, f":{ref}"],
+                          cwd=cwd, capture_output=True).returncode == 0
+
+
 @dataclass
 class Worktree:
     path: str
@@ -141,15 +149,28 @@ def main(argv: list[str] | None = None) -> int:
     if not args.prune:
         print("Report only. Run with --prune to remove the merged, clean ones.")
         return 0
+    # Each removal is tied to the commit that was classified: if a session committed or pushed in the meantime, git
+    # refuses and the branch stays (reported, never counted as pruned).
+    removed, deleted, refused = 0, 0, []
     for wt in r.remove_worktrees:
-        run("git", "worktree", "remove", wt.path)
-        run("git", "branch", "-D", wt.branch, check=False)
+        ref = f"refs/heads/{wt.branch}"
+        if tip(ref) != tips[ref] or subprocess.run(["git", "worktree", "remove", wt.path], capture_output=True).returncode:
+            refused.append(f"worktree {wt.path}: changed since the report, kept")
+            continue
+        removed += 1
+        if subprocess.run(["git", "update-ref", "-d", ref, tips[ref]], capture_output=True).returncode:
+            refused.append(f"local branch {wt.branch}: moved since the report, kept")
     for b, _ in r.delete_branches:
-        run("git", "push", "origin", "--delete", b, check=False)
+        if delete_remote_branch(b, tips[f"refs/remotes/origin/{b}"]):
+            deleted += 1
+        else:
+            refused.append(f"remote branch {b}: pushed to since the report, kept")
     run("git", "fetch", "--prune", "origin")
-    print(f"Pruned: {len(r.remove_worktrees)} worktrees, {len(r.delete_branches)} remote branches. "
+    for line in refused:
+        print(f"  refused {line}")
+    print(f"Pruned: {removed} worktrees, {deleted} remote branches; refused: {len(refused)}. "
           f"Now: {len(worktrees())} worktrees, {len(remote_branches())} remote branches.")
-    return 0
+    return 1 if refused else 0
 
 
 if __name__ == "__main__":
