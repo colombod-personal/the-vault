@@ -348,3 +348,11 @@ def test_no_scheduled_job_contacts_archidekt():
     conformance = (ROOT / "tests" / "conformance" / "test_conformance.py").read_text(encoding="utf-8")
     assert "decks/v3" not in conformance.split("# -- Archidekt")[1].split("# -- Vercel")[0].replace("# Archidekt is read", "")
     assert conformance.count("@manual_archidekt") == 2  # both live Archidekt checks need the manual switch
+
+
+def test_vercel_check_smokes_only_deployments_vercel_made():
+    # Jobs in the vercel-production environment (sync-catalog, sync-prices) also create GitHub
+    # deployments, addressed at their Actions job page: smoke-testing those went red (vault-1b8).
+    condition = load(ROOT / ".github" / "workflows" / "vercel-check.yml")["jobs"]["smoke"]["if"]
+    assert "github.event.deployment_status.state == 'success'" in condition
+    assert "github.event.deployment.creator.login == 'vercel[bot]'" in condition
