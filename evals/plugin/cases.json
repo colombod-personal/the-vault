@@ -23,6 +23,10 @@
         {
           "label": "says simulate_draws does not check colours",
           "pattern": "(?i)(does not|doesn't|not) (check|account for|simulate|model) colou?rs?|colou?r_warning|colou?rs?[^.]{0,40}(are|is) not (checked|simulated|modelled)"
+        },
+        {
+          "label": "devil's advocate raises an objection that rests on a figure, a rule or a card",
+          "pattern": "(?is)(devil.?s advocate|objection)[^\\n]{0,400}?(\\d|\\b[A-Z][a-z]+ [A-Z][a-z]+\\b)"
         }
       ],
       "must_not": [

@@ -46,7 +46,8 @@ def _run(tools, answer):
 def test_the_scorer_passes_a_good_run_and_fails_one_answered_from_memory():
     case = CASES["sliver_council_review"]
     good_answer = ("Shadow Sliver gives every Sliver shadow, rule 702.28b. Sliver Overlord is the commander. simulate_draws does not "
-                   "check colours, so its mana numbers are optimistic.")
+                   "check colours, so its mana numbers are optimistic. Devil's advocate objection: cutting 7 basics leaves 3 red "
+                   "sources in a five-colour deck; the plan answers it by keeping 4 Mountains.")
     tools, answer = ev.read_codex(_run(["council_brief", "deck_stats", "get_rule", "validate_deck_changes"], good_answer))
     assert all(r["ok"] for r in ev.score(case, tools, answer))
     tools, answer = ev.read_codex(_run(["deck_stats"], "Your deck has 45 basic lands and looks fine."))
@@ -81,8 +82,15 @@ def test_the_advocate_is_told_to_always_raise_an_objection_and_the_chair_to_quot
     assert "always at least one" in advocate and "No objection" in advocate
     chair = (ROOT / "skills" / "expert-council" / "SKILL.md").read_text(encoding="utf-8")
     assert "quoted with `get_rule` in this answer" in chair and "not your own reading" in chair
+    assert "`council_brief` or `validate_deck_changes`" in chair  # the brief carries lookouts too
     case = CASES["sliver_council_review"]
     rows = ev.score(case, [], "Devil's advocate: found no material legality objection.")
     assert not next(r for r in rows if r["check"].endswith("devil's advocate objects to nothing"))["ok"]
     rows = ev.score(case, [], "Devil's advocate: cutting 7 basics leaves 3 red sources, rule 903.4 puts red in the commander's identity.")
     assert next(r for r in rows if r["check"].endswith("devil's advocate objects to nothing"))["ok"]
+
+
+def test_an_answer_with_no_advocate_objection_at_all_fails_the_positive_check():
+    case = CASES["sliver_council_review"]
+    rows = ev.score(case, [], "Shadow Sliver, rule 702.28b. Sliver Overlord. Colours are not checked. Looks fine.")
+    assert not next(r for r in rows if r["check"].startswith("devil's advocate raises"))["ok"]

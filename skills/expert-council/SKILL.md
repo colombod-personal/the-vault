@@ -88,7 +88,7 @@ checked plan. Nothing in this flow changes the person's collection or decks.
      Every `lookout` the deck answer or the council brief carries (cards that can turn against their owner: a shroud that blocks
      your own Equipment, a forced trigger that destroys your own artifacts, a bonus shared with opponents), with its cards and its
      rule numbers quoted with `get_rule` in this answer (the number alone is not a quote), and say it is the Vault's lookout
-     from `deck_stats` or `validate_deck_changes`, not your own reading. The plan never adds a card that `warnings` lists (a lookout that names a card of the
+     from `deck_stats`, `council_brief` or `validate_deck_changes`, not your own reading. The plan never adds a card that `warnings` lists (a lookout that names a card of the
      deck it hurts, or is high severity); a lookout that is only listed, such as a tribe lord's shared bonus, is named in the
      answer and is not a refusal.
    - Stop: if a tool fails or the catalog is not loaded, say so; do not fill the gap from memory.
