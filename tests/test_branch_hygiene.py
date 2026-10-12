@@ -31,13 +31,18 @@ def repo(tmp_path):
     git("clone", "-q", str(origin), str(main), cwd=tmp_path)
     for k, v in (("user.email", "t@example.com"), ("user.name", "t"), ("commit.gpgsign", "false")):
         git("config", k, v, cwd=main)
-    (main / ".gitignore").write_text(".env*\nnode_modules/\n__pycache__/\n")
+    (main / ".gitignore").write_text(".env*\nnode_modules/\n__pycache__\n")  # no slash: a file of that name too
     git("add", ".gitignore", cwd=main)
     git("commit", "-q", "-m", "base", cwd=main)
     git("push", "-q", "origin", "main", cwd=main)
     paths, tips = {}, {"main": git("rev-parse", "HEAD", cwd=main)}
+    (main / "docs" / "build").mkdir(parents=True)  # a tracked folder that happens to be called build
+    (main / "docs" / "build" / "index.md").write_text("tracked")
+    git("add", "docs", cwd=main)
+    git("commit", "-q", "-m", "docs/build is tracked", cwd=main)
+    git("push", "-q", "origin", "main", cwd=main)
     for case in ("merged", "fresh", "dirty", "untracked", "env", "cache", "locked", "detached", "open", "unmerged",
-                 "here", "kept_remote"):
+                 "here", "kept_remote", "env_in_build", "file_named_cache"):
         path = tmp_path / f"wt-{case}"
         git("worktree", "add", "-q", "-b", f"b/{case}", str(path), "origin/main", cwd=main)
         git("commit", "-q", "--allow-empty", "-m", case, cwd=path)
@@ -46,6 +51,9 @@ def repo(tmp_path):
     (paths["dirty"] / ".gitignore").write_text("changed\n")
     (paths["untracked"] / "notes.txt").write_text("mine")
     (paths["env"] / ".env.local").write_text("SECRET=1")
+    (paths["env_in_build"] / "docs" / "build" / ".env.local").write_text("SECRET=1")  # under a tracked "build"
+    (paths["file_named_cache"] / "pkg").mkdir()
+    (paths["file_named_cache"] / "pkg" / "__pycache__").write_text("SECRET=1")
     (paths["cache"] / "node_modules").mkdir()
     (paths["cache"] / "node_modules" / "x.js").write_text("")
     (paths["cache"] / "pkg" / "__pycache__").mkdir(parents=True)  # nested: still a cache
@@ -90,6 +98,8 @@ def test_only_the_merged_clean_old_worktree_is_removed(repo, monkeypatch):
     assert why["wt-untracked"].startswith("uncommitted or untracked")
     assert ".env.local" in why["wt-env"]  # ignored but not a cache: would be lost
     assert "wt-cache" not in why  # node_modules is rebuildable
+    assert "docs/build/.env.local" in why["wt-env_in_build"]  # an ancestor named build does not make it a cache
+    assert "pkg/__pycache__" in why["wt-file_named_cache"]  # a FILE named __pycache__ is not a cache folder
 
 
 def test_main_and_the_branches_of_kept_worktrees_are_never_deleted(repo, monkeypatch):

@@ -36,8 +36,12 @@ REBUILDABLE = {".venv", "node_modules", "__pycache__", ".pytest_cache", ".ruff_c
 
 
 def rebuildable(path: str) -> bool:
-    parts = path.replace("\\", "/").rstrip("/").split("/")
-    return bool(REBUILDABLE.intersection(parts)) or parts[-1] == ".coverage" or path.endswith(".pyc")
+    """An entry of ``git status --ignored=matching`` that a build or test run makes again: an ignored folder (listed with
+    a trailing "/") whose own name is a cache's, or a .pyc / .coverage file. A file inside a tracked folder that happens
+    to be called build (docs/build/.env.local) is not a cache, nor is a file named __pycache__."""
+    path = path.replace("\\", "/")
+    name = path.rstrip("/").rsplit("/", 1)[-1]
+    return (path.endswith("/") and name in REBUILDABLE) or name == ".coverage" or path.endswith(".pyc")
 
 
 def git(*args: str, cwd: str | None = None) -> subprocess.CompletedProcess:
@@ -91,7 +95,7 @@ def same_path(a: str, b: str) -> bool:
 
 def local_state(path: str) -> str:
     """Why removing this worktree's files could lose something, or "" when nothing can be lost."""
-    status = git("status", "--porcelain", "--ignored=matching", cwd=path)
+    status = git("--no-optional-locks", "status", "--porcelain", "--ignored=matching", cwd=path)
     if status.returncode:
         return f"git status failed ({status.returncode}): left alone"
     tracked = [l for l in status.stdout.splitlines() if not l.startswith("!! ")]

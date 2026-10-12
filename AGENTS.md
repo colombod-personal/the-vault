@@ -112,10 +112,12 @@ repository is public).
 The owner's rule (2026-10-12): "each session worker MUST work in its own work tree and MUST ensure the work tree is correctly
 based of main and keep that base fresh to reduce merge conflicts"; "when prs are created we want to have github reviews
 feedback on those"; and "after merging worktree branches must be either deleted or rebased ? aligned to latest main, never
-have the risk to work off old main". The owner's clarification the same day: GitHub's "require branches to be up to date
-before merging" stays **off** (a pull request with no merge conflict may merge as it is), and local work must be kept up
-to date. Two sessions in one checkout overwrite each other's files, move each other's branch and commit each other's
-half-finished changes; a branch cut from an old `main` conflicts and ships late.
+have the risk to work off old main". The owner's decisions the same day (relayed in the session, not quoted): GitHub's
+"require branches to be up to date before merging" stays off, so a pull request with no merge conflict may merge as it is,
+and local work is what must be kept up to date; "automatically delete head branches" stays off too (Chief of Staff, under
+the owner's delegation), and merged branches are removed with `scripts/branch_hygiene.py` instead. Why it matters (not the
+owner's words): two sessions in one checkout overwrite each other's files, move each other's branch and commit each
+other's half-finished changes, and a branch cut from an old `main` conflicts and ships late.
 
 1. **Own worktree, from a fresh `origin/main`.** Before the first edit: `git fetch origin`, then
    `git worktree add -b <branch> ../the-vault-<short-name> origin/main`. One worktree and one branch per bead per session;
@@ -131,9 +133,13 @@ half-finished changes; a branch cut from an old `main` conflicts and ships late.
 3. **After the merge, never work off the old base.** The merged branch is deleted, or brought up to the latest `main`
    before any further work on it; new work starts a new branch in a new worktree from the new `origin/main`. Removing the
    worktree (`git worktree remove <path>`) and the branches the same day is the Infra Manager's proposal (vault-erp), not
-   yet the owner's words. Someone else's worktree is removed only when its branch is merged and `git status` is clean, and
-   never if it holds uncommitted work (report that in its bead). `python scripts/branch_hygiene.py` lists what qualifies
-   (report only; `--prune` removes only that, each removal tied to the reported commit).
+   yet the owner's words. `python scripts/branch_hygiene.py` lists what qualifies (report only) and `--prune` removes
+   only that. A worktree qualifies when its branch tip is the head commit of a merged pull request merged more than 24
+   hours ago, it is not the main checkout, not the one the script runs in, not locked and not detached, and `git status`
+   shows no uncommitted or untracked files and no ignored files other than caches (`.venv/`, `node_modules/`,
+   `__pycache__/` and the like). A remote branch qualifies when its tip is a merged pull request's head, it is not `main`,
+   has no open pull request, and no kept worktree uses its name or commit. Each removal is tied to the reported commit;
+   anything that moved is refused. Worktrees with uncommitted work are never removed: report them in their bead.
 4. **Review feedback on every pull request.** Ask for a GitHub review on each pull request (Copilot code review can be
    requested per pull request: `gh api graphql` `requestReviewsByLogin` with `botLogins: ["copilot-pull-request-reviewer"]`),
    plus the independent read section 6 already requires for security-sensitive paths. Read every comment and answer each
