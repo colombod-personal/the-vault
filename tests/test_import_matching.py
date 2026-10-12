@@ -186,3 +186,16 @@ def test_the_counts_for_a_file_with_the_17_row_shapes(signed_in, app):
         "All 18 rows are kept: 2 rows name a printing the Vault knows; 13 were matched by card name or collector number "
         "because the file's set or number is not the catalog's (priced as the cheapest printing, shown as not named by the "
         "file); 3 rows are not in the card catalog, kept as written without a price.")
+
+
+def test_names_past_the_lookup_cap_are_left_for_the_daily_update_and_never_called_not_found(signed_in, catalog, monkeypatch):
+    from vault import printing_lookup
+
+    monkeypatch.setattr(printing_lookup, "MAX_LOOKUP_NAMES", 2)
+    names = ["Test Bolt", "Test Daxos", "Test Old Border", "Test Nonexistent Card"]  # looked up in sorted order: two are left out
+    file = (HEADER + "".join(row(n, "ZZZ", str(i)) for i, n in enumerate(names, 1))).encode()
+    p = preview(signed_in, file)
+    why = {u["name"]: u["why"] for u in p["unmatched"]}
+    assert p["matched_rows"] == 2  # sorted: "test bolt" and "test daxos" are looked up and found by name
+    assert why == {"Test Old Border": "later", "Test Nonexistent Card": "later"}
+    assert p["not_found_rows"] == 0 and p["left_for_daily_update_rows"] == 2
