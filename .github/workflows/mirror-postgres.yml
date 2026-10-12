@@ -30,15 +30,17 @@ jobs:
         run: |
           set -euo pipefail
           for i in 1 2 3; do  # the anonymous ECR pull is the thing that rate-limits: try a few times, spaced out
-            if skopeo copy --override-os linux --override-arch amd64 --preserve-digests \
+            if skopeo copy --override-os linux --override-arch amd64 --preserve-digests --digestfile copied.digest \
                  --dest-creds "${ACTOR}:${GH_TOKEN}" "$SOURCE" "$TARGET"; then break; fi
             [ "$i" = 3 ] && exit 1
             sleep $((i * 60))
           done
-          src=$(skopeo inspect --override-os linux --override-arch amd64 --format '{{.Digest}}' "$SOURCE")
+          # The digest skopeo actually copied, not a second anonymous read of the mutable ECR tag (which can be
+          # rate-limited, or have moved on since the copy).
+          src=$(cat copied.digest)
           dst=$(skopeo inspect --creds "${ACTOR}:${GH_TOKEN}" --format '{{.Digest}}' "$TARGET")
           {
-            echo "Source (${SOURCE#docker://}, linux/amd64): \`$src\`"
+            echo "Copied (${SOURCE#docker://}, linux/amd64): \`$src\`"
             echo "Mirror (${TARGET#docker://}): \`$dst\`"
           } >> "$GITHUB_STEP_SUMMARY"
           [ "$src" = "$dst" ] || { echo "digest differs: $src vs $dst" >&2; exit 1; }
