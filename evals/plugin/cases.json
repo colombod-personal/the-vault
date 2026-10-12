@@ -1,0 +1,247 @@
+{
+  "about": "Locked conversations for the Vault's plugin and connector (bead vault-85p.6). Each case is a prompt a player would type, the checks an answer must pass, and the results recorded so far per host. Score a run with scripts/eval_plugin.py; a change to guidance, skills, tool descriptions or tool answers is compared against these baselines before it ships. Add a case whenever a real run finds a problem worth keeping.",
+  "deck": "the demo account's Sliver Swarm (demo) deck, id 7: Commander, Sliver Overlord, 100 cards, WUBRG, 54 lands, Shadow Sliver, Crystalline Sliver, Sol Ring, Rhystic Study",
+  "cases": [
+    {
+      "id": "sliver_council_review",
+      "prompt": "Review my Sliver Swarm deck with the expert council, I want to tune it.",
+      "why": "The product's core promise: the council's expertise shows up in the answer, with rules quoted, not remembered.",
+      "must_call": [
+        "council_brief",
+        "deck_stats",
+        "get_rule",
+        "validate_deck_changes"
+      ],
+      "must_name": [
+        "Shadow Sliver",
+        "Sliver Overlord"
+      ],
+      "must_cite": [
+        "702.28b"
+      ],
+      "must_match": [
+        {
+          "label": "says simulate_draws does not check colours",
+          "pattern": "(?i)(does not|doesn't|not) (check|account for|simulate|model) colou?rs?|colou?r_warning|colou?rs?[^.]{0,40}(are|is) not (checked|simulated|modelled)"
+        }
+      ],
+      "must_not": [
+        {
+          "label": "invented basic-land count (deck_stats says 54 lands)",
+          "pattern": "45 basic lands"
+        }
+      ],
+      "baselines": [
+        {
+          "host": "claude.ai",
+          "artifact": "connector",
+          "mode": "Sonnet 5.5",
+          "date": "2026-10-11",
+          "result": "pass",
+          "notes": "named the Vault's lookout with rule 702.28b, audited figures all matched deck_stats, three validate_deck_changes calls"
+        },
+        {
+          "host": "ChatGPT web",
+          "artifact": "connector",
+          "mode": "Instant",
+          "date": "2026-10-11",
+          "result": "fail",
+          "notes": "council_brief called, 9 tools in 10 s, lookout not named, no get_rule, invented 45 basic lands"
+        },
+        {
+          "host": "ChatGPT web",
+          "artifact": "plugin ZIP as submitted",
+          "mode": "Instant",
+          "date": "2026-10-11",
+          "result": "partial",
+          "notes": "10 tools incl. council_brief, no get_rule, no rule numbers, one unattributed line about Shadow Sliver, 45 basic lands repeated"
+        },
+        {
+          "host": "Codex CLI",
+          "artifact": "plugin",
+          "mode": "gpt-5.5 headless",
+          "date": "2026-10-12",
+          "result": "pass",
+          "notes": "50 tool calls, get_rule x3, get_card_oracle x25, rules 702.28b 702.18a 702.6a named, Skullclamp advised against"
+        },
+        {
+          "host": "Codex CLI",
+          "artifact": "plugin",
+          "mode": "gpt-5.5 headless, 3 runs",
+          "date": "2026-10-12",
+          "result": "pass",
+          "notes": "3 of 3 pass, 28/53/47 tool calls, rules 702.28b 702.18a 702.6a in every run, colour caveat in every run"
+        }
+      ]
+    },
+    {
+      "id": "skullclamp_with_crystalline",
+      "prompt": "Should I add Skullclamp to my Sliver Swarm deck?",
+      "why": "Crystalline Sliver gives every Sliver shroud, so Equipment cannot attach to your own creatures: a card the Vault warns about from card text.",
+      "must_call": [
+        "validate_deck_changes"
+      ],
+      "must_name": [
+        "Crystalline Sliver",
+        "Skullclamp"
+      ],
+      "must_cite": [
+        "702.18a",
+        "702.6a"
+      ],
+      "baselines": [
+        {
+          "host": "Codex CLI",
+          "artifact": "plugin",
+          "mode": "gpt-5.5 headless",
+          "date": "2026-10-12",
+          "result": "pass",
+          "notes": "inside the council review: Do Not Add Skullclamp unless you also cut Crystalline Sliver, 702.18a and 702.6a quoted"
+        }
+      ]
+    },
+    {
+      "id": "harmonic_sliver_add",
+      "prompt": "I want to add Harmonic Sliver to my Sliver Swarm deck. Good idea?",
+      "why": "Harmonic Sliver gives every Sliver a mandatory destroy-target trigger, so it destroys your own artifacts and enchantments once opponents have none (the owner's own example). Row V7 of vault-wxy.7.",
+      "must_call": [
+        "validate_deck_changes"
+      ],
+      "must_name": [
+        "Harmonic Sliver",
+        "Sol Ring"
+      ],
+      "must_cite": [
+        "603.3d"
+      ],
+      "must_match": [
+        {
+          "label": "advises against it plainly",
+          "pattern": "(?i)(don't|do not|would not|wouldn't|avoid|skip|cut|not add|advise against|bad idea|not a good)"
+        }
+      ],
+      "baselines": [
+        {
+          "host": "Codex CLI",
+          "artifact": "plugin",
+          "mode": "gpt-5.5 headless, 3 runs",
+          "date": "2026-10-12",
+          "result": "fail",
+          "notes": "0 of 3: run 1 says 'Yes, but with caution ... good include'; runs 2 and 3 advise against it and name Sol Ring, Arcane Signet, Rhystic Study, Smothering Tithe, but none quotes a rule number (603.3d); run 2 attributes it as 'the Vault flagged it' without the tool. Gap 1 of vault-wxy.7.2"
+        }
+      ]
+    },
+    {
+      "id": "rules_unnamed_vault",
+      "prompt": "My 5/5 trampler is blocked by a 2/2 with protection from green. How much damage can go to the player?",
+      "why": "A player does not say use the Vault. The rules answer must come from the rules tools anyway (T7). Baseline 2026-10-11: all three hosts answered from memory.",
+      "must_call_any": [
+        [
+          "get_rule",
+          "search_rules",
+          "find_rules_term"
+        ]
+      ],
+      "must_cite": [
+        "702.19b"
+      ],
+      "baselines": [
+        {
+          "host": "claude.ai",
+          "artifact": "connector",
+          "mode": "Sonnet 5.5",
+          "date": "2026-10-11",
+          "result": "fail",
+          "notes": "no Vault call; claude.ai shows the model only tool names (vault-ar1)"
+        },
+        {
+          "host": "ChatGPT desktop",
+          "artifact": "connector",
+          "mode": "default",
+          "date": "2026-10-11",
+          "result": "fail",
+          "notes": "answered from memory, no Vault call"
+        },
+        {
+          "host": "Perplexity",
+          "artifact": "connector",
+          "mode": "default",
+          "date": "2026-10-11",
+          "result": "fail",
+          "notes": "answered from memory or web search, no Vault call"
+        },
+        {
+          "host": "Codex CLI",
+          "artifact": "plugin",
+          "mode": "gpt-5.5 headless, 3 runs",
+          "date": "2026-10-12",
+          "result": "pass",
+          "notes": "3 of 3: search_rules called without the Vault named, 702.19b and 702.16e cited with the 2026-09-25 edition (the hosts without the plugin answered from memory)"
+        }
+      ]
+    },
+    {
+      "id": "unnamed_collection_upload",
+      "prompt": "I want to update my collection from an export file from my app. How do I get the file to you?",
+      "why": "The owner's original complaint: having to use the website to upload. Unnamed phrasing must reach the upload flow (vault-wxy.7.1).",
+      "must_call": [
+        "start_collection_upload"
+      ],
+      "must_not": [
+        {
+          "label": "tells the player to drag the file into the chat",
+          "pattern": "(?i)drag (and drop )?(the|your) file"
+        }
+      ],
+      "baselines": [
+        {
+          "host": "ChatGPT desktop",
+          "artifact": "plugin",
+          "mode": "Work chat",
+          "date": "2026-10-12",
+          "result": "fail",
+          "notes": "V8a: no tool call, no skill read; with in the Vault in the prompt (V8b) it works"
+        }
+      ]
+    },
+    {
+      "id": "most_valuable_cards",
+      "prompt": "What are my most valuable cards?",
+      "why": "The simplest collection question: tools, prices dated, nothing invented.",
+      "must_call": [
+        "get_collection_summary"
+      ],
+      "baselines": [
+        {
+          "host": "ChatGPT desktop",
+          "artifact": "plugin",
+          "mode": "Work chat",
+          "date": "2026-10-12",
+          "result": "pass",
+          "notes": "row from vault-wxy.7"
+        }
+      ]
+    },
+    {
+      "id": "no_power_verdict",
+      "prompt": "Is my Sliver Swarm deck weak or strong?",
+      "why": "The Vault has no power score: an answer must say what the tools show and label any bracket placement as opinion above the computed floor (vault-8v1).",
+      "must_call": [
+        "deck_stats"
+      ],
+      "must_match": [
+        {
+          "label": "names the bracket floor as a floor or says there is no power score",
+          "pattern": "(?i)(bracket|power) (floor|score)|no power score|floor of|at least bracket"
+        }
+      ],
+      "must_not": [
+        {
+          "label": "calls the deck weak or low power from the curve",
+          "pattern": "(?i)\\b(deck is|it is|it's) (weak|low[- ]power|underpowered)\\b"
+        }
+      ],
+      "baselines": []
+    }
+  ]
+}

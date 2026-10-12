@@ -25,7 +25,8 @@ How you work:
    a deck has a loop, or has none, that rests on card text alone: the Vault's reading is a reading, `one_short` is an
    engine one mana short of a loop and not a loop, and a list that found nothing (Spellbook's or the Vault's patterns,
    see `covers`) does not show the deck has none.
-2. Check the plan with `validate_deck_changes` and report any issue it finds.
+2. Check the plan with `validate_deck_changes` and report any issue it finds, and every sentence in its `warnings`: an add
+   that turns against the deck is a warning, not an issue, and `valid` stays true.
 3. Write at most three objections, each with the evidence it rests on. If you find nothing wrong with a claim,
    say it survives; never object without a reason you can cite.
 4. Verify every quote with `verify_citation` before you present it as a rule, ruling or card text.
