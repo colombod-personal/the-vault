@@ -222,17 +222,20 @@ def where_it_returns(redirect_uri: str) -> str:
 
 
 def sign_in_page(req: AuthRequest, providers: list[str], passkeys: bool, dev_login: bool, reviewers: bool = False,
-                 earlier: bool = False, choose: bool = False) -> HTMLResponse:
+                 earlier: bool = False, choose: bool = False, token: str = "") -> HTMLResponse:
     """The sign-in page of a pending authorization request. ``earlier``: this browser has a Vault sign-in that is older than the
     recent-sign-in window (it is treated as signed out); ``choose``: the person pressed "Use a different account", so the provider
-    is asked to show its account chooser (``account=choose``, which vault.auth turns into ``prompt=select_account``)."""
+    is asked to show its account chooser (``account=choose``, which vault.auth turns into ``prompt=select_account``). ``token``: the
+    one-time value rendered into every provider link; only a link that carries it may let the provider's answer replace an old Vault
+    sign-in (vault.auth), so a link on another site cannot sign anyone out or switch them."""
     nonce = secrets.token_urlsafe(16)
-    suffix = "&account=choose" if choose else ""
+    suffix = ("&account=choose" if choose else "") + (f"&pending={esc(token)}" if token else "")
     buttons = "".join(f'<a class=button href="/api/auth/login/{esc(p)}?continue=oauth{suffix}">Continue with {esc(p.capitalize())}</a>'
                       for p in providers)
     different = ""
+    amp_token = f"&amp;pending={esc(token)}" if token else ""
     if earlier and not choose:  # the usual case: the browser kept a sign-in for up to 30 days; the provider would re-pick that account
-        links = " ".join(f'<a href="/api/auth/login/{esc(p)}?continue=oauth&amp;account=choose">{esc(p.capitalize())}</a>'
+        links = " ".join(f'<a href="/api/auth/login/{esc(p)}?continue=oauth&amp;account=choose{amp_token}">{esc(p.capitalize())}</a>'
                          for p in providers if p in SELECT_ACCOUNT)
         if links:
             different = ("<p class=small>This browser was signed in to a Vault account earlier. To connect a different account, "
@@ -365,9 +368,13 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
         if user is None:
             before = request.session.get("oauth_pending")  # "Use a different account" left a mark for this very request
             switching = isinstance(before, dict) and before.get("switch") is True and before.get("q") == raw
-            request.session["oauth_pending"] = {"q": raw, "t": int(time.time()), **({"switch": True} if switching else {})}
+            same = isinstance(before, dict) and before.get("q") == raw
+            kept = [t for t in before.get("n", []) if isinstance(t, str)][-2:] if same and isinstance(before.get("n"), list) else []
+            token = secrets.token_urlsafe(16)  # another tab of the same request keeps its links working (the last three)
+            request.session["oauth_pending"] = {"q": raw, "t": int(time.time()), "n": [*kept, token],
+                                                **({"switch": True} if switching else {})}
             return sign_in_page(req, auth.offered, _passkeys_on(), settings.dev_login, bool(settings.reviewer_passphrase),
-                                earlier=earlier, choose=switching)
+                                earlier=earlier, choose=switching, token=token)
         request.session.pop("oauth_pending", None)
         nonce = secrets.token_urlsafe(24)
         server.save_consent(db, user.id, nonce, raw)

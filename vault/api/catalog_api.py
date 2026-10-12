@@ -219,8 +219,9 @@ class WhoamiOut(BaseModel):
 class SignOutOut(BaseModel):
     signed_out: bool = Field(description="false: a preview, nothing changed; true: this connection was ended")
     signed_in_as: dict = Field(description="The account this connection is signed in to: id, name, and the email with all but its first letter hidden")
-    connection: dict = Field(description="This connection: the app's name and web address, its scopes, when it was made, "
-                                         "and how many other connections the account has (other devices and apps)")
+    connection: dict = Field(description="This connection: the app's name (\"Unverified app: ...\" when it registered itself, as the consent screen says), "
+                                         "whether it is verified, its web address, its scopes, when it was made, and how many other connections "
+                                         "the account has that can still be used (other devices and apps)")
     what_happens: str
     links: dict = Field(default_factory=dict, alias="_links")
 
@@ -334,13 +335,17 @@ def build_router(get_db, optional_user, current_user, settings, rules_live=None)
         client = db.scalar(select(OAuthClient).where(OAuthClient.client_id == grant.client_id))
         domain = urlsplit(grant.client_id).hostname if grant.client_id.startswith("https://") else None
         name = client.name if client else (domain or "Unknown app")
-        others = db.scalar(select(func.count()).select_from(OAuthGrant).where(
-            OAuthGrant.user_id == user.id, OAuthGrant.id != grant.id)) or 0
+        # A client that registered itself chooses its own name: the consent screen calls it "Unverified app: ..." (oauth_routes.client_label),
+        # and so does this preview, so a self-registered client cannot pass for a verified app here.
+        verified = client is not None and client.kind == "cimd" or (client is None and domain is not None)
+        shown = name if verified else f"Unverified app: {name}"
+        spoken = f"{shown} ({domain})" if verified and domain else shown
+        others = oauth_server.count_other_live_connections(db, user.id, grant.id)
         return {"signed_out": signed_out, "signed_in_as": {"id": user.id, "name": user.name, "email": mask_email(user.email)},
-                "connection": {"app": name, "domain": domain, "scopes": grant.access_scopes.split(),
+                "connection": {"app": shown, "verified": verified, "domain": domain, "scopes": grant.access_scopes.split(),
                                "connected_at": grant.created_at.isoformat() if grant.created_at else None,
                                "other_connections": others},
-                "what_happens": ("Signed out. " if signed_out else "") + SIGN_OUT_EFFECT.format(app=name),
+                "what_happens": ("Signed out. " if signed_out else "") + SIGN_OUT_EFFECT.format(app=spoken),
                 "_links": {"self": link(f"{V1}/agent/sign-out")}}
 
     @agent.get("/sign-out", response_model=SignOutOut, response_model_by_alias=True,

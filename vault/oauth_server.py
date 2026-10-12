@@ -18,7 +18,7 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from .locks import lock_account
@@ -295,6 +295,13 @@ def purge_expired_grants(db: Session, user_id: int | None = None, *, commit: boo
         if commit:
             db.commit()
     return len(dead)
+
+
+def count_other_live_connections(db: Session, user_id: int, grant_id: int) -> int:
+    """How many of this person's other connections can still be used (a refresh token that ran out is a dead connection that the
+    next listing removes, so it is not counted). Reads only: a preview must not delete anything."""
+    return db.scalar(select(func.count()).select_from(OAuthGrant).where(
+        OAuthGrant.user_id == user_id, OAuthGrant.id != grant_id, OAuthGrant.refresh_expires >= _now())) or 0
 
 
 def user_grants(db: Session, user_id: int) -> list[OAuthGrant]:

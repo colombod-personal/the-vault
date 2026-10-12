@@ -637,13 +637,23 @@ def build_router(auth: Auth, get_db) -> APIRouter:
     @router.get("/login/{provider}", dependencies=limited("oauth-login"))
     async def login(provider: str, request: Request, app_redirect_uri: str | None = None,
                     code_challenge: str | None = None, code_challenge_method: str | None = None,
-                    continue_: str | None = Query(None, alias="continue"), account: str | None = Query(None, max_length=16)):
+                    continue_: str | None = Query(None, alias="continue"), account: str | None = Query(None, max_length=16),
+                    pending: str | None = Query(None, max_length=64)):
         """Browser sign-in. Native apps open this in ASWebAuthenticationSession with
         ``app_redirect_uri`` (one of APP_REDIRECT_URIS) and a PKCE ``code_challenge`` (S256);
         they get ``<app_redirect_uri>?code=...`` back and redeem it at POST /api/v1/auth/token."""
         request.session.pop("app_flow", None)
         if continue_ != "oauth":  # only the OAuth consent page's sign-in resumes a pending request
             request.session.pop("oauth_pending", None)
+        elif isinstance(request.session.get("oauth_pending"), dict):
+            # The sign-in page rendered a one-time token into its links. Only a link that carries it may let the provider's answer replace
+            # an old Vault sign-in (the callback checks `ok`): a page on another site can start this login, but cannot read the token.
+            held = dict(request.session["oauth_pending"])
+            tokens_ = [t for t in held.get("n", []) if isinstance(t, str)] if isinstance(held.get("n"), list) else []
+            proved = bool(pending) and any(hmac.compare_digest(pending.encode(), t.encode()) for t in tokens_)
+            held.pop("n", None)  # spent, or never meant for this link: the page must be shown again for another
+            held.pop("ok", None)
+            request.session["oauth_pending"] = {**held, **({"ok": True} if proved else {})}
         if app_redirect_uri is not None:
             if app_redirect_uri not in auth.settings.app_redirect_uris:
                 raise HTTPException(400, "app_redirect_uri is not allowed")
@@ -692,12 +702,13 @@ def build_router(auth: Auth, get_db) -> APIRouter:
             current = session_user(db, request)
             pending = request.session.get("oauth_pending")
             if (current is not None and "rv" not in request.session and not app_flow and isinstance(pending, dict)
-                    and time.time() - pending.get("t", 0) < OAUTH_PENDING_SECONDS
+                    and pending.get("ok") is True and time.time() - pending.get("t", 0) < OAUTH_PENDING_SECONDS
                     and not recent_signin.is_fresh(db, request, auth.settings)):
-                # The consent flow treated this browser as signed out (its sign-in is older than the window) and the provider has now
-                # answered for someone: this is a sign-in as that person, never a link to the old account (#347 stays for every other
-                # path: a copied cookie still cannot link or claim anything). The old sign-in is dropped only now, after the provider
-                # authenticated and the request carried this browser's own state, so a link to the authorization page logs no one out.
+                # The consent flow treated this browser as signed out (its sign-in is older than the window), the person chose a provider
+                # link on the sign-in page (it carries a one-time token, `ok`), and the provider has now answered for someone: this is a sign-in
+                # as that person, never a link to the old account (#347 stays for every other path: a copied cookie still cannot link or claim
+                # anything). The old sign-in is dropped only now, after the provider authenticated, so a link on another site, which cannot read
+                # the token, logs no one out.
                 for key in ("uid", "sk", "auth_at"):
                     request.session.pop(key, None)
                 current = None
