@@ -8,8 +8,8 @@ the assistant said "the deck-list tool isn't available" and fell back to the bro
 A client whose own ``initialize`` names it (``codex-mcp-client``) therefore gets this profile:
 
 * the **core** tools: what a player's first questions need, with one-sentence descriptions (the full text is one
-  ``vault_tools`` call away). A write tool is listed only to a token that may write (the exception is
-  ``start_collection_upload``, which only makes a link and is listed to every token), and keeps its own approval hints;
+  ``vault_tools`` call away). A write tool is listed only to a token that may write (the exceptions are
+  ``start_collection_upload``, which only makes a link, and ``sign_out``, which ends only the caller's own connection: both are listed to every token), and keeps its own approval hints;
 * ``vault_tools``: lists every other tool with a one-line summary, or returns one tool's full description and schema;
 * ``vault_call``: runs any other **read** tool by name; ``vault_write``: runs any other non-destructive **write** tool by
   name. Two tools, so a host's "always allow" for reading never pre-approves changing anything. Both go through exactly the

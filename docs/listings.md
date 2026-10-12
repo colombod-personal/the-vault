@@ -8,7 +8,7 @@ already has.
 ## What the Vault already has
 
 - Tool annotations on every tool (`readOnlyHint`, `destructiveHint`, `openWorldHint`); all catalog and deck
-  tools are read-only; write tools exist only for the person's own data and need a write scope (the exception is `start_collection_upload`, a link for a file that waits for the person to confirm).
+  tools are read-only; write tools exist only for the person's own data and need a write scope (the exceptions are `start_collection_upload`, a link for a file that waits for the person to confirm, and `sign_out`, which ends only the connection that calls it).
 - A public privacy notice (`/privacy.html`, with a placeholder section the owner still has to fill: issue #2), credits
   (`/credits.html`), a plain-language connect page (`/connect.html`), `llms.txt`, and docs in the repository.
 - Provenance on every answer, the Fan Content notice, and "not endorsed by" lines.
