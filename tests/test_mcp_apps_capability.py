@@ -81,7 +81,7 @@ def test_an_id_signed_under_another_secret_is_unknown():
     mine = mcp_session.issue(SECRET, ui=True)
     assert mcp_session.read(SECRET, mine) is True and mcp_session.read(SECRET, mine + "0") is None
     flipped = mine.replace("v1.1.", "v1.0.", 1)
-    assert mcp_session.read(SECRET, flipped) is None  # the one bit cannot be flipped without the secret
+    assert mcp_session.read(SECRET, flipped) is None  # the state digit cannot be flipped without the secret
     assert mine != mcp_session.issue(SECRET, ui=True)  # ids are not guessable from one another
 
 

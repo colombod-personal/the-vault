@@ -2,9 +2,9 @@
 
 The MCP server is stateless, so it cannot remember that a client advertised the MCP Apps extension
 (``io.modelcontextprotocol/ui``) when it connected. Streamable HTTP lets a server hand out an ``Mcp-Session-Id`` at
-``initialize``, which the client sends back on every later request. Here that id *is* the memory: it holds one bit
-(did the client advertise the extension?), a random part and an HMAC under the server's secret. Nothing is stored,
-nothing identifies the person, and any server instance can read it.
+``initialize``, which the client sends back on every later request. Here that id *is* the memory: it holds two bits
+(did the client advertise the extension? does it get the compact tool list of ``mcp_profile``?), a random part and an
+HMAC under the server's secret. Nothing is stored, nothing identifies the person, and any server instance can read it.
 
 Fail open: a request with no session id, an id that does not verify (another secret, a typo) or one from before this
 existed is treated as "unknown", and ``tools/list`` then behaves as it always did (the views are advertised). Only an
