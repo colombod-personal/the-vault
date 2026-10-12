@@ -393,8 +393,8 @@ def agent_texts() -> dict[str, tuple[str, list[str]]]:
     return out
 
 
-AGENT_PARAGRAPH = ("A tool named below that is not in your list is not missing: look it up by that name "
-                   "(`vault_tools` finds it, `vault_call` runs it).")
+AGENT_PARAGRAPH = ("A tool not in your list: look it up by that name "
+                   "(`vault_tools`, then `vault_call`).")
 # Every place one agent's brief reaches an assistant (the keys of agent_texts()).
 RENDITIONS = ("agents/{n}.md", "agent-definitions/codex/{n}.toml", "agent-definitions/copilot/{n}.agent.md",
               "agent-definitions/cursor/{n}.md", "plugins/the-vault/agents/{n}.md", "plugins/the-vault-openai/agents/{n}.md",
