@@ -107,6 +107,45 @@ repository is public).
 7. **The roadmap lives in beads** as one epic per phase; each phase is blocked by the one before, so `bd ready` shows the
    current phase only.
 
+### Each agent and each session works in its own worktree, kept up to date with main, with review feedback
+
+The owner's rule (2026-10-12): "each session worker MUST work in its own work tree and MUST ensure the work tree is correctly
+based of main and keep that base fresh to reduce merge conflicts"; "when prs are created we want to have github reviews
+feedback on those"; and "after merging worktree branches must be either deleted or rebased ? aligned to latest main, never
+have the risk to work off old main". The owner's decisions the same day (relayed in the session, not quoted): GitHub's
+"require branches to be up to date before merging" stays off, so a pull request with no merge conflict may merge as it is,
+and local work is what must be kept up to date; "automatically delete head branches" stays off too (Chief of Staff, under
+the owner's delegation), and merged branches are removed with `scripts/branch_hygiene.py` instead. Why it matters (not the
+owner's words): two sessions in one checkout overwrite each other's files, move each other's branch and commit each
+other's half-finished changes, and a branch cut from an old `main` conflicts and ships late.
+
+1. **Own worktree, from a fresh `origin/main`.** Before the first edit: `git fetch origin`, then
+   `git worktree add -b <branch> ../the-vault-<short-name> origin/main`. One worktree and one branch per bead per session;
+   its path goes in the claim note (step 2 above), with the session's title (two sessions can share an actor name). Never
+   edit, build or run tests in the main checkout (`the-vault`) or in another session's worktree; `git worktree list` shows
+   them all and the claim notes say whose each one is. A session that finds itself in a shared checkout stops, moves its
+   changes to its own worktree and carries on there. The worktree has its own test database (section 7).
+2. **Keep it up to date with `main` while working.** At the start of every working session, before every push and before
+   opening the pull request: `git fetch origin`, and if the branch is behind `origin/main`, merge `origin/main` into it
+   (rebase only a branch nobody else pushes to), regenerate generated files instead of hand-merging them
+   (`python scripts/build_plugin.py`), and run `python scripts/prepush.py` again. Once the pull request is open, a branch
+   with no merge conflict needs nothing more to merge.
+3. **After the merge, never work off the old base.** The merged branch is deleted, or brought up to the latest `main`
+   before any further work on it; new work starts a new branch in a new worktree from the new `origin/main`. Removing the
+   worktree (`git worktree remove <path>`) and the branches the same day is the Infra Manager's proposal (vault-erp), not
+   yet the owner's words. `python scripts/branch_hygiene.py` lists what qualifies (report only) and `--prune` removes
+   only that. A worktree qualifies when its branch tip is the head commit of a merged pull request merged more than 24
+   hours ago, it is not the main checkout, not the one the script runs in, not locked and not detached, and `git status`
+   shows no uncommitted or untracked files and no ignored files other than caches (`.venv/`, `node_modules/`,
+   `__pycache__/` and the like). A remote branch qualifies when its tip is a merged pull request's head, it is not `main`,
+   has no open pull request, and no kept worktree uses its name or commit. Each removal is tied to the reported commit;
+   anything that moved is refused. Worktrees with uncommitted work are never removed: report them in their bead.
+4. **Review feedback on every pull request.** Ask for a GitHub review on each pull request (Copilot code review can be
+   requested per pull request: `gh api graphql` `requestReviewsByLogin` with `botLogins: ["copilot-pull-request-reviewer"]`),
+   plus the independent read section 6 already requires for security-sensitive paths. Read every comment and answer each
+   thread with a fix ("Fixed in <commit>") or a reply saying why not, then resolve it; the `protect-main` ruleset refuses a
+   merge with unresolved threads.
+
 ### When sessions overlap
 
 Several sessions work on this repository at once, and one may start another. These rules decide who owns a bead. **The
@@ -142,7 +181,9 @@ Vault's beads workspace on a shared Dolt server that starts on boot. Agents just
 
 **Running the checks.** Smart App Control also blocks the Vault's Python on the owner's PC. `vault-check` (same folder) runs
 `scripts/prepush.py` for the current branch on that server, with the same Postgres as CI: `vault-check`, or
-`vault-check --full`. Section 7 applies: never push a pull request that `vault-check` hasn't passed.
+`vault-check --full`. Section 7 applies: never push a pull request that `vault-check` hasn't passed. Concurrent sessions
+use different lanes (`VAULT_CHECK_LANE=a|b|c|d`, or `vault-check-local` lanes in WSL): one run per lane. The tool holds a
+lock for the whole run and refuses a busy lane; wait or take another lane, and never stop another session's run.
 
 ## 9. Read the record, never remember it
 
