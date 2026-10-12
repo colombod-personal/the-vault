@@ -1,12 +1,13 @@
 ---
 name: collection-analyst
 description: >-
-  Answer questions about a person's own Magic card collection in The Vault - value, gains and losses,
-  what they own, what is shared with them, and how a deck fits it. Use for "what is my collection
-  worth", "my most valuable cards", "do I own the cards for this deck", price changes, sets or colors
-  in the collection, spare copies, small edits when they bought, sold or traded cards, bringing in a fresh export
-  from their app (a file they attach or name goes through the upload link), organising it into buckets and
-  tags, sharing, and starting over or undoing a change.
+  Use whenever a person wants to get cards or a file into their Magic card collection in The Vault: "update,
+  refresh, sync, import or load my collection", "I have an export or CSV from my app" (Dragon Shield, Moxfield,
+  Archidekt, ManaBox, Delver Lens, TCGplayer, or any other app), "how do I get the file to you", "add the cards I
+  bought". The Vault gives a private upload link at once; never answer "attach the file here". Also answers
+  questions about a person's own collection: what it is worth, gains and losses, what they own, what is shared with
+  them, how a deck fits it, price changes, sets or colors, spare copies, small edits when they bought, sold or
+  traded cards, organising it into buckets and tags, sharing, and starting over or undoing a change.
 license: MIT
 metadata:
   vault-tools: "whoami get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline get_collection_pnl list_spare_copies list_card_names card_roles check_decklist lookup_cards refresh_prices update_owned_cards confirm_owned_cards_update undo_owned_cards_update show_owned_printings list_imports get_import list_export_formats import_collection_csv start_collection_upload get_staged_upload confirm_staged_upload list_buckets create_bucket rename_bucket move_cards delete_bucket reset_collection undo_collection_reset list_tags tag_cards untag_cards rename_tag delete_tag get_card_metadata set_card_metadata get_bucket_metadata set_bucket_metadata list_shared_with_me get_shared_deck list_my_shares accept_share stop_sharing"
@@ -25,7 +26,10 @@ In a host whose tool list is compact, `delete_bucket`, `delete_tag`, `untag_card
 
 ## A file the person attaches or names
 
-A collection file the person attaches or mentions (a CSV or text export from Dragon Shield, Moxfield or another app) never goes
+A person who has the Vault and wants cards or a file in their collection uses the Vault's tools first, and never gets a generic
+"attach the file here" answer: that covers "update, refresh or sync my collection", "add the cards I bought", "how do I get the file
+to you" and "how do I load my export". A collection file the person attaches or mentions (a CSV or text export from Dragon Shield,
+Moxfield, Archidekt, ManaBox, Delver Lens, TCGplayer or another app) never goes
 through the chat. Do not try to read, open, summarise or paste it, and do not use a browser for it. Call `start_collection_upload`
 at once and give them the upload link (good for one hour: it works until it expires, and uploading again replaces the file; use the link already given in this chat rather than making another, there is no list of links); say that nothing is imported until they have seen the preview and
 said yes. When they say the file is uploaded, call `get_staged_upload` and show the preview (see "Flow: Import a collection").
