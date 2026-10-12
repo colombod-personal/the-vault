@@ -82,9 +82,16 @@ def test_every_row_of_the_17_row_shapes_is_matched_or_kept_and_none_is_asked_for
     assert (p["not_found_rows"], p["left_for_daily_update_rows"], p["unmatched_rows"]) == (1, 1, 2)
     assert {u["name"]: u["why"] for u in p["unmatched"]} == {"Test Known But Unpriced": "later", "Test Nonexistent Card": "not_found"}
     assert p["matching_line"] == (
-        "All 11 rows are kept: 2 rows name a printing the Vault knows; 7 were found by card name or collector number "
-        "because the file's set or number is not the catalog's (the daily update ties each to the cheapest printing and "
-        "shows it as not named by the file); 1 row is matched by the daily update; 1 row is not in the card catalog, kept as written without a price.")
+        "All 11 rows are kept: 2 rows name the printing; 7 were found by card name or collector number because the file's "
+        "set or number does not identify a printing the catalog has (their value follows the file's own price where it has "
+        "one, until the printing is named; 3 of them could be more than one printing); 1 row is left for the daily update; "
+        "1 row is not in the Vault's card list yet, kept as written and priced from the file where it has a price.")
+    # the cards that could be several printings say so, with the range, never one price as if it were certain
+    ruled = {r["name"]: r for r in p["found_by_rule"]}
+    assert p["several_printings_rows"] == 3 and len(ruled) == 4
+    assert ruled["Test Old Border"]["range"] == "could be any of 2 printings, between $4.00 and $5.00"
+    assert (ruled["Test Old Border"]["candidates"], ruled["Test Old Border"]["highest_usd"]) == (2, 5.0)
+    assert ruled["Test List Card One"]["candidates"] == 1 and ruled["Test List Card One"]["range"] == "printing priced $1.20"
     # the answer never tells the person (or the assistant) to fix the file
     assert not FORBIDDEN.search(p["note"]) and not FORBIDDEN.search(p["matching_line"]) and not FORBIDDEN.search(str(p))
 
@@ -104,10 +111,10 @@ def test_import_keeps_every_row_as_written_and_the_sync_ties_each_to_a_printing_
         return {(r.name, r.set_code, r.collector_number): (r.scryfall_id, r.match_method) for r in rows}
 
     by = entries()
-    # at import only a printing the file names is stored: a guess is never locked in
+    # at import what was always stored: the printing the Vault already holds. The rest (even VTHB/258, which names thb/258)
+    # is left to the sync, which also knows the finish a printing exists in.
     assert by[("Test Bolt", "m11", "149")] == (sid("bolt-m11"), "set_number")
-    assert by[("Test Daxos", "vthb", "258")] == (sid("dax-258"), "set_number")  # as written: VTHB stays VTHB
-    assert all(v == (None, None) for k, v in by.items() if k[0] not in ("Test Bolt", "Test Daxos"))
+    assert all(v == (None, None) for k, v in by.items() if k[0] != "Test Bolt")
 
     def lib(key, name, set_code, number, usd):
         return LibraryCard.from_json({"id": sid(key), "name": name, "set": set_code, "collector_number": number,
@@ -120,6 +127,7 @@ def test_import_keeps_every_row_as_written_and_the_sync_ties_each_to_a_printing_
     with app.state.db.sessions() as db:
         sync(db, bulk, day=date(2026, 10, 12))  # the daily sync: the same ladder and the same rule
     by = entries()
+    assert by[("Test Daxos", "vthb", "258")] == (sid("dax-258"), "set_number")  # as written: VTHB stays VTHB
     assert by[("Test List Card One", "mb1", "1607")] == (sid("list1"), "name_set")
     assert by[("Test List Card Two", "phed", "74")] == (sid("list2"), "name_set")
     assert by[("Test List Card Three", "pagl", "45")] == (sid("list3-b"), "name_set")  # the cheaper of its two printings
@@ -206,9 +214,11 @@ def test_the_counts_for_a_file_with_the_17_row_shapes(signed_in, app):
     assert p["matched_by"] == {"set_number": 2, "name_set": 12, "name_number": 1}
     assert (p["printing_not_in_file_rows"], p["not_found_rows"], p["left_for_daily_update_rows"]) == (13, 3, 0)
     assert p["matching_line"] == (
-        "All 18 rows are kept: 2 rows name a printing the Vault knows; 13 were found by card name or collector number "
-        "because the file's set or number is not the catalog's (the daily update ties each to the cheapest printing and "
-        "shows it as not named by the file); 3 rows are not in the card catalog, kept as written without a price.")
+        "All 18 rows are kept: 2 rows name the printing; 13 were found by card name or collector number because the file's "
+        "set or number does not identify a printing the catalog has (their value follows the file's own price where it has "
+        "one, until the printing is named; 4 of them could be more than one printing); 3 rows are not in the Vault's card "
+        "list yet, kept as written and priced from the file where it has a price.")
+
 
 
 def test_names_past_the_lookup_cap_are_left_for_the_daily_update_and_never_called_not_found(signed_in, catalog, monkeypatch):
@@ -222,3 +232,79 @@ def test_names_past_the_lookup_cap_are_left_for_the_daily_update_and_never_calle
     assert p["matched_rows"] == 2  # sorted: "test bolt" and "test daxos" are looked up and found by name
     assert why == {"Test Old Border": "later", "Test Nonexistent Card": "later"}
     assert p["not_found_rows"] == 0 and p["left_for_daily_update_rows"] == 2
+
+
+def test_a_fallback_code_never_ties_a_row_to_another_card_with_that_number(signed_in, app):
+    """VTHB/259 "Test Daxos" while thb/259 is another card: found by name in thb, never called the printing the file names."""
+    with app.state.db.sessions() as db:
+        db.add_all([oracle(1, "Test Daxos"), oracle(2, "Test Other Card"), printing(1, "dax-7", "thb", "7", 0.1),
+                    printing(2, "other-259", "thb", "259", 3.0)])
+        db.commit()
+    p = preview(signed_in, (HEADER + row("Test Daxos", "VTHB", "259")).encode())
+    assert p["matched_by"] == {"name_set": 1} and p["printing_not_in_file_rows"] == 1
+    assert p["found_by_rule"][0]["row"] == 1 and p["found_by_rule"][0]["candidates"] == 1
+
+
+def test_a_printing_found_in_the_catalog_is_left_to_the_sync_which_knows_its_finish(signed_in, app):
+    """An etched-only printing the file calls Normal: the import must not store it with no finish (the sync would skip it)."""
+    from datetime import date
+
+    from mtg_toolkits.scryfall import Card as LibraryCard
+    from vault.sync import sync
+
+    with app.state.db.sessions() as db:
+        db.add_all([oracle(1, "Test Etched"), OraclePrinting(scryfall_id=sid("etched-only"), oracle_id=sid("oracle-1"), set_code="cmm", set_name="CMM",
+                                                      collector_number="600", lang="en", usd_etched=7.0)])
+        db.commit()
+    file = (HEADER + row("Test Etched", "CMM", "600")).encode()
+    assert preview(signed_in, file)["matched_by"] == {"set_number": 1}  # the preview says it names a printing
+    assert signed_in.post(f"{V1}/imports", files={"file": ("e.csv", file, "text/csv")}).status_code == 201
+    with app.state.db.sessions() as db:
+        [entry] = list(db.scalars(select(Entry)))
+        assert entry.scryfall_id is None  # left to the sync, as before this change
+        bulk = [LibraryCard.from_json({"id": sid("etched-only"), "name": "Test Etched", "set": "cmm", "collector_number": "600",
+                                       "finishes": ["etched"], "prices": {"usd_etched": "7.00"}})]
+        sync(db, bulk, day=date(2026, 10, 12))
+        db.expire_all()
+        [entry] = list(db.scalars(select(Entry)))
+        assert (entry.scryfall_id, entry.match_method, entry.price_finish) == (sid("etched-only"), "set_number", "etched")
+    [card] = signed_in.get(f"{V1}/collection/cards").json()["items"]
+    assert (card["price"]["source"], card["price"]["market"]) == ("scryfall", 7.0)  # not the file's 1.00 as Normal
+
+
+def test_a_card_found_by_name_keeps_the_files_own_price_and_a_named_printing_follows_the_catalog(signed_in, app):
+    from datetime import date
+
+    from mtg_toolkits.scryfall import Card as LibraryCard
+    from vault.sync import sync
+
+    def lib(key, name, set_code, number, usd):
+        return LibraryCard.from_json({"id": sid(key), "name": name, "set": set_code, "collector_number": number,
+                                      "prices": {"usd": str(usd)}, "finishes": ["nonfoil"]})
+
+    file = (HEADER + row("Test Named", "ZZZ", "1") + row("Test By Name", "ZZZ", "2")).encode()  # file price 1.00 each
+    assert signed_in.post(f"{V1}/imports", files={"file": ("n.csv", file, "text/csv")}).status_code == 201
+    exact_file = (HEADER + row("Test Named", "QQQ", "5") + row("Test By Name", "ZZZ", "2")).encode()
+    assert signed_in.post(f"{V1}/imports", files={"file": ("n2.csv", exact_file, "text/csv")}).status_code == 201
+    bulk = [lib("named", "Test Named", "qqq", "5", 9.0), lib("by-name", "Test By Name", "yyy", "7", 30.0)]
+    with app.state.db.sessions() as db:
+        sync(db, bulk, day=date(2026, 10, 12))
+    prices = {c["name"]: c["price"] for c in signed_in.get(f"{V1}/collection/cards").json()["items"]}
+    assert prices["Test Named"]["source"] == "scryfall"  # the printing is named: the catalog's price
+    assert prices["Test By Name"]["source"] == "file"  # found by name: the file's own price, not the $30 printing's
+    # and an unchanged re-import keeps what the sync resolved by name (the value does not flip to nothing until the next sync)
+    assert preview(signed_in, exact_file)["changes"]["unchanged"] == 2
+    assert signed_in.post(f"{V1}/imports", files={"file": ("n3.csv", exact_file, "text/csv")}).status_code == 201
+    with app.state.db.sessions() as db:
+        by = {e.name: (e.scryfall_id, e.match_method) for e in db.scalars(select(Entry))}
+    assert by["Test By Name"] == (sid("by-name"), "name")
+
+
+def test_a_nul_character_in_a_file_is_refused_not_a_server_error(signed_in):
+    bad = (HEADER + row("Test Bolt\x00", "M11", "149")).encode()
+    res = signed_in.post(f"{V1}/imports/preview", files={"file": ("n.csv", bad, "text/csv")})
+    assert res.status_code == 400 and "no card file contains" in res.json()["detail"]
+    started = signed_in.post(f"{V1}/uploads").json()
+    page = signed_in.post("/upload", data={"ticket": started["url"].split("ticket=")[1]},
+                          files={"file": ("n.csv", bad, "text/csv")})
+    assert page.status_code == 200 and "could not be read" in page.text

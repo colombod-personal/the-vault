@@ -163,9 +163,9 @@ changed. An import applies only what changed in their app since their last impor
      link) and then `get_staged_upload` once they say it is uploaded. The file is never read, pasted or opened in a browser.
    - Show: from `merge`, three things: what their app changed (the only part applied), the edits made here that are kept, and
      each conflict. With a bucket, the preview names it and totals what is left alone: say both. Then `matching_line`, as it is:
-     every row is kept; rows the file's set or number does not identify are matched by card name (priced as the cheapest
-     printing, which the file did not name), and any row the catalog does not hold is kept as written without a price. Never
-     ask the person to fix, re-export or re-upload the file; do not list rows unless they ask.
+     every row is kept; rows the file's set or number does not identify are found by card name, and their value
+     follows the file's own price until the printing is named; a row the Vault's card list does not hold yet is kept
+     as written. Never ask the person to fix, re-export or re-upload the file; do not list rows unless they ask.
    - Stop: a conflict is a card changed in both places, or dropped by their app but edited here. Ask about each one, one card at a
      time, with copies at the last import, in their app and here. If they do not choose, the edit made here is kept. Send their
      answers as `use_app_value` (the conflict ids where they want their app's value) or `conflicts`.

@@ -217,39 +217,62 @@ def preview_import(db: Session, user: User, content: bytes, options: ImportOptio
                "untouched": untouched(db, user, scope)} if scope is not None else {})
     exact = sum(by_method.get(m, 0) for m in EXACT)
     by_rule = len(entries) - len(unmatched) - exact
+    # Rows found by rule, each with how many printings it could be and what they cost (the library's Match): the answer says
+    # "between $X and $Y, shown at $X" when the file does not say which printing, never one price as if it were certain.
+    ruled = []
+    for i, (e, (sid, method, _)) in enumerate(zip(entries, matching.results)):
+        m = matching.found.get(i)
+        if m is None:
+            continue
+        low, high = m.lowest, m.highest
+        if m.candidates > 1 and low is not None and high is not None and high > low:
+            said = f"could be any of {m.candidates} printings, between ${low:,.2f} and ${high:,.2f}"
+        elif low is not None:
+            said = f"printing priced ${low:,.2f}"
+        else:
+            said = "no printing price known"
+        ruled.append({"row": i + 1, "name": e.name, "set": e.set_code, "number": e.collector_number, "method": method,
+                      "candidates": m.candidates, "lowest_usd": low, "highest_usd": high, "range": said})
+    several_rows = sum(1 for r in ruled if r["candidates"] > 1)
     return {"source": source, "rows": len(entries), "copies": sum(e.quantity for e in entries),
             **scoped, "changes": prep.changes,
             "merge": merge.describe(prep.plan, prep.baseline, bucket=scope.name if scope else None),
             "matched_rows": len(entries) - len(unmatched),
             "matched_by": dict(by_method),
             "printing_not_in_file_rows": by_rule,
+            "several_printings_rows": several_rows,
+            "found_by_rule": ruled[:PREVIEW_UNMATCHED],
             "unmatched_rows": len(unmatched), "unmatched": unmatched[:PREVIEW_UNMATCHED],
             "not_found_rows": not_found, "left_for_daily_update_rows": len(unmatched) - not_found,
-            "matching_line": matching_line(len(entries), exact, by_rule, len(unmatched) - not_found, not_found),
+            "matching_line": matching_line(len(entries), exact, by_rule, len(unmatched) - not_found, not_found, several_rows),
             "note": "row is the n-th card row of the file, not counting header lines. "
                     "`changes` is what happens to the collection; `merge` says what comes from the person's app, which "
                     "edits made in the Vault are kept and which cards changed on both sides (conflicts keep the "
                     "Vault's edit unless the person answers otherwise). "
                     "Every row is kept as written. `matching_line` says in one line how the rows were matched: "
                     "`matched_by` counts them by method (`id` and `set_number` name the printing the file has; `name_set`, "
-                    "`name_number` and `name` found the card and the Vault's rule chose the printing, which the file did "
-                    "not name). `unmatched` lists rows with no printing, each with `why`: `not_found` (no card of that "
-                    "name in the catalog the Vault holds: kept as written, unpriced) or `later` (the daily update "
-                    "matches it). Nothing in this answer is for the person to do."}
+                    "`name_number` and `name` found the card, not the printing: the daily update picks one by a fixed rule "
+                    "and the value follows the file's own price where it has one; `found_by_rule` gives each such row's "
+                    "number of candidate printings and their price range). `unmatched` lists rows with no printing, each "
+                    "with `why`: `not_found` (not in the Vault's card list yet: kept as written, priced from the file where "
+                    "it has a price) or `later` (the daily update matches it). Nothing in this answer is for the person to "
+                    "do."}
 
 
-def matching_line(rows: int, exact: int, by_rule: int, later: int, not_found: int) -> str:
+def matching_line(rows: int, exact: int, by_rule: int, later: int, not_found: int, several: int = 0) -> str:
     """How the rows of a file were matched, in one sentence (the same words in the upload page and the assistant's answer)."""
     n = lambda count, one, many: f"{count:,} {one if count == 1 else many}"  # noqa: E731
-    parts = [f"{n(exact, 'row names', 'rows name')} a printing the Vault knows"]
+    parts = [f"{n(exact, 'row names', 'rows name')} the printing"]
     if by_rule:
-        parts.append(f"{n(by_rule, 'was', 'were')} found by card name or collector number because the file's set or "
-                     "number is not the catalog's (the daily update ties each to the cheapest printing and shows it as "
-                     "not named by the file)")
+        parts.append(f"{n(by_rule, 'was', 'were')} found by card name or collector number because the file's set or number "
+                     "does not identify a printing the catalog has (their value follows the file's own price where it has "
+                     "one, until the printing is named"
+                     + (f"; {several:,} of them could be more than one printing" if several else "") + ")")
     if later:
-        parts.append(f"{n(later, 'row is', 'rows are')} matched by the daily update")
+        parts.append(f"{n(later, 'row is', 'rows are')} left for the daily update")
     if not_found:
-        parts.append(f"{n(not_found, 'row is', 'rows are')} not in the card catalog, kept as written without a price")
+        parts.append(f"{n(not_found, 'row is', 'rows are')} not in the Vault's card list yet, kept as written and priced "
+                     "from the file where it has a price")
     return f"All {n(rows, 'row is', 'rows are')} kept: " + "; ".join(parts) + "."
 
 
@@ -258,27 +281,34 @@ PREVIEW_UNMATCHED = 100
 
 @dataclass
 class Matching:
-    """Each entry's (scryfall_id, match_method, price_finish), and why an entry with no printing has none."""
+    """What the preview says about each entry and what an import stores.
+
+    ``results``: each entry's (scryfall_id, match_method, price_finish) as the preview forecasts it (the ladder over the
+    catalog included). ``stored``: what an import writes, which is what it always wrote: a printing the Vault already
+    holds or the file names, or what the daily sync already matched; a card found only by the ladder is left to the
+    sync, which sets the finish a printing exists in (an etched-only printing the file calls Normal) and re-resolves it
+    every day. ``why``: for an entry with no printing, "not_found" or "later". ``found``: the library's Match for a card
+    found by rule."""
     results: list[tuple]
-    why: dict[int, str]  # entry index -> "not_found" | "later" (vault.printing_lookup.Lookup.why_not)
+    stored: list[tuple]
+    why: dict[int, str]
+    found: dict[int, object] = field(default_factory=dict)
 
     def exact(self) -> list[tuple]:
-        """What an import stores: only the rows whose printing the file names. A card found by name is left for the daily
-        sync, which does it with the same ladder, so a guess is never locked in at import time and the file's own price
-        stays until it has (test_sync_keeps_imported_finish_and_does_not_lock_in_name_guesses)."""
-        return [r if r[1] in EXACT else (None, None, None) for r in self.results]
+        return self.stored
 
 
 def _match_printings(db: Session, entries, old_rows) -> Matching:
-    """Each entry's (scryfall_id, match_method, price_finish): carried over from the previous import, the id in the
-    file, set + collector number among the printings the server knows, then the library's ladder over the catalog
-    (a retired code's set, name + set, name + collector number, name; ``vault.printing_lookup``).
+    """Each entry's (scryfall_id, match_method, price_finish): carried over from the previous import (an exact match,
+    or the one the daily sync made by name), the id in the file, or set + collector number among the printings the
+    server knows; then the library's ladder over the catalog (``vault.printing_lookup``) for what the preview says.
     (None, None, None) when nothing finds the card; ``why`` says whether the catalog does not hold it or it is for the
     daily sync."""
-    known = {}
+    known, by_sync = {}, {}
     for row in old_rows:
-        if row.scryfall_id and row.match_method in EXACT:
-            known[delta.key_of(row.to_collection_entry())] = (row.scryfall_id, row.match_method, row.price_finish)
+        if row.scryfall_id and row.match_method:
+            (known if row.match_method in EXACT else by_sync)[delta.key_of(row.to_collection_entry())] = (
+                row.scryfall_id, row.match_method, row.price_finish)
     # Printings the server already knows, matched the way the library matches (set aliases, case,
     # leading zeros); queried by the number as written and as normalised, so the index is used.
     printing = lambda e: (normalize_set_code(e.set_code), normalize_collector_number(e.collector_number))  # noqa: E731
@@ -290,27 +320,35 @@ def _match_printings(db: Session, entries, old_rows) -> Matching:
             tuple_(Card.set_code, Card.collector_number).in_(wanted[i:i + 500]))
         for sid, set_code, number in db.execute(query):
             by_number[(set_code, normalize_collector_number(number))] = sid
-    out: list[tuple] = []
+    stored: list[tuple] = []
     for e in entries:
-        scryfall_id, method, price_finish = known.get(delta.key_of(e), (None, None, None))
+        key = delta.key_of(e)
+        scryfall_id, method, price_finish = known.get(key, (None, None, None))
         if scryfall_id is None and e.scryfall_id:
             scryfall_id, method = e.scryfall_id, "id"
         elif scryfall_id is None and e.set_code and e.collector_number and printing(e) in by_number:
             scryfall_id, method = by_number[printing(e)], "set_number"
-        out.append((scryfall_id, method, price_finish))
-    # The rest: the card is found by the ladder over the catalog (the rule that picks the printing is the library's).
-    rest = [i for i, (sid, _, _) in enumerate(out) if sid is None]
+        elif scryfall_id is None and key in by_sync:  # what the sync resolved by name stays until it resolves it again
+            scryfall_id, method, price_finish = by_sync[key]
+        stored.append((scryfall_id, method, price_finish))
+    # What the preview says: the ladder over the catalog for every row the file does not name a printing of.
+    out = list(stored)
+    rest = [i for i, (sid, method, _) in enumerate(stored) if sid is None or method not in EXACT]
     why: dict[int, str] = {}
+    by_rule: dict[int, object] = {}
     if rest:
         lookup = printings_of(db, {front(entries[i].name).lower() for i in rest})
         index = PrintingIndex(lookup.printings)
         for i in rest:
             found = index.match(entries[i])
             if found.printing is not None:
-                out[i] = (found.printing.id, found.method, None)
-            else:
+                if stored[i][0] is None:
+                    out[i] = (found.printing.id, found.method, None)
+                if found.method not in EXACT:
+                    by_rule[i] = found
+            elif stored[i][0] is None:
                 why[i] = lookup.why_not(entries[i].name)
-    return Matching(out, why)
+    return Matching(out, stored, why, by_rule)
 
 
 def _replace(db: Session, user: User, filename: str, version, prep: Prepared) -> Import:
@@ -423,6 +461,12 @@ def _clean(e: CollectionEntry, row: int) -> None:
     e.extra = {k: v for k, v in extra.items() if isinstance(k, str) and isinstance(v, str)}
     if not isinstance(e.name, str) or not e.name.strip():
         raise ImportError_(f"Row {row}: the card has no name.")
+    for column in (*CLIP, *REFUSE):  # Postgres refuses a NUL in text: a 500 for the whole preview, so a 400 for the row
+        value = getattr(e, column)
+        if isinstance(value, str) and "\x00" in value:
+            raise ImportError_(f"Row {row}: {column.replace('_', ' ')} has a character no card file contains.")
+    if any("\x00" in v for v in (*e.extra.values(), *e.source_prices)):
+        raise ImportError_(f"Row {row}: a column has a character no card file contains.")
     for column, size in CLIP.items():
         value = getattr(e, column)
         if value is not None and not isinstance(value, str):

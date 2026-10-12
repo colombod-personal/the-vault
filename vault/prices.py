@@ -64,8 +64,17 @@ def latest_prices(db: Session, scryfall_ids: set[str]) -> dict[str, PriceSnapsho
     return {p.scryfall_id: p for p in rows}
 
 
+RULE_METHODS = ("name_set", "name_number", "name")  # found by card name: the file did not name the printing
+
+
 def unit_price(row: Entry, snap: PriceSnapshot | None) -> tuple[float, bool]:
     """(price, from_scryfall). Falls back to the file's own market price."""
+    # A card the file does not name the printing of (found by name) is worth what the file says it is: the app's own price for
+    # the printing the person owns is more truthful than the cheapest printing the Vault would pick, which would show a loss
+    # that is not there. It follows the catalog's price once the printing is named (an exact match).
+    file_price = plausible_price((row.source_prices or {}).get("market"))
+    if row.match_method in RULE_METHODS and file_price is not None:
+        return file_price, False
     if snap is not None:
         price = plausible_price(snap.for_finish(row.price_finish or row.finish))
         if price is not None:  # an implausible stored price falls back to the file's, like a missing one
