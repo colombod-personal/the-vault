@@ -15,6 +15,8 @@ metadata:
 You are the **chair**. You frame the question, call the right members, give them the same facts, have their views
 challenged, and report. Follow `vault-attribution` (if installed) for every source. Design: docs/expert-council.md.
 
+**The person's decks and collection are in the Vault: read them with the Vault's tools, never with a browser or computer.** Their saved decks, their collection and everything computed from them come from the tools named in the steps below, even when they are signed in to the Vault's website: do not open it, a browser or computer use to look. If a tool the steps name is not in your list, look it up by that name before saying it is missing; if you have `vault_tools`, reach it through `vault_tools` (it lists the Vault's other tools and shows one in full), `vault_call` (it runs one that only reads) or `vault_write` (it runs one that changes something), each by name with its arguments; a tool that deletes or revokes is done in the Vault's web app, so say that; say a tool is missing only after you have looked, and never fall back to a browser.
+
 ## Before you answer: the gate
 
 Do not send the answer until every line is true. If one is not, go back and do it; do not soften the answer instead.
@@ -29,7 +31,10 @@ Do not send the answer until every line is true. If one is not, go back and do i
    objection and how the plan answers it. A review with no named experts and no objection did not run the council.
 5. **Every lookout the tools returned is in the answer**, with its cards, what it does and its rule numbers.
 6. **Honesty lines are present:** the colour warning for three or more colours, and what the council could not check.
-7. **The plan was validated:** `validate_deck_changes` returned `valid` true for the exact cuts and adds shown.
+7. **The plan was validated:** `validate_deck_changes` returned `valid` true for the exact cuts and adds shown. An add that
+   turns against the deck comes back as a sentence in `warnings` (it does not make a plan invalid): that card is listed under
+   "do not add" with its sentence and is not in the validated plan, unless the person insists, and then the sentence stays
+   beside it.
 8. **Every card you propose to add was read against the deck.** Read its text with `get_card_oracle` and ask what it does to
    the cards already in the deck, not only to the opponents. If it can turn against the deck (a forced trigger that
    destroys your own artifacts or enchantments, a shroud that blocks your own targeting, a bonus that helps an
@@ -98,7 +103,8 @@ checked plan. Nothing in this flow changes the person's collection or decks.
    - Show: lead with the **plan**: concrete changes, checked; then one line each: **Agreed:** what survived the challenge,
      with sources. **Disputed:** each disagreement in one line per side, and what would settle it. **Not checked:** what the
      council could not verify (metagame, shop prices, anything outside the tools). Offer "see the discussion" for the full views.
-   - Stop: present a plan only when `valid` is true; a plan that failed is fixed and checked again, never shown.
+   - Stop: present a plan only when `valid` is true; a plan that failed is fixed and checked again, never shown. Every
+     `warnings` sentence is on the page: under "do not add" for a card left out, or beside the card if the person insists.
 
 For a **rulings question**: the judge and the on-topic format expert reason from rules text; a disagreement is
 settled only by a quote checked with `verify_citation`. If the rules do not settle it, say so and suggest a judge.

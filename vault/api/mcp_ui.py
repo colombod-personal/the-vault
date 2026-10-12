@@ -14,7 +14,10 @@ Rules the views keep (docs/compliance.md):
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
+from functools import lru_cache
 
 from .. import provenance as prov
 from ..deck_tools import FORMATS
@@ -435,7 +438,9 @@ function render(root, env) {
     if (v && v.error) { planBox.appendChild(h("p", { class: "bad", text: v.error })); }
     else if (v) {
       var x = v.vr.result;
-      planBox.appendChild(h("p", { class: x.valid ? "ok" : "bad", text: (x.valid ? "Valid. " : "Not valid. ") + "The adds cost " + usd(x.added_cost_usd) + (x.budget_usd !== null ? " of " + usd(x.budget_usd) : "") + "; the deck has " + x.cards_after + " cards." }));
+      var warned = x.warnings || [];  // a card that turns against the deck (bead vault-064.11): shown above everything else, whatever `valid` says
+      warned.forEach(function (w) { planBox.appendChild(h("p", { class: "bad", text: "Warning: " + w })); });
+      planBox.appendChild(h("p", { class: x.valid && !warned.length ? "ok" : "bad", text: (x.valid ? (warned.length ? "Valid, with " + warned.length + (warned.length === 1 ? " warning" : " warnings") + ". " : "Valid. ") : "Not valid. ") + "The adds cost " + usd(x.added_cost_usd) + (x.budget_usd !== null ? " of " + usd(x.budget_usd) : "") + "; the deck has " + x.cards_after + " cards." }));
       planBox.appendChild(h("p", { text: "Net price change: " + signed(x.net_change_usd) + " (adds " + usd(x.added_cost_usd) + ", cuts " + usd(x.cut_value_usd) + "). The deck: " + usd(x.deck_cost_before_usd) + " before, " + usd(x.deck_cost_after_usd) + " after." }));
       if ((x.cut_unpriced || []).length) { planBox.appendChild(h("p", { class: "small muted", text: "No price for the cut " + x.cut_unpriced.join(", ") + ": counted as $0.00." })); }
       planBox.appendChild(h("p", { class: "small muted", text: "The budget counts the adds only: cuts are not refunded against it." }));
@@ -459,7 +464,7 @@ function render(root, env) {
         } else { plan = plan.filter(function (s) { return !(s.add && s.add.name === c.name); }); }
         changed();
       });
-      root.appendChild(h("label", { class: "box", style: "display:block" }, [box, document.createTextNode(" "), h("strong", { text: c.name }), document.createTextNode("  " + usd(c.price_usd) + " (" + (c.price_date || "") + ")  rank " + (c.edhrec_rank === null ? "n/a" : c.edhrec_rank)), h("div", { class: "small muted", text: c.why })]));
+      root.appendChild(h("label", { class: "box", style: "display:block" }, [box, document.createTextNode(" "), h("strong", { text: c.name }), document.createTextNode("  " + usd(c.price_usd) + " (" + (c.price_date || "") + ")  rank " + (c.edhrec_rank === null ? "n/a" : c.edhrec_rank)), h("div", { class: (c.lookouts || []).length ? "small bad" : "small muted", text: c.why })]));
     });
   });
   if ((r.cut_candidates || []).length) {
@@ -687,10 +692,6 @@ VIEWS = {
 }
 
 
-def uri(view: str) -> str:
-    return URI_PREFIX + view
-
-
 def html(view: str) -> str:
     spec = VIEWS[view]
     script = SHARED_JS.replace("__VIEW__", view).replace("__PROTOCOL__", PROTOCOL) + spec["js"].replace("__FORMATS__", json.dumps(list(FORMATS)))
@@ -700,21 +701,55 @@ def html(view: str) -> str:
 
 
 def resource_meta(view: str) -> dict:
-    """Content-security metadata for the host: no network at all, except Scryfall's image server for the card view."""
-    csp = {"resourceDomains": [SCRYFALL_IMAGES]} if VIEWS[view].get("images") else {}
-    # ChatGPT's own key too: the ChatGPT desktop app showed the card picture as an empty box with only ui.csp (2026-10-10)
-    legacy = {"connect_domains": [], "resource_domains": [SCRYFALL_IMAGES] if VIEWS[view].get("images") else []}
+    """Content-security metadata for the host: no network at all, except Scryfall's image server for the card view.
+
+    Both keys carry the same domains. `ui.csp` is the MCP Apps standard (camelCase `resourceDomains`, `connectDomains`);
+    `openai/widgetCSP` is ChatGPT's own key (snake_case `resource_domains`, `connect_domains`), which the ChatGPT desktop app reads
+    too (2026-10-10: the card picture was an empty box with only `ui.csp`). Images, fonts, scripts and styles all count as
+    resources: if a view ever loads one from another host, that host goes here, and `tests/test_mcp_apps.py` fails until it does."""
+    images = [SCRYFALL_IMAGES] if VIEWS[view].get("images") else []
+    csp = {"resourceDomains": images} if images else {}
+    legacy = {"connect_domains": [], "resource_domains": images}
     return {"ui": {"csp": csp, "prefersBorder": True}, "openai/widgetCSP": legacy}
+
+
+@lru_cache(maxsize=None)
+def version(view: str) -> str:
+    """Eight hex digits that change whenever the page or its security metadata change.
+
+    OpenAI: "Treat the resource URI as a cache key. When you make a breaking change to the HTML, JavaScript, or CSS, publish a new
+    URI" (developers.openai.com/apps-sdk/build/chatgpt-ui). The domains a view may load from are part of that: #446 added a key to
+    the metadata under the same `ui://vault/card`, which a host that keeps the template by URI does not see again. A URI that carries
+    this digest is new exactly when the page or its policy is."""
+    material = html(view) + json.dumps(resource_meta(view), sort_keys=True)
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:8]
+
+
+def uri(view: str) -> str:
+    return f"{URI_PREFIX}{view}-{version(view)}"
+
+
+_VERSIONED = re.compile(r"^(?P<view>[a-z]+)(?:-[0-9a-f]{8})?$")
+
+
+def view_of(resource_uri: str) -> str | None:
+    """The view a `ui://vault/...` address names: `card` (the address before versions, still in tool lists a host cached) or
+    `card-<digest>` (any digest: a host holding an older tool list gets the current page, never an error)."""
+    if not resource_uri.startswith(URI_PREFIX):
+        return None
+    found = _VERSIONED.match(resource_uri[len(URI_PREFIX):])
+    return found["view"] if found and found["view"] in VIEWS else None
 
 
 def resources() -> list[dict]:
     return [{"uri": uri(v), "name": f"vault_{v}", "title": f"The Vault: {s['title']}", "mimeType": MIME,
-             "description": f"{s['title']} view for the matching Vault tool (MCP Apps)."} for v, s in VIEWS.items()]
+             "description": f"{s['title']} view for the matching Vault tool (MCP Apps).",
+             "_meta": resource_meta(v)} for v, s in VIEWS.items()]  # the policy is on the listing too, for a host that reads it there
 
 
 def read(resource_uri: str) -> dict | None:
-    view = resource_uri[len(URI_PREFIX):] if resource_uri.startswith(URI_PREFIX) else None
-    if view not in VIEWS:
+    view = view_of(resource_uri)
+    if view is None:
         return None
     return {"contents": [{"uri": resource_uri, "mimeType": MIME, "text": html(view), "_meta": resource_meta(view)}]}
 

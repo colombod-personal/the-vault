@@ -188,6 +188,8 @@ What the design left open, and how it was decided:
   is stored with the upload. The preview's `content_hash` covers the file and the bucket (the plain file hash when there is no bucket, as before),
   so a changed file or bucket after the preview is refused (409). A link whose bucket is deleted is deleted with it, never turned into a
   whole-collection import. `bucket_id` on the preview and apply of an upload is only a check that it is the bound bucket.
+  Any connection may make the link and read the preview, a read-only one too (vault-wxy.6: it imports nothing; `POST /uploads` is in
+  `READ_ONLY_POSTS`, the apply is not): the file a person attaches in a chat goes this way, and only the import needs write.
 
 Built since (#128, the app): tags in Browse and the card drawer (`public/views/tags.jsx`): chips under each card's name, the tag filter
 (`#/browse?tag=`, combinable with `bucket=`), tick boxes on every list (the bucket move bar stays bucket-only) with a bulk bar to tag or

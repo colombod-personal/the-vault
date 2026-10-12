@@ -3,8 +3,10 @@ carries third-party data says where it came from, read-only tokens can use the c
 grounding rules reach the agent (instructions and prompts)."""
 
 import re
+from pathlib import Path
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 
 from tests.test_agents import CSV, auth, call_tool, make_token, rpc
@@ -386,3 +388,17 @@ def test_every_rule_that_left_a_description_lives_in_the_instructions_or_a_skill
         text = mcp.INSTRUCTIONS if where == "GROUNDING" else (root / where).read_text(encoding="utf-8")
         assert flat(phrase) in flat(text), (rule, where, phrase)
     assert GROUNDING in mcp.INSTRUCTIONS  # the server instructions every host reads at initialize
+
+
+def test_a_read_only_grant_lists_every_read_tool_the_skills_name(agent, bot):
+    """vault-wxy.5: a chat that said list_decks 'wasn't available' must not be able to blame the grant. The plugin asks for the read scope
+    only, so every tool a skill names that does not write is in tools/list for a read-only token."""
+    read = make_token(agent)
+    listed = {t["name"] for t in rpc(bot, "tools/list", token=read).json()["result"]["tools"]}
+    named = set()
+    for path in sorted((Path(__file__).parent.parent / "skills").glob("*/SKILL.md")):
+        front = yaml.safe_load(path.read_text(encoding="utf-8")[4:].split("\n---\n", 1)[0])
+        named |= set(front["metadata"]["vault-tools"].split())
+    reads = {n for n in named if not mcp.BY_NAME[n].write}
+    assert {"list_decks", "get_deck", "deck_stats", "get_collection_summary"} <= reads
+    assert reads <= listed, f"a read-only token cannot see: {sorted(reads - listed)}"

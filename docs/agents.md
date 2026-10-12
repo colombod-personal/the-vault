@@ -23,7 +23,7 @@ Created in Account → Agents & API, or with `POST /api/v1/me/tokens`
 (`{"name", "scopes": ["read"] | ["read", "write"], "expires_in_days": 1–365}`).
 
 - The token (`vault_pat_…`) is shown once. Only its SHA-256 is stored.
-- **read** covers everything under `GET`, plus the POSTs that only compute or revoke the token
+- **read** covers everything under `GET`, plus `POST /uploads` (a link that waits for the person) and the POSTs that only compute or revoke the token
   itself: `decks/parse`, `decks/coverage`, `cards/lookup`, `auth/revoke` and the deck computations (`decks/stats`, `decks/legality`, `decks/upgrades`, `decks/validate-changes`, `decks/combos`, `decks/shopping-list`). **write** adds imports, saving decks and sharing.
   Without write, a change answers `403` with `WWW-Authenticate: Bearer error="insufficient_scope"`.
 - Tokens can never manage the account: they can't create tokens, delete the account, export
@@ -101,7 +101,7 @@ shopping, collection, Archidekt helper, expert council) and the experts, so they
 
 Stateless Streamable HTTP. Each JSON-RPC request gets one `application/json` answer, with no
 server-side session and no SSE, which fits serverless hosting. `initialize` answers with a signed
-`Mcp-Session-Id` that only records whether the client advertised the MCP Apps extension (`docs/mcp-apps.md`);
+`Mcp-Session-Id` that only records two presentation bits: whether the client advertised the MCP Apps extension (`docs/mcp-apps.md`) and whether it gets the compact tool list (`docs/plugin-delivery-and-testing.md`);
 clients that never send it back are served as before. Protocol versions 2025-06-18, 2025-03-26
 and 2024-11-05 are supported. It was tested with the official MCP Python SDK client. A JSON-RPC
 batch (older protocol versions) holds 1 to 20 calls; an empty or larger one is refused (`-32600`).
@@ -137,7 +137,7 @@ Tools (the `share_id` argument reads a collection someone shared with you):
 | `list_export_formats` (download links for Dragon Shield, Moxfield, Archidekt, generic CSV, text) | `/collection/exports` |
 | `list_shared_with_me`, `get_shared_deck` | `/shared` |
 
-\* write tools, listed only for tokens with the write scope.
+\* write tools, listed only for tokens with the write scope; the one exception is `start_collection_upload`, which a read-only token lists too (a link that waits for the person to confirm).
 
 Each tool calls the API in-process with the caller's credentials (an OAuth token is accepted on those calls and on `/api/mcp`, nowhere else), so the API enforces every
 rule: tenancy, sharing, scopes, validation and paging. Tool arguments are checked against the

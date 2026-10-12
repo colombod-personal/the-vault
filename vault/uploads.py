@@ -1,7 +1,8 @@
-"""Collection files too big for a chat: the assistant asks for a one-time upload link, the person picks the file on a
-plain page, the file waits (staged, not imported), the assistant shows the preview, and the person confirms.
+"""Collection files too big for a chat: the assistant asks for an upload link (good for one hour, not single-use), the person
+picks the file on a plain page, the file waits (staged, not imported), the assistant shows the preview, and the person confirms.
 
-- ``POST /api/v1/uploads`` (write): a ticket and the link to give the person. Only the ticket's hash is stored. With
+- ``POST /api/v1/uploads`` (any scope, read-only included: it imports nothing, vault.app.READ_ONLY_POSTS): a ticket and the
+  link to give the person. Only the ticket's hash is stored. With
   ``bucket_id`` the upload goes into that bucket only (#124): the link is bound to it, the preview and the apply use it, and
   the page cannot change it. Without, the page offers the person a picker of their own buckets when they have more than one.
 - ``GET /upload?ticket=`` and ``POST /upload``: the page. The ticket is the only credential; it works for one hour,
@@ -12,7 +13,12 @@ plain page, the file waits (staged, not imported), the assistant shows the previ
   file that was previewed (#352: the link can be used again until it expires, so what is stored when apply runs may not be
   what the person was shown; the hash covers the bucket too). Like every import it applies only what changed in the person's
   app and keeps edits made in the Vault (``vault.merge``).
-- At most 5 open links per person and 10 started a minute; expired files are deleted by the daily job (``vault.retention``).
+- At most 5 open links per person and 10 started a minute (a retry makes another link and uses a slot); each file posted to
+  the page counts against its own per-link allowance (``import_limit`` a minute for each link, 429, not the person's /imports
+  counter); expired files are deleted by the daily
+  job (``vault.retention``). A link is not single-use: it works until it expires and a second file replaces the first. Links
+  are not attributed to an app and there is no list or cancel yet (a read-only app can hold the five and use the starts of a
+  minute, the same as a write app could: docs/mcp-oauth-threat-model.md, "The upload link for a read-only connection").
 """
 
 from __future__ import annotations
@@ -111,7 +117,7 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         return {"id": bucket.id, "name": bucket.name} if bucket is not None else None
 
     @router.post(f"{V1}/uploads", tags=["imports"], status_code=201,
-                 summary="A one-time link for the person to upload a collection file (staged, not imported); with `bucket_id` "
+                 summary="A link, good for one hour, for the person to upload a collection file (staged, not imported); with `bucket_id` "
                          "the file goes into that bucket only")
     def start_upload(request: Request, bucket_id: BucketId = None, user: User = Depends(current_user),
                      db: Session = Depends(get_db)) -> dict:
@@ -122,8 +128,9 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         open_links = db.scalar(select(func.count()).select_from(StagedUpload).where(StagedUpload.user_id == user.id))
         if open_links >= MAX_OPEN:
             db.commit()
-            raise HTTPException(409, f"You already have {MAX_OPEN} open upload links (each works for one hour). Use one of them "
-                                "or wait for one to expire.")
+            raise HTTPException(409, f"You already have {MAX_OPEN} open upload links (each works for one hour, and again until "
+                                "it expires). The person can finish uploading to one of the links already given in this chat, or "
+                                "let them expire; there is no list of open links yet, and none can be cancelled.")
         ticket = secrets.token_urlsafe(32)
         staged = StagedUpload(user_id=user.id, ticket_hash=_hash(ticket), expires_at=_now() + LIFETIME,
                               bucket_id=bucket_id, bucket_bound=bucket_id is not None)
@@ -226,12 +233,23 @@ def build_router(get_db, current_user, settings) -> APIRouter:
                 f"{options}</select></label></p><p>A bucket keeps the rest of your collection as it is.</p>")
 
     @router.post("/upload", include_in_schema=False)
-    async def upload_file(ticket: str = Form(""), bucket: str = Form(""), file: UploadFile = File(...),
+    async def upload_file(request: Request, ticket: str = Form(""), bucket: str = Form(""), file: UploadFile = File(...),
                           db: Session = Depends(get_db)):
         staged = _live(db, ticket) if ticket else None
         if staged is None:
             return page("Upload link expired", "<h1>This upload link has expired</h1>"
                         "<p>Ask your assistant for a new one.</p>", status=404)
+        # Up to 20 MB of parsing and matching, limited to IMPORT_LIMIT a minute per link, on a counter of its own: the shared
+        # per-person "import" counter counts refused tries too, so whoever still holds a link (an app the person has since
+        # disconnected) could loop here and keep the person's own /imports at 429. A made-up ticket was refused above and is
+        # counted nowhere. A person is bounded by 5 links x IMPORT_LIMIT, and a link that is being looped is replaced by a new one.
+        try:
+            per_user(request, "upload page", staged.id, settings.import_limit, db, kind="ticket")
+        except HTTPException as exc:
+            limited = page("Too many uploads", "<h1>Too many uploads just now</h1><p>Wait a minute, then upload the file "
+                           "again with the same link. If this keeps happening, ask your assistant for a new link.</p>", status=429)
+            limited.headers["Retry-After"] = (exc.headers or {}).get("Retry-After", "60")
+            return limited
         chosen, asked = staged.bucket_id, bucket.strip()
         if staged.bucket_bound:  # made for a bucket by the assistant: the page cannot send it elsewhere
             if asked and asked != str(staged.bucket_id):
@@ -248,7 +266,8 @@ def build_router(get_db, current_user, settings) -> APIRouter:
                 chosen = found
         content = await file.read(MAX_UPLOAD_BYTES + 1)
         if len(content) > MAX_UPLOAD_BYTES:
-            return page("File too large", "<h1>The file is too large</h1><p>20 MB at most.</p>", status=413)
+            return page("File too large", "<h1>The file is too large</h1><p>20 MB at most, and about 4 MB on mtgvault.cards, "
+                        "where the hosting platform refuses a bigger request first.</p>", status=413)
         staged.content, staged.filename, staged.uploaded_at = content, (file.filename or "upload.csv")[:255], _now()
         staged.bucket_id = chosen
         db.commit()

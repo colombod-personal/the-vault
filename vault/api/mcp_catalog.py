@@ -70,7 +70,8 @@ Rules, cards and prices - how to answer:
   A deck read from Archidekt is Archidekt's: read only the deck the person gave you (check list_decks first: it may be
   saved), credit Archidekt and give the deck's link back.
 - Connection and files: call whoami first to check the connection and the data versions. For a file too big to paste,
-  give the person the one-time upload link, then call get_staged_upload once they say it is uploaded. Give export
+  give the person the upload link (good for one hour) at once (any connection can make it), then call get_staged_upload once they
+  say it is uploaded; a file they attach or name goes this way, never read or pasted. Give export
   download links (list_export_formats) rather than reading the files. When they ask to see which printings of a card
   they own, or to match a card in their hand, use show_owned_printings.
 - Changes to the person's data (their collection, decks and shares) are theirs to decide. Tools that change
@@ -209,7 +210,10 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              provenance=("computed",)),
         Tool("find_upgrades", "Upgrade candidates for a deck within a budget: legal, inside the deck's colors, not already in it, each priced "
              "at or under budget_usd, for the roles the deck is short of (or the roles you name). Ordered by popularity, which is "
-             "not power. Also lists the deck's least-played untagged cards as cut candidates. The candidates are not checked as one "
+             "not power. A candidate that would turn against the deck as it is (a forced trigger that destroys its own artifacts, a shroud "
+             "that blocks its own Equipment, a bonus shared with opponents) carries `lookouts`, read by the Vault from the card text, "
+             "each with the deck's cards it would hurt, the rule numbers and what to do, and is named in `warnings`. Also lists the "
+             "deck's least-played untagged cards as cut candidates. The candidates are not checked as one "
              "change; validate_deck_changes checks a list of cuts and adds." + TAKES_DECK,
              {"text": deck, "deck_id": DECK_ID, "format": fmt,
               "budget_usd": {"type": "number", "minimum": 0, "maximum": 100000, "description": "The most any single added card may cost"},
@@ -222,7 +226,11 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              provenance=("computed",), ui="upgrades"),
         Tool("validate_deck_changes", "Checks a proposed list of cuts and adds: every card exists and is legal, adds are in "
              "the deck's colors, the resulting deck is still legal, and the adds' total price is within budget_usd. `valid` is true "
-             "only when every check passes. Each cut or add is a card name; a quantity ('2 Mind Stone', '2x Mind Stone') repeats it and a set and "
+             "only when every check passes. It also reads the deck as it would be after the cuts and adds: `lookouts` lists the cards that can "
+             "turn against their owner (read by the Vault from the card text, with the cards each hurts and the rule numbers), each marked "
+             "`new` when the plan creates or widens it, `lookouts_cleared` those the cuts remove, and an add that turns against the deck "
+             "carries `lookouts` in its `added_cards` entry and a sentence in `warnings`. A lookout is a warning and does not change "
+             "`valid`. Each cut or add is a card name; a quantity ('2 Mind Stone', '2x Mind Stone') repeats it and a set and "
              "number are ignored." + TAKES_DECK,
              {"text": deck, "deck_id": DECK_ID, "format": fmt, "adds": {"type": "array", "maxItems": 60, "items": {"type": "string", "maxLength": 300}},
               "cuts": {"type": "array", "maxItems": 60, "items": {"type": "string", "maxLength": 300}},
@@ -283,7 +291,7 @@ START_TOUR = """Start here: a first look at The Vault, from the person's own dat
 
 1. Call `whoami`. Say who the person is signed in as, their scopes and the data versions the Vault holds (the Comprehensive Rules edition and the price date). If it fails, stop and say the connection is not working; the Connect page of the Vault has the setup page for their assistant.
 2. Call `get_collection_summary`. If it shows no collection (no cards), say so, explain how to import one (in the Vault, the Import page takes a Dragon Shield, Moxfield or generic CSV export) and stop here.
-3. Otherwise show the totals from that answer: copies, printings, sets, market value and the prices date. Then call `search_cards` with sort `-value` and a limit of 1, and show their most valuable card with its dated Scryfall price.
+3. Otherwise show the totals from that answer: copies, printings, sets, market value and the prices date. Then call `search_cards` with sort `-unit_value` and a limit of 1, and show their most valuable card with its dated Scryfall price.
 4. Answer one rules question with a citation, about a card or an ability from their own collection: use `find_rules_term` or `search_rules`, open the rule with `get_rule`, check any quote with `verify_citation` before you present it, and say the rule number and the rules edition.
 5. Decks: call `list_decks`. If there are decks, show one with `get_deck`: lead with its name, format, commander(s), card count and colour identity, then how much of it the person owns and what is missing. If there are no decks (normal for a new account), say so, keep going read-only, and offer to look at a decklist they paste (`check_decklist`) or a public Archidekt link (`get_archidekt_deck`) right now: nothing is saved. Say that saving a deck needs write access, which setup did not ask for, and continue with the next step.
 6. Finish with three next steps the person can ask for, chosen from what you saw (for example a rules question, checking a deck against their collection, or what their most valuable cards are worth over time).
@@ -352,7 +360,7 @@ PROMPTS = [
              "casual table voice), plus a rules judge and a devil's advocate, and the synergy or collection analyst if useful. Give each at most "
              "three points with evidence (read card text with get_card_oracle and fetch every rule number you cite with get_rule; read every card you propose to add against the deck, and if it can turn against the deck, say plainly not to add it and name the cards it would hurt), then let the devil's advocate challenge them with evidence; a rules disagreement is settled "
              "only by a quote checked with verify_citation (and rules_changes when a rule a member relies on may have changed lately). Answer with the plan first (checked with "
-             "validate_deck_changes, shown only if valid is true), then Agreed, Disputed and Not checked in one line each, and offer the full "
+             "validate_deck_changes, shown only if valid is true; a card whose add turns against the deck comes back in its warnings and is listed under \"do not add\" with that sentence, outside the plan, unless the person insists), then Agreed, Disputed and Not checked in one line each, and offer the full "
              "discussion on request. Label metagame knowledge as opinion."},
     {"name": "evaluate_deck", "title": "Check a deck from a link",
      "description": "Read one Archidekt deck from its link (or a saved deck), check it against the collection, and give a change list and what to buy.",

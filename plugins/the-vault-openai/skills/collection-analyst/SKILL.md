@@ -1,15 +1,16 @@
 ---
 name: collection-analyst
 description: >-
-  Answer questions about a person's own Magic card collection in The Vault - value, gains and losses,
-  what they own, what is shared with them, and how a deck fits it. Use for "what is my collection
-  worth", "my most valuable cards", "do I own the cards for this deck", price changes, sets or colors
-  in the collection, spare copies, small edits when they bought, sold or traded cards, bringing in a fresh export
-  from their app, organising it into buckets and tags, sharing, starting over or undoing a change, and signing out
-  of the Vault or switching to another Vault account.
+  Use whenever a person wants to get cards or a file into their Magic card collection in The Vault: "update,
+  refresh, sync, import or load my collection", "I have an export or CSV from my app" (Dragon Shield, Moxfield,
+  Archidekt, ManaBox, Delver Lens, TCGplayer, or any other app), "how do I get the file to you", "add the cards I
+  bought". The Vault gives a private upload link at once; never answer "attach the file here". Also answers
+  questions about a person's own collection: what it is worth, gains and losses, what they own, what is shared with
+  them, how a deck fits it, price changes, sets or colors, spare copies, small edits when they bought, sold or
+  traded cards, organising it into buckets and tags, sharing, and starting over or undoing a change.
 license: MIT
 metadata:
-  vault-tools: "whoami get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline get_collection_pnl list_spare_copies list_card_names card_roles check_decklist lookup_cards refresh_prices update_owned_cards confirm_owned_cards_update undo_owned_cards_update show_owned_printings list_imports get_import list_export_formats import_collection_csv start_collection_upload get_staged_upload confirm_staged_upload list_buckets create_bucket rename_bucket move_cards delete_bucket reset_collection undo_collection_reset list_tags tag_cards untag_cards rename_tag delete_tag get_card_metadata set_card_metadata get_bucket_metadata set_bucket_metadata list_shared_with_me get_shared_deck list_my_shares accept_share stop_sharing sign_out"
+  vault-tools: "whoami get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline get_collection_pnl list_spare_copies list_card_names card_roles check_decklist lookup_cards refresh_prices update_owned_cards confirm_owned_cards_update undo_owned_cards_update show_owned_printings list_imports get_import list_export_formats import_collection_csv start_collection_upload get_staged_upload confirm_staged_upload list_buckets create_bucket rename_bucket move_cards delete_bucket reset_collection undo_collection_reset list_tags tag_cards untag_cards rename_tag delete_tag get_card_metadata set_card_metadata get_bucket_metadata set_bucket_metadata list_shared_with_me get_shared_deck list_my_shares accept_share stop_sharing"
 ---
 
 # Collection analyst
@@ -17,15 +18,32 @@ metadata:
 This is the person's own private data plus Scryfall's prices. Report what the tools return; do not
 estimate or fill gaps. Follow `vault-attribution` (if installed) for card data and prices.
 
+**The person's decks and collection are in the Vault: read them with the Vault's tools, never with a browser or computer.** Their saved decks, their collection and everything computed from them come from the tools named in the steps below, even when they are signed in to the Vault's website: do not open it, a browser or computer use to look. If a tool the steps name is not in your list, look it up by that name before saying it is missing; if you have `vault_tools`, reach it through `vault_tools` (it lists the Vault's other tools and shows one in full), `vault_call` (it runs one that only reads) or `vault_write` (it runs one that changes something), each by name with its arguments; a tool that deletes or revokes is done in the Vault's web app, so say that; say a tool is missing only after you have looked, and never fall back to a browser.
+
+In a host whose tool list is compact, `delete_bucket`, `delete_tag`, `untag_cards`, `reset_collection`, `undo_collection_reset`, `stop_sharing` and `import_collection_csv` are done by the person in the Vault's web app (a file is brought in from the chat with `start_collection_upload`): say so instead of looking for them.
+
 **Check the connection when something is off.** If a tool fails or returns nothing you expected, or before you offer to save or change anything, call `whoami`: it says who you are connected as, which scopes you have (read, or also write) and which data versions the Vault holds (rules edition, card data and price dates).
+
+## A file the person attaches or names
+
+A person who has the Vault and wants cards or a file in their collection uses the Vault's tools first, and never gets a generic
+"attach the file here" answer: that covers "update, refresh or sync my collection", "add the cards I bought", "how do I get the file
+to you" and "how do I load my export". A collection file the person attaches or mentions (a CSV or text export from Dragon Shield,
+Moxfield, Archidekt, ManaBox, Delver Lens, TCGplayer or another app) never goes
+through the chat. Do not try to read, open, summarise or paste it, and do not use a browser for it. Call `start_collection_upload`
+at once and give them the upload link (good for one hour: it works until it expires, and uploading again replaces the file; use the link already given in this chat rather than making another, there is no list of links); say that nothing is imported until they have seen the preview and
+said yes. When they say the file is uploaded, call `get_staged_upload` and show the preview (see "Flow: Import a collection").
+Any connection can make the link and read the preview, read-only ones included; only the final import (`confirm_staged_upload`)
+needs write access, so a read-only connection is told at that step to reconnect the Vault and tick Write on its consent page.
 
 ## Answering questions
 
 1. **Start with `get_collection_summary`.** It has copies, printings, market value, amount paid, P&L (only
    over copies with a known price paid) and the date of the prices. State that date with any value.
 2. **Pick the tool that answers the question** rather than paging through everything:
-   - most valuable or specific printings: `search_cards` with `sort="-value"`, a small `limit`, `query`,
-     `set` or `name` filters; follow `next_cursor` only if more is needed;
+   - most valuable or specific printings: `search_cards` with `sort="-unit_value"`, a small `limit`, `query`,
+     `set` or `name` filters (`sort="-unit_value"` ranks by the price of one copy; `sort="-value"` by a printing's total, price times
+     copies owned); follow `next_cursor` only if more is needed;
    - one printing in detail and its recent prices: `get_card`;
    - "show me my Sol Rings", "which printings do I have": `show_owned_printings` (pictures, most copies first);
    - rolled up by card name (top N, by color or type): `list_card_names`;
@@ -60,12 +78,6 @@ say what the link shares and from whom before you use it, and use only a link th
 without `confirm` lists the shares and changes nothing: show the one they mean and send `confirm` only after they say yes. Creating
 a share is not an assistant's job (an invite link hands data to someone): send the person to the web app (Account, Share your
 collection).
-
-## Signing out or switching account
-
-When the person asks to sign out of the Vault or switch to another Vault account, call `sign_out` without `confirm`: say which
-account (name and masked email) and which app it would sign out, then send `confirm` only after they say yes. The next request asks them
-to sign in; on the Vault's page they choose "Use a different account" to switch.
 
 ## Editing what they own
 
@@ -121,7 +133,7 @@ by (a score, why you suggested a card). Nothing changes until step 4.
      back is the undo.
 5. **Check and say how to undo.**
    - Calls: `list_buckets`, `list_tags`.
-   - Show: the new counts, and the undo in one line (`untag_cards` for a tag, `move_cards` back for a move).
+   - Show: the new counts, and the undo in one line (`move_cards` back for a move; a tag is removed with `untag_cards`, which a host with a compact tool list leaves to the web app).
    - Stop: none; do not tidy anything else without being asked.
 
 ## Flow: Import a collection
@@ -132,15 +144,16 @@ changed. An import applies only what changed in their app since their last impor
 1. **Check the starting point.**
    - Calls: `get_collection_summary`, `list_imports`.
    - Show: what they have today (copies, value, the price date) and when the last import ran and what it changed.
-   - Stop: if `whoami` says the connection is read-only, say that an import needs write access and stop.
+   - Stop: none. A read-only connection (`whoami` says so) can still get the upload link and the preview; say before step 4
+     that the import itself needs write access.
 2. **Choose the route and the bucket.**
    - Calls: `list_buckets`.
-   - Show: a file that fits in the chat goes straight to the preview; a big one gets a one-time upload link. By default a file is
-     the whole collection; if it is one binder, box or folder, ask which bucket it is for and show the choices.
+   - Show: a file the person attached or named, or one too big to paste, gets an upload link; only a few pasted lines of CSV
+     go straight to the preview. By default a file is the whole collection; if it is one binder, box or folder, ask which bucket it is for and show the choices.
    - Stop: do not guess a bucket. If the person did not pick one, the preview says `bucket: null`: the whole collection.
 3. **Preview, with nothing changed.**
    - Calls: `import_collection_csv` (no `confirm`; `bucket_id` for one bucket), or `start_collection_upload` (give them the
-     link) and then `get_staged_upload` once they say it is uploaded.
+     link) and then `get_staged_upload` once they say it is uploaded. The file is never read, pasted or opened in a browser.
    - Show: from `merge`, three things: what their app changed (the only part applied), the edits made here that are kept, and
      each conflict. With a bucket, the preview names it and totals what is left alone: say both. Rows that match no known
      printing are listed: fix them in the file and upload again.
@@ -152,7 +165,10 @@ changed. An import applies only what changed in their app since their last impor
      they saw is imported.
    - Show: what was imported, as the preview showed it.
    - Stop: only after they say yes in this chat. If they want the file to replace everything (`replace_everything`), say first how
-     many edits made here it discards and ask again. If it is refused (expired, or the collection changed), preview again.
+     many edits made here it discards and ask again. If it is refused (expired, or the collection changed), preview again. If
+     the connection is read-only, the import is refused: say the file is staged and waiting (links work for one hour), that the
+     import needs the write permission, and that they reconnect the Vault and tick Write on its consent page (the same upload
+     can then be confirmed while its hour lasts; after that, make a new link).
 5. **Say what happened.**
    - Calls: `get_import`, `refresh_prices`.
    - Show: what the import added, removed and changed, what it kept and what it asked, never changes it did not make. Prices

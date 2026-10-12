@@ -384,6 +384,10 @@ SORTS["acquired"] = lambda g: (date.fromisoformat(g.first_acquired).toordinal() 
 SORTS["-name"] = lambda g: (_descending(g.name.lower()), _descending(g.set_code), _descending(g.number))
 SORTS["mana_value"] = lambda g: (g.cmc is None, g.cmc or 0, g.name.lower(), g.set_code, g.number)
 SORTS["-mana_value"] = lambda g: (g.cmc is None, -(g.cmc or 0), g.name.lower(), g.set_code, g.number)
+# One copy's price, not the group's total (-value, value): 3 copies at $10 rank below 1 copy at $25. A printing with no price
+# is last in both directions (a price of 0.0 means none, as everywhere else); ties by name.
+SORTS["-unit_value"] = lambda g: (not g.price > 0, -g.price, g.name.lower(), g.set_code, g.number)
+SORTS["unit_value"] = lambda g: (not g.price > 0, g.price, g.name.lower(), g.set_code, g.number)
 
 
 def filtered_printing(groups: list[Group], printing: str | None) -> list[Group]:

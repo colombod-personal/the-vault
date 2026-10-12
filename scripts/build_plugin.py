@@ -78,11 +78,12 @@ PORTABLE_PLUGIN = {
     "repository": REPO, "license": "MIT", "keywords": KEYWORDS,
 }
 # No credentials in the portable file: the client discovers sign-in from the server (OAuth), or you add a
-# personal access token header by hand (docs/skills.md).
+# personal access token header by hand (docs/skills.md). Only `type` and `url`: the ChatGPT desktop app's plugin loader
+# rejects any other field ("unknown field `extensions`, expected `url` or `headers`"), and a plugin whose server fails to
+# parse registers no server at all, so the app has no Vault tools. The directory ZIP adds the sign-in declaration (write_zip).
 PORTABLE_MCP = {
     "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
-    "mcpServers": {NAME: {"type": "streamable-http", "url": f"{HOST}/api/mcp",
-                          "extensions": {"com.openai": {"auth": {"type": "oauth", "client": {"mode": "cimd"}, "baseScopes": ["read"]}}}}},
+    "mcpServers": {NAME: {"type": "streamable-http", "url": f"{HOST}/api/mcp"}},
 }
 CLAUDE_PLUGIN = {
     "name": NAME, "displayName": "The Vault", "version": VERSION, "description": DESCRIPTION, "author": AUTHOR,
@@ -1099,12 +1100,14 @@ OPENAI_MANIFEST = {
     "extensions": {"com.openai": {"interface": OPENAI_REVIEW_AND_INTERFACE["interface"],
                                   "review": OPENAI_REVIEW_AND_INTERFACE["review"]}},
 }
-# The server declares its own sign-in (OpenAI's "Configure MCP authentication": extensions.com.openai.auth in mcp.json),
-# so a host that installs the plugin can run OAuth itself. The Vault offers CIMD and dynamic registration; CIMD is
+# The server declares its own sign-in to OpenAI's directory ("Configure MCP authentication": extensions.com.openai.auth in
+# mcp.json) in the ZIP that is uploaded there (write_zip), not in the files a Git marketplace serves: the ChatGPT desktop
+# app's plugin loader fails to parse that field and drops the server (evidence: its log, 2026-10-11), and it signs the person
+# in itself when the server answers 401 with the OAuth challenge. The Vault offers CIMD and dynamic registration; CIMD is
 # preferred and OpenAI keeps the DCR fallback. No client id or secret lives in the package.
 MCP_AUTH = {"com.openai": {"auth": {"type": "oauth", "client": {"mode": "cimd"}, "baseScopes": ["read"]}}}
 OPENAI_MCP = {"$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
-              "mcpServers": {NAME: {"type": "streamable-http", "url": f"{HOST}/api/mcp", "extensions": MCP_AUTH}}}
+              "mcpServers": {NAME: {"type": "streamable-http", "url": f"{HOST}/api/mcp"}}}
 # Experts that work on a deck or a question: each becomes a skill where hosts have no subagents (the council skill
 # calls them; a person can also ask for one directly). The buyer and deckbuilder stay agents for plugin hosts.
 EXPERT_SKILLS = ("vault-commander-expert", "vault-casual-table", "vault-limited-expert", "vault-pauper-expert",
@@ -1145,13 +1148,21 @@ def openai_files() -> dict[Path, str | Path]:
 
 
 def write_zip(target: Path) -> Path:
-    """The ChatGPT/Codex plugin as a ZIP (plugin root at the top), for upload or directory submission."""
+    """The ChatGPT/Codex plugin as a ZIP (plugin root at the top), for upload or directory submission. Its mcp.json
+    also declares the server's sign-in (MCP_AUTH), which OpenAI's directory reads; the files in the repository do not."""
     import zipfile
 
     target.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
         for path, value in sorted(openai_files().items()):
-            z.writestr(str(path.relative_to(OPENAI)).replace("\\", "/"), _read(value))
+            name = str(path.relative_to(OPENAI)).replace("\\", "/")
+            text = _read(value)
+            if name == "mcp.json":
+                declared = json.loads(text)
+                for server in declared["mcpServers"].values():
+                    server["extensions"] = MCP_AUTH
+                text = dump(declared)
+            z.writestr(name, text)
     return target
 
 

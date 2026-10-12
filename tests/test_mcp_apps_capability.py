@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from tests.test_mcp_oauth import app, universe  # noqa: F401 - fixtures
 from vault.config import Settings
 from twins.mcp_client import APPS_CAPABILITIES, SESSION_HEADER, McpClient
-from vault.api import mcp, mcp_session
+from vault.api import mcp, mcp_session, mcp_ui
 
 VIEW_TOOLS = {t.name for t in mcp.TOOLS if t.ui and not t.write}  # this client connects with read access: write tools are not listed
 SECRET = "a-test-secret"
@@ -43,7 +43,7 @@ def test_a_host_that_advertises_mcp_apps_is_given_the_view_links(host):
     assert host.session_id and host.session_id.startswith("v1.1.")
     tools = listed(host)
     assert {n for n, t in tools.items() if "_meta" in t} == VIEW_TOOLS and len(VIEW_TOOLS) >= 7
-    assert tools["find_combos"]["_meta"]["ui"]["resourceUri"] == "ui://vault/combos"
+    assert tools["find_combos"]["_meta"]["ui"]["resourceUri"] == mcp_ui.uri("combos")
 
 
 def test_a_host_that_does_not_advertise_it_gets_every_tool_without_view_links_and_the_same_text_answers(host):
@@ -118,7 +118,7 @@ def test_the_session_id_carries_no_person_and_no_token(host):
     host.initialize(APPS_CAPABILITIES)
     sid = host.session_id
     assert host.tokens["access_token"] not in sid and "dev@localhost" not in sid and len(sid) < 70
-    assert sid.split(".")[0] == "v1" and sid.split(".")[1] in ("0", "1")  # a version, one bit, a random part and a signature, nothing else
+    assert sid.split(".")[0] == "v1" and sid.split(".")[1] in ("0", "1", "2", "3")  # a version, two bits (extension, compact list), a random part and a signature, nothing else
 
 
 def test_the_log_says_which_host_advertised_the_extension_without_naming_a_person(host, caplog):

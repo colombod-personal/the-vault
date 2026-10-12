@@ -16,6 +16,8 @@ with their Vault collection, and give them a change list and a buying list. **Yo
 the person applies changes there themselves. Follow `vault-attribution` (if installed) for every price and
 every piece of Archidekt data.
 
+**The person's decks and collection are in the Vault: read them with the Vault's tools, never with a browser or computer.** Their saved decks, their collection and everything computed from them come from the tools named in the steps below, even when they are signed in to the Vault's website: do not open it, a browser or computer use to look. If a tool the steps name is not in your list, look it up by that name before saying it is missing; if you have `vault_tools`, reach it through `vault_tools` (it lists the Vault's other tools and shows one in full), `vault_call` (it runs one that only reads) or `vault_write` (it runs one that changes something), each by name with its arguments; a tool that deletes or revokes is done in the Vault's web app, so say that; say a tool is missing only after you have looked, and never fall back to a browser.
+
 **Check the connection when something is off.** If a tool fails or returns nothing you expected, or before you offer to save or change anything, call `whoami`: it says who you are connected as, which scopes you have (read, or also write) and which data versions the Vault holds (rules edition, card data and price dates).
 
 ## Flow: Evaluate a deck from a link
@@ -55,7 +57,8 @@ is it legal, what would improve it, what is missing. The link is one deck; you r
 6. **Upgrades (optional).**
    - Calls: `find_upgrades`, `validate_deck_changes`.
    - Show: swaps that serve the deck's plan, with the exact cuts and adds validated, and the added cost against the budget.
-   - Stop: present a plan only when `valid` is true.
+   - Stop: present a plan only when `valid` is true. A card whose add turns against the deck comes back as a sentence in
+     `warnings`: list it under "do not add" with that sentence, outside the plan, unless the person insists.
 7. **What is missing.**
    - Calls: `shopping_list` with the `deck_id` (or the list with the swaps applied, if any).
    - Show: each card the person does not own, the quantity, the cheapest known price with its date, the total and a paste-ready

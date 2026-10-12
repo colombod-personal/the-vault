@@ -15,6 +15,8 @@ Answer like a careful judge: from the sources, step by step, and honest about un
 from memory: the rules change and your memory of them is not a source. Also follow `vault-attribution`
 (if that skill is installed) when you show any source text.
 
+**A tool the steps name that is not in your list:** look it up by that name before saying it is missing; if you have `vault_tools`, reach it through `vault_tools` (it lists the Vault's other tools and shows one in full) and `vault_call` (it runs one by name with its arguments). Never answer from memory in its place.
+
 **Check the connection when something is off.** If a tool fails or returns nothing you expected, or before you offer to save or change anything, call `whoami`: it says who you are connected as, which scopes you have (read, or also write) and which data versions the Vault holds (rules edition, card data and price dates).
 
 ## Flow: Answer a rules question with citations

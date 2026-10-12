@@ -68,10 +68,15 @@ window.VaultDeckChange = (() => {
   // The check's verdict. A plan the check cannot make sense of (a card that is not in the deck, one the catalog does not know)
   // cannot be saved; any other problem is shown and may be saved over, with the button saying so.
   const BLOCKING = ['cut_not_in_deck', 'unknown_card'];
+  // Warnings are the server's reading of the card text (a card that turns against the deck): the change stays valid and may be saved,
+  // so they are worded apart from the problems, and a change with one is never called clean.
+  const warningLines = (result) => (result.warnings || []).filter((w) => typeof w === 'string' && w);
   function verdict(result) {
-    const n = result.issues.length;
-    return n === 0 ? { good: true, text: 'The check found no problems.' }
-      : { good: false, text: `The check found ${plural(n, 'problem', 'problems')}.` };
+    const n = result.issues.length, w = warningLines(result).length;
+    if (n === 0 && w === 0) return { good: true, text: 'The check found no problems.' };
+    const warned = w ? ` and ${plural(w, 'warning', 'warnings')}` : '';
+    if (n === 0) return { good: false, text: `The check found no problems, but ${plural(w, 'warning', 'warnings')} to read before saving.` };
+    return { good: false, text: `The check found ${plural(n, 'problem', 'problems')}${warned}.` };
   }
   function blocked(result, cuts, adds) {
     if (!cuts.length && !adds.length) return 'Choose a card to cut or add first.';
@@ -121,6 +126,6 @@ window.VaultDeckChange = (() => {
   const savedLine = (deckName, cuts, adds) => `Saved. ${summaryLine(deckName, cuts, adds)}. The earlier list is in the History tab.`;
   const savedArchidekt = 'This page still shows the list on Archidekt, and “Update saved copy” would put that list back over this change.';
 
-  return { MAX_ITEMS, parseSwap, copies, summaryLine, proposalKey, issueLabel, issueLine, verdict, blocked, existingLine, countsLine,
+  return { MAX_ITEMS, parseSwap, copies, summaryLine, proposalKey, issueLabel, issueLine, verdict, warningLines, blocked, existingLine, countsLine,
     costLines, coverageByName, ownershipLine, toBuyLine, confirmLabel, fromArchidekt, savedLine, savedArchidekt, nameKey };
 })();

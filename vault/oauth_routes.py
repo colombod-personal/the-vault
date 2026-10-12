@@ -49,7 +49,8 @@ CORS = {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET
 NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
 
 SCOPE_TEXT = {
-    "read": "Read your collection, decks, value history and what others shared with you",
+    "read": ("Read your collection, decks, value history and what others shared with you. It can also give you a one-hour link "
+             "to upload a collection file, and read what importing that file would change. Importing it needs Write."),
     "write": "Make changes: import collections, save and edit decks, change which cards you own, refresh prices, share",
 }
 NEVER = ("Delete your account", "Export all your data", "Create or revoke access tokens",

@@ -15,6 +15,10 @@ The budget is a hard constraint, and the Vault enforces it with code. Your job i
 the candidates it returns, explain why, and present only a plan that the validator accepts. Follow
 `vault-attribution` (if installed) when you show prices, tags or combos.
 
+**The person's decks and collection are in the Vault: read them with the Vault's tools, never with a browser or computer.** Their saved decks, their collection and everything computed from them come from the tools named in the steps below, even when they are signed in to the Vault's website: do not open it, a browser or computer use to look. If a tool the steps name is not in your list, look it up by that name before saying it is missing; if you have `vault_tools`, reach it through `vault_tools` (it lists the Vault's other tools and shows one in full), `vault_call` (it runs one that only reads) or `vault_write` (it runs one that changes something), each by name with its arguments; a tool that deletes or revokes is done in the Vault's web app, so say that; say a tool is missing only after you have looked, and never fall back to a browser.
+
+In a host whose tool list is compact, `delete_deck` is done by the person in the Vault's web app: say so instead of looking for it.
+
 **Check the connection when something is off.** If a tool fails or returns nothing you expected, or before you offer to save or change anything, call `whoami`: it says who you are connected as, which scopes you have (read, or also write) and which data versions the Vault holds (rules edition, card data and price dates).
 
 ## Flow: Upgrade a deck within a budget
@@ -73,6 +77,8 @@ enforces it in code: you choose well among what it returns and show only a plan 
    - Calls: `validate_deck_changes` with the exact `cuts`, `adds`, format and budget.
    - Show: `added_cost_usd` against the budget. Cuts are not refunded: the total is the adds.
    - Stop: if `valid` is false, read `issues`, fix the plan and validate again. **Present the plan only when `valid` is true.**
+     A card whose add turns against the deck comes back as a sentence in `warnings` (`valid` can stay true): list it under
+     "do not add" with that sentence, outside the plan, unless the person insists (then the sentence stays beside it).
 9. **Optionally check combos.**
    - Calls: `find_combos`, `get_card_oracle`.
    - Show: combos the new cards complete, attributed to Commander Spellbook; read a card's text with `get_card_oracle` before you

@@ -27,6 +27,11 @@ Every change to `skills/`, `agents/`, the plugin manifests or the tools' answers
    `tests/test_delivery_contract.py` and `tests/test_plugin.py`.
 2. **Install from Git, in the real app.** On the PC with the apps: add the marketplace at the branch, install the plugin.
    Open the app's Skills list and record that the Vault skills are there. Record the commit and, for a zip, its sha256.
+   **Then check the server loaded:** Settings > Plugins > MCPs lists The Vault under "From plugins" (Authenticate there
+   if it asks), and the app's log has no `failed to parse plugin MCP server` line for it. Skills load without the
+   server, so a plugin can look installed with no Vault tool in it (11 Oct 2026). Without the app, the same check:
+   `CODEX_HOME=<empty folder> codex plugin marketplace add <checkout>`, `codex plugin add the-vault@the-vault`,
+   `codex mcp list` shows `the-vault`.
 3. **Fresh chat, neutral prompt**, the way a player asks: "Review my Sliver Swarm deck, I want to tune it." Also a rules
    question and a card question. Instant and Thinking.
 4. **Score with the rubric**, per run, pass or fail per item, by someone who did not build the change:
@@ -48,4 +53,33 @@ Every change to `skills/`, `agents/`, the plugin manifests or the tools' answers
 - the Codex marketplace being git-ignored, so the app found nothing;
 - the manifests disagreeing on name or version;
 - the plugin's skills drifting from `skills/`;
-- the answer gate in `expert-council` being weakened.
+- the answer gate in `expert-council` being weakened;
+- a field in the plugin's `mcp.json` that the ChatGPT desktop app's loader rejects (`extensions` made it log "unknown
+  field `extensions`, expected `url` or `headers`" and register no server, so the plugin had no Vault tools). The sign-in
+  declaration OpenAI's directory reads goes only in the upload ZIP (`build_plugin.py --zip`).
+
+## The tool budget (ChatGPT desktop app, Codex)
+
+Codex keeps only a size-limited, alphabetical slice of a plugin's MCP tools and drops the rest without a message
+(measured 11 Oct 2026: 30 of the Vault's 81 in the owner's app, 62 in a clean home). `list_decks` and `whoami` sort late,
+so the assistant said they were "not available" and used the browser.
+
+- A client whose `initialize` names it `codex-mcp-client` (the CLI and the desktop app both do) gets the **compact list**
+  (`vault/api/mcp_profile.py`): the core tools with one-sentence descriptions, then `vault_tools` (lists the other tools,
+  or shows one in full), `vault_call` (runs another tool that only reads) and, for a token that may write, `vault_write`
+  (runs another non-destructive write tool; it carries a destructive hint, because it can run `update_deck`,
+  `set_*_metadata` and `rename_tag`, so the host asks before it). Every other client gets the full list.
+- Both runners take the same path as a direct call: same argument check, same API, same token scopes, same
+  preview-then-confirm. They are two tools so that a host's "always allow" for reading never pre-approves changing data.
+- Through the runners, tools that delete or revoke are refused (the web app does those), and so are the core tools
+  (called by name) and the runners themselves. That refusal is **presentation policy, not enforcement**: a direct
+  `tools/call` by name behaves as it always did and the API decides. `tests/test_mcp_profile.py` derives from the catalog
+  (every HTTP method a tool can use, including those built by a function) which tools must be marked destructive or recorded
+  as reviewed with a reason, and pins the skills' tools a compact client can only do in the web app. It is a guard against
+  the usual slips, not a proof: review a new write tool by hand.
+- A new tool is reachable through the runners with no change. Add its name to `CORE` only if a first-journey question needs
+  it listed (a write tool there keeps its own approval hint); the test keeps the list under 30 KB. When `sign_out` lands
+  it belongs in `CORE` and must be `destructive`.
+- **Count what the host exposes** (the measurement that found this): `codex exec --enable code_mode --json --ephemeral
+  -m gpt-5.5 "Use your exec tool to run: text(ALL_TOOLS.filter(x=>x.name.startsWith('mcp__the_vault__')).map(x=>x.name).join(' '))"`
+  with stdin closed; it must list `list_decks`, `whoami`, `vault_tools` and `vault_call`.

@@ -18,7 +18,7 @@ from mtg_toolkits import decklist
 from sqlalchemy import and_, false, func, or_, select
 from sqlalchemy.orm import Session
 
-from . import brackets, deck_text, role_rules
+from . import brackets, deck_text, lookouts, possible_loops, role_rules
 from .card_faces import all_text, front_mana_cost
 from .catalog_queries import card_priority
 from .models import OracleCard, OraclePrice, OracleTag, OracleTagLink
@@ -508,6 +508,11 @@ def _price_fields(p: OraclePrice | None) -> dict:
     return {"price_usd": plausible_price(p.usd) if p else None, "price_date": p.day.isoformat() if p else None, "price_source": p.source if p else None}
 
 
+def _texts(resolved: Resolved) -> list:
+    """Oracle texts of a resolved deck's played cards, the companion not counted (it starts outside the game): what lookouts read."""
+    return possible_loops.card_texts(e for e in resolved.played() if e.line.section != "companion")
+
+
 def find_upgrades(db: Session, resolved: Resolved, fmt: str, budget_usd: float, roles: list[str] | None = None,
                   limit: int = 10, targets: dict[str, int] | None = None, owned: dict[str, int] | None = None) -> dict:
     """Candidates to add for the roles the deck is short of, all legal, in the deck's colors, not
@@ -531,6 +536,9 @@ def find_upgrades(db: Session, resolved: Resolved, fmt: str, budget_usd: float, 
         raise DeckError(f"Unknown role(s) {unknown}; use: {', '.join(ROLE_TAGS)}")
     tag_ids = role_tag_ids(db)
     gaps = {r: {"have": st["roles"][r]["count"], "guideline": guide.get(r)} for r in wanted}
+    deck_texts = _texts(resolved)
+    deck_lookouts = lookouts.read(deck_texts)  # read once; each candidate is read against the deck as it would be with it
+    warnings: dict[str, str] = {}
     candidates: dict[str, list[dict]] = {}
     for role in wanted:
         if not tag_ids.get(role):
@@ -550,12 +558,21 @@ def find_upgrades(db: Session, resolved: Resolved, fmt: str, budget_usd: float, 
                  .group_by(OracleCard.oracle_id, OraclePrice.oracle_id)
                  .order_by(*([OracleCard.oracle_id.in_(list(owned)).desc()] if owned else []),
                            OracleCard.edhrec_rank.asc().nulls_last(), OraclePrice.usd, OracleCard.name).limit(limit))
-        candidates[role] = [{"name": c.name, "oracle_id": c.oracle_id, "type_line": c.type_line, "mana_cost": front_mana_cost(c),
-                             "edhrec_rank": c.edhrec_rank, **_price_fields(p),
-                             **({"owned_copies": owned.get(c.oracle_id, 0)} if owned is not None else {}),
-                             "why": f"tagged {role} by Scryfall Tagger; legal in {fmt}; within the deck's colors; "
-                                    + ("already in your collection" if owned and c.oracle_id in owned else "priced within the budget")}
-                            for c, p, _ in db.execute(query).all()]
+        candidates[role] = []
+        for c, p, _ in db.execute(query).all():
+            # What the deck would have if this card were added (bead vault-064.11): lookouts the card creates or widens.
+            planned = lookouts.plan(deck_texts, deck_texts + possible_loops.card_texts([Entry(decklist.DeckLine(1, c.name), c)]),
+                                    was=deck_lookouts)
+            flagged = planned["by_card"].get(c.name, [])
+            why = (f"tagged {role} by Scryfall Tagger; legal in {fmt}; within the deck's colors; "
+                   + ("already in your collection" if owned and c.oracle_id in owned else "priced within the budget"))
+            if flagged:
+                why += "; WARNING: it would turn against this deck: " + "; ".join(e["title"] for e in flagged)
+                warnings.setdefault(c.name, planned["warnings"][c.name])
+            candidates[role].append({"name": c.name, "oracle_id": c.oracle_id, "type_line": c.type_line, "mana_cost": front_mana_cost(c),
+                                     "edhrec_rank": c.edhrec_rank, **_price_fields(p),
+                                     **({"owned_copies": owned.get(c.oracle_id, 0)} if owned is not None else {}),
+                                     **({"lookouts": flagged} if flagged else {}), "why": why})
     oids = [e.card.oracle_id for e in played if e.card and not is_land(e.card)]
     roles_map = roles_of(db, oids)
     cut_prices = prices_of(db, oids)
@@ -566,9 +583,13 @@ def find_upgrades(db: Session, resolved: Resolved, fmt: str, budget_usd: float, 
     return {"format": fmt, "budget_usd": budget_usd, "color_identity": sorted(ident, key=COLORS.index), "gaps": gaps,
             "deck_cost_usd": st["estimated_cost_usd"],  # the deck's estimated cost now, to compare a plan's change with
             "candidates": candidates, "cut_candidates": cuts,
+            # a candidate that would turn against the deck as it is (read from card text) carries `lookouts`; one plain sentence each
+            "warnings": list(warnings.values()),
             "notes": ["Candidates are ordered by popularity (EDHREC rank, lower is more played). Popularity is not power or fit.",
                       "Role guidelines (ramp 10, draw 10, removal 8, sweepers 2 for 100-card decks) are a common community habit, not a rule.",
                       "Cut candidates are the deck's least-played cards without a role tag: a starting point, not a verdict.",
+                      "A candidate with `lookouts` would turn against the deck as it is now, read from the card text by the Vault (a pattern "
+                      "that does not match says nothing); cuts can change that, and validate_deck_changes reads the deck as it would be.",
                       "Call validate_deck_changes with the final cuts and adds before presenting them as a plan."]}
 
 
@@ -666,6 +687,7 @@ def validate_changes(db: Session, text: str, fmt: str, adds: list[str], cuts: li
         issues.append({"kind": "over_budget", "card": None, "detail": f"adds cost ${total:.2f}, budget is ${budget_usd:.2f}"})
     result = Resolved(resolve(db, decklist.Decklist(after_lines)).entries + [Entry(l, e.card) for l, e in zip(add_lines, resolved_adds.entries)])
     outcome = legality(result, fmt)
+    planned = lookouts.plan(_texts(before), _texts(result))
     # Problems the deck already had are reported apart: they do not make *this plan* invalid (found with a real deck
     # that had one off-color card: every plan was rejected for it). A problem the plan creates or leaves unsolved
     # where it matters (size, copies) still counts.
@@ -679,12 +701,22 @@ def validate_changes(db: Session, text: str, fmt: str, adds: list[str], cuts: li
             "cuts_not_refunded": True,
             # What the plan does to the deck's price: the adds, the cuts (each with its own price) and the deck as a whole.
             # The budget above still counts only the adds; these figures are for comparing, not for the budget check.
-            "added_cards": [{"name": e.card.name, "price_usd": plausible_price(prices[e.card.oracle_id].usd) if e.card.oracle_id in prices else None}
+            "added_cards": [{"name": e.card.name, "price_usd": plausible_price(prices[e.card.oracle_id].usd) if e.card.oracle_id in prices else None,
+                             # only an add that is part of a lookout carries `lookouts`: what it would hurt, or the card that would hurt it
+                             **({"lookouts": [{k: x[k] for k in ("kind", "severity", "title", "role", "causes", "hurts", "rules")}
+                                              for x in planned["by_card"][e.card.name]]} if e.card.name in planned["by_card"] else {})}
                             for e in resolved_adds.entries if e.card],
             "cut_cards": [{"name": c.name, "price_usd": plausible_price(cut_prices[c.oracle_id].usd) if c.oracle_id in cut_prices else None} for c in cut_cards],
             "cut_value_usd": cut_value, "cut_unpriced": cut_unpriced, "net_change_usd": round(total - cut_value, 2),
             "deck_cost_before_usd": cost_before, "deck_cost_after_usd": round(cost_before - cut_value + total, 2),
-            "not_checked": outcome["not_checked"]}
+            "not_checked": outcome["not_checked"],
+            # What the plan does to the cards that can turn against their owner, read on the deck AS IT WOULD BE (bead
+            # vault-064.11): the cuts are out and the adds are in. They are warnings: the plan stays `valid`, the person may still
+            # choose it, so each add that turns against the deck is named in `warnings` and in its own `added_cards` entry.
+            "lookouts": planned["lookouts"], "lookouts_cleared": planned["cleared"],
+            "warnings": list(dict.fromkeys(planned["warnings"][e.card.name] for e in resolved_adds.entries
+                                           if e.card and e.card.name in planned["warnings"])),
+            "lookouts_read": {"source": planned["source"], "note": planned["note"], "covers": planned["covers"]}}
     if with_text:
         out["deck_text"] = deck_text.render(after_lines + _added_lines(resolved_adds, add_lines))
         out["deck_text_dropped"] = deck.unparsed[:20]  # lines of the saved text that are not cards (a comment, a typo): not in deck_text
