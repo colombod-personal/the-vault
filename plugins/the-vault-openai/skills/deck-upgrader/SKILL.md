@@ -77,6 +77,8 @@ enforces it in code: you choose well among what it returns and show only a plan 
    - Calls: `validate_deck_changes` with the exact `cuts`, `adds`, format and budget.
    - Show: `added_cost_usd` against the budget. Cuts are not refunded: the total is the adds.
    - Stop: if `valid` is false, read `issues`, fix the plan and validate again. **Present the plan only when `valid` is true.**
+     A card whose add turns against the deck comes back as a sentence in `warnings` (`valid` can stay true): list it under
+     "do not add" with that sentence, outside the plan, unless the person insists (then the sentence stays beside it).
 9. **Optionally check combos.**
    - Calls: `find_combos`, `get_card_oracle`.
    - Show: combos the new cards complete, attributed to Commander Spellbook; read a card's text with `get_card_oracle` before you

@@ -210,7 +210,10 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              provenance=("computed",)),
         Tool("find_upgrades", "Upgrade candidates for a deck within a budget: legal, inside the deck's colors, not already in it, each priced "
              "at or under budget_usd, for the roles the deck is short of (or the roles you name). Ordered by popularity, which is "
-             "not power. Also lists the deck's least-played untagged cards as cut candidates. The candidates are not checked as one "
+             "not power. A candidate that would turn against the deck as it is (a forced trigger that destroys its own artifacts, a shroud "
+             "that blocks its own Equipment, a bonus shared with opponents) carries `lookouts`, read by the Vault from the card text, "
+             "each with the deck's cards it would hurt, the rule numbers and what to do, and is named in `warnings`. Also lists the "
+             "deck's least-played untagged cards as cut candidates. The candidates are not checked as one "
              "change; validate_deck_changes checks a list of cuts and adds." + TAKES_DECK,
              {"text": deck, "deck_id": DECK_ID, "format": fmt,
               "budget_usd": {"type": "number", "minimum": 0, "maximum": 100000, "description": "The most any single added card may cost"},
@@ -223,7 +226,11 @@ def catalog_tools(Tool, ID, PAGING):  # noqa: N803 - the classes and constants o
              provenance=("computed",), ui="upgrades"),
         Tool("validate_deck_changes", "Checks a proposed list of cuts and adds: every card exists and is legal, adds are in "
              "the deck's colors, the resulting deck is still legal, and the adds' total price is within budget_usd. `valid` is true "
-             "only when every check passes. Each cut or add is a card name; a quantity ('2 Mind Stone', '2x Mind Stone') repeats it and a set and "
+             "only when every check passes. It also reads the deck as it would be after the cuts and adds: `lookouts` lists the cards that can "
+             "turn against their owner (read by the Vault from the card text, with the cards each hurts and the rule numbers), each marked "
+             "`new` when the plan creates or widens it, `lookouts_cleared` those the cuts remove, and an add that turns against the deck "
+             "carries `lookouts` in its `added_cards` entry and a sentence in `warnings`. A lookout is a warning and does not change "
+             "`valid`. Each cut or add is a card name; a quantity ('2 Mind Stone', '2x Mind Stone') repeats it and a set and "
              "number are ignored." + TAKES_DECK,
              {"text": deck, "deck_id": DECK_ID, "format": fmt, "adds": {"type": "array", "maxItems": 60, "items": {"type": "string", "maxLength": 300}},
               "cuts": {"type": "array", "maxItems": 60, "items": {"type": "string", "maxLength": 300}},
@@ -353,7 +360,7 @@ PROMPTS = [
              "casual table voice), plus a rules judge and a devil's advocate, and the synergy or collection analyst if useful. Give each at most "
              "three points with evidence (read card text with get_card_oracle and fetch every rule number you cite with get_rule; read every card you propose to add against the deck, and if it can turn against the deck, say plainly not to add it and name the cards it would hurt), then let the devil's advocate challenge them with evidence; a rules disagreement is settled "
              "only by a quote checked with verify_citation (and rules_changes when a rule a member relies on may have changed lately). Answer with the plan first (checked with "
-             "validate_deck_changes, shown only if valid is true), then Agreed, Disputed and Not checked in one line each, and offer the full "
+             "validate_deck_changes, shown only if valid is true; a card whose add turns against the deck comes back in its warnings and is listed under \"do not add\" with that sentence, outside the plan, unless the person insists), then Agreed, Disputed and Not checked in one line each, and offer the full "
              "discussion on request. Label metagame knowledge as opinion."},
     {"name": "evaluate_deck", "title": "Check a deck from a link",
      "description": "Read one Archidekt deck from its link (or a saved deck), check it against the collection, and give a change list and what to buy.",

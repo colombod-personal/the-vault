@@ -55,6 +55,14 @@ test('a problem is named in plain words with the server’s own detail; a plan t
   assert.deepEqual(J(V.verdict({ issues: [] })), { good: true, text: 'The check found no problems.' });
   assert.equal(V.verdict({ issues: [{}, {}] }).text, 'The check found 2 problems.');
   assert.equal(V.verdict({ issues: [{}] }).text, 'The check found 1 problem.');
+  // a card that turns against the deck is a warning: the change is valid, but the check is not called clean (bead vault-064.11)
+  const said = 'Adding Harmonic Sliver would turn against this deck. It would destroy Sol Ring (rules 603.3d, 601.2c).';
+  assert.deepEqual(J(V.verdict({ issues: [], warnings: [said] })), { good: false, text: 'The check found no problems, but 1 warning to read before saving.' });
+  assert.equal(V.verdict({ issues: [], warnings: [said, said] }).text, 'The check found no problems, but 2 warnings to read before saving.');
+  assert.equal(V.verdict({ issues: [{}], warnings: [said] }).text, 'The check found 1 problem and 1 warning.');
+  assert.deepEqual(J(V.verdict({ issues: [], warnings: [] })), { good: true, text: 'The check found no problems.' });
+  assert.deepEqual(J(V.warningLines({ warnings: [said, '', null] })), [said]);
+  assert.deepEqual(J(V.warningLines({})), []);
   assert.equal(V.blocked({ issues: [] }, [], []), 'Choose a card to cut or add first.');
   assert.equal(V.blocked({ issues: [] }, ['a'], []), null);
   assert.equal(V.blocked({ issues: [{ kind: 'not_legal', card: 'x' }] }, ['a'], ['x']), null, 'a problem is shown and may be saved over');

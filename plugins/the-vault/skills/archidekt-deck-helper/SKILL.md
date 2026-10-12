@@ -57,7 +57,8 @@ is it legal, what would improve it, what is missing. The link is one deck; you r
 6. **Upgrades (optional).**
    - Calls: `find_upgrades`, `validate_deck_changes`.
    - Show: swaps that serve the deck's plan, with the exact cuts and adds validated, and the added cost against the budget.
-   - Stop: present a plan only when `valid` is true.
+   - Stop: present a plan only when `valid` is true. A card whose add turns against the deck comes back as a sentence in
+     `warnings`: list it under "do not add" with that sentence, outside the plan, unless the person insists.
 7. **What is missing.**
    - Calls: `shopping_list` with the `deck_id` (or the list with the swaps applied, if any).
    - Show: each card the person does not own, the quantity, the cheapest known price with its date, the total and a paste-ready

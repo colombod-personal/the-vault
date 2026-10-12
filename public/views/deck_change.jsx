@@ -208,6 +208,11 @@ function DeckChange({ deckId, deckName, rows, format, setFormat, archidekt, init
                     })}
                   </ul>
                 )}
+                {V.warningLines(view).length > 0 && (
+                  <ul className="dc-problems" aria-label="Warnings">
+                    {V.warningLines(view).map((w, n) => <li key={n}><strong>Turns against the deck</strong><span className="muted dc-detail">{w}</span></li>)}
+                  </ul>
+                )}
                 {V.existingLine(view) && <p className="muted dc-small">{V.existingLine(view)}</p>}
                 <p className="dc-line">{V.countsLine(view)}</p>
                 {V.costLines(view).map((t, n) => <p key={n} className="dc-line">{t}</p>)}
@@ -228,7 +233,7 @@ function DeckChange({ deckId, deckName, rows, format, setFormat, archidekt, init
               {blocked
                 ? <p className="dc-error" role="alert">{blocked}</p>
                 : <>
-                  <p className="dc-small">{view.issues.length ? 'The problems above stay in the deck if you save.' : 'This changes the saved deck and adds a version to its History.'}</p>
+                  <p className="dc-small">{view.issues.length ? 'The problems above stay in the deck if you save.' : V.warningLines(view).length ? 'The warnings above stay true of the deck if you save. This adds a version to its History.' : 'This changes the saved deck and adds a version to its History.'}</p>
                   <button className="btn primary dc-save" disabled={saving} onClick={save}>{saving ? 'Saving…' : V.confirmLabel(deckName, cuts, adds, view)}</button>
                 </>}
               {saveError && <p className="dc-error" role="alert">{saveError}</p>}

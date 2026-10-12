@@ -64,7 +64,8 @@ paste-ready list: nothing is bought, imported into a store or put in a cart.
 6. **Budget help, if they have one.**
    - Calls: `validate_deck_changes`.
    - Show: changes checked against the budget, or cheaper alternatives only from tool results.
-   - Stop: do not invent cheaper cards; present a change only when `valid` is true.
+   - Stop: do not invent cheaper cards; present a change only when `valid` is true. A card whose add turns against the deck
+     comes back as a sentence in `warnings`: list it under "do not add" with that sentence, outside the change.
 7. **When the cards arrive, offer to add them.**
    - Calls: `update_owned_cards`, `confirm_owned_cards_update`.
    - Show: the printings they actually got (ask; they may not know, then `printing_unknown`), then the preview.
