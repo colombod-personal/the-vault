@@ -95,6 +95,12 @@ class Tool:
     # (its REST route is in vault.app.READ_ONLY_POSTS; confirm_staged_upload stays write-scoped). It keeps ``write`` so the
     # annotations stay honest: it is not read-only, it creates a link.
     any_scope: bool = False
+    # Host-specific metadata for tools/list (``_meta``): import_collection_file declares ``openai/fileParams`` here, which is how
+    # ChatGPT knows a parameter takes the file the person attached (and passes it as {download_url, file_id, ...}).
+    meta: dict = field(default_factory=dict)
+    # Arguments the endpoint judges, not the schema check: what a host sends for a file it cannot hand over (a string, a path,
+    # nothing) must reach the tool to be answered in one plain sentence instead of "arguments.file must be an object".
+    loose: tuple[str, ...] = ()
 
     def listed_for(self, scopes: set[str]) -> bool:
         """Whether a connection with these scopes sees this tool in tools/list."""
@@ -113,9 +119,19 @@ class Tool:
             "annotations": {"title": self.display_title(), "readOnlyHint": not self.write, "destructiveHint": self.destructive,
                             "openWorldHint": False},
         }
+        meta = dict(self.meta)
         if self.ui and ui:  # MCP Apps: hosts that support it show the view; others ignore this and show the text answer
-            out["_meta"] = {"ui": {"resourceUri": mcp_ui.uri(self.ui), "visibility": ["model", "app"]}}
+            meta["ui"] = {"resourceUri": mcp_ui.uri(self.ui), "visibility": ["model", "app"]}
+        if meta:
+            out["_meta"] = meta
         return out
+
+    def checked_schema(self) -> dict:
+        """The input schema a call is checked against: ``schema()`` with the ``loose`` arguments left to the endpoint."""
+        schema = self.schema()["inputSchema"]
+        if self.loose:
+            schema = {**schema, "properties": {k: ({} if k in self.loose else v) for k, v in schema["properties"].items()}}
+        return schema
 
 
 # How a re-import answers its three-way update (vault.merge): shared by import_collection_csv and confirm_staged_upload.
@@ -199,6 +215,14 @@ IMPORT_BUCKET = {"bucket_id": {**ID, "description": "Import into this bucket onl
                                                     "bucket's copies and replaces only them; every other bucket, its tags and its notes "
                                                     "stay as they are, and the file's cards land in this bucket whatever folder the "
                                                     "file names. Omit for the whole collection (the default)"}}
+# The file object ChatGPT hands a tool whose _meta["openai/fileParams"] names the parameter (developers.openai.com/plugins/reference,
+# "Define file inputs"): all four properties declared, download_url and file_id required.
+FILE_ARG = {"type": "object", "required": ["download_url", "file_id"],
+            "description": "The collection file the person attached to the chat; the app fills it in, do not write it yourself",
+            "properties": {"download_url": {"type": "string", "description": "A temporary download address"},
+                           "file_id": {"type": "string", "description": "The app's id of the file"},
+                           "mime_type": {"type": "string", "description": "The file's media type"},
+                           "file_name": {"type": "string", "description": "The file's name"}}}
 SHARE = {"share_id": {**ID, "description": "Read a collection someone shared with you (from list_shared_with_me) instead of your own"}}
 DECKLIST = {"type": "string", "maxLength": 50_000}  # as the API's TextIn and DeckIn
 CONFIRM = {"type": "boolean", "description": "true only after the person agreed to this exact change"}
@@ -631,6 +655,14 @@ TOOLS = [
          "when the link is made; without it the upload page lets the person pick one of their buckets, or the whole collection.",
          {"bucket_id": IMPORT_BUCKET["bucket_id"]}, method="POST", path=lambda a: f"{V1}/uploads", query=("bucket_id",), write=True,
          any_scope=True),
+    Tool("import_collection_file", "Brings in the collection file the person attached to the chat: the Vault fetches it, stages it "
+         "as that person's upload and returns what importing it would change (what comes from their app, which Vault edits are "
+         "kept, the conflicts) with the upload's id and `content_hash`. It changes nothing in the collection: the import is "
+         "confirm_staged_upload. Any connection may call it, read-only ones included. If the app cannot hand the file over the "
+         "answer says so in a sentence.",
+         {"file": FILE_ARG, "bucket_id": IMPORT_BUCKET["bucket_id"]}, method="POST", path=lambda a: f"{V1}/uploads/from-file",
+         body=lambda a: {k: a[k] for k in ("file", "bucket_id") if a.get(k) is not None}, write=True, any_scope=True,
+         meta={"openai/fileParams": ["file"]}, loose=("file",)),
     Tool("get_staged_upload", "A file the person uploaded through start_collection_upload: still waiting, or what "
          "importing it would change (what comes from their app, which Vault edits are kept, the conflicts) and which rows "
          "match no known printing (they need fixing in the file and a new upload). Names the bucket the upload goes into, if any, and "
@@ -753,7 +785,7 @@ OWN_DATA_ONLY = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucke
                  "get_acquisition_timeline", "parse_decklist", "save_deck", "update_deck", "list_imports",
                  "import_collection_csv", "list_export_formats", "list_shared_with_me", "get_import", "delete_deck",
                  "list_my_shares", "accept_share", "stop_sharing", "start_collection_upload",
-                 "get_staged_upload", "confirm_staged_upload", "council_brief", "expert_brief",
+                 "import_collection_file", "get_staged_upload", "confirm_staged_upload", "council_brief", "expert_brief",
                  "confirm_owned_cards_update", "undo_owned_cards_update"}
 DECK_ANALYSIS = {"deck_stats", "simulate_draws", "deck_legality", "find_upgrades", "validate_deck_changes", "find_combos",
                  "shopping_list"}
@@ -1012,7 +1044,7 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
             tool = BY_NAME.get(name)
             if tool is None:
                 return _rpc_error(id_, -32602, f"Unknown tool: {params.get('name')}")
-            why = _invalid(tool.schema()["inputSchema"], args, "arguments")
+            why = _invalid(tool.checked_schema(), args, "arguments")
             if why:
                 return _rpc_error(id_, -32602, f"Invalid arguments: {why}")
             status, body = await call_api(request, tool, args, part)

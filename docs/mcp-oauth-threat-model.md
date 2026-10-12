@@ -936,3 +936,82 @@ a size budget. The choice is carried in the existing signed `Mcp-Session-Id` (on
   `create_bucket` and keep asking for `update_deck`. Mitigation: `vault_write` is marked destructive so the host asks, the
   replacing tools that matter most (`import_deck_from_link`, `refresh_deck`, the collection edits and their confirmations) are
   listed directly with their own hints, and a person who wants per-tool control can use a client that gets the full list.
+
+## A file dropped in the chat (vault-0n9.3, 2026-10-12)
+
+What changed: the person attaches a collection CSV in ChatGPT and says to update the collection. The new tool
+`import_collection_file` declares `_meta["openai/fileParams"]: ["file"]`, so ChatGPT hands it `{download_url, file_id, mime_type?,
+file_name?}`; the Vault **fetches `download_url`**, stages the bytes as the person's own `StagedUpload`, and answers with the preview
+and the upload id. It changes nothing in the collection: the import is `confirm_staged_upload` (write scope, only for the preview's
+`content_hash`), unchanged. Files: `vault/file_fetch.py` (the fetch), `vault/intake.py` (the route
+`POST /api/v1/uploads/from-file`, in `READ_ONLY_POSTS` at exactly that path), `vault/api/mcp.py` (the tool, `any_scope` like
+`start_collection_upload`, so a read-only connection may preview and cannot import).
+
+**What the fetch can reach.** An address chosen by the caller of the tool: the model, the host app, or text a prompt injection put in
+the conversation. That is an SSRF surface, so every step is bounded (C = `tests/test_file_intake.py`):
+
+- **https only**, port 443, no credentials, no fragment, no address literal (decimal, hex, IPv6, IPv4-mapped), no space, backslash or
+  control character, no trailing dot, ASCII host names only, 4096 characters at most (C `test_an_address_that_could_aim_the_fetch_is_refused`).
+- **An allow-list of host names**, `FILE_INTAKE_HOSTS` (each entry is a domain and its subdomains; `Settings.check` refuses a
+  single label). **Default: `oaiusercontent.com`, `openai.com`, `chatgpt.com`.** Why that default: the only host name any OpenAI page
+  gives for a file download link is `files.oaiusercontent.com` (GPT Actions, "valid for five minutes"); the Apps SDK reference
+  (developers.openai.com/plugins/reference, read 2026-10-12) says nothing about the host, lifetime or redirects of `download_url`.
+  The first real run decides the real host, and a refused host costs a whole iteration, so OpenAI's own domains and their subdomains
+  are allowed and the **resolved address is what protects** (next point). Residual: a subdomain of an allowed domain that OpenAI lets
+  a third party serve content from would be fetchable; what is fetched is only ever parsed as a CSV by the existing importer.
+  A refused host is logged **by host name only** (`file_intake` event, `host`), never with its path or query, which carry the token.
+- **The name is resolved here and every address must be public** (`oauth_clients.public_address`: private, loopback, link-local
+  including the cloud metadata address, shared 100.64/10, multicast, reserved, unspecified, IPv4-mapped, NAT64 and 6to4 forms, Teredo;
+  one bad address among good ones refuses the host), and **the connection goes to the address that was checked**, with the name kept
+  for TLS (SNI) and the Host header: the name is resolved once per hop, so DNS rebinding between check and use does nothing (C
+  `test_a_name_that_resolves_to_a_private_address_is_never_contacted`, `test_the_connection_goes_to_the_address_that_was_checked_and_the_name_is_resolved_once`).
+- **At most 2 redirects**, each target checked by exactly the same rules (https, allow-list, public addresses, own DNS check); any
+  other redirect is refused (C `test_a_redirect_that_breaks_a_rule_is_not_followed`, `test_at_most_two_redirects_are_followed`).
+- **Size and time.** At most `MAX_UPLOAD_BYTES` (20 MB, the importer's cap) is read, in plain bytes (`Accept-Encoding: identity`; a
+  compressed answer is refused), checked against `Content-Length` and while streaming; 15 seconds in total, as a wall clock the
+  caller waits on (the fetch, including DNS, runs in a worker joined with a timeout), so a server that drips or never answers
+  cannot hold the request (C size, drip and slow-resolver tests). At most 4 fetches at once per process; a fifth is told it is busy.
+- **Content type is text-like** (`text/*` except `text/html`, `application/csv`, `application/vnd.ms-excel`); a generic
+  `application/octet-stream` counts only when the host's own description says CSV or text (storage hosts answer octet-stream).
+- **A bare GET**: no cookie, no authorization, no referrer, no proxy from the environment (C
+  `test_the_fetch_is_a_bare_get_with_no_cookie_no_authorization_and_no_referrer`).
+- **The address is never logged and never returned.** `httpx` and `httpcore` log requests at INFO with the address, so their loggers
+  are held at WARNING; exceptions from the client are reduced to their class name; answers are fixed sentences (C
+  `test_the_address_never_reaches_the_log_or_an_answer_whatever_happens_to_it`). A non-address `file` value (the string
+  `chat_upload` a phone app sends, a path, a missing key) is answered in one sentence and its **shape only** is logged: type, a
+  12-character prefix for a bare token, length; a path is logged by its root only (`C:`), never the rest, which may name the person.
+
+**What a malicious file name or content can do.** The declared `file_name` is used only to label the staged file, with any path and
+control characters removed, 255 characters; it is never used to name a path on the server. The bytes are parsed by the existing
+importer (UTF-8 check, 20 MB, the same row and column limits as an upload through the link), and shown to the person only through
+the preview, whose text the Vault writes. A file holding an instruction to the assistant is data, as for any import.
+
+**Rate and storage.** Every try counts against the person's import allowance (`IMPORT_LIMIT`, 10 a minute) on a counter of its own
+(`file intake`), so a loop does not keep the person's own `/imports` at 429. A person holds **one** fetched file at a time (a new one
+replaces the earlier, an identical one is the same row, so a host's duplicate call returns the same id); that is one 20 MB row beside
+the five link rows already allowed, expiring in one hour like a link, deleted by the daily retention job and when applied. Fetched
+rows have no ticket: `ticket_hash` starts `intake-`, which no sha256 digest can equal, so `/upload` can never open one (C
+`test_a_fetched_upload_has_no_link_the_upload_page_could_open`).
+
+**Who can do what.** A read-only connection can drop a file and read the preview and cannot import it: the apply is
+`POST /uploads/{id}/apply`, write scope, 403 (C `test_a_read_only_connection_can_drop_a_file_and_see_the_preview_but_cannot_import_it`).
+A staged file belongs to the person, not to the app: another person's id is the same 404 for read and apply (C
+`test_another_person_cannot_read_or_import_a_file_that_was_dropped_in_the_chat`); a bucket that is not the person's is a 404 before
+anything is fetched. The same residual as the link applies: a write-scope assistant told an upload id could confirm what a read-only
+app staged, with the preview's `content_hash`, and the person's yes in the chat (text, not verified by the server).
+
+**Egress and time from a Vercel function.** The fetch is an outbound HTTPS request from the same function that answers the tool call
+(60 seconds maximum, `vercel.json`): the fetch is capped at 15 seconds, leaving the rest for the preview of up to 20 MB. Memory for a
+20 MB file (the bytes, then the decoded text, then the parsed rows) is not measured on the platform; the existing upload page holds the
+same. No change to the function's permissions or secrets.
+
+Residual risks, stated:
+
+- The fetch has no wall-clock limit **inside** a worker that is blocked in a socket read: the caller is released at 15 seconds, the
+  worker ends at its own read timeouts and gives its slot back then; a host that drips response headers can hold up to 4 slots of a
+  process for as long as it drips. Only allow-listed hosts can do this.
+- The allow-list includes subdomains of three OpenAI domains (above). It can be narrowed with `FILE_INTAKE_HOSTS` once the real host
+  is known from the log (`file_intake` events, `outcome: staged` or `cannot_hand_over` with `host`).
+- What ChatGPT really sends a remote plugin is not known before the first real run: the R1 probe on the desktop app handed a
+  **local path** to a local server; mobile is reported to send the string `chat_upload`. Both are answered by the one-sentence
+  refusal, and the evidence they leave is the logged shape.

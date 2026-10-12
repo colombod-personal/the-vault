@@ -83,8 +83,8 @@ def test_a_read_only_connection_is_offered_the_upload_link_and_nothing_that_chan
     notes = tools["start_collection_upload"]["annotations"]
     assert notes["readOnlyHint"] is False and notes["destructiveHint"] is False
     # and it is the only write tool a read-only connection is given: a new one has to be added here on purpose
-    assert {t.name for t in mcp.TOOLS if t.write and t.any_scope} == {"start_collection_upload"}
-    assert {n for n in tools if mcp.BY_NAME[n].write} == {"start_collection_upload"}
+    assert {t.name for t in mcp.TOOLS if t.write and t.any_scope} == {"start_collection_upload", "import_collection_file"}
+    assert {n for n in tools if mcp.BY_NAME[n].write} == {"start_collection_upload", "import_collection_file"}
 
 
 def test_a_read_only_connection_can_start_an_upload_and_read_it_waiting(read):
@@ -95,7 +95,8 @@ def test_a_read_only_connection_can_start_an_upload_and_read_it_waiting(read):
 
 def test_the_apply_route_is_not_open_to_a_read_only_caller():
     assert "/api/v1/uploads" in vault_app.READ_ONLY_POSTS
-    assert not [p for p in vault_app.READ_ONLY_POSTS if p.startswith("/api/v1/uploads/")]  # the apply is not in it
+    # the apply is not in it; the fetch of a file the chat app hands over (vault-0n9.3) is, at exactly its own path
+    assert [p for p in vault_app.READ_ONLY_POSTS if p.startswith("/api/v1/uploads/")] == ["/api/v1/uploads/from-file"]
 
 
 # -- nothing is imported until the person confirms, and confirming needs write ------------------------------------------
@@ -295,7 +296,7 @@ BEFORE_THIS_CHANGE = {("POST", p) for p in (
 # ...and the routes that take no access token's authority at all (sign-in, and two public catalog computations).
 TAKE_NO_ACCESS_TOKEN = {("POST", "/api/v1/auth/native/{provider}"), ("POST", "/api/v1/auth/token"),
                         ("POST", "/api/v1/catalog/walkthrough"), ("POST", "/api/v1/catalog/verify-citation")}
-THE_ONE_EXEMPTION = {("POST", "/api/v1/uploads")}
+THE_ONE_EXEMPTION = {("POST", "/api/v1/uploads"), ("POST", "/api/v1/uploads/from-file")}  # the link, and the file a chat app hands over (vault-0n9.3): both stage, neither imports
 
 
 def in_process(app) -> TestClient:
