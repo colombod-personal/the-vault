@@ -238,6 +238,8 @@ def test_a_server_that_drips_the_body_is_cut_off_at_the_deadline():
     started = time.monotonic()
     f = fetcher(lambda r: httpx.Response(200, headers={"content-type": "text/csv"}, stream=Drip()), seconds=0.6)
     assert refused(lambda: fetch(f)).reason == "too slow" and time.monotonic() - started < 3
+    # the worker itself stopped at the deadline and gave its slot back (it is not left reading a server that drips for 15 s)
+    assert f._slots._value == file_fetch.MAX_CONCURRENT
 
 
 def test_a_name_that_takes_forever_to_resolve_does_not_hold_the_caller():
