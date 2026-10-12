@@ -18,7 +18,7 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from .locks import lock_account
@@ -297,6 +297,13 @@ def purge_expired_grants(db: Session, user_id: int | None = None, *, commit: boo
     return len(dead)
 
 
+def count_other_live_connections(db: Session, user_id: int, grant_id: int) -> int:
+    """How many of this person's other connections can still be used (a refresh token that ran out is a dead connection that the
+    next listing removes, so it is not counted). Reads only: a preview must not delete anything."""
+    return db.scalar(select(func.count()).select_from(OAuthGrant).where(
+        OAuthGrant.user_id == user_id, OAuthGrant.id != grant_id, OAuthGrant.refresh_expires >= _now())) or 0
+
+
 def user_grants(db: Session, user_id: int) -> list[OAuthGrant]:
     """This person's live connections (expired ones are removed first)."""
     purge_expired_grants(db, user_id)
@@ -334,6 +341,26 @@ def connected_apps(db: Session, user_id: int) -> list[list[OAuthGrant]]:
     for g in sorted(grants, key=lambda g: -g.id):
         groups.setdefault(app_key(g, clients.get(g.client_id)), []).append(g)
     return list(groups.values())
+
+
+def grant_of_access(db: Session, user_id: int, bearer: str) -> OAuthGrant | None:
+    """The connection whose current access token this is, when it is this person's; None for anything else (a personal
+    access token, the app's own sign-in, an old or unknown token)."""
+    if not is_access_token(bearer or ""):
+        return None
+    return db.scalar(select(OAuthGrant).where(OAuthGrant.access_hash == _hash(bearer), OAuthGrant.user_id == user_id))
+
+
+def revoke_user_grant(db: Session, user_id: int, grant_id: int) -> bool:
+    """Sign out one of this person's connections by its id: its access and refresh tokens (and its retired refresh tokens)
+    stop working, and the person's other connections (the same app on other devices, other apps) are untouched. By id, not
+    by access token: a refresh in between replaces the token but not the connection. False when it is already gone or is
+    not this person's."""
+    removed = db.execute(delete(OAuthGrant).where(OAuthGrant.id == grant_id, OAuthGrant.user_id == user_id)).rowcount
+    if removed:
+        db.execute(delete(OAuthRetiredRefresh).where(OAuthRetiredRefresh.grant_id == grant_id))
+    db.commit()
+    return bool(removed)
 
 
 def revoke_user_app(db: Session, user_id: int, grant_id: int) -> int | None:

@@ -203,7 +203,7 @@ against it and what is built (a recent sign-in, re-confirmed by a passkey, a pro
 - No `scope` means `read`. `write` is offered only when the client asks for it and is an **unticked** box on the
   consent page; whatever the client asks, the grant holds only what the person ticked (M `test_write_is_never_granted_without_the_person_choosing_it`).
 - Unknown scopes are `invalid_scope`. A refresh may narrow scopes, never widen them (M `test_refresh_cannot_widen_the_scopes`).
-- The REST layer enforces scopes: a read grant gets 403 `insufficient_scope` on writes, and write tools are not listed, with one exception: `start_collection_upload` and `POST /api/v1/uploads` (a link that waits for the person; the section "The upload link for a read-only connection" below says what it can cause).
+- The REST layer enforces scopes: a read grant gets 403 `insufficient_scope` on writes, and write tools are not listed, with two exceptions: `start_collection_upload` and `POST /api/v1/uploads` (a link that waits for the person; the section "The upload link for a read-only connection" below says what it can cause), and `sign_out` with `POST /api/v1/agent/sign-out` (ends only the caller's own OAuth connection; the section "Signing out from the chat" below).
 
 ### 10. SSRF through Client ID Metadata Documents
 A stranger sets `client_id=https://x/...` and the Vault fetches it. Mitigations in `vault.oauth_clients.ClientFetcher`:
@@ -936,3 +936,102 @@ a size budget. The choice is carried in the existing signed `Mcp-Session-Id` (on
   `create_bucket` and keep asking for `update_deck`. Mitigation: `vault_write` is marked destructive so the host asks, the
   replacing tools that matter most (`import_deck_from_link`, `refresh_deck`, the collection edits and their confirmations) are
   listed directly with their own hints, and a person who wants per-tool control can use a client that gets the full list.
+
+## Signing out from the chat: `sign_out` (bead vault-wxy.3.1, 2026-10-11)
+
+A host such as the ChatGPT desktop app gives a plugin's MCP server no sign-out control and keeps reusing its saved token, so a
+person could switch Vault accounts only through Account, "Connected apps", "Disconnect" on the web. `sign_out` (MCP) over
+`GET` / `POST /api/v1/agent/sign-out` ends the one connection the request comes from (`vault/oauth_server.py`
+`grant_of_access`, `revoke_user_grant`; `vault/api/catalog_api.py`). What it changes, and what stops misuse:
+
+- **Only the caller's own grant.** The grant is found by the SHA-256 of the presented access token **and** the authenticated person's
+  id, and only that row (with its retired refresh tokens) is deleted, as RFC 7009 revocation by the client already allows. The
+  person's other connections (the same app on another device, other apps) stay (M `tests/test_sign_out.py::test_confirm_ends_only_this_connection_and_another_device_keeps_working`).
+  There is no argument naming a grant, so a prompt-injected call cannot end anyone else's connection or another app of the same person.
+- **Any scope.** A read-only connection may end itself: the `POST` is in `READ_ONLY_POSTS` and the tool is listed for read-only callers
+  (`Tool.any_scope`). Ending your own credential grants nothing; it is the same power RFC 7009 gives every client
+  (M `test_a_read_only_connection_lists_the_tool_as_destructive_and_can_sign_out`).
+- **Nothing else is ended here.** A personal access token, the native app's own sign-in and a web session get 409 with where to end
+  them (Account, "Agents & API"; the app; "Sign out"), and keep working (M `test_a_personal_access_token_is_refused_and_keeps_working`,
+  `test_the_native_apps_own_sign_in_is_refused_and_keeps_working`, `test_a_web_session_is_refused_and_stays_signed_in`). A cross-site form POST with the cookie therefore revokes nothing.
+- **Audience unchanged.** An OAuth access token is still accepted only on `/api/mcp` and its in-process tool calls: the REST route called
+  directly with one answers 401 (M `test_the_route_called_directly_with_an_oauth_token_is_refused`).
+- **Preview first, and the host asks.** Without `confirm` it only reads; the tool carries `destructiveHint: true` and
+  `readOnlyHint: false`, and the server instructions and the collection-analyst skill say to confirm only after the person's yes.
+  The worst an injected `confirm: true` does is sign the person out of that app: no data changes, and signing in again restores it.
+- **After revocation** the old access token gets the MCP 401 with `WWW-Authenticate: Bearer realm="the-vault", error="invalid_token",
+  resource_metadata="..."`, and its refresh token gets `invalid_grant`, so the host starts the authorization again (M `test_the_old_token_then_gets_401_with_the_resource_metadata_and_cannot_refresh`).
+  What the person then meets depends on the age of this browser's Vault sign-in: within the recent-sign-in window (#347) the consent page, which
+  offers "Use a different account"; older (the usual case: the cookie lives 30 days) the sign-in page, which offers it as links (the last bullets).
+- **The email is masked.** The preview names the account by its name and the email with all but the first letter hidden (`d***@example.com`),
+  so a connected app that calls the tool is not handed the whole address; it is enough for the person to tell their accounts apart
+  (M `test_an_email_is_masked_to_its_first_letter_and_domain`, `test_the_preview_says_who_which_app_and_what_happens_and_changes_nothing`).
+  A local part of one letter is shown whole (`a***@b.example` reveals `a`): for such an address the mask hides nothing, and the domain is always shown.
+- **Revoked by id, so a refresh cannot misreport it.** The connection found for the request is revoked by its id and the person's
+  id, not looked up again by an access token a refresh may just have replaced (M `test_a_token_refresh_between_the_lookup_and_the_revoke_still_signs_the_connection_out`);
+  a connection ended meanwhile answers "already signed out", never the native app's message (M `test_a_connection_ended_meanwhile_says_already_signed_out_*`).
+  The preview shows the scopes the current token carries (`access_scopes`), which a refresh may have narrowed (M `test_the_preview_shows_what_this_token_carries_*`).
+  A token a refresh replaced between the request's authentication and the lookup finds no connection by its hash, and answers the same
+  "already signed out (or its token was just renewed)... ask again" (`ALREADY_SIGNED_OUT`, 409): nothing is revoked, and asking again finds the
+  connection under its new token (M `test_a_connection_ended_meanwhile_says_already_signed_out_*`).
+- **The compact tool list (Codex family) lists it directly.** `sign_out` is one of the core tools, so the ChatGPT desktop app, where this
+  was asked for, sees it with its own `destructiveHint`; `vault_call` and `vault_write` refuse it ("listed directly") like every core tool, so
+  a host's "always allow" for `vault_write` never covers signing out. The list has 30 tools and 29,549 bytes with the view links (28,970
+  without), against the guards of 30 and 30,000 (M `tests/test_mcp_profile.py::test_the_compact_list_stays_within_both_guards_with_and_without_the_views`,
+  `test_sign_out_is_listed_directly_to_every_sign_in_and_the_runners_will_not_run_it`; M `tests/test_sign_out.py::test_a_codex_client_with_the_compact_list_is_offered_sign_out_and_it_ends_only_its_connection`).
+- **A second call, or two at once.** The first call ends the connection, so the same token's second call is the MCP 401 with the resource
+  metadata, and a call that loses a race answers "already signed out"; neither touches another connection (M
+  `test_a_second_sign_out_with_the_same_token_is_a_plain_401_and_nothing_else_is_touched`,
+  `test_a_connection_removed_between_the_lookup_and_the_revoke_answers_already_signed_out`).
+- **Switching account from a browser whose Vault sign-in is older than ten minutes (found by the review of the first version of this
+  change, which only worked through the developer sign-in).** Signing out ends the app's token, not the browser's Vault session, and that
+  session is usually older than the recent-sign-in window (#347). `/oauth/authorize` already treats such a session as signed out and shows the
+  sign-in page, but the old cookie stayed, so signing in at the provider as another person hit the provider callback's link check
+  (current account, other owner, not fresh) and ended at `/?link_error=recent_sign_in_required` with the pending request lost; signing
+  in as the same person proceeded silently. Now:
+  - **The provider's answer replaces the old sign-in, only there.** `vault/auth.py` `callback`: when the session's sign-in is stale **and** the
+    session carries a live `oauth_pending` request (set by `/oauth/authorize`, kept only by a login started with `continue=oauth`, ten
+    minutes) **and** the login was started from a link of the sign-in page that carries its **one-time token** (`pending=`, rendered by
+    `/oauth/authorize` into every provider link, spent by the first login that presents it, the last three kept for other tabs of the same
+    request; `login` records it as `ok` in the pending request) **and** this is not an app (`app_flow`) or reviewer sign-in, the old `uid`/`sk`/`auth_at` are dropped before the sign-in, so it is
+    a sign-in as whoever the provider authenticated, never a link or a claim. The pending request is then resumed (consent for that person).
+    Every other path is unchanged: a stale cookie signing in at a provider without the pending request still gets `recent_sign_in_required`
+    (M `test_the_pending_request_cannot_be_used_to_link_a_provider_from_another_page`, `tests/test_recent_signin.py`).
+  - **What this can and cannot do.** A copied stale cookie that goes through the consent flow ends up signed in as the provider account it
+    authenticated with (its own account, or a new one), not as the cookie's owner and with nothing linked to the owner's account; it learns
+    nothing it did not have (M `test_a_copied_stale_cookie_in_the_consent_flow_signs_in_as_the_provider_account_and_links_nothing`). It is
+    the same outcome as signing in from an empty browser. The provider's `state` and `nonce` still bind the answer to this browser.
+  - **No logout or switch by link.** `GET /oauth/authorize` clears nothing (an earlier design cleared the session there, which would let any
+    page that can send a person's browser to the authorization URL of a registered client end their Vault sign-in as a nuisance), and the
+    provider's answer replaces the old sign-in only for a login started from the sign-in page's own link (the review of PR 471: a page on
+    another site can prime the pending request with a GET and then send the browser to the login URL, and a provider with a session of its
+    own may answer without asking, so the pending request alone is not a user action). The token is in the page's HTML, which a page on
+    another origin cannot read; without it, or with a spent or wrong one, the answer meets the unchanged #347 refusal (M
+    `test_a_link_to_the_authorization_page_does_not_end_the_browsers_sign_in`,
+    `test_a_login_link_from_another_site_cannot_replace_the_sign_in_even_if_the_provider_answers_silently`, `test_the_token_of_the_sign_in_page_works_once`).
+    A person who opens the sign-in page in a second tab keeps both working (the last three tokens), an older third tab asks again.
+    The one place the session is cleared on purpose is the consent page's "Use a different account" button, a POST that needs the page's
+    one-time nonce and a fresh sign-in, as before.
+  - **The sign-in page offers a different account.** For a browser with an older sign-in the page says so and links "use a different
+    account" per provider that supports it (`account=choose`); after "Use a different account" on the consent page every provider button
+    carries it. `GET /api/auth/login/{provider}?continue=oauth&account=choose` adds `prompt=select_account` for Google and Microsoft (the
+    documented value; the twins reject any other prompt), so a provider with one signed-in account does not silently continue as the
+    account being left. It is sent only on request and only for the OAuth sign-in (M `test_only_the_oauth_sign_in_asks_for_the_account_chooser`),
+    so the common reconnect as the same person costs no extra click. Apple and Facebook have no such prompt: their sign-in is unchanged.
+    The page does not name the earlier account (a shared computer's next user would see it).
+  - **Residual.** The provider decides which accounts its chooser lists. A person with a single Google account who wants a second Vault
+    account must sign in to the provider with it (the chooser's "Use another account"). The tests go through the Google twin, which
+    answers with the account it is told to: the chooser's behaviour at Google is the documented one, not exercised.
+  - **The preview does not lend a name.** A client that registered itself picks its own name, so the preview says `Unverified app: <name>`
+    (and `verified: false`), as the consent screen does; an app identified by its web address is named with that address (M
+    `tests/test_sign_out_preview.py::test_a_self_registered_client_is_called_unverified_in_the_preview_and_after`). "Other connections"
+    counts only connections whose refresh token has not expired, without deleting the expired ones (M
+    `test_a_connection_whose_refresh_token_ran_out_is_not_counted_and_the_preview_deletes_nothing`).
+  - **Conformance.** `prompt=select_account` is a value sent to two outside services: `tests/conformance/test_conformance.py::
+    test_the_account_chooser_prompt_is_not_refused_by_the_real_authorization_endpoint` (nightly, `TWINS_LIVE=1`) checks that the real
+    Google and Microsoft endpoints answer the request with it as they do without it (an unknown client, so only the client can be
+    complained about); the twins' own rule on prompt values is `_extra_checks`.
+  - **The conditions are each pinned** (`tests/test_sign_out_replace_rule.py`): a recent sign-in with a pending request still links another
+    provider account as before; an app flow (`app_redirect_uri`) keeps the #347 answer and goes back to the app with the error; a reviewer's
+    demo session switches accounts as before. Dropping the freshness or the app-flow condition fails its test; the reviewer condition is
+    belt and braces (`sign_in` already ignores a reviewer session for linking, so dropping it changes no outcome: a test cannot tell).

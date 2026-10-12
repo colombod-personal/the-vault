@@ -8,8 +8,8 @@ the assistant said "the deck-list tool isn't available" and fell back to the bro
 A client whose own ``initialize`` names it (``codex-mcp-client``) therefore gets this profile:
 
 * the **core** tools: what a player's first questions need, with one-sentence descriptions (the full text is one
-  ``vault_tools`` call away). A write tool is listed only to a token that may write (the exception is
-  ``start_collection_upload``, which only makes a link and is listed to every token), and keeps its own approval hints;
+  ``vault_tools`` call away). A write tool is listed only to a token that may write (the exceptions are
+  ``start_collection_upload``, which only makes a link, and ``sign_out``, which ends only the caller's own connection: both are listed to every token), and keeps its own approval hints;
 * ``vault_tools``: lists every other tool with a one-line summary, or returns one tool's full description and schema;
 * ``vault_call``: runs any other **read** tool by name; ``vault_write``: runs any other non-destructive **write** tool by
   name. Two tools, so a host's "always allow" for reading never pre-approves changing anything. Both go through exactly the
@@ -42,6 +42,7 @@ CORE = (
     "get_collection_summary", "search_cards", "check_decklist",
     "get_card_oracle", "get_rule", "search_rules", "verify_citation",
     "import_deck_from_link", "refresh_deck", "start_collection_upload",
+    "sign_out",
     "update_owned_cards", "confirm_owned_cards_update", "undo_owned_cards_update", "confirm_staged_upload",
 )
 
@@ -73,6 +74,7 @@ COMPACT = {
     "confirm_owned_cards_update": "Applies the change previewed by update_owned_cards, with the same lines and that preview's confirmation. Recorded in history and undoable.",
     "undo_owned_cards_update": "Reverts the most recent change made through an assistant if nothing else changed the collection; shows what it would change first.",
     "confirm_staged_upload": "Imports the file uploaded through start_collection_upload: a preview first, then confirm with the preview's `content_hash`.",
+    "sign_out": "Signs this app out of the Vault; its next call asks to sign in again, as another account if wanted. Needs `confirm` true; without it, it only shows which account and app.",
 }
 assert set(COMPACT) == set(CORE), "every core tool has a hand-written description"
 
@@ -89,7 +91,7 @@ INSTRUCTIONS_NOTE = (
     "\n\nThis connection lists a short set of tools. A tool these instructions name that is not in the list (for example "
     "get_rulings, list_buckets, tag_cards) is reached with vault_tools (look it up) and then vault_call (a tool that only reads) or "
     "vault_write (a tool that changes something), each by name with its arguments. Tools that delete or revoke are done by the "
-    "person in the Vault's web app."
+    "person in the Vault's web app; sign_out, which ends only this app's own connection, is listed and called by name."
 )
 
 DESC_CORE = 150   # characters of a core tool's description (for a tool with no hand-written one)

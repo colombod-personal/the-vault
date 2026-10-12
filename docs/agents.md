@@ -137,7 +137,7 @@ Tools (the `share_id` argument reads a collection someone shared with you):
 | `list_export_formats` (download links for Dragon Shield, Moxfield, Archidekt, generic CSV, text) | `/collection/exports` |
 | `list_shared_with_me`, `get_shared_deck` | `/shared` |
 
-\* write tools, listed only for tokens with the write scope; the one exception is `start_collection_upload`, which a read-only token lists too (a link that waits for the person to confirm).
+\* write tools, listed only for tokens with the write scope; the exceptions are `start_collection_upload` (a link that waits for the person to confirm) and `sign_out` (it ends only the connection that calls it), which a read-only token lists too.
 
 Each tool calls the API in-process with the caller's credentials (an OAuth token is accepted on those calls and on `/api/mcp`, nowhere else), so the API enforces every
 rule: tenancy, sharing, scopes, validation and paging. Tool arguments are checked against the
@@ -184,6 +184,7 @@ Nothing is dumped: a tool returns the card, rule or deck asked about, capped.
 | Tool | API | Notes |
 |---|---|---|
 | `whoami` | `GET /agent/whoami` | who you are, scopes, data versions (rules edition, card data, rulings, tags, prices) |
+| `sign_out` | `GET /agent/sign-out`, `POST /agent/sign-out` | `confirm` true ends only the connection that calls it (any scope); without it, who it is signed in as (email masked), which app, and what happens. A personal access token or a web sign-in is refused with where to end it |
 | `get_card_oracle` | `GET /catalog/cards` | exact name (either face) or Oracle id; a misspelling gets suggestions, never a guess |
 | `get_rulings` | `GET /catalog/cards/{oracle_id}/rulings` | newest first, at most 25 |
 | `get_limited_card_stats` | `GET /catalog/limited/{set}` | 17Lands' Magic Arena data (CC BY 4.0) for a loaded set and format (`PremierDraft` or `TradDraft`): by card names, or the best sorted by a metric, with each rate's sample size (`too_few` under 200 games in hand, `low`, `ok` from 1,000) and the exact warning; repeat the `attribution`; computed by the Vault, so figures can differ from 17lands.com |

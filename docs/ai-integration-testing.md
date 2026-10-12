@@ -269,7 +269,7 @@ link, the criterion stays open.
 1. **Connect with read scope only.** In claude.ai: Customize, Connectors, remove The Vault if it is there, add it again
    (`https://mtgvault.cards/api/mcp`), and on the Vault's approval page leave **Write unticked**. claude.ai keeps the tool
    list from the moment the connector is added, so a stale connector would test the old tools. Open the connector's tool list
-   and note the number of tools; it must equal what `tools/list` returns for a read-only token (`vault.api.mcp.TOOLS` without the write tools, except `start_collection_upload`, which is listed for read-only tokens).
+   and note the number of tools; it must equal what `tools/list` returns for a read-only token (`vault.api.mcp.TOOLS` without the write tools, except `start_collection_upload` and `sign_out`, which are listed for read-only tokens).
 2. **Open a new chat** with The Vault enabled for it (the connector toggle under the message box). Do not install the
    plugin or any skill: claude.ai has none, which is the point of the check.
 3. **Send this exact message, once:**

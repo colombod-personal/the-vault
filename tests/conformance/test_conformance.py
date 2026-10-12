@@ -609,3 +609,21 @@ def test_neon_project_consumption_fields_the_usage_check_reads(real, twin):
     t = twin.get("https://console.neon.tech/api/v2/projects/twin-project", headers={"Authorization": "Bearer twin-neon-key"}).json()["project"]
     assert missing(r, ["compute_time_seconds", "data_transfer_bytes", "synthetic_storage_size", "consumption_period_start", "consumption_period_end"]) == []
     assert invented(t, r) == []
+
+
+# -- the account chooser the Vault asks for (vault-wxy.3.1) -----------------------------------
+
+AUTHORIZE = {"google": "https://accounts.google.com/o/oauth2/v2/auth",
+             "microsoft": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"}
+
+
+@pytest.mark.parametrize("provider", list(AUTHORIZE))
+def test_the_account_chooser_prompt_is_not_refused_by_the_real_authorization_endpoint(real, provider):
+    """vault.auth sends ``prompt=select_account`` (only for the OAuth sign-in's "Use a different account") to Google and Microsoft.
+    With a client that does not exist the real endpoint can only complain about the client: if it starts answering the prompt
+    differently from the same request without it, the value is no longer accepted and the twin (which takes it) has drifted."""
+    base = {"client_id": "conformance-no-such-client.apps.example", "redirect_uri": "https://example.invalid/callback",
+            "response_type": "code", "scope": "openid email profile", "state": "conformance"}
+    control = real.get(AUTHORIZE[provider], params=base)
+    chooser = real.get(AUTHORIZE[provider], params={**base, "prompt": "select_account"})
+    assert control.status_code < 500 and chooser.status_code == control.status_code, (control.status_code, chooser.status_code)

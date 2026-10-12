@@ -22,7 +22,7 @@ Use a throwaway Vault account with a small imported collection. Do not use someo
 3. Press Connect. Expected: a browser window opens at `https://<host>/oauth/authorize?...`.
    - [ ] If not signed in, the Vault's sign-in page shows the client name. Sign in (try a provider, then repeat once with a passkey).
    - [ ] The consent screen names the app and its web address (or says "Unverified" for a registered one), lists Read, offers Write **unticked**, and lists what is never allowed.
-   - [ ] Allow with Read only. ChatGPT reports the connection and lists tools. No write tools appear except `start_collection_upload` (the link for a file; it imports nothing).
+   - [ ] Allow with Read only. ChatGPT reports the connection and lists tools. No write tools appear except `start_collection_upload` (the link for a file; it imports nothing) and `sign_out` (ends only this connection; destructive hint, ask before confirming).
 4. In a new chat, enable the connector and ask: "Call the Vault's whoami tool." Expected: it names your account, the scopes you allowed (`read`, plus `write` only if ticked) and the data versions (Comprehensive Rules edition, card data and price dates).
    - [ ] `whoami` answers with the Comprehensive Rules edition (`rules_version`), not null.
    Then ask: "What is in my Vault collection summary?" Expected: it calls `get_collection_summary` and answers with your totals.
