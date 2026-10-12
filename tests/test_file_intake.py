@@ -284,8 +284,11 @@ def test_a_generic_binary_type_is_taken_only_when_the_host_says_it_is_a_csv():
 
 
 def test_a_compressed_answer_is_not_read():
-    f = fetcher(lambda r: httpx.Response(200, content=CSV, headers={"content-type": "text/csv", "content-encoding": "gzip"}))
-    assert refused(lambda: fetch(f)).kind == "fetch_failed"
+    import gzip
+    small = gzip.compress(CSV)  # a real gzip body: a fetcher that decoded it would succeed, so refusing is the check's own doing
+    f = fetcher(lambda r: httpx.Response(200, content=small, headers={"content-type": "text/csv", "content-encoding": "gzip"}))
+    why = refused(lambda: fetch(f))
+    assert why.kind == "fetch_failed" and why.reason == "Content-Encoding is not identity"
 
 
 @pytest.mark.parametrize("status", [401, 403, 404, 410, 429, 500, 503, 204, 206])
