@@ -125,7 +125,9 @@ conflicts and ships late.
    is behind `origin/main`, merge `origin/main` into it (rebase only a branch nobody else pushes to) and run
    `python scripts/prepush.py` again. A generated file that conflicts is regenerated (`python scripts/build_plugin.py`),
    never hand-merged. Before opening a pull request, and again before asking for the merge, the branch contains today's
-   `origin/main` (section 7).
+   `origin/main` (section 7). GitHub's "require branches to be up to date before merging" stays **off** (owner,
+   2026-10-12): a pull request with no merge conflict may merge, because with a 30-minute CI that setting would make every
+   merge re-run the others. Keeping the branch current is each session's job, locally, by this rule.
 3. **Never keep working on a stale branch.** A branch whose base is more than a day behind `main` is brought up to date
    (rule 2) before any more work goes on it.
 4. **Same-day cleanup after a merge.** The day a pull request merges, its session runs `git worktree remove <path>`, deletes
