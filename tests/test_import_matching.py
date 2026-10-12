@@ -159,3 +159,30 @@ def test_no_tool_description_or_skill_asks_the_person_to_fix_a_file_from_a_known
                if not re.search(r"never|not |do not|don't", text[max(0, m.start() - 80):m.start()], re.I)]
         assert not bad, (where, bad)
     assert "fix them in the file" not in texts["get_staged_upload"] and "matching_line" in texts["get_staged_upload"]
+
+
+def test_the_counts_for_a_file_with_the_17_row_shapes(signed_in, app):
+    """13 rows with the retired code MB1 (numbers up to 1607; 3 of the cards are not in the catalog), 4 with VTHB, PHED, FWB and
+    PAGL, and one ordinary row: what the preview answers, in numbers and in one line."""
+    with app.state.db.sessions() as db:
+        cards = [(n, f"Test Mystery {n}") for n in range(1, 11)]
+        db.add_all([oracle(100 + n, name) for n, name in cards] + [oracle(200, "Test Variant"), oracle(201, "Test Promo"),
+                                                                  oracle(202, "Test Foreign"), oracle(203, "Test Normal")])
+        db.add_all([printing(100 + n, f"my-{n}", "plst", f"SET-{n}", 1.0 + n) for n, _ in cards]
+                   + [printing(100 + n, f"my-{n}-b", "plst", f"OTH-{n}", 9.0) for n in (1, 2, 3)]  # three with two printings
+                   + [printing(200, "variant", "thb", "258", 0.4), printing(201, "promo-a", "plst", "AAA-45", 2.0),
+                      printing(202, "foreign-a", "3ed", "76", 4.0), printing(202, "foreign-b", "2ed", "76", 5.0),
+                      printing(203, "normal", "m11", "149", 1.0)])
+        db.commit()
+    mb1 = [row(f"Test Mystery {n}", "MB1", str(105 + n * 150)) for n in range(1, 11)]  # up to 1605
+    mb1 += [row("Test Missing A", "MB1", "1607"), row("Test Missing B", "MB1", "300"), row("Test Missing C", "MB1", "999")]
+    file = (HEADER + "".join(mb1) + row("Test Variant", "VTHB", "258") + row("Test Promo", "PHED", "74")
+            + row("Test Foreign", "FWB", "76") + row("Test Promo", "PAGL", "45") + row("Test Normal", "M11", "149")).encode()
+    p = preview(signed_in, file)
+    assert (p["rows"], p["matched_rows"], p["unmatched_rows"]) == (18, 15, 3)
+    assert p["matched_by"] == {"set_number": 2, "name_set": 12, "name_number": 1}
+    assert (p["printing_not_in_file_rows"], p["not_found_rows"], p["left_for_daily_update_rows"]) == (13, 3, 0)
+    assert p["matching_line"] == (
+        "All 18 rows are kept: 2 rows name a printing the Vault knows; 13 were matched by card name or collector number "
+        "because the file's set or number is not the catalog's (priced as the cheapest printing, shown as not named by the "
+        "file); 3 rows are not in the card catalog, kept as written without a price.")
