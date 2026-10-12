@@ -82,21 +82,44 @@ def test_every_row_of_the_17_row_shapes_is_matched_or_kept_and_none_is_asked_for
     assert (p["not_found_rows"], p["left_for_daily_update_rows"], p["unmatched_rows"]) == (1, 1, 2)
     assert {u["name"]: u["why"] for u in p["unmatched"]} == {"Test Known But Unpriced": "later", "Test Nonexistent Card": "not_found"}
     assert p["matching_line"] == (
-        "All 11 rows are kept: 2 rows name a printing the Vault knows; 7 were matched by card name or collector number "
-        "because the file's set or number is not the catalog's (priced as the cheapest printing, shown as not named by the "
-        "file); 1 row is matched by the daily update; 1 row is not in the card catalog, kept as written without a price.")
+        "All 11 rows are kept: 2 rows name a printing the Vault knows; 7 were found by card name or collector number "
+        "because the file's set or number is not the catalog's (the daily update ties each to the cheapest printing and "
+        "shows it as not named by the file); 1 row is matched by the daily update; 1 row is not in the card catalog, kept as written without a price.")
     # the answer never tells the person (or the assistant) to fix the file
     assert not FORBIDDEN.search(p["note"]) and not FORBIDDEN.search(p["matching_line"]) and not FORBIDDEN.search(str(p))
 
 
-def test_import_keeps_every_row_as_written_and_ties_each_to_a_printing_by_the_stated_rule(signed_in, catalog, app):
+def test_import_keeps_every_row_as_written_and_the_sync_ties_each_to_a_printing_by_the_stated_rule(signed_in, catalog, app):
+    from datetime import date
+
+    from mtg_toolkits.scryfall import Card as LibraryCard
+    from vault.sync import sync
+
     assert signed_in.post(f"{V1}/imports", files={"file": ("my_cards.csv", FILE, "text/csv")}).status_code == 201
-    with app.state.db.sessions() as db:
-        rows = list(db.scalars(select(Entry).order_by(Entry.position)))
-    assert len(rows) == 11  # nothing dropped
-    by = {(r.name, r.set_code, r.collector_number): (r.scryfall_id, r.match_method) for r in rows}
+
+    def entries():
+        with app.state.db.sessions() as db:
+            rows = list(db.scalars(select(Entry).order_by(Entry.position)))
+        assert len(rows) == 11  # nothing dropped
+        return {(r.name, r.set_code, r.collector_number): (r.scryfall_id, r.match_method) for r in rows}
+
+    by = entries()
+    # at import only a printing the file names is stored: a guess is never locked in
     assert by[("Test Bolt", "m11", "149")] == (sid("bolt-m11"), "set_number")
     assert by[("Test Daxos", "vthb", "258")] == (sid("dax-258"), "set_number")  # as written: VTHB stays VTHB
+    assert all(v == (None, None) for k, v in by.items() if k[0] not in ("Test Bolt", "Test Daxos"))
+
+    def lib(key, name, set_code, number, usd):
+        return LibraryCard.from_json({"id": sid(key), "name": name, "set": set_code, "collector_number": number,
+                                      "prices": {"usd": str(usd)}, "finishes": ["nonfoil"]})
+
+    bulk = [lib("bolt-m11", "Test Bolt", "m11", "149", 1.0), lib("dax-258", "Test Daxos", "thb", "258", 0.4),
+            lib("list1", "Test List Card One", "plst", "CMR-395", 1.2), lib("list2", "Test List Card Two", "plst", "DOM-12", 0.7),
+            lib("list3-a", "Test List Card Three", "plst", "A25-50", 3.0), lib("list3-b", "Test List Card Three", "plst", "MH2-267", 1.5),
+            lib("old-2ed", "Test Old Border", "2ed", "76", 5.0), lib("old-3ed", "Test Old Border", "3ed", "76", 4.0)]
+    with app.state.db.sessions() as db:
+        sync(db, bulk, day=date(2026, 10, 12))  # the daily sync: the same ladder and the same rule
+    by = entries()
     assert by[("Test List Card One", "mb1", "1607")] == (sid("list1"), "name_set")
     assert by[("Test List Card Two", "phed", "74")] == (sid("list2"), "name_set")
     assert by[("Test List Card Three", "pagl", "45")] == (sid("list3-b"), "name_set")  # the cheaper of its two printings
@@ -183,9 +206,9 @@ def test_the_counts_for_a_file_with_the_17_row_shapes(signed_in, app):
     assert p["matched_by"] == {"set_number": 2, "name_set": 12, "name_number": 1}
     assert (p["printing_not_in_file_rows"], p["not_found_rows"], p["left_for_daily_update_rows"]) == (13, 3, 0)
     assert p["matching_line"] == (
-        "All 18 rows are kept: 2 rows name a printing the Vault knows; 13 were matched by card name or collector number "
-        "because the file's set or number is not the catalog's (priced as the cheapest printing, shown as not named by the "
-        "file); 3 rows are not in the card catalog, kept as written without a price.")
+        "All 18 rows are kept: 2 rows name a printing the Vault knows; 13 were found by card name or collector number "
+        "because the file's set or number is not the catalog's (the daily update ties each to the cheapest printing and "
+        "shows it as not named by the file); 3 rows are not in the card catalog, kept as written without a price.")
 
 
 def test_names_past_the_lookup_cap_are_left_for_the_daily_update_and_never_called_not_found(signed_in, catalog, monkeypatch):

@@ -98,10 +98,12 @@ def import_collection(db: Session, user: User, filename: str, content: bytes, op
     - exact matches from the previous import are carried over
     - Scryfall ids in the file are used
     - set + collector number is looked up among the cards the server already knows
-    - the rest by the library's ladder (``mtg_toolkits.matching``) over the catalog the Vault holds: the set a retired
-      code went to, then the card's name with the set, with the collector number, then the name alone (a row matched
-      so is marked by its ``match_method`` as not naming the printing, and the daily sync matches it again)
-    A row nothing finds is kept as written; the daily sync looks again.
+    - the rest by the library's ladder (``mtg_toolkits.matching``) over the catalog the Vault holds, for the printing
+      the file names through a fallback code (``VTHB`` is Theros Beyond Death's)
+    A card the file does not name the printing of is found by the same ladder (name + set, name + collector number,
+    name) in the preview, and by the daily sync, which ties it to a printing by one stated rule; the import keeps the
+    row as written and leaves it to the sync, so a guess is never stored as the printing. A row nothing finds is kept
+    as written, and the sync looks again.
     """
     options = options or ImportOptions()
     scope = scope_of(db, user, options)  # a bucket that is not the person's is refused before the file is read
@@ -241,8 +243,9 @@ def matching_line(rows: int, exact: int, by_rule: int, later: int, not_found: in
     n = lambda count, one, many: f"{count:,} {one if count == 1 else many}"  # noqa: E731
     parts = [f"{n(exact, 'row names', 'rows name')} a printing the Vault knows"]
     if by_rule:
-        parts.append(f"{n(by_rule, 'was', 'were')} matched by card name or collector number because the file's set or "
-                     "number is not the catalog's (priced as the cheapest printing, shown as not named by the file)")
+        parts.append(f"{n(by_rule, 'was', 'were')} found by card name or collector number because the file's set or "
+                     "number is not the catalog's (the daily update ties each to the cheapest printing and shows it as "
+                     "not named by the file)")
     if later:
         parts.append(f"{n(later, 'row is', 'rows are')} matched by the daily update")
     if not_found:
@@ -258,6 +261,12 @@ class Matching:
     """Each entry's (scryfall_id, match_method, price_finish), and why an entry with no printing has none."""
     results: list[tuple]
     why: dict[int, str]  # entry index -> "not_found" | "later" (vault.printing_lookup.Lookup.why_not)
+
+    def exact(self) -> list[tuple]:
+        """What an import stores: only the rows whose printing the file names. A card found by name is left for the daily
+        sync, which does it with the same ladder, so a guess is never locked in at import time and the file's own price
+        stays until it has (test_sync_keeps_imported_finish_and_does_not_lock_in_name_guesses)."""
+        return [r if r[1] in EXACT else (None, None, None) for r in self.results]
 
 
 def _match_printings(db: Session, entries, old_rows) -> Matching:
@@ -306,7 +315,7 @@ def _match_printings(db: Session, entries, old_rows) -> Matching:
 
 def _replace(db: Session, user: User, filename: str, version, prep: Prepared) -> Import:
     entries, plan, scope = prep.entries, prep.plan, prep.scope
-    matches = _match_printings(db, entries, prep.old_rows).results
+    matches = _match_printings(db, entries, prep.old_rows).exact()
     # ``rows`` and ``copies`` are those of what the import covers: the whole collection, or the one bucket (#124)
     imp = Import(
         user_id=user.id, filename=filename[:255], source=prep.source, rows=prep.result_rows,
