@@ -31,8 +31,13 @@ from pathlib import Path
 
 REPO = "colombod-personal/the-vault"
 # Ignored files that are rebuilt by a command, so removing them loses nothing.
-REBUILDABLE = (".venv/", "node_modules/", "__pycache__/", ".pytest_cache/", ".ruff_cache/", ".mypy_cache/", "dist/",
-               "build/", ".coverage", "web/node_modules/")
+# Folders git ignores that a build or test run makes again, at any depth (vault/__pycache__/ as well as __pycache__/).
+REBUILDABLE = {".venv", "node_modules", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", "dist", "build"}
+
+
+def rebuildable(path: str) -> bool:
+    parts = path.replace("\\", "/").rstrip("/").split("/")
+    return bool(REBUILDABLE.intersection(parts)) or parts[-1] == ".coverage" or path.endswith(".pyc")
 
 
 def git(*args: str, cwd: str | None = None) -> subprocess.CompletedProcess:
@@ -86,14 +91,14 @@ def same_path(a: str, b: str) -> bool:
 
 def local_state(path: str) -> str:
     """Why removing this worktree's files could lose something, or "" when nothing can be lost."""
-    status = git("status", "--porcelain", "--ignored", cwd=path)
+    status = git("status", "--porcelain", "--ignored=matching", cwd=path)
     if status.returncode:
         return f"git status failed ({status.returncode}): left alone"
     tracked = [l for l in status.stdout.splitlines() if not l.startswith("!! ")]
     if tracked:
         return f"uncommitted or untracked work ({len(tracked)} files)"
     ignored = [l[3:] for l in status.stdout.splitlines() if l.startswith("!! ")]
-    kept = [p for p in ignored if not p.replace("\\", "/").startswith(REBUILDABLE) and not p.endswith(".pyc")]
+    kept = [p for p in ignored if not rebuildable(p)]
     if kept:
         return f"ignored files that are not caches ({', '.join(kept[:3])}{'...' if len(kept) > 3 else ''})"
     return ""
@@ -154,7 +159,7 @@ def classify(wts: list[Worktree], branches: list[str], merged: dict[str, Merged]
         elif not m:
             why = "not a merged pull request's head: work in progress?"
         elif now - m.merged_at < min_age:
-            why = f"PR #{m.number} merged {m.merged_at:%Y-%m-%d %H:%M}Z, under {min_age} ago: its session removes it"
+            why = f"PR #{m.number} merged {m.merged_at:%Y-%m-%d %H:%M}Z, under {min_age.total_seconds() / 3600:g} h ago: its session removes it"
         else:
             r.remove_worktrees.append(wt)
             continue

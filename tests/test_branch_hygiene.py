@@ -31,7 +31,7 @@ def repo(tmp_path):
     git("clone", "-q", str(origin), str(main), cwd=tmp_path)
     for k, v in (("user.email", "t@example.com"), ("user.name", "t"), ("commit.gpgsign", "false")):
         git("config", k, v, cwd=main)
-    (main / ".gitignore").write_text(".env*\nnode_modules/\n")
+    (main / ".gitignore").write_text(".env*\nnode_modules/\n__pycache__/\n")
     git("add", ".gitignore", cwd=main)
     git("commit", "-q", "-m", "base", cwd=main)
     git("push", "-q", "origin", "main", cwd=main)
@@ -48,6 +48,8 @@ def repo(tmp_path):
     (paths["env"] / ".env.local").write_text("SECRET=1")
     (paths["cache"] / "node_modules").mkdir()
     (paths["cache"] / "node_modules" / "x.js").write_text("")
+    (paths["cache"] / "pkg" / "__pycache__").mkdir(parents=True)  # nested: still a cache
+    (paths["cache"] / "pkg" / "__pycache__" / "m.cpython-312.pyc").write_text("")
     git("worktree", "lock", str(paths["locked"]), cwd=main)
     git("checkout", "-q", "--detach", cwd=paths["detached"])
     git("fetch", "-q", "origin", cwd=main)
@@ -83,7 +85,7 @@ def test_only_the_merged_clean_old_worktree_is_removed(repo, monkeypatch):
     assert why["wt-detached"].startswith("detached")
     assert why["wt-open"] == "open pull request"
     assert why["wt-unmerged"].startswith("not a merged")
-    assert "under" in why["wt-fresh"]  # its own session removes it
+    assert "under 24 h" in why["wt-fresh"]  # its own session removes it
     assert why["wt-dirty"].startswith("uncommitted")
     assert why["wt-untracked"].startswith("uncommitted or untracked")
     assert ".env.local" in why["wt-env"]  # ignored but not a cache: would be lost
