@@ -65,7 +65,8 @@ Codex keeps only a size-limited, alphabetical slice of a plugin's MCP tools and 
 so the assistant said they were "not available" and used the browser.
 
 - A client whose `initialize` names it `codex-mcp-client` (the CLI and the desktop app both do) gets the **compact list**
-  (`vault/api/mcp_profile.py`): the core tools with one-sentence descriptions, then `vault_tools` (lists the other tools,
+  (`vault/api/mcp_profile.py`): the core tools with one-sentence descriptions (a write tool among them only for a token that may
+  write; `start_collection_upload`, which only makes a link, for every token), then `vault_tools` (lists the other tools,
   or shows one in full), `vault_call` (runs another tool that only reads) and, for a token that may write, `vault_write`
   (runs another non-destructive write tool; it carries a destructive hint, because it can run `update_deck`,
   `set_*_metadata` and `rename_tag`, so the host asks before it). Every other client gets the full list.
