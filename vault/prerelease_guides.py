@@ -52,6 +52,10 @@ GUIDE_NOTE = ("The Vault keeps links and a few facts (dates, pack counts), each 
               "listing decides.")
 
 
+DECK_NOTE = ("Wizards' own advice on building the 40-card Sealed deck for this set is in the player guide linked here; the Vault keeps "
+             "no copy or summary of it.")
+
+
 def sleep(seconds: float) -> None:  # a name tests replace
     time.sleep(seconds)
 
@@ -361,7 +365,7 @@ def answer(db: Session, query: str | None, day: date | None = None) -> dict:
                 "nearest_upcoming": _brief(upcoming, day) if upcoming else None, "candidates": [_brief(c, day) for c in candidates[:8]],
                 "caveats": [GUIDE_NOTE], "provenance": [], "as_of": day.isoformat()}
     body = row_body(row, day)
-    body |= {"found": True, "caveats": [GUIDE_NOTE], "as_of": day.isoformat()}
+    body |= {"found": True, "caveats": [GUIDE_NOTE, *([DECK_NOTE] if row.player_guide_url else [])], "as_of": day.isoformat()}
     if chosen_because:
         body["chosen_because"] = chosen_because
     if query and query.strip() and row.prerelease_end and row.prerelease_end < day:

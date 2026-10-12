@@ -219,6 +219,7 @@ def test_every_answer_carries_provenance_naming_wizards_and_no_page_text(seeded)
     assert all(b["source"] == "Wizards of the Coast" and b["as_of"] == "2026-10-12" and b["notice"] == prov.FAN_CONTENT_NOTICE for b in sources)
     assert any(b["kind"] == "computed" for b in body["provenance"])  # the Play Booster total is the Vault's arithmetic
     assert "no text of a Wizards page" in " ".join(body["caveats"])
+    assert "building the 40-card Sealed deck" in " ".join(body["caveats"])  # Wizards' advice is linked, not copied or summarised
 
     def strings(node):
         if isinstance(node, str):
@@ -239,6 +240,7 @@ def test_a_set_with_no_guide_published_says_so_plainly_and_gives_the_event_page(
     assert body["wpn_event_page"]["url"] == "https://wpn.wizards.com/en/event/prerelease-star-trek"
     assert body["prerelease_state"] == "upcoming" and body["row_status"] == "verified" and body["note"]  # all it holds was read; no guide is out
     assert body["pack_composition"]["traditional"]["status"] == "unverified"
+    assert "building the 40-card Sealed deck" not in " ".join(body["caveats"])  # no guide, so nothing to point to
     assert body["pack_composition"]["two_headed_giant"]["status"] == "unverified"
 
 

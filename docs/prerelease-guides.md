@@ -45,6 +45,18 @@ from the set's name (`spider-man-prerelease-guide`, `the-guide-to-your-first-pre
 It runs only when `CATALOG_SOURCES` names `prerelease_guides`; see the compliance section for why and for the switch. Tests use the Wizards
 twin and never the real web.
 
+## Deck-building suggestions (the owner's words, and what is held)
+
+The owner's words name "deck construction suggestions and way to collect the right pre release documentation". This change is the second half:
+the right documentation (the links, the dates, the pack contents, with their sources). For the suggestions:
+
+* **Wizards' own** advice on building the 40-card Sealed deck is in the player guide the answer links; the answer says so
+  (`caveats`), and the Vault keeps no copy or summary of it (compliance default: link plus short facts).
+* **The Vault's own** suggestions (built from the set's card list, or a short summary in the Vault's words of the guide) are **held for the
+  owner**: bead `vault-064.10.8` says the source is the owner's to decide. Until then the Limited expert (`agents/vault-limited-expert.md`)
+  works from a pool the person gives it with the tools it already has (`check_decklist`, `deck_stats`, `get_card_oracle`,
+  `get_limited_card_stats`) and from `get_prerelease_guide` for the pages; building from a photo of a sealed pool is `vault-064.10.2`.
+
 ## What it does not do
 
 * It does not read pack contents out of the prose of a guide beyond the one counted list, and it does not know which colour pack a person
