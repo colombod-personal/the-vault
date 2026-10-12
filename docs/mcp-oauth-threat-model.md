@@ -991,7 +991,9 @@ person could switch Vault accounts only through Account, "Connected apps", "Disc
   in as the same person proceeded silently. Now:
   - **The provider's answer replaces the old sign-in, only there.** `vault/auth.py` `callback`: when the session's sign-in is stale **and** the
     session carries a live `oauth_pending` request (set by `/oauth/authorize`, kept only by a login started with `continue=oauth`, ten
-    minutes) **and** this is not an app (`app_flow`) or reviewer sign-in, the old `uid`/`sk`/`auth_at` are dropped before the sign-in, so it is
+    minutes) **and** the login was started from a link of the sign-in page that carries its **one-time token** (`pending=`, rendered by
+    `/oauth/authorize` into every provider link, spent by the first login that presents it, the last three kept for other tabs of the same
+    request; `login` records it as `ok` in the pending request) **and** this is not an app (`app_flow`) or reviewer sign-in, the old `uid`/`sk`/`auth_at` are dropped before the sign-in, so it is
     a sign-in as whoever the provider authenticated, never a link or a claim. The pending request is then resumed (consent for that person).
     Every other path is unchanged: a stale cookie signing in at a provider without the pending request still gets `recent_sign_in_required`
     (M `test_the_pending_request_cannot_be_used_to_link_a_provider_from_another_page`, `tests/test_recent_signin.py`).
@@ -999,9 +1001,15 @@ person could switch Vault accounts only through Account, "Connected apps", "Disc
     authenticated with (its own account, or a new one), not as the cookie's owner and with nothing linked to the owner's account; it learns
     nothing it did not have (M `test_a_copied_stale_cookie_in_the_consent_flow_signs_in_as_the_provider_account_and_links_nothing`). It is
     the same outcome as signing in from an empty browser. The provider's `state` and `nonce` still bind the answer to this browser.
-  - **No logout by link.** `GET /oauth/authorize` clears nothing (an earlier design cleared the session there, which would let any page that
-    can send a person's browser to the authorization URL of a registered client end their Vault sign-in as a nuisance). The old sign-in is
-    replaced only after a provider answered, in a flow this browser began (M `test_a_link_to_the_authorization_page_does_not_end_the_browsers_sign_in`).
+  - **No logout or switch by link.** `GET /oauth/authorize` clears nothing (an earlier design cleared the session there, which would let any
+    page that can send a person's browser to the authorization URL of a registered client end their Vault sign-in as a nuisance), and the
+    provider's answer replaces the old sign-in only for a login started from the sign-in page's own link (the review of PR 471: a page on
+    another site can prime the pending request with a GET and then send the browser to the login URL, and a provider with a session of its
+    own may answer without asking, so the pending request alone is not a user action). The token is in the page's HTML, which a page on
+    another origin cannot read; without it, or with a spent or wrong one, the answer meets the unchanged #347 refusal (M
+    `test_a_link_to_the_authorization_page_does_not_end_the_browsers_sign_in`,
+    `test_a_login_link_from_another_site_cannot_replace_the_sign_in_even_if_the_provider_answers_silently`, `test_the_token_of_the_sign_in_page_works_once`).
+    A person who opens the sign-in page in a second tab keeps both working (the last three tokens), an older third tab asks again.
     The one place the session is cleared on purpose is the consent page's "Use a different account" button, a POST that needs the page's
     one-time nonce and a fresh sign-in, as before.
   - **The sign-in page offers a different account.** For a browser with an older sign-in the page says so and links "use a different
@@ -1014,3 +1022,12 @@ person could switch Vault accounts only through Account, "Connected apps", "Disc
   - **Residual.** The provider decides which accounts its chooser lists. A person with a single Google account who wants a second Vault
     account must sign in to the provider with it (the chooser's "Use another account"). The tests go through the Google twin, which
     answers with the account it is told to: the chooser's behaviour at Google is the documented one, not exercised.
+  - **The preview does not lend a name.** A client that registered itself picks its own name, so the preview says `Unverified app: <name>`
+    (and `verified: false`), as the consent screen does; an app identified by its web address is named with that address (M
+    `tests/test_sign_out_preview.py::test_a_self_registered_client_is_called_unverified_in_the_preview_and_after`). "Other connections"
+    counts only connections whose refresh token has not expired, without deleting the expired ones (M
+    `test_a_connection_whose_refresh_token_ran_out_is_not_counted_and_the_preview_deletes_nothing`).
+  - **Conformance.** `prompt=select_account` is a value sent to two outside services: `tests/conformance/test_conformance.py::
+    test_the_account_chooser_prompt_is_not_refused_by_the_real_authorization_endpoint` (nightly, `TWINS_LIVE=1`) checks that the real
+    Google and Microsoft endpoints answer the request with it as they do without it (an unknown client, so only the client can be
+    complained about); the twins' own rule on prompt values is `_extra_checks`.
