@@ -82,9 +82,10 @@ def test_a_read_only_connection_is_offered_the_upload_link_and_nothing_that_chan
     # the tool is honest about what it is: it creates a link, so it is not marked read-only; it destroys nothing
     notes = tools["start_collection_upload"]["annotations"]
     assert notes["readOnlyHint"] is False and notes["destructiveHint"] is False
-    # and it is the only write tool a read-only connection is given: a new one has to be added here on purpose
-    assert {t.name for t in mcp.TOOLS if t.write and t.any_scope} == {"start_collection_upload"}
-    assert {n for n in tools if mcp.BY_NAME[n].write} == {"start_collection_upload"}
+    # and these are the only write tools a read-only connection is given (the link, the file a chat app hands over, and ending
+    # its own sign-in: vault-wxy.3.1): a new one has to be added here on purpose
+    assert {t.name for t in mcp.TOOLS if t.write and t.any_scope} == {"start_collection_upload", "import_collection_file", "sign_out"}
+    assert {n for n in tools if mcp.BY_NAME[n].write} == {"start_collection_upload", "import_collection_file", "sign_out"}
 
 
 def test_a_read_only_connection_can_start_an_upload_and_read_it_waiting(read):
@@ -95,7 +96,8 @@ def test_a_read_only_connection_can_start_an_upload_and_read_it_waiting(read):
 
 def test_the_apply_route_is_not_open_to_a_read_only_caller():
     assert "/api/v1/uploads" in vault_app.READ_ONLY_POSTS
-    assert not [p for p in vault_app.READ_ONLY_POSTS if p.startswith("/api/v1/uploads/")]  # the apply is not in it
+    # the apply is not in it; the fetch of a file the chat app hands over (vault-0n9.3) is, at exactly its own path
+    assert [p for p in vault_app.READ_ONLY_POSTS if p.startswith("/api/v1/uploads/")] == ["/api/v1/uploads/from-file"]
 
 
 # -- nothing is imported until the person confirms, and confirming needs write ------------------------------------------
@@ -155,14 +157,26 @@ def test_a_read_only_personal_token_can_start_and_read_but_not_import(app):
 
 # -- limits hold for a read-only connection, and the denial is plain -----------------------------------------------------
 
-def test_a_read_only_app_can_hold_the_five_links_and_the_409_says_what_the_person_can_do(app, read, write):
+def test_a_read_only_app_can_rotate_the_persons_waiting_links_but_not_read_or_import_what_they_hold(app, read, write):
     links = [ok(read, "start_collection_upload") for _ in range(uploads.MAX_OPEN)]
-    for refused in (tool(read, "start_collection_upload"), tool(write, "start_collection_upload")):  # one budget per person
-        text = refused["content"][0]["text"]
-        assert refused["isError"] is True and "5 open upload links" in text
-        assert "let them expire" in text and "no list of open links" in text  # what can be done, and that there is no list
+    sixth = ok(read, "start_collection_upload")  # vault-73p: replaced, not refused
+    assert sixth["replaced_upload_id"] == links[0]["id"]
+    assert ok(write, "start_collection_upload")["replaced_upload_id"] == links[1]["id"]  # the person's write app too
     with app.state.db.sessions() as db:
-        assert db.query(StagedUpload).count() == len(links)  # the refused calls stored nothing
+        assert db.query(StagedUpload).count() == uploads.MAX_OPEN  # five open, never six
+    # a link that holds a file: the read-only app sees only what the person's own read grant shows, and cannot import it
+    assert person_uploads(app, ticket_of(sixth), file(line(*KILLER, qty=1))).status_code == 200
+    staged = ok(read, "get_staged_upload", upload_id=sixth["id"])
+    refused = tool(read, "confirm_staged_upload", upload_id=sixth["id"], confirm=True, content_hash=staged["content_hash"])
+    assert refused["isError"] is True and "read-only" in refused["content"][0]["text"]
+    with app.state.db.sessions() as db:  # make every other link hold a file too: now the refusal is plain and lists them
+        for row in db.query(StagedUpload).filter(StagedUpload.content.is_(None)):
+            row.content, row.filename, row.uploaded_at = b"x", "a.csv", row.expires_at
+        db.commit()
+    for denied in (tool(read, "start_collection_upload"), tool(write, "start_collection_upload")):  # either scope
+        text = denied["content"][0]["text"]
+        assert denied["isError"] is True and "a file has been uploaded through each one" in text
+        assert "confirm_staged_upload" in text and f"id {sixth['id']}" in text
 
 
 def test_a_read_only_app_can_use_up_the_persons_start_budget_and_the_denial_is_plain(app, read, write):
@@ -261,9 +275,10 @@ def test_another_person_cannot_read_or_apply_an_upload_a_read_only_app_started(a
 
 def test_the_tool_descriptions_state_the_limits_the_server_enforces():
     text = mcp.BY_NAME["start_collection_upload"].description
-    assert f"At most {uploads.MAX_OPEN} links" in text and f"{importer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB" in text
+    assert f"at most {uploads.MAX_OPEN} open links" in text and f"{importer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB" in text
     assert "read-only" in text and "confirm_staged_upload" in text and "write permission" in text
-    assert "not single-use" in text and "none can be listed or cancelled" in text  # said where the link is described
+    assert "not single-use" in text and "There is no list or cancel yet" in text  # said where the link is described
+    assert "oldest link that holds no file stop working" in text and "is never replaced" in text  # the cap, as it behaves
     assert "changes nothing in the person's collection or decks" in text
     # the server's own limit is 20 MB; on the hosted site the platform's request cap (docs/developing.md) is what a person meets
     assert "mtgvault.cards" in text and "about 4 MB" in text and "before the Vault sees it" in text
@@ -281,6 +296,7 @@ def test_the_consent_screen_tells_a_person_that_read_includes_the_upload_link(ap
     client.sign_in()
     text = html.unescape(client.authorize(scope="read write").text)
     assert "give you a one-hour link to upload a collection file" in text
+    assert "take a file you attach in the chat and keep it for an hour" in text  # vault-0n9.3: the Vault fetches it, for any connection
     assert "read what importing that file would change. Importing it needs Write." in text
 
 
@@ -295,7 +311,10 @@ BEFORE_THIS_CHANGE = {("POST", p) for p in (
 # ...and the routes that take no access token's authority at all (sign-in, and two public catalog computations).
 TAKE_NO_ACCESS_TOKEN = {("POST", "/api/v1/auth/native/{provider}"), ("POST", "/api/v1/auth/token"),
                         ("POST", "/api/v1/catalog/walkthrough"), ("POST", "/api/v1/catalog/verify-citation")}
-THE_ONE_EXEMPTION = {("POST", "/api/v1/uploads")}
+THE_ONE_EXEMPTION = {("POST", "/api/v1/uploads"), ("POST", "/api/v1/uploads/from-file")}  # the link, and the file a chat app hands over (vault-0n9.3): both stage, neither imports
+# ...and the one that ends the caller's own app connection (vault-wxy.3.1): any connection may end itself, and nothing else.
+ENDS_ITS_OWN_CONNECTION = {("POST", "/api/v1/agent/sign-out")}
+END_THE_TOKEN = ("/api/v1/auth/revoke", "/api/v1/agent/sign-out")
 
 
 def in_process(app) -> TestClient:
@@ -318,7 +337,7 @@ def concrete(path: str) -> str:
 def test_a_read_only_oauth_token_is_refused_on_every_unsafe_route_but_the_upload_link(app, read):
     token = read.tokens["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
-    routes = sorted(unsafe_routes(app), key=lambda r: r[1] == "/api/v1/auth/revoke")  # revoking ends the token: last
+    routes = sorted(unsafe_routes(app), key=lambda r: r[1] in END_THE_TOKEN)  # these two end the token: last
     assert len(routes) > 40  # the sweep really saw the API
     not_refused = set()
     with in_process(app) as c:
@@ -329,8 +348,8 @@ def test_a_read_only_oauth_token_is_refused_on_every_unsafe_route_but_the_upload
             else:
                 not_refused.add((method, path))
     # nothing new is open to a read-only token, and the one thing this change opens is exactly the upload link
-    assert not_refused == BEFORE_THIS_CHANGE | TAKE_NO_ACCESS_TOKEN | THE_ONE_EXEMPTION, (
-        not_refused ^ (BEFORE_THIS_CHANGE | TAKE_NO_ACCESS_TOKEN | THE_ONE_EXEMPTION))
+    assert not_refused == BEFORE_THIS_CHANGE | TAKE_NO_ACCESS_TOKEN | THE_ONE_EXEMPTION | ENDS_ITS_OWN_CONNECTION, (
+        not_refused ^ (BEFORE_THIS_CHANGE | TAKE_NO_ACCESS_TOKEN | THE_ONE_EXEMPTION | ENDS_ITS_OWN_CONNECTION))
 
 
 def test_an_oauth_token_is_not_accepted_on_the_rest_route_directly(app, read):

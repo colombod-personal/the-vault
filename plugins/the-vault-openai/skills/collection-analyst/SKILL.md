@@ -4,13 +4,14 @@ description: >-
   Use whenever a person wants to get cards or a file into their Magic card collection in The Vault: "update,
   refresh, sync, import or load my collection", "I have an export or CSV from my app" (Dragon Shield, Moxfield,
   Archidekt, ManaBox, Delver Lens, TCGplayer, or any other app), "how do I get the file to you", "add the cards I
-  bought". The Vault gives a private upload link at once; never answer "attach the file here". Also answers
+  bought". A file the person drops or attaches in the chat is brought in from there, with no link; never answer "attach the file here" when it is already attached. Also answers
   questions about a person's own collection: what it is worth, gains and losses, what they own, what is shared with
   them, how a deck fits it, price changes, sets or colors, spare copies, small edits when they bought, sold or
-  traded cards, organising it into buckets and tags, sharing, and starting over or undoing a change.
+  traded cards, organising it into buckets and tags, sharing, starting over or undoing a change, and signing out of the Vault or
+  switching to another Vault account.
 license: MIT
 metadata:
-  vault-tools: "whoami get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline get_collection_pnl list_spare_copies list_card_names card_roles check_decklist lookup_cards refresh_prices update_owned_cards confirm_owned_cards_update undo_owned_cards_update show_owned_printings list_imports get_import list_export_formats import_collection_csv start_collection_upload get_staged_upload confirm_staged_upload list_buckets create_bucket rename_bucket move_cards delete_bucket reset_collection undo_collection_reset list_tags tag_cards untag_cards rename_tag delete_tag get_card_metadata set_card_metadata get_bucket_metadata set_bucket_metadata list_shared_with_me get_shared_deck list_my_shares accept_share stop_sharing"
+  vault-tools: "whoami get_collection_summary search_cards get_card list_sets get_collection_stats get_collection_breakdowns get_valuation get_value_history get_acquisition_timeline get_collection_pnl list_spare_copies list_card_names card_roles check_decklist lookup_cards refresh_prices update_owned_cards confirm_owned_cards_update undo_owned_cards_update show_owned_printings list_imports get_import list_export_formats import_collection_csv import_collection_file start_collection_upload get_staged_upload confirm_staged_upload list_buckets create_bucket rename_bucket move_cards delete_bucket reset_collection undo_collection_reset list_tags tag_cards untag_cards rename_tag delete_tag get_card_metadata set_card_metadata get_bucket_metadata set_bucket_metadata list_shared_with_me get_shared_deck list_my_shares accept_share stop_sharing sign_out"
 ---
 
 # Collection analyst
@@ -20,21 +21,44 @@ estimate or fill gaps. Follow `vault-attribution` (if installed) for card data a
 
 **The person's decks and collection are in the Vault: read them with the Vault's tools, never with a browser or computer.** Their saved decks, their collection and everything computed from them come from the tools named in the steps below, even when they are signed in to the Vault's website: do not open it, a browser or computer use to look. If a tool the steps name is not in your list, look it up by that name before saying it is missing; if you have `vault_tools`, reach it through `vault_tools` (it lists the Vault's other tools and shows one in full), `vault_call` (it runs one that only reads) or `vault_write` (it runs one that changes something), each by name with its arguments; a tool that deletes or revokes is done in the Vault's web app, so say that; say a tool is missing only after you have looked, and never fall back to a browser.
 
-In a host whose tool list is compact, `delete_bucket`, `delete_tag`, `untag_cards`, `reset_collection`, `undo_collection_reset`, `stop_sharing` and `import_collection_csv` are done by the person in the Vault's web app (a file is brought in from the chat with `start_collection_upload`): say so instead of looking for them.
+In a host whose tool list is compact, `delete_bucket`, `delete_tag`, `untag_cards`, `reset_collection`, `undo_collection_reset`, `stop_sharing` and `import_collection_csv` are done by the person in the Vault's web app (a file is brought in from the chat with `import_collection_file`, or `start_collection_upload` when the app cannot hand it over): say so instead of looking for them. `sign_out` also ends a sign-in, but it is listed directly: call it by its own name, never through `vault_call` or `vault_write`.
 
 **Check the connection when something is off.** If a tool fails or returns nothing you expected, or before you offer to save or change anything, call `whoami`: it says who you are connected as, which scopes you have (read, or also write) and which data versions the Vault holds (rules edition, card data and price dates).
 
 ## A file the person attaches or names
 
 A person who has the Vault and wants cards or a file in their collection uses the Vault's tools first, and never gets a generic
-"attach the file here" answer: that covers "update, refresh or sync my collection", "add the cards I bought", "how do I get the file
-to you" and "how do I load my export". A collection file the person attaches or mentions (a CSV or text export from Dragon Shield,
-Moxfield, Archidekt, ManaBox, Delver Lens, TCGplayer or another app) never goes
-through the chat. Do not try to read, open, summarise or paste it, and do not use a browser for it. Call `start_collection_upload`
-at once and give them the upload link (good for one hour: it works until it expires, and uploading again replaces the file; use the link already given in this chat rather than making another, there is no list of links); say that nothing is imported until they have seen the preview and
-said yes. When they say the file is uploaded, call `get_staged_upload` and show the preview (see "Flow: Import a collection").
-Any connection can make the link and read the preview, read-only ones included; only the final import (`confirm_staged_upload`)
-needs write access, so a read-only connection is told at that step to reconnect the Vault and tick Write on its consent page.
+"attach the file here" answer when a file is already attached: that covers "update, refresh or sync my collection", "add the cards I
+bought", "how do I get the file to you" and "how do I load my export". When they have not attached it yet, say once that they can drop
+the export (a CSV or text file from Dragon Shield, Moxfield, Archidekt, ManaBox, Delver Lens, TCGplayer or another app) in this chat.
+
+**A file the person dropped or attached in this chat: call `import_collection_file` first**, at once, with the file (the app fills
+in the file argument itself; never write it by hand, never read, open, summarise or paste the file, and never use a browser for it).
+It fetches the file, stages it as theirs and answers with the preview and an upload `id` and `content_hash`; it changes nothing.
+Then give the person **one message**: what would change (what their app changed, which edits made here are kept) and the few things
+that deserve a look (a conflict, a card that would be removed), and ask for **one yes**. On their yes, call `confirm_staged_upload`
+with that `id` as `upload_id`, `confirm` true and the `content_hash`, and say what changed in plain words: no link, no page, no
+"tell me when it is done". Any connection can drop a file and read the preview, read-only ones included; only the import needs write
+access, so a read-only connection is told at that step, in one sentence, that nothing was changed and why, and how to reconnect the
+Vault and tick Write on its consent page.
+
+**Never ask the person to fix, edit, re-export or re-upload the file**, and never hand them a list of rows to correct: the Vault
+matches the rows itself.
+
+**Only when `import_collection_file` answers `cannot_receive`** (this app cannot hand the attached file to the Vault: say its `say`
+sentence, in one sentence) or the file is not in the chat, fall back to the link: call `start_collection_upload` and give them the
+upload link (good for one hour: it works until it expires, and uploading again replaces the file; use the link already given in this
+chat if there is one; asking for another is fine when there is none to hand: a person has five open links, and a sixth makes the
+oldest one that holds no file stop working, never one that holds a file) or tell them 'Import CSV' in the Vault's website does the
+same. Say that nothing is imported until they have seen the preview and said yes. When they say the file is uploaded, call
+`get_staged_upload` once they say it is uploaded and show the preview (see "Flow: Import a collection"). A `fetch_failed` answer is
+tried once more; if it fails again, offer the same fallback.
+
+**A file from an app the Vault knows is never handed back as homework.** The Vault matches the rows itself (a set code that is the
+app's own, a collector number the catalog numbers differently, a card whose printing the file does not name) and keeps every row.
+Never ask the person to fix, edit, re-export or re-upload the file, and never ask them which printing of a card they have in it: the
+preview's `matching_line` says in one line how many rows were matched by name and how many are set aside and why; say that line,
+nothing more about it, and list rows only if they ask. Matching the rows asks them nothing: what is left to ask is only the conflicts the preview lists (a card changed both in their app and here) and the final yes.
 
 ## Answering questions
 
@@ -78,6 +102,13 @@ say what the link shares and from whom before you use it, and use only a link th
 without `confirm` lists the shares and changes nothing: show the one they mean and send `confirm` only after they say yes. Creating
 a share is not an assistant's job (an invite link hands data to someone): send the person to the web app (Account, Share your
 collection).
+
+## Signing out or switching account
+
+When the person asks to sign out of the Vault or switch to another Vault account, call `sign_out` without `confirm`: say which
+account (name and masked email) and which app it would sign out, then send `confirm` only after they say yes. The next request asks them
+to sign in again: they sign in with the other account, or choose "Use a different account" (a link on the Vault's sign-in page for Google and Microsoft, where the provider then shows
+its account chooser, or the button on its consent page); with Apple or Facebook they sign in with the other account. A personal access token or a web sign-in cannot be signed out here: the tool says where to end it, so pass that on.
 
 ## Editing what they own
 
@@ -146,17 +177,22 @@ changed. An import applies only what changed in their app since their last impor
    - Show: what they have today (copies, value, the price date) and when the last import ran and what it changed.
    - Stop: none. A read-only connection (`whoami` says so) can still get the upload link and the preview; say before step 4
      that the import itself needs write access.
-2. **Choose the route and the bucket.**
-   - Calls: `list_buckets`.
-   - Show: a file the person attached or named, or one too big to paste, gets an upload link; only a few pasted lines of CSV
-     go straight to the preview. By default a file is the whole collection; if it is one binder, box or folder, ask which bucket it is for and show the choices.
-   - Stop: do not guess a bucket. If the person did not pick one, the preview says `bucket: null`: the whole collection.
+2. **Choose the route.**
+   - Calls: `list_buckets`, only when the person names a binder, box or folder.
+   - Show: a file the person dropped or attached in the chat goes to `import_collection_file` (no link); the upload link is
+     the fallback when the app cannot hand it over, or for one that is not in the chat; only a few pasted lines of CSV
+     go straight to the preview. State the default in one line and do not ask first: "into your collection; say a bucket name if
+     you want it kept apart". A bucket the person names is looked up in `list_buckets` and passed as `bucket_id`.
+   - Stop: none. If no bucket was named, the preview says `bucket: null`: the whole collection.
 3. **Preview, with nothing changed.**
-   - Calls: `import_collection_csv` (no `confirm`; `bucket_id` for one bucket), or `start_collection_upload` (give them the
+   - Calls: `import_collection_file` for a file dropped in the chat (`bucket_id` for one bucket), `import_collection_csv` (no
+     `confirm`; `bucket_id` for one bucket), or, only as the fallback, `start_collection_upload` (give them the
      link) and then `get_staged_upload` once they say it is uploaded. The file is never read, pasted or opened in a browser.
    - Show: from `merge`, three things: what their app changed (the only part applied), the edits made here that are kept, and
-     each conflict. With a bucket, the preview names it and totals what is left alone: say both. Rows that match no known
-     printing are listed: fix them in the file and upload again.
+     each conflict. With a bucket, the preview names it and totals what is left alone: say both. Then `matching_line`, as it is:
+     every row is kept; rows the file's set or number does not identify are found by card name, and their value
+     follows the file's own price until the printing is named; a row the Vault's card list does not hold yet is kept
+     as written. Never ask the person to fix, re-export or re-upload the file; do not list rows unless they ask.
    - Stop: a conflict is a card changed in both places, or dropped by their app but edited here. Ask about each one, one card at a
      time, with copies at the last import, in their app and here. If they do not choose, the edit made here is kept. Send their
      answers as `use_app_value` (the conflict ids where they want their app's value) or `conflicts`.
@@ -217,6 +253,8 @@ answer other people's questions. Credit the artist and Scryfall when you show a 
 
 ## Do not
 
+- Ask the person to fix, edit, re-export or re-upload a file from an app the Vault knows, or to choose a printing the file does not
+  name: the Vault matches by card name and says how many rows that was.
 - Present a tag or note an assistant wrote as the person's own: the Vault records it as that app's.
 - Add up values yourself when a tool gives the total, or round away the date.
 - Assume a missing price is zero; say it is unknown.

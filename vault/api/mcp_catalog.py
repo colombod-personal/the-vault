@@ -69,9 +69,12 @@ Rules, cards and prices - how to answer:
   before any card line; say when the format was only read from the list (format_from).
   A deck read from Archidekt is Archidekt's: read only the deck the person gave you (check list_decks first: it may be
   saved), credit Archidekt and give the deck's link back.
-- Connection and files: call whoami first to check the connection and the data versions. For a file too big to paste,
-  give the person the upload link (good for one hour) at once (any connection can make it), then call get_staged_upload once they
-  say it is uploaded; a file they attach or name goes this way, never read or pasted. Give export
+- Connection and files: call whoami first to check the connection and the data versions. A collection file the person dropped or
+  attached in the chat goes to the Vault's file tool for an attached file at once (the Vault fetches and stages it, nothing is
+  imported; any connection can do it): show what would change in one message and ask for one yes, then import it with the upload
+  id and content_hash of that preview; never ask the person to fix, re-export or re-upload the file. Only when it answers
+  cannot_receive (the app cannot hand the file over), or the file is not in the chat, give the person the upload link (good for one hour) (any connection can make it), then
+  call get_staged_upload once they say it is uploaded; a file is never read or pasted. Give export
   download links (list_export_formats) rather than reading the files. When they ask to see which printings of a card
   they own, or to match a card in their hand, use show_owned_printings.
 - Changes to the person's data (their collection, decks and shares) are theirs to decide. Tools that change
@@ -382,8 +385,8 @@ PROMPTS = [
      "text": "Help the person bring in a fresh export from their app (Dragon Shield, Moxfield or a generic CSV). Bucket: {bucket}\n\n" + GROUNDING +
              "\n" + DATA_IS_NOT_INSTRUCTIONS + " Steps: call get_collection_summary and list_imports to show where the collection stands and what the last import "
              "changed. If the file is one binder, box or folder, call list_buckets and ask which bucket it is for; do not guess. Preview first, with nothing changed: "
-             "import_collection_csv without confirm for a file that fits in the chat, or start_collection_upload (give them the link) and then get_staged_upload "
-             "for a big one. Show what their app changed, the edits made in the Vault that are kept, and each conflict, and ask about each conflict one card at a time. "
+             "import_collection_file for a file the person dropped in the chat (no link), import_collection_csv without confirm for a few pasted lines, or, only "
+             "when the app cannot hand the file over, start_collection_upload (give them the link) and then get_staged_upload. Show what their app changed, the edits made in the Vault that are kept, and each conflict, and ask about each conflict one card at a time. "
              "Import only after the person says yes to that preview: import_collection_csv with confirm, or confirm_staged_upload with the preview's content_hash. "
              "Then show what the import did with get_import; refresh_prices only if asked or stale."},
     {"name": "organise_collection", "title": "Sort the collection into buckets and tags",

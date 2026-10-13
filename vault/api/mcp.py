@@ -9,7 +9,8 @@ access token from Account → Agents & API (or ``POST /api/v1/me/tokens``).
 Every tool is a thin wrapper around a ``/api/v1`` endpoint, called in-process with the
 caller's credentials. Tenancy, sharing, scopes, paging and validation are therefore
 enforced in one place. With a read-only token, write tools aren't listed, and calling one
-fails with the API's 403; the exception is ``start_collection_upload`` (``Tool.any_scope``), which only makes a link.
+fails with the API's 403; the exceptions are ``start_collection_upload`` (it only makes a link) and ``sign_out`` (it ends the
+caller's own connection), both ``Tool.any_scope``.
 """
 
 from __future__ import annotations
@@ -70,6 +71,8 @@ priced daily from Scryfall, plus their saved decks and what others have shared w
   returned only when they clearly asked for that exact reset. Never reset to make an import or an edit easier. A reset can be
   undone for 7 days with undo_collection_reset, but only until anything else changes the collection: it is best-effort, so offer
   the export first. Clearing tags, notes or history and resetting with no undo are the person's, in the web app.
+- To sign out or switch Vault account, call sign_out without confirm, say which account and app it would end, and send
+  confirm true only once the person said yes.
 """
 
 
@@ -92,9 +95,16 @@ class Tool:
     ui: str = ""  # the MCP Apps view (vault/api/mcp_ui.py) a host may show next to this tool's result
     # A write tool that a read-only connection still sees and may call, because what it does imports and changes nothing the
     # person has: start_collection_upload makes a link (good for one hour) for a file that then waits for the person's confirmation
-    # (its REST route is in vault.app.READ_ONLY_POSTS; confirm_staged_upload stays write-scoped). It keeps ``write`` so the
-    # annotations stay honest: it is not read-only, it creates a link.
+    # (its REST route is in vault.app.READ_ONLY_POSTS; confirm_staged_upload stays write-scoped), and sign_out ends only the
+    # caller's own OAuth connection, which any connection may do (its REST route is in READ_ONLY_POSTS too). They keep ``write``
+    # so the annotations stay honest: neither is read-only.
     any_scope: bool = False
+    # Host-specific metadata for tools/list (``_meta``): import_collection_file declares ``openai/fileParams`` here, which is how
+    # ChatGPT knows a parameter takes the file the person attached (and passes it as {download_url, file_id, ...}).
+    meta: dict = field(default_factory=dict)
+    # Arguments the endpoint judges, not the schema check: what a host sends for a file it cannot hand over (a string, a path,
+    # nothing) must reach the tool to be answered in one plain sentence instead of "arguments.file must be an object".
+    loose: tuple[str, ...] = ()
 
     def listed_for(self, scopes: set[str]) -> bool:
         """Whether a connection with these scopes sees this tool in tools/list."""
@@ -113,9 +123,19 @@ class Tool:
             "annotations": {"title": self.display_title(), "readOnlyHint": not self.write, "destructiveHint": self.destructive,
                             "openWorldHint": False},
         }
+        meta = dict(self.meta)
         if self.ui and ui:  # MCP Apps: hosts that support it show the view; others ignore this and show the text answer
-            out["_meta"] = {"ui": {"resourceUri": mcp_ui.uri(self.ui), "visibility": ["model", "app"]}}
+            meta["ui"] = {"resourceUri": mcp_ui.uri(self.ui), "visibility": ["model", "app"]}
+        if meta:
+            out["_meta"] = meta
         return out
+
+    def checked_schema(self) -> dict:
+        """The input schema a call is checked against: ``schema()`` with the ``loose`` arguments left to the endpoint."""
+        schema = self.schema()["inputSchema"]
+        if self.loose:
+            schema = {**schema, "properties": {k: ({} if k in self.loose else v) for k, v in schema["properties"].items()}}
+        return schema
 
 
 # How a re-import answers its three-way update (vault.merge): shared by import_collection_csv and confirm_staged_upload.
@@ -199,6 +219,14 @@ IMPORT_BUCKET = {"bucket_id": {**ID, "description": "Import into this bucket onl
                                                     "bucket's copies and replaces only them; every other bucket, its tags and its notes "
                                                     "stay as they are, and the file's cards land in this bucket whatever folder the "
                                                     "file names. Omit for the whole collection (the default)"}}
+# The file object ChatGPT hands a tool whose _meta["openai/fileParams"] names the parameter (developers.openai.com/plugins/reference,
+# "Define file inputs"): all four properties declared, download_url and file_id required.
+FILE_ARG = {"type": "object", "required": ["download_url", "file_id"],
+            "description": "The collection file the person attached to the chat; filled in by the app, never written by hand",
+            "properties": {"download_url": {"type": "string", "description": "A temporary download address"},
+                           "file_id": {"type": "string", "description": "The app's id of the file"},
+                           "mime_type": {"type": "string", "description": "The file's media type"},
+                           "file_name": {"type": "string", "description": "The file's name"}}}
 SHARE = {"share_id": {**ID, "description": "Read a collection someone shared with you (from list_shared_with_me) instead of your own"}}
 DECKLIST = {"type": "string", "maxLength": 50_000}  # as the API's TextIn and DeckIn
 CONFIRM = {"type": "boolean", "description": "true only after the person agreed to this exact change"}
@@ -617,23 +645,35 @@ TOOLS = [
           "filename": {"type": "string", "default": "agent-import.csv"}, "confirm": CONFIRM, **IMPORT_BUCKET, **MERGE_ARGS}, ["csv"],
          method="POST", path=lambda a: f"{V1}/imports" if a.get("confirm") is True else f"{V1}/imports/preview",
          query=MERGE_QUERY + ("bucket_id",), write=True, destructive=True),
-    Tool("start_collection_upload", "How a collection file reaches the Vault from a chat: a link, good for one hour, for the "
-         "person to upload the file in their browser, so the file never passes through the conversation. It is not single-use: "
-         "it works until it expires, and a second upload replaces the first file. It is what a file the "
-         "person attached or names (an export from their app) needs, of any size. Nothing is imported: the file waits until "
+    Tool("start_collection_upload", "The fallback for a collection file that import_collection_file cannot take (an app that cannot "
+         "hand over the attached file, or a file that is not in the chat): a link, good for one hour, for the "
+         "person to upload the file in their browser. It is not single-use: "
+         "it works until it expires, and a second upload replaces the first file. A file the person attached in the chat goes "
+         "to import_collection_file first. Nothing is imported: the file waits until "
          "they confirm. The uploaded file is then read by get_staged_upload. Any connection may make the link, read-only ones "
          "included, because it changes nothing in the person's collection or decks; importing the uploaded file is "
-         "confirm_staged_upload, which needs the write permission. At most 5 links are open at once, and none can be listed or "
-         "cancelled yet, so use the link already given in this chat rather than making another; the server takes a file of "
+         "confirm_staged_upload, which needs the write permission. A person has at most 5 open links: asking for a sixth makes the "
+         "oldest link that holds no file stop working (the answer names its id); a link that holds an uploaded file is never "
+         "replaced, and when all five hold one the call is refused and lists them. There is no list or cancel yet, so use the link "
+         "already given in this chat when there is one; the server takes a file of "
          "up to 20 MB, but on mtgvault.cards the hosting platform caps "
          "a request at about 4 MB, so a bigger file is refused before the Vault sees it. "
          "With bucket_id the upload goes into that bucket only, fixed "
          "when the link is made; without it the upload page lets the person pick one of their buckets, or the whole collection.",
          {"bucket_id": IMPORT_BUCKET["bucket_id"]}, method="POST", path=lambda a: f"{V1}/uploads", query=("bucket_id",), write=True,
          any_scope=True),
+    Tool("import_collection_file", "Brings in the collection file the person attached to the chat: the Vault fetches it, stages it "
+         "as that person's upload and returns what importing it would change (what comes from their app, which Vault edits are "
+         "kept, the conflicts) with the upload's id and `content_hash`. It changes nothing in the collection: the import is "
+         "confirm_staged_upload. Any connection may use it, read-only ones included. If the app cannot hand the file over the "
+         "answer says so in a sentence.",
+         {"file": FILE_ARG, "bucket_id": IMPORT_BUCKET["bucket_id"]}, method="POST", path=lambda a: f"{V1}/uploads/from-file",
+         body=lambda a: {k: a[k] for k in ("file", "bucket_id") if a.get(k) is not None}, write=True, any_scope=True,
+         meta={"openai/fileParams": ["file"]}, loose=("file",)),
     Tool("get_staged_upload", "A file the person uploaded through start_collection_upload: still waiting, or what "
-         "importing it would change (what comes from their app, which Vault edits are kept, the conflicts) and which rows "
-         "match no known printing (they need fixing in the file and a new upload). Names the bucket the upload goes into, if any, and "
+         "importing it would change (what comes from their app, which Vault edits are kept, the conflicts) and how its rows "
+         "matched: `matching_line` says it in one line and `matched_by` counts the rows by method. Every row is kept as "
+         "written; a row the catalog does not hold is listed in `unmatched` with its `why`, and nothing in it is for the person to do. Names the bucket the upload goes into, if any, and "
          "what it leaves alone. It changes nothing, and any connection may read it (read-only ones too); the person uploads "
          "the file on the link first, so it is `waiting` until they have.",
          {"upload_id": ID, **MERGE_ARGS}, ["upload_id"], path=lambda a: f"{V1}/uploads/{int(a['upload_id'])}",
@@ -725,6 +765,15 @@ TOOLS = [
          method=lambda a: "DELETE" if a.get("confirm") is True else "GET",
          path=lambda a: f"{V1}/shares/{int(a['share_id'])}" if a.get("confirm") is True else f"{V1}/shares",
          write=True, destructive=True),
+    Tool("sign_out", "Ends this app's connection to the Vault on this device: its access and refresh tokens are revoked, and the "
+         "app's next request asks for a sign-in, where another account can be chosen. With confirm false or absent it returns "
+         "the account this connection is signed in to (name and masked email), the app, and what ending it does, and changes "
+         "nothing; with confirm true it ends this one connection. The account's other apps and devices, personal access "
+         "tokens and web sign-in are not affected. Read-only connections can use it.",
+         {"confirm": CONFIRM}, [],
+         method=lambda a: "POST" if a.get("confirm") is True else "GET",
+         path=lambda a: f"{V1}/agent/sign-out", title="Sign out of the Vault here",
+         write=True, destructive=True, any_scope=True),
     Tool("where_to_buy", "Plain links to shops for one card, in the order for the country the person set (shops, then the stores they "
          "typed, the Wizards store locator and Scryfall). Each link opens a shop's own search; the Vault contacts no shop and has "
          "no price, stock or shipping, so none is given and none is the cheapest. Reading only: the person's country and stores are "
@@ -752,8 +801,8 @@ OWN_DATA_ONLY = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucke
                  "get_card_metadata", "set_card_metadata", "get_bucket_metadata", "set_bucket_metadata",
                  "get_acquisition_timeline", "parse_decklist", "save_deck", "update_deck", "list_imports",
                  "import_collection_csv", "list_export_formats", "list_shared_with_me", "get_import", "delete_deck",
-                 "list_my_shares", "accept_share", "stop_sharing", "start_collection_upload",
-                 "get_staged_upload", "confirm_staged_upload", "council_brief", "expert_brief",
+                 "list_my_shares", "accept_share", "stop_sharing", "sign_out", "start_collection_upload",
+                 "import_collection_file", "get_staged_upload", "confirm_staged_upload", "council_brief", "expert_brief",
                  "confirm_owned_cards_update", "undo_owned_cards_update"}
 DECK_ANALYSIS = {"deck_stats", "simulate_draws", "deck_legality", "find_upgrades", "validate_deck_changes", "find_combos",
                  "shopping_list"}
@@ -1012,7 +1061,7 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
             tool = BY_NAME.get(name)
             if tool is None:
                 return _rpc_error(id_, -32602, f"Unknown tool: {params.get('name')}")
-            why = _invalid(tool.schema()["inputSchema"], args, "arguments")
+            why = _invalid(tool.checked_schema(), args, "arguments")
             if why:
                 return _rpc_error(id_, -32602, f"Invalid arguments: {why}")
             status, body = await call_api(request, tool, args, part)

@@ -25,7 +25,7 @@ from starlette.requests import ClientDisconnect
 
 from . import auth as auth_module
 from . import observability
-from . import oauth_clients, oauth_routes, oauth_server, outbound, passkeys, recent_signin, reviewer_routes, rules_live, tokens, uploads
+from . import file_fetch, intake, oauth_clients, oauth_routes, oauth_server, outbound, passkeys, recent_signin, reviewer_routes, rules_live, tokens, uploads
 from .api import buckets_api, buy_api, catalog_api, deck_api, ideas_api, independence_api, mcp, meta, metadata_api, reset_api, tags_api, v1
 from .api.hal import problem
 from .config import Settings
@@ -53,7 +53,11 @@ READ_ONLY_POSTS = {"/api/v1/decks/parse", "/api/v1/imports/preview", "/api/v1/de
                    "/api/v1/decks/roles",
                    # a one-time link for a file that then waits for the person's confirmation: nothing is imported or changed
                    # (vault/uploads.py; the apply, /uploads/{id}/apply, is not here and needs the write scope)
-                   "/api/v1/uploads"}
+                   "/api/v1/uploads",
+                   # a file the chat app hands over by address: fetched and staged for the person, not imported (vault/intake.py)
+                   "/api/v1/uploads/from-file",
+                   # ends the caller's own app connection (an OAuth grant), whatever its scopes (vault/api/catalog_api.py, sign_out)
+                   "/api/v1/agent/sign-out"}
 
 
 def is_write(method: str, path: str) -> bool:
@@ -93,6 +97,7 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
     app.state.db = db
     app.state.settings = settings
     app.state.client_fetcher = fetcher
+    app.state.file_fetcher = file_fetch.FileFetcher(settings.file_intake_hosts, transport, resolver)  # a file a chat app hands over (vault.intake)
     app.state.email_sender = make_sender(settings, transport)  # None without RESEND_API_KEY: the e-mailed code is then not offered
 
     @app.exception_handler(StarletteHTTPException)
@@ -292,6 +297,7 @@ def create_app(settings: Settings | None = None, *, serve_static: bool = True, t
     app.include_router(mcp.build_router(mcp_user, resource_metadata))
     app.include_router(oauth_routes.build_router(get_db, settings, fetcher, auth))
     app.include_router(uploads.build_router(get_db, current_user, settings))
+    app.include_router(intake.build_router(get_db, current_user, settings))  # a file dropped in the chat (vault-0n9.3)
     app.include_router(meta.build_router(get_db, settings))
 
     app.add_middleware(observability.Observe)  # added last, so outermost: it sees every answer and gives every request its id

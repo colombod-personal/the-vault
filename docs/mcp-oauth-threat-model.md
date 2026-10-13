@@ -203,7 +203,7 @@ against it and what is built (a recent sign-in, re-confirmed by a passkey, a pro
 - No `scope` means `read`. `write` is offered only when the client asks for it and is an **unticked** box on the
   consent page; whatever the client asks, the grant holds only what the person ticked (M `test_write_is_never_granted_without_the_person_choosing_it`).
 - Unknown scopes are `invalid_scope`. A refresh may narrow scopes, never widen them (M `test_refresh_cannot_widen_the_scopes`).
-- The REST layer enforces scopes: a read grant gets 403 `insufficient_scope` on writes, and write tools are not listed, with one exception: `start_collection_upload` and `POST /api/v1/uploads` (a link that waits for the person; the section "The upload link for a read-only connection" below says what it can cause).
+- The REST layer enforces scopes: a read grant gets 403 `insufficient_scope` on writes, and write tools are not listed, with two exceptions: `start_collection_upload` and `POST /api/v1/uploads` (a link that waits for the person; the section "The upload link for a read-only connection" below says what it can cause), and `sign_out` with `POST /api/v1/agent/sign-out` (ends only the caller's own OAuth connection; the section "Signing out from the chat" below).
 
 ### 10. SSRF through Client ID Metadata Documents
 A stranger sets `client_id=https://x/...` and the Vault fetches it. Mitigations in `vault.oauth_clients.ClientFetcher`:
@@ -241,6 +241,11 @@ A stranger sets `client_id=https://x/...` and the Vault fetches it. Mitigations 
 - Two first fetches of one URL at once no longer fail on the unique index: the loser re-reads the winner's row (C `test_two_first_fetches_of_one_url_at_once_do_not_fail`).
 - Residual: the Vault can be made to fetch any public https URL on 443 at the rate limit; the response is
   discarded unless it is a valid document.
+
+Hardening added with the file intake (vault-0n9.3, review of PR #478): `public_address` also refuses the IPv4-compatible form
+(`::a.b.c.d`), SIIT-translated addresses, site-local `fec0::/10`, the local-use NAT64 prefix and the 6to4 relay anycast
+`192.88.99.0/24` (C `test_the_public_address_check_refuses_the_forms_a_plain_is_global_test_passes` in `tests/test_file_intake.py`).
+None was reachable on the lane host; it closes a gap that needed DNS control of an allowed name.
 
 ### 11. Dynamic registration abuse
 - Public clients only, validated redirect URIs (same rules), at most 10 URIs, 8 KB body, names cleaned and capped.
@@ -841,9 +846,9 @@ list (`vault/oauth_routes.py`, one sentence of the consent text, below). Nothing
 What a read-only caller can now cause, and what stops it (all in `vault/uploads.py`; the limits were already there; the review of 2026-10-11 added an allowance on the page, per link):
 
 - **A row, bounded.** One `staged_uploads` row: the person's id, the hash of a random ticket, an expiry (one hour) and, if the caller
-  names one, the person's own bucket (another person's is the same 404). At most 5 are open per person (409 on the sixth), at most
+  names one, the person's own bucket (another person's is the same 404). At most 5 are open per person (a sixth replaces the oldest one that holds no file, see below; 409 only when all five hold one), at most
   10 are started a minute per person (429), expired rows are deleted by the next start and by the daily retention job
-  (`tests/test_staged_upload.py`, `tests/test_upload_read_only.py::test_a_read_only_app_can_hold_the_five_links_and_the_409_says_what_the_person_can_do`, `test_a_read_only_connection_names_only_the_persons_own_buckets`).
+  (`tests/test_staged_upload.py`, `tests/test_upload_read_only.py::test_a_read_only_app_can_rotate_the_persons_waiting_links_but_not_read_or_import_what_they_hold`, `test_a_read_only_connection_names_only_the_persons_own_buckets`).
 - **Storage, bounded and not new.** A file is stored only by `POST /upload`, which needs the ticket, which the tool answer gives the
   caller as it gives a write caller. One file per link (a new one replaces it), 20 MB at most (413, nothing kept:
   `test_a_link_started_by_a_read_only_connection_takes_no_more_than_twenty_megabytes`), so at most 5 x 20 MB for one hour per person,
@@ -893,14 +898,87 @@ Residual risks, stated:
   a retry of `start_collection_upload` (an `Idempotency-Key` is not honoured on that route) makes another link and uses a slot.
   Attribution, a list, a revoke and removal on disconnect are bead vault-wxy.13 (P1); the upload page cannot yet say which app
   asked for the file for the same reason.
-- A read-only app can fill the person's five links for an hour and use the ten starts a minute (both are per person, shared by every
-  app they connected), so a write connection's `start_collection_upload` answers 409 or 429 until they expire; the 409 text now says
-  the person can finish a link or let them expire and that there is no list yet
-  (`test_a_read_only_app_can_use_up_the_persons_start_budget_and_the_denial_is_plain`). That is the same denial a write app could
-  already cause, and it is the reason for vault-wxy.13.
+- A read-only app can use the ten starts a minute (a budget per person, shared by every app they connected), so a write connection's
+  `start_collection_upload` answers 429 until the minute turns (`test_a_read_only_app_can_use_up_the_persons_start_budget_and_the_denial_is_plain`). It could
+  already fill the five links; since vault-73p it can instead rotate the waiting ones (next section). Both are the reason for vault-wxy.13.
 - `POST /upload` has no body-size limit before the ticket is checked (read from the code, not measured): the framework reads the multipart body before the handler
   rejects a made-up ticket. That is independent of scopes (the route takes no credential) and unchanged here; it is tracked as its own
   bead (vault-wxy.8).
+
+
+### The sixth link replaces the oldest waiting one (vault-73p, 2026-10-12)
+
+The vault-wxy.7.1 batch ran 8 unnamed phrasings headless and used up the account's five open links; 2 of 8 answers were the 409. A
+new chat has no memory of the link it was given, and only a hash of the ticket is stored, so the link cannot be handed back: the
+player who retried was stuck for up to an hour. Now, when the person already has five open links, `start_collection_upload`
+(`POST /api/v1/uploads`) **removes the oldest link that has no file uploaded through it** and issues the new one; the answer carries
+`replaced_upload_id` and says that link no longer works. A link with a file uploaded through it is never removed. When all five
+have one, the answer is a 409 that says so, lists them (id, size, upload time and end of the link, never the file's name) and points
+to `get_staged_upload` and `confirm_staged_upload`; there is still no discard (vault-wxy.13).
+
+**What this does not fix, said plainly (review of b833d49, 2026-10-12): the lockout.** A file "uploaded through a link" is not
+necessarily the person's: a connected app that made all five links holds all five tickets and can `POST /upload` its own file to
+each. The links then all have a file, none can be replaced, and the person's next start is a 409 until the links end, up to an hour
+from when each was made, and the person cannot discard them. This change replaces "fill" with "rotate" for links that have no file;
+the lockout remains for as long as files are held, and it is the same denial the app could cause before. The 409 therefore does not
+say "the person uploaded": it says a file was uploaded through each link, by the person or by the app that made it, that none is
+imported, and to import one only if the person recognises it. The discard is vault-wxy.13 (with attribution, list and revoke). A
+second consequence: with four files held there is one free slot, so two starts at about the same time both get a link and the
+second replaces the first (the newest request owns the slot); the first link's holder finds it expired.
+
+What a malicious connected read-only app can and cannot do with this:
+
+- **Cannot read or import anything new.** It gets the id of the link it replaced, which is a row of the person's own, no ticket and
+  no file: the id is the same number `get_staged_upload` would take from any read connection. The apply is write scope and needs the
+  previewed `content_hash`; a read-only app is refused there (`test_a_read_only_token_and_a_write_token_get_the_same_replacement`,
+  `test_a_read_only_app_can_rotate_the_persons_waiting_links_but_not_read_or_import_what_they_hold`).
+- **Can rotate the person's waiting links, quickly.** The per-person start counter (10 a minute) is unchanged and still counts a
+  start that replaces a link (`test_the_ten_starts_a_minute_limit_still_counts_when_a_link_is_replaced`). The review of b833d49
+  measured what that allows: a hostile app makes the person's newest waiting link stop working in 5 starts (about 30 seconds), and
+  can repeat it as often as it likes; because the counter is a fixed one-minute window, up to 20 starts fit in about 2 seconds
+  across a window boundary. So "the oldest waiting link is the one replaced" is a protection against a benign assistant that asks
+  again, not against a hostile one. What it costs the person: they ask their assistant for a new link; no data is lost, because a link
+  with a file uploaded through it is never replaced. Before, the same app could fill the five slots and make the person's own
+  assistant wait; now it can make a link the person was given stop working. Neither reads or imports anything.
+- **Can strand a person who has a link's page open.** The person opened a link and is choosing a file when the link is replaced:
+  their POST finds no link. They get the ordinary "This upload link has expired, ask your assistant for a new one" page, never
+  "File received" (`test_a_file_that_arrives_after_its_link_was_replaced_is_refused_as_expired_and_not_reported_received`). A link
+  that has begun receiving a file is no longer waiting. A minimum age or a last-opened time before a link may be replaced was
+  considered and left out here (it brings the 409 back for a person who asks five times in a minute); it is logged under
+  vault-wxy.13.
+- **Cannot take another person's links**: the statement is made under the owner's id (`test_replacing_does_not_touch_another_persons_links`).
+- **Cannot put its words into the 409.** The file name is chosen by whoever holds a link's ticket, and the 409 is read by the
+  person's assistants. It carries no file name at all, only the id, the size and the times; the name is in the structured answer of
+  `get_staged_upload`, as data (`test_a_hostile_file_name_never_reaches_the_409`,
+  `test_another_persons_files_never_appear_in_the_409`).
+
+The race, and whether the replacement is a transaction. Each start takes `pg_advisory_xact_lock(7301, user id)` after the
+per-person counter and before it reads anything, so one person's starts are one at a time to the end of their transaction. (Without
+it, 6 simultaneous starts at 3 open links all counted 3 and left 6 rows, and two starts with one waiting link and four held files
+could both find the same waiting row, one then answering a false 409: the review reported both. The lock is PostgreSQL's, which is
+what the Vault runs on. The wait for it is bounded by the Vault's lock timeout, `SET LOCAL lock_timeout` from `vault.locks` (5 s), and past it the start answers the usual 503 with Retry-After: `test_a_stalled_start_of_the_same_person_is_a_bounded_wait_and_a_503_not_a_hang`.) The replacement is then one `DELETE ... WHERE id = (SELECT ... ORDER BY expires_at, id LIMIT 1 FOR UPDATE
+SKIP LOCKED) AND content IS NULL ... RETURNING id` in the same transaction as the insert of the new link, committed once: if the
+insert fails the old link is still there (`test_the_replacement_and_the_new_link_are_one_transaction`), and a bad `bucket_id` replaces
+nothing (`test_a_bad_bucket_id_replaces_nothing`). The count is five or fewer after any number of simultaneous starts
+(`test_simultaneous_starts_below_the_cap_never_leave_more_than_five_links`,
+`test_two_simultaneous_starts_at_one_waiting_link_and_four_held_files_both_get_a_link`). The `content IS NULL` test is made on the row
+under its lock, so the three orders in which a file and a replacement can meet all end safely:
+1. the file was committed first: the row is no longer waiting and is skipped (`test_a_file_that_was_committed_before_the_replacement_keeps_its_link`);
+2. the file's write is in flight (row locked, not committed): the row is skipped and the next oldest waiting one is taken, and the
+   file's commit stands (`test_a_file_being_written_while_the_sixth_link_is_made_keeps_its_link`, time-bounded so a replacement that
+   waits for the lock fails the test instead of hanging it);
+3. the replacement was committed first and the file's write comes after: the file is written with one conditional `UPDATE ... WHERE
+   id = :id AND expires_at > now()` and, if no row matched, it is not kept and the page answers as for an expired link; a link that
+   expired while the file was being read is refused the same way
+   (`test_a_file_is_not_kept_for_a_link_that_expired_while_it_was_being_read`). This was an unconditional attribute write that would
+   have raised on a missing row; the page also reads the row's plain values once, before its first commit, so it never reads a row
+   that has gone.
+
+No oracle: the replaced row is deleted, as expired ones are, so `/uploads/{id}` and the page answer exactly as for an expired or
+made-up ticket (`test_a_sixth_link_replaces_the_oldest_waiting_one_and_the_old_one_answers_as_expired`). The 409's list is the
+person's own links to their own authenticated caller, never another person's (`test_another_persons_files_never_appear_in_the_409`).
+Rate limits are unchanged: the 10 starts a minute are counted before anything is replaced (a refused start replaces nothing), and
+the page keeps its allowance per link (`test_the_page_allowance_per_link_is_unchanged`).
 
 ## The compact tool list for the Codex family (2026-10-11, vault-wxy.5)
 
@@ -938,3 +1016,228 @@ a size budget. The choice is carried in the existing signed `Mcp-Session-Id` (on
   `create_bucket` and keep asking for `update_deck`. Mitigation: `vault_write` is marked destructive so the host asks, the
   replacing tools that matter most (`import_deck_from_link`, `refresh_deck`, the collection edits and their confirmations) are
   listed directly with their own hints, and a person who wants per-tool control can use a client that gets the full list.
+
+## Signing out from the chat: `sign_out` (bead vault-wxy.3.1, 2026-10-11)
+
+A host such as the ChatGPT desktop app gives a plugin's MCP server no sign-out control and keeps reusing its saved token, so a
+person could switch Vault accounts only through Account, "Connected apps", "Disconnect" on the web. `sign_out` (MCP) over
+`GET` / `POST /api/v1/agent/sign-out` ends the one connection the request comes from (`vault/oauth_server.py`
+`grant_of_access`, `revoke_user_grant`; `vault/api/catalog_api.py`). What it changes, and what stops misuse:
+
+- **Only the caller's own grant.** The grant is found by the SHA-256 of the presented access token **and** the authenticated person's
+  id, and only that row (with its retired refresh tokens) is deleted, as RFC 7009 revocation by the client already allows. The
+  person's other connections (the same app on another device, other apps) stay (M `tests/test_sign_out.py::test_confirm_ends_only_this_connection_and_another_device_keeps_working`).
+  There is no argument naming a grant, so a prompt-injected call cannot end anyone else's connection or another app of the same person.
+- **Any scope.** A read-only connection may end itself: the `POST` is in `READ_ONLY_POSTS` and the tool is listed for read-only callers
+  (`Tool.any_scope`). Ending your own credential grants nothing; it is the same power RFC 7009 gives every client
+  (M `test_a_read_only_connection_lists_the_tool_as_destructive_and_can_sign_out`).
+- **Nothing else is ended here.** A personal access token, the native app's own sign-in and a web session get 409 with where to end
+  them (Account, "Agents & API"; the app; "Sign out"), and keep working (M `test_a_personal_access_token_is_refused_and_keeps_working`,
+  `test_the_native_apps_own_sign_in_is_refused_and_keeps_working`, `test_a_web_session_is_refused_and_stays_signed_in`). A cross-site form POST with the cookie therefore revokes nothing.
+- **Audience unchanged.** An OAuth access token is still accepted only on `/api/mcp` and its in-process tool calls: the REST route called
+  directly with one answers 401 (M `test_the_route_called_directly_with_an_oauth_token_is_refused`).
+- **Preview first, and the host asks.** Without `confirm` it only reads; the tool carries `destructiveHint: true` and
+  `readOnlyHint: false`, and the server instructions and the collection-analyst skill say to confirm only after the person's yes.
+  The worst an injected `confirm: true` does is sign the person out of that app: no data changes, and signing in again restores it.
+- **After revocation** the old access token gets the MCP 401 with `WWW-Authenticate: Bearer realm="the-vault", error="invalid_token",
+  resource_metadata="..."`, and its refresh token gets `invalid_grant`, so the host starts the authorization again (M `test_the_old_token_then_gets_401_with_the_resource_metadata_and_cannot_refresh`).
+  What the person then meets depends on the age of this browser's Vault sign-in: within the recent-sign-in window (#347) the consent page, which
+  offers "Use a different account"; older (the usual case: the cookie lives 30 days) the sign-in page, which offers it as links (the last bullets).
+- **The email is masked.** The preview names the account by its name and the email with all but the first letter hidden (`d***@example.com`),
+  so a connected app that calls the tool is not handed the whole address; it is enough for the person to tell their accounts apart
+  (M `test_an_email_is_masked_to_its_first_letter_and_domain`, `test_the_preview_says_who_which_app_and_what_happens_and_changes_nothing`).
+  A local part of one letter is shown whole (`a***@b.example` reveals `a`): for such an address the mask hides nothing, and the domain is always shown.
+- **Revoked by id, so a refresh cannot misreport it.** The connection found for the request is revoked by its id and the person's
+  id, not looked up again by an access token a refresh may just have replaced (M `test_a_token_refresh_between_the_lookup_and_the_revoke_still_signs_the_connection_out`);
+  a connection ended meanwhile answers "already signed out", never the native app's message (M `test_a_connection_ended_meanwhile_says_already_signed_out_*`).
+  The preview shows the scopes the current token carries (`access_scopes`), which a refresh may have narrowed (M `test_the_preview_shows_what_this_token_carries_*`).
+  A token a refresh replaced between the request's authentication and the lookup finds no connection by its hash, and answers the same
+  "already signed out (or its token was just renewed)... ask again" (`ALREADY_SIGNED_OUT`, 409): nothing is revoked, and asking again finds the
+  connection under its new token (M `test_a_connection_ended_meanwhile_says_already_signed_out_*`).
+- **The compact tool list (Codex family) lists it directly.** `sign_out` is one of the core tools, so the ChatGPT desktop app, where this
+  was asked for, sees it with its own `destructiveHint`; `vault_call` and `vault_write` refuse it ("listed directly") like every core tool, so
+  a host's "always allow" for `vault_write` never covers signing out. The list has 30 tools and 29,549 bytes with the view links (28,970
+  without), against the guards of 30 and 30,000 (M `tests/test_mcp_profile.py::test_the_compact_list_stays_within_both_guards_with_and_without_the_views`,
+  `test_sign_out_is_listed_directly_to_every_sign_in_and_the_runners_will_not_run_it`; M `tests/test_sign_out.py::test_a_codex_client_with_the_compact_list_is_offered_sign_out_and_it_ends_only_its_connection`).
+- **A second call, or two at once.** The first call ends the connection, so the same token's second call is the MCP 401 with the resource
+  metadata, and a call that loses a race answers "already signed out"; neither touches another connection (M
+  `test_a_second_sign_out_with_the_same_token_is_a_plain_401_and_nothing_else_is_touched`,
+  `test_a_connection_removed_between_the_lookup_and_the_revoke_answers_already_signed_out`).
+- **Switching account from a browser whose Vault sign-in is older than ten minutes (found by the review of the first version of this
+  change, which only worked through the developer sign-in).** Signing out ends the app's token, not the browser's Vault session, and that
+  session is usually older than the recent-sign-in window (#347). `/oauth/authorize` already treats such a session as signed out and shows the
+  sign-in page, but the old cookie stayed, so signing in at the provider as another person hit the provider callback's link check
+  (current account, other owner, not fresh) and ended at `/?link_error=recent_sign_in_required` with the pending request lost; signing
+  in as the same person proceeded silently. Now:
+  - **The provider's answer replaces the old sign-in, only there.** `vault/auth.py` `callback`: when the session's sign-in is stale **and** the
+    session carries a live `oauth_pending` request (set by `/oauth/authorize`, kept only by a login started with `continue=oauth`, ten
+    minutes) **and** the login was started from a link of the sign-in page that carries its **one-time token** (`pending=`, rendered by
+    `/oauth/authorize` into every provider link, spent by the first login that presents it, the last three kept for other tabs of the same
+    request; `login` records it as `ok` in the pending request) **and** this is not an app (`app_flow`) or reviewer sign-in, the old `uid`/`sk`/`auth_at` are dropped before the sign-in, so it is
+    a sign-in as whoever the provider authenticated, never a link or a claim. The pending request is then resumed (consent for that person).
+    Every other path is unchanged: a stale cookie signing in at a provider without the pending request still gets `recent_sign_in_required`
+    (M `test_the_pending_request_cannot_be_used_to_link_a_provider_from_another_page`, `tests/test_recent_signin.py`).
+  - **What this can and cannot do.** A copied stale cookie that goes through the consent flow ends up signed in as the provider account it
+    authenticated with (its own account, or a new one), not as the cookie's owner and with nothing linked to the owner's account; it learns
+    nothing it did not have (M `test_a_copied_stale_cookie_in_the_consent_flow_signs_in_as_the_provider_account_and_links_nothing`). It is
+    the same outcome as signing in from an empty browser. The provider's `state` and `nonce` still bind the answer to this browser.
+  - **No logout or switch by link.** `GET /oauth/authorize` clears nothing (an earlier design cleared the session there, which would let any
+    page that can send a person's browser to the authorization URL of a registered client end their Vault sign-in as a nuisance), and the
+    provider's answer replaces the old sign-in only for a login started from the sign-in page's own link (the review of PR 471: a page on
+    another site can prime the pending request with a GET and then send the browser to the login URL, and a provider with a session of its
+    own may answer without asking, so the pending request alone is not a user action). The token is in the page's HTML, which a page on
+    another origin cannot read; without it, or with a spent or wrong one, the answer meets the unchanged #347 refusal (M
+    `test_a_link_to_the_authorization_page_does_not_end_the_browsers_sign_in`,
+    `test_a_login_link_from_another_site_cannot_replace_the_sign_in_even_if_the_provider_answers_silently`, `test_the_token_of_the_sign_in_page_works_once`).
+    A person who opens the sign-in page in a second tab keeps both working (the last three tokens), an older third tab asks again.
+    The one place the session is cleared on purpose is the consent page's "Use a different account" button, a POST that needs the page's
+    one-time nonce and a fresh sign-in, as before.
+  - **The sign-in page offers a different account.** For a browser with an older sign-in the page says so and links "use a different
+    account" per provider that supports it (`account=choose`); after "Use a different account" on the consent page every provider button
+    carries it. `GET /api/auth/login/{provider}?continue=oauth&account=choose` adds `prompt=select_account` for Google and Microsoft (the
+    documented value; the twins reject any other prompt), so a provider with one signed-in account does not silently continue as the
+    account being left. It is sent only on request and only for the OAuth sign-in (M `test_only_the_oauth_sign_in_asks_for_the_account_chooser`),
+    so the common reconnect as the same person costs no extra click. Apple and Facebook have no such prompt: their sign-in is unchanged.
+    The page does not name the earlier account (a shared computer's next user would see it).
+  - **Residual.** The provider decides which accounts its chooser lists. A person with a single Google account who wants a second Vault
+    account must sign in to the provider with it (the chooser's "Use another account"). The tests go through the Google twin, which
+    answers with the account it is told to: the chooser's behaviour at Google is the documented one, not exercised.
+  - **The preview does not lend a name.** A client that registered itself picks its own name, so the preview says `Unverified app: <name>`
+    (and `verified: false`), as the consent screen does; an app identified by its web address is named with that address (M
+    `tests/test_sign_out_preview.py::test_a_self_registered_client_is_called_unverified_in_the_preview_and_after`). "Other connections"
+    counts only connections whose refresh token has not expired, without deleting the expired ones (M
+    `test_a_connection_whose_refresh_token_ran_out_is_not_counted_and_the_preview_deletes_nothing`).
+  - **Conformance.** `prompt=select_account` is a value sent to two outside services: `tests/conformance/test_conformance.py::
+    test_the_account_chooser_prompt_is_not_refused_by_the_real_authorization_endpoint` (nightly, `TWINS_LIVE=1`) checks that the real
+    Google and Microsoft endpoints answer the request with it as they do without it (an unknown client, so only the client can be
+    complained about); the twins' own rule on prompt values is `_extra_checks`.
+  - **The conditions are each pinned** (`tests/test_sign_out_replace_rule.py`): a recent sign-in with a pending request still links another
+    provider account as before; an app flow (`app_redirect_uri`) keeps the #347 answer and goes back to the app with the error; a reviewer's
+    demo session switches accounts as before. Dropping the freshness or the app-flow condition fails its test; the reviewer condition is
+    belt and braces (`sign_in` already ignores a reviewer session for linking, so dropping it changes no outcome: a test cannot tell).
+## A file dropped in the chat (vault-0n9.3, 2026-10-12)
+
+What changed: the person attaches a collection CSV in ChatGPT and says to update the collection. The new tool
+`import_collection_file` declares `_meta["openai/fileParams"]: ["file"]`, so ChatGPT hands it `{download_url, file_id, mime_type?,
+file_name?}`; the Vault **fetches `download_url`**, stages the bytes as the person's own `StagedUpload`, and answers with the preview
+and the upload id. It changes nothing in the collection: the import is `confirm_staged_upload` (write scope, only for the preview's
+`content_hash`), unchanged. Files: `vault/file_fetch.py` (the fetch), `vault/intake.py` (the route
+`POST /api/v1/uploads/from-file`, in `READ_ONLY_POSTS` at exactly that path), `vault/api/mcp.py` (the tool, `any_scope` like
+`start_collection_upload`, so a read-only connection may preview and cannot import).
+
+**What the fetch can reach.** An address chosen by the caller of the tool: the model, the host app, or text a prompt injection put in
+the conversation. That is an SSRF surface, so every step is bounded (C = `tests/test_file_intake.py`):
+
+- **https only**, port 443, no credentials, no fragment, no address literal (decimal, hex, IPv6, IPv4-mapped), no space, backslash or
+  control character, no trailing dot, ASCII host names only, 4096 characters at most (C `test_an_address_that_could_aim_the_fetch_is_refused`).
+- **An allow-list of host names**, `FILE_INTAKE_HOSTS` (each entry is a domain and its subdomains; `Settings.check` refuses a
+  single label). **Default: `oaiusercontent.com`, `openai.com`, `chatgpt.com`.** Why that default: the only host name any OpenAI page
+  gives for a file download link is `files.oaiusercontent.com` (GPT Actions, "valid for five minutes"); the Apps SDK reference
+  (developers.openai.com/plugins/reference, read 2026-10-12) says nothing about the host, lifetime or redirects of `download_url`.
+  The first real run decides the real host, and a refused host costs a whole iteration, so OpenAI's own domains and their subdomains
+  are allowed and the **resolved address is what protects** (next point). Residual: a subdomain of an allowed domain that OpenAI lets
+  a third party serve content from would be fetchable; what is fetched is only ever parsed as a CSV by the existing importer.
+  A refused host is logged **by host name only** (`file_intake` event, `host`), never with its path or query, which carry the token,
+  and only its **last three labels** (`*.files.example.com` for `<token>.files.example.com`), so a secret in the first labels of a
+  name stays out of the log (C `test_a_host_name_is_logged_by_its_last_three_labels_so_a_secret_in_the_first_ones_stays_out`).
+- **The name is resolved here and every address must be public** (`oauth_clients.public_address`: private, loopback, link-local
+  including the cloud metadata address, shared 100.64/10, multicast, reserved, unspecified, IPv4-mapped, NAT64 and 6to4 forms, Teredo;
+  one bad address among good ones refuses the host), and **the connection goes to the address that was checked**, with the name kept
+  for TLS (SNI) and the Host header: the name is resolved once per hop, so DNS rebinding between check and use does nothing (C
+  `test_a_name_that_resolves_to_a_private_address_is_never_contacted`, `test_the_connection_goes_to_the_address_that_was_checked_and_the_name_is_resolved_once`).
+- **At most 2 redirects**, each target checked by exactly the same rules (https, allow-list, public addresses, own DNS check; a
+  relative `Location` is resolved against the address just fetched); any other redirect is refused (C
+  `test_a_redirect_that_breaks_a_rule_is_not_followed`, `test_at_most_two_redirects_are_followed`,
+  `test_a_relative_redirect_is_resolved_against_the_current_address_and_checked_again`). **This differs from the first draft of the
+  brief ("no redirects")**, on purpose: the real host and its redirects are unknown before the first real run, a refused redirect
+  would cost a whole iteration, and a hop to a host that is on the allow-list and resolves to public addresses is no wider than the
+  first request.
+- **Size and time.** At most `INTAKE_MAX_BYTES` (**5 MB**; the importer's own cap is 20 MB, see "Egress and time" for why the intake
+  takes less) is read, in plain bytes (`Accept-Encoding: identity`; a
+  compressed answer is refused), checked against `Content-Length` and while streaming; 15 seconds in total, as a wall clock the
+  caller waits on (the fetch, including DNS, runs in a worker joined with a timeout), so a server that drips or never answers
+  cannot hold the request (C size, drip and slow-resolver tests). At most 4 fetches at once per process; a fifth is told it is busy.
+- **Content type is text-like** (`text/*` except `text/html`, `application/csv`, `application/vnd.ms-excel`); a generic
+  `application/octet-stream` counts only when the host's own description says CSV or text (storage hosts answer octet-stream).
+- **A bare GET**: no cookie, no authorization, no referrer, no proxy from the environment (C
+  `test_the_fetch_is_a_bare_get_with_no_cookie_no_authorization_and_no_referrer`; the proxy is tested with the production client, no
+  transport, a listener standing in for HTTPS_PROXY: `test_environment_proxies_are_ignored_by_the_real_client`).
+- **The address is never logged and never returned.** `httpx` and `httpcore` log requests at INFO with the address, so their loggers
+  are held at WARNING; exceptions from the client are reduced to their class name; answers are fixed sentences (C
+  `test_the_address_never_reaches_the_log_or_an_answer_whatever_happens_to_it`). A non-address `file` value (the string
+  `chat_upload` a phone app sends, a path, a missing key) is answered in one sentence and its **shape only** is logged: type, length
+  and a masked prefix (only the known sentinel `chat_upload` as it is; anything else as its form); a path is logged by its root only
+  (`C:`), never the rest, which may name the person.
+
+**What a malicious file name or content can do.** The declared `file_name` is used only to label the staged file, with any path and
+control, format (bidirectional overrides, zero-width), line-separator and unassigned characters removed, 255 characters; it is
+still the app's own text and is treated as data wherever it is shown (it appears in the tool answer and in `list_imports`), and it
+is never used to name a path on the server (C `test_the_filename_shown_for_a_staged_file_is_the_declared_name_without_a_path`).
+A file that cannot be read is answered with a phrase the Vault wrote (not the library's message, which can quote a cell: C
+`test_an_unreadable_answer_never_repeats_text_from_the_file`). The bytes are parsed by the existing
+importer (UTF-8 check, 20 MB, the same row and column limits as an upload through the link), and shown to the person only through
+the preview, whose text the Vault writes. A file holding an instruction to the assistant is data, as for any import.
+
+**Rate and storage.** Every try counts against the person's import allowance (`IMPORT_LIMIT`, 10 a minute) on a counter of its own
+(`file intake`), so a loop does not keep the person's own `/imports` at 429. A person holds **one** fetched file at a time (a new one
+replaces the earlier, an identical one is the same row, so a host's duplicate call returns the same id); that is one 5 MB row beside
+the five link rows already allowed (the link cap, the replacement of the oldest waiting link and the list of held
+files count links only: C `test_a_dropped_file_is_not_one_of_the_five_links_and_is_not_listed_with_them`), expiring in one hour like a link, deleted by the daily retention job and when applied. Fetched
+rows have no ticket: `ticket_hash` starts `intake-`, which no sha256 digest can equal, so `/upload` can never open one (C
+`test_a_fetched_upload_has_no_link_the_upload_page_could_open`).
+
+**Who can do what.** A read-only connection can drop a file and read the preview and cannot import it: the apply is
+`POST /uploads/{id}/apply`, write scope, 403 (C `test_a_read_only_connection_can_drop_a_file_and_see_the_preview_but_cannot_import_it`).
+A staged file belongs to the person, not to the app: another person's id is the same 404 for read and apply (C
+`test_another_person_cannot_read_or_import_a_file_that_was_dropped_in_the_chat`); a bucket that is not the person's is a 404 before
+anything is fetched. **A read-only connection can replace the pending fetched file of a write connection** (a person holds one
+fetched file at a time): the write app's `confirm_staged_upload` with the old id then answers 404 and it drops the file again. It is
+the same person's files, nothing is imported or changed in the collection, and the `content_hash` binding holds. The same residual as the link applies: a write-scope assistant told an upload id could confirm what a read-only
+app staged, with the preview's `content_hash`, and the person's yes in the chat (text, not verified by the server).
+
+**A retry replays.** `POST /uploads/from-file` honours `Idempotency-Key` like the other creating POSTs (`vault/api/idempotency.py`; the MCP
+tool forwards the header, and a batch gets one key per call): the staged row and the stored answer commit together, a retry whose answer was
+lost gets that answer again and fetches nothing, even when another file was dropped in between and replaced the row (C
+`test_a_retry_with_the_same_key_replays_the_answer_even_after_another_file_was_dropped`). Only a staged file is stored under the key; an
+answer that staged nothing (cannot hand over, failed fetch, unreadable) is not, so a retry with the same key runs again (C
+`test_a_key_is_not_spent_on_an_answer_that_staged_nothing`). The stored answer is the preview of the person's own file, kept 24 hours
+with the other stored answers (erased with the account).
+
+**One at a time.** The replace-or-reuse decision is made under the per-person advisory lock the upload links use (5 s lock timeout,
+then the usual 503 with Retry-After), so simultaneous drops cannot leave two fetched files or two ids for one file (C
+`test_two_drops_at_once_leave_one_row_and_one_upload_id`).
+
+**The twin.** `twins/openai_files.py` answers on `files.oaiusercontent.com` as OpenAI's GPT Actions documentation describes it (a
+signed link, valid five minutes). It is the documentation's reading, **not a recording**: nothing real has been captured, so the
+conformance check (`tests/conformance/test_openai_files_live.py`) is by hand and has not run; the log of the first real run is
+its first evidence.
+
+**What the person is told.** A read-only connection can now make the Vault fetch and keep a file for an hour, so the consent screen's Read line
+(`SCOPE_TEXT["read"]` in `vault/oauth_routes.py`, the one file of section 6's list this change touches, only for that sentence) says so: it
+can also "take a file you attach in the chat and keep it for an hour, and read what importing that file would change. Importing it needs
+Write." (C `tests/test_upload_read_only.py::test_the_consent_screen_tells_a_person_that_read_includes_the_upload_link`.)
+
+**What the log keeps of a value that is not a file** (review of PR #478): its type and length; a bare string as its first 12 characters
+only when it is the one known sentinel `chat_upload` (ChatGPT mobile, issue #185), else as the form of those characters (letters
+`a`/`A`, digits `9`), and a scheme the same way, so an identifier, a name or a token a host sends in place of a file is not written down; an object by the names of the keys a file object has and a count of the
+others; a path by its root. (C `test_the_logged_shape_never_holds_a_value_that_could_be_a_token_or_a_name`.)
+
+**Egress and time from a Vercel function.** The fetch is an outbound HTTPS request from the same function that answers the tool call
+(60 seconds maximum, `vercel.json`): the fetch is capped at 15 seconds, leaving the rest for the preview. **The intake takes 5 MB, not the
+importer's 20 MB** (review of PR #478): measured in a lane process, a 17.9 MB, 190,000-row file took 8.9 s and about 450 MB of memory for
+one request, for any token, read-only included, 10 calls a minute per person; the upload page is cut near 4 MB by the hosting platform
+in production, so 20 MB had never been processed there. Memory on Vercel is not measured. A larger file is answered `too_large`, naming
+'Import CSV' on the website. No change to the function's permissions or secrets.
+
+Residual risks, stated:
+
+- The fetch has no wall-clock limit **inside** a worker that is blocked in a socket read: the caller is released at 15 seconds, the
+  worker ends at its own read timeouts and gives its slot back then; a host that drips response headers can hold up to 4 slots of a
+  process for as long as it drips. Only allow-listed hosts can do this.
+- A host name with two or three labels is logged whole, and the first labels of a longer one are cut: a secret kept in a short
+  host name (the apex a third party chose) would be logged. The address's path and query, where signed tokens are, never are.
+- The allow-list includes subdomains of three OpenAI domains (above). It can be narrowed with `FILE_INTAKE_HOSTS` once the real host
+  is known from the log (`file_intake` events, `outcome: staged` or `cannot_hand_over` with `host`).
+- What ChatGPT really sends a remote plugin is not known before the first real run: the R1 probe on the desktop app handed a
+  **local path** to a local server; mobile is reported to send the string `chat_upload`. Both are answered by the one-sentence
+  refusal, and the evidence they leave is the logged shape.

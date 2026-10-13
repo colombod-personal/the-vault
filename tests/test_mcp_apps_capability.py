@@ -15,7 +15,20 @@ from twins.mcp_client import APPS_CAPABILITIES, SESSION_HEADER, McpClient
 from vault.api import mcp, mcp_session, mcp_ui
 
 VIEW_TOOLS = {t.name for t in mcp.TOOLS if t.ui and not t.write}  # this client connects with read access: write tools are not listed
+# The one tool with a ``_meta`` that is not a view: the file parameter ChatGPT reads (vault-0n9.3). It is no view link, so a host that
+# cannot show Apps still gets it; and no view tool may carry it.
+FILE_TOOL, FILE_META = "import_collection_file", {"openai/fileParams": ["file"]}
 SECRET = "a-test-secret"
+
+
+def views_of(tools: dict) -> set:
+    """The tools that carry a view link (``_meta.ui``)."""
+    return {n for n, t in tools.items() if "ui" in t.get("_meta", {})}
+
+
+def other_meta(tools: dict) -> dict:
+    """The ``_meta`` of every tool that is not a view link: exactly the file tool's, and nothing else."""
+    return {n: t["_meta"] for n, t in tools.items() if "_meta" in t and "ui" not in t["_meta"]}
 
 
 @pytest.fixture
@@ -42,7 +55,8 @@ def test_a_host_that_advertises_mcp_apps_is_given_the_view_links(host):
     host.initialize(APPS_CAPABILITIES, name="apps-host")
     assert host.session_id and host.session_id.startswith("v1.1.")
     tools = listed(host)
-    assert {n for n, t in tools.items() if "_meta" in t} == VIEW_TOOLS and len(VIEW_TOOLS) >= 7
+    assert views_of(tools) == VIEW_TOOLS and len(VIEW_TOOLS) >= 7
+    assert other_meta(tools) == {FILE_TOOL: FILE_META}
     assert tools["find_combos"]["_meta"]["ui"]["resourceUri"] == mcp_ui.uri("combos")
 
 
@@ -50,7 +64,8 @@ def test_a_host_that_does_not_advertise_it_gets_every_tool_without_view_links_an
     host.initialize({}, name="plain-host")
     assert host.session_id.startswith("v1.0.")
     tools = listed(host)
-    assert not [n for n, t in tools.items() if "_meta" in t]
+    assert not views_of(tools)  # no view link for a host that cannot show them...
+    assert other_meta(tools) == {FILE_TOOL: FILE_META}  # ...and the file tool keeps the one key that is not a view
     assert set(tools) == {t.name for t in mcp.TOOLS if t.listed_for({"read"})}  # the tools themselves are all there
     call = host.tool("whoami")
     assert call["result"]["isError"] is False and call["result"]["content"][0]["text"]  # tool calls are untouched
@@ -60,10 +75,10 @@ def test_a_client_with_no_session_id_gets_the_view_links_as_before(host):
     """claude.ai and ChatGPT render the views today. A client that sends no session id (stateless, or connected before this
     existed) is not guessed about: its tool list is what it always was."""
     assert host.session_id is None
-    assert {n for n, t in listed(host).items() if "_meta" in t} == VIEW_TOOLS
+    assert views_of(listed(host)) == VIEW_TOOLS
     host.initialize({})  # said it cannot...
     host.session_id = None  # ...but a client that does not send the id back is unknown to us
-    assert {n for n, t in listed(host).items() if "_meta" in t} == VIEW_TOOLS
+    assert views_of(listed(host)) == VIEW_TOOLS and other_meta(listed(host)) == {FILE_TOOL: FILE_META}
 
 
 @pytest.mark.parametrize("forged", ["v1.0.0123456789abcdef.00000000000000000000000000000000", "v1.1.x", "garbage", "v2.0.a.b", "", "v1.0." + "a" * 200])
@@ -71,7 +86,7 @@ def test_an_id_the_server_did_not_sign_is_ignored_not_trusted_and_not_an_error(h
     host.session_id = forged
     res = host.mcp("tools/list")
     assert res.status_code == 200
-    assert {t["name"] for t in res.json()["result"]["tools"] if "_meta" in t} == VIEW_TOOLS  # unknown: as before
+    assert views_of({t["name"]: t for t in res.json()["result"]["tools"]}) == VIEW_TOOLS  # unknown: as before
 
 
 def test_an_id_signed_under_another_secret_is_unknown():
@@ -150,7 +165,8 @@ def test_by_default_a_host_that_said_it_cannot_show_apps_gets_no_view_links(data
     client.connect(write=True)
     client.initialize({}, name="plain-host")
     assert client.session_id.startswith("v1.0.")  # recorded: it said it cannot
-    assert {n for n, t in listed(client).items() if "_meta" in t} == set()  # enforced: a host that cannot show them is not offered them
+    assert views_of(listed(client)) == set()  # enforced: a host that cannot show them is not offered them
+    assert other_meta(listed(client)) == {FILE_TOOL: FILE_META}
 
 
 def test_the_enforcement_can_be_turned_off_with_the_environment(monkeypatch):

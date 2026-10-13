@@ -32,7 +32,7 @@ from starlette.datastructures import QueryParams
 from . import client_auth, recent_signin
 from . import oauth_clients as clients
 from . import oauth_server as server
-from .auth import PKCE_CHALLENGE as PKCE_CHALLENGE_RE, SessionEnded, require_live_session, session_user
+from .auth import PKCE_CHALLENGE as PKCE_CHALLENGE_RE, SELECT_ACCOUNT, SessionEnded, require_live_session, session_user
 from .config import Settings
 from .models import OAuthClient, User
 from .ratelimit import client_ip, limited
@@ -50,7 +50,8 @@ NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
 
 SCOPE_TEXT = {
     "read": ("Read your collection, decks, value history and what others shared with you. It can also give you a one-hour link "
-             "to upload a collection file, and read what importing that file would change. Importing it needs Write."),
+             "to upload a collection file, or take a file you attach in the chat and keep it for an hour, and read what importing "
+             "that file would change. Importing it needs Write."),
     "write": "Make changes: import collections, save and edit decks, change which cards you own, refresh prices, share",
 }
 NEVER = ("Delete your account", "Export all your data", "Create or revoke access tokens",
@@ -221,10 +222,25 @@ def where_it_returns(redirect_uri: str) -> str:
     return f"<p class=small>After you answer, you are sent back to <code>{esc(urlsplit(redirect_uri).netloc)}</code>.</p>"
 
 
-def sign_in_page(req: AuthRequest, providers: list[str], passkeys: bool, dev_login: bool, reviewers: bool = False) -> HTMLResponse:
+def sign_in_page(req: AuthRequest, providers: list[str], passkeys: bool, dev_login: bool, reviewers: bool = False,
+                 earlier: bool = False, choose: bool = False, token: str = "") -> HTMLResponse:
+    """The sign-in page of a pending authorization request. ``earlier``: this browser has a Vault sign-in that is older than the
+    recent-sign-in window (it is treated as signed out); ``choose``: the person pressed "Use a different account", so the provider
+    is asked to show its account chooser (``account=choose``, which vault.auth turns into ``prompt=select_account``). ``token``: the
+    one-time value rendered into every provider link; only a link that carries it may let the provider's answer replace an old Vault
+    sign-in (vault.auth), so a link on another site cannot sign anyone out or switch them."""
     nonce = secrets.token_urlsafe(16)
-    buttons = "".join(f'<a class=button href="/api/auth/login/{esc(p)}?continue=oauth">Continue with {esc(p.capitalize())}</a>'
+    suffix = ("&account=choose" if choose else "") + (f"&pending={esc(token)}" if token else "")
+    buttons = "".join(f'<a class=button href="/api/auth/login/{esc(p)}?continue=oauth{suffix}">Continue with {esc(p.capitalize())}</a>'
                       for p in providers)
+    different = ""
+    amp_token = f"&amp;pending={esc(token)}" if token else ""
+    if earlier and not choose:  # the usual case: the browser kept a sign-in for up to 30 days; the provider would re-pick that account
+        links = " ".join(f'<a href="/api/auth/login/{esc(p)}?continue=oauth&amp;account=choose{amp_token}">{esc(p.capitalize())}</a>'
+                         for p in providers if p in SELECT_ACCOUNT)
+        if links:
+            different = ("<p class=small>This browser was signed in to a Vault account earlier. To connect a different account, "
+                         f"<strong>use a different account</strong> with {links}.</p>")
     if passkeys:
         buttons += '<button type="button" id="passkey">Sign in with a passkey</button>'
     if dev_login:
@@ -234,6 +250,7 @@ def sign_in_page(req: AuthRequest, providers: list[str], passkeys: bool, dev_log
                     'autocomplete="off" aria-label="Reviewer passphrase"></label> <button type="button" id="reviewer">Sign in</button>')
     body = (f"<h1>Sign in to connect {esc(client_label(req.client))}</h1><p>{who_is_asking(req.client)}</p>"
             f"<p>Sign in to your Vault account to choose what it may do.</p><p>{buttons}</p>"
+            f"{different}"
             '<p id="note" class="small" role="status"></p>'
             '<p class="small">New to the Vault? Create your account at <a href="/">the Vault</a> first, then connect again.</p>')
     return page("Sign in to the Vault", body, script_nonce=nonce)
@@ -346,11 +363,19 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
         # Connecting an app mints a 30-day credential (read, and write if allowed): the same power as a personal access token, which needs a
         # recent sign-in (#347). A stale session signs in again first, with a method the account has (that makes it fresh) and comes back here.
         # A store reviewer's demo session is exempt: it has no account powers and is the way the stores' review connects an app.
+        earlier = False
         if user is not None and "rv" not in request.session and not recent_signin.is_fresh(db, request, settings):
-            user = None
+            user, earlier = None, True  # NOT cleared here: a GET must not log anyone out; vault.auth.callback replaces it after a provider answered
         if user is None:
-            request.session["oauth_pending"] = {"q": raw, "t": int(time.time())}
-            return sign_in_page(req, auth.offered, _passkeys_on(), settings.dev_login, bool(settings.reviewer_passphrase))
+            before = request.session.get("oauth_pending")  # "Use a different account" left a mark for this very request
+            switching = isinstance(before, dict) and before.get("switch") is True and before.get("q") == raw
+            same = isinstance(before, dict) and before.get("q") == raw
+            kept = [t for t in before.get("n", []) if isinstance(t, str)][-2:] if same and isinstance(before.get("n"), list) else []
+            token = secrets.token_urlsafe(16)  # another tab of the same request keeps its links working (the last three)
+            request.session["oauth_pending"] = {"q": raw, "t": int(time.time()), "n": [*kept, token],
+                                                **({"switch": True} if switching else {})}
+            return sign_in_page(req, auth.offered, _passkeys_on(), settings.dev_login, bool(settings.reviewer_passphrase),
+                                earlier=earlier, choose=switching, token=token)
         request.session.pop("oauth_pending", None)
         nonce = secrets.token_urlsafe(24)
         server.save_consent(db, user.id, nonce, raw)
@@ -391,7 +416,7 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
             return redirect(exc.redirect_uri, {"error": exc.code, "state": exc.state}, settings)
         if decision == "switch":  # another account: sign out here, then sign in again
             request.session.clear()
-            request.session["oauth_pending"] = {"q": asked, "t": int(time.time())}
+            request.session["oauth_pending"] = {"q": asked, "t": int(time.time()), "switch": True}  # the sign-in page asks the provider to let the person choose
             return RedirectResponse("/oauth/authorize?" + asked, status_code=303, headers=NO_STORE)
         if decision != "allow":
             return redirect(req.redirect_uri, {"error": "access_denied", "state": req.state}, settings)

@@ -75,7 +75,8 @@ checked plan. Nothing in this flow changes the person's collection or decks.
    - Calls: `council_brief`, `expert_brief`.
    - Show: who you called and why (4 to 6 members). Where the host has the agents (the plugin), call them by name. Where it has
      only the Vault's tools (a connector), `council_brief` with the format and goal (or the saved deck's `deck_id`) seats the same
-     panel and hands you each member's brief, and `expert_brief` one expert's brief; follow them and play each member in turn.
+     panel and hands you each member's brief, and `expert_brief` one expert's brief (in a compact tool list it is not listed directly:
+     call it through `vault_call`, by name, with `expert`); follow them and play each member in turn.
    - Stop: never seat an expert for another format; say when there is no expert for the format.
 3. **Facts first.**
    - Calls: `deck_stats`, `simulate_draws` (how the curve plays), `deck_legality`, `find_combos` with `include_possible_loops` true,

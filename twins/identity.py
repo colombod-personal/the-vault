@@ -381,6 +381,11 @@ class GoogleTwin(IdentityTwin):
                                       "urn:ietf:params:oauth:grant-type:jwt-bearer"],
         }
 
+    # What Google documents for `prompt`: a space-separated list of none, consent, select_account (a value outside it is an error).
+    def _extra_checks(self, q):
+        bad = set(q.get("prompt", "").split()) - {"none", "consent", "select_account"}
+        return f"invalid_request: unknown prompt value {sorted(bad)[0]}" if bad else None
+
     def _callback_extras(self, app, account, q):
         return {"scope": " ".join(sorted(set(q.get("scope", "").split()))), "authuser": "0", "prompt": "consent"}
 
@@ -454,6 +459,11 @@ class MicrosoftTwin(IdentityTwin):
             "msgraph_host": "graph.microsoft.com",
             "rbac_url": "https://pas.windows.net",
         }
+
+    # Microsoft documents prompt values login, none, consent, select_account and create.
+    def _extra_checks(self, q):
+        bad = set(q.get("prompt", "").split()) - {"login", "none", "consent", "select_account", "create"}
+        return f"invalid_request: unknown prompt value {sorted(bad)[0]}" if bad else None
 
     def _callback_extras(self, app, account, q):
         return {"session_state": secrets.token_hex(16)}
