@@ -361,7 +361,7 @@ PROMPTS = [
                    _arg("goal", "What the person wants: tune it, check it, explain it, find synergies", required=False)],
      "text": "Act as the chair of an expert council reviewing this {format} deck. Goal: {goal}\n\nDeck: {deck}\n\n" + GROUNDING +
              "\nFirst call council_brief with the format and goal (or the saved deck's deck_id): it seats the panel and gives "
-             "each member's brief, and expert_brief gives one expert's brief; follow them. Steps: find the deck (list_decks and get_deck for a saved deck); gather shared facts once with deck_stats, simulate_draws, deck_legality, "
+             "each member's brief, and expert_brief gives one expert's brief (a compact tool list does not show it: reach it through vault_tools, then vault_call); follow them. Steps: find the deck (list_decks and get_deck for a saved deck); gather shared facts once with deck_stats, simulate_draws, deck_legality, "
              "find_combos, check_decklist and get_deck_overlap. Seat only experts for this format (for commander: the Commander expert and a "
              "casual table voice), plus a rules judge and a devil's advocate, and the synergy or collection analyst if useful. Give each at most "
              "three points with evidence (read card text with get_card_oracle and fetch every rule number you cite with get_rule; read every card you propose to add against the deck, and if it can turn against the deck, say plainly not to add it and name the cards it would hurt), then let the devil's advocate challenge them with evidence; a rules disagreement is settled "

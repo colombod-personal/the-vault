@@ -507,6 +507,31 @@ def test_every_tool_an_agent_names_outside_the_core_list_is_a_read_the_paragraph
             assert why is None, f"{path.name}: {name} cannot be reached with vault_call by a read-only token: {why}"
 
 
+def test_nothing_sends_the_assistant_to_expert_brief_without_the_way_to_reach_it():
+    """expert_brief left the compact list (#478): it is reached through vault_call (vault_tools lists it). Every paragraph of a skill, an
+    agent, a brief, a prompt or the chair's procedure that names it says how, so none tells a compact client to call it directly."""
+    from vault.api.mcp_catalog import PROMPTS
+
+    assert "expert_brief" in mcp.BY_NAME and "expert_brief" not in mcp_profile.CORE
+    texts = {where: text for where, (text, _) in agent_texts().items()}
+    for path in sorted((ROOT / "skills").glob("*/SKILL.md")):
+        texts[str(path.relative_to(ROOT)).replace("\\", "/")] = path.read_text(encoding="utf-8")
+    for prompt in PROMPTS:
+        texts[f"prompt:{prompt['name']}"] = prompt["text"]
+    texts["vault/experts.py"] = (ROOT / "vault" / "experts.py").read_text(encoding="utf-8")
+    bare, seen = {}, 0
+    for where, text in texts.items():
+        text = text.replace("\r\n", "\n")
+        if text.startswith("---\n"):
+            text = text.split("\n---\n", 1)[1]  # the front matter lists tool names; it is not an instruction
+        for paragraph in text.split("\n\n"):
+            if "expert_brief" in paragraph:
+                seen += 1
+                if "vault_call" not in paragraph:
+                    bare[where] = " ".join(paragraph.split())[:120]
+    assert seen >= 2 and not bare, bare
+
+
 # The tools a skill names that a compact client can only get through the web app (they delete or revoke): the skills say so.
 WEB_APP_ONLY = {"delete_deck", "import_collection_csv", "reset_collection", "undo_collection_reset", "delete_bucket",
                 "delete_tag", "untag_cards", "stop_sharing"}
