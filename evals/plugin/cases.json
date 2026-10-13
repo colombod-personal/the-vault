@@ -195,13 +195,13 @@
       "must_match": [
         {
           "label": "says the file can be dropped in this chat",
-          "pattern": "(?i)(drop|attach|add|send|share|paste|upload)[^.\n]{0,60}\b(here|this chat|the chat|this conversation)\b"
+          "pattern": "(?i)(drop|attach|add|send|share|paste|upload)[^.\\n]{0,60}\\b(here|this chat|the chat|this conversation)\\b"
         }
       ],
       "must_not": [
         {
           "label": "sends the player to a link or page and back",
-          "pattern": "(?i)(open|go to|click|visit)[^.\n]{0,40}(link|page|website|browser)[^.\n]{0,80}(tell me|let me know|come back|say (it is )?(done|uploaded))"
+          "pattern": "(?i)(open|go to|click|visit)[^.\\n]{0,40}(link|page|website|browser)[^.\\n]{0,80}(tell me|let me know|come back|say (it is )?(done|uploaded))"
         }
       ],
       "baselines": [

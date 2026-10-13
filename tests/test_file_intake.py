@@ -540,7 +540,7 @@ def test_the_shape_of_a_value_that_is_not_a_file_goes_to_the_log_and_never_a_pat
     assert first["outcome"] == "cannot_hand_over" and first["shape"] == {"type": "str", "kind": "token", "prefix": "chat_upload", "length": 11}
     path = r"C:\Users\someone\Downloads\my_cards.csv"
     assert second["shape"]["download_url"] == {"type": "str", "kind": "windows_path", "prefix": "C:", "length": len(path)}
-    assert second["shape"]["keys"] == ["download_url", "file_id"]
+    assert second["shape"]["keys"] == ["download_url", "file_id"] and second["shape"]["other_keys"] == 0
     assert "someone" not in caplog.text and "my_cards" not in caplog.text
 
 
@@ -712,3 +712,22 @@ def test_the_file_host_twin_serves_a_file_the_way_the_documentation_says_and_the
     universe.openai_files.redirect(away["file_id"], "http://169.254.169.254/latest/meta-data")
     assert call_tool(bot, token, "import_collection_file", file=away)["structuredContent"]["status"] == "fetch_failed"
     assert not universe.escapes
+
+
+def test_the_logged_shape_never_holds_a_value_that_could_be_a_token_or_a_name(app, agent, bot, caplog):
+    """Review of PR #478: a short string was logged whole as its prefix and object keys verbatim. A label like chat_upload is
+    kept (that is the evidence the owner asked for); anything else is logged as its form; unknown keys only as a count."""
+    caplog.set_level(logging.DEBUG)
+    intake_with(app)
+    token = token_of(agent)
+    secret = "Ab3dEf9GhIjKlMn0pQr"  # an identifier or a token a host might send in place of a file
+    call_tool(bot, token, "import_collection_file", file=secret)
+    call_tool(bot, token, "import_collection_file", file={"download_url": "x", "file_id": "y", "jane.doe@example.com": 1, "sig-9f2c": 2})
+    call_tool(bot, token, "import_collection_file", file="ftp-9f2c71d4e0a5b://x")
+    first, second, third = event_lines(caplog)[-3:]
+    assert first["shape"] == {"type": "str", "kind": "token", "prefix": "Aa9aAa9AaAaA", "length": len(secret)}  # its form, not its characters
+    assert second["shape"]["keys"] == ["download_url", "file_id"] and second["shape"]["other_keys"] == 2
+    assert third["shape"]["kind"] == "other_scheme" and "9f2c71d4e0a5b" not in json.dumps(third)
+    for secret_text in (secret, secret[:12], "jane.doe", "example.com", "sig-9f2c", "9f2c71d4e0a5b"):
+        assert secret_text not in caplog.text, secret_text
+    assert file_fetch.mask("Ab3dEf9GhIjK") == "Aa9aAa9AaAaA" and file_fetch.shape_of("chat_upload")["prefix"] == "chat_upload"

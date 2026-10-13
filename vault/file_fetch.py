@@ -92,9 +92,21 @@ def _printable(text: str, limit: int) -> str:
     return re.sub(r"[^ -~]", "?", text[:limit])
 
 
+KNOWN_KEYS = ("download_url", "file_id", "mime_type", "file_name", "name", "id", "url", "path", "size", "type", "file")
+LABEL = re.compile(r"[a-z][a-z_]{2,23}")  # a word-like label ('chat_upload'), not an identifier or a name
+
+
+def mask(text: str) -> str:
+    """The form of a string with its content gone: letters become a or A, digits 9, anything else ``?`` (``-``, ``_`` and ``.``
+    stay): enough to tell a label, a UUID and a signed token apart in the log, and nothing that can be replayed."""
+    return re.sub(r"[^-_.aA9]", "?", re.sub(r"[0-9]", "9", re.sub(r"[a-z]", "a", re.sub(r"[A-Z]", "A", text))))
+
+
 def shape_of(value) -> dict:
-    """The shape of a value, for the log: its type, a 12-character prefix and its length, and nothing that could be a secret
-    address. A web address is recorded as its scheme only; a path as its root only (a path may name the person)."""
+    """The shape of a value, for the log: its type, a 12-character prefix and its length, and nothing that could be a secret.
+    A web address is recorded as its scheme only; a path as its root only (a path may name the person); a bare string as its
+    first 12 characters only when it is a word-like label (``chat_upload``), else as the form of those characters (``mask``);
+    an object by the names of its keys when they are the ones a file object has, and by how many others there are."""
     if isinstance(value, str):
         low = value.lower()
         if low.startswith("https://"):
@@ -108,12 +120,16 @@ def shape_of(value) -> dict:
         elif value.startswith(("/", "\\")):
             kind, prefix = "posix_path", value[:1]
         elif "://" in value:
-            kind, prefix = "other_scheme", _printable(value.split("://", 1)[0], 12) + "://"
+            scheme = value.split("://", 1)[0]
+            kind, prefix = "other_scheme", (scheme if re.fullmatch(r"[a-z][a-z0-9+.-]{0,11}", scheme) else mask(scheme[:12])) + "://"
         else:
-            kind, prefix = "token", _printable(value, 12)
+            head = value[:12]
+            kind, prefix = "token", (head if LABEL.fullmatch(value[:24]) and len(value) <= 24 else mask(head))
         return {"type": "str", "kind": kind, "prefix": prefix, "length": len(value)}
     if isinstance(value, dict):
-        out: dict = {"type": "object", "keys": sorted(_printable(str(k), 20) for k in value)[:10]}
+        names = [str(k) for k in value]
+        out: dict = {"type": "object", "keys": sorted(k for k in names if k in KNOWN_KEYS),
+                     "other_keys": sum(1 for k in names if k not in KNOWN_KEYS)}
         if "download_url" in value:
             out["download_url"] = shape_of(value["download_url"])
         return out

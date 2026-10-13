@@ -296,6 +296,7 @@ def test_the_consent_screen_tells_a_person_that_read_includes_the_upload_link(ap
     client.sign_in()
     text = html.unescape(client.authorize(scope="read write").text)
     assert "give you a one-hour link to upload a collection file" in text
+    assert "take a file you attach in the chat and keep it for an hour" in text  # vault-0n9.3: the Vault fetches it, for any connection
     assert "read what importing that file would change. Importing it needs Write." in text
 
 

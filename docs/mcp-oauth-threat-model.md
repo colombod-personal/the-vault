@@ -1182,6 +1182,16 @@ signed link, valid five minutes). It is the documentation's reading, **not a rec
 conformance check (`tests/conformance/test_openai_files_live.py`) is by hand and has not run; the log of the first real run is
 its first evidence.
 
+**What the person is told.** A read-only connection can now make the Vault fetch and keep a file for an hour, so the consent screen's Read line
+(`SCOPE_TEXT["read"]` in `vault/oauth_routes.py`, the one file of section 6's list this change touches, only for that sentence) says so: it
+can also "take a file you attach in the chat and keep it for an hour, and read what importing that file would change. Importing it needs
+Write." (C `tests/test_upload_read_only.py::test_the_consent_screen_tells_a_person_that_read_includes_the_upload_link`.)
+
+**What the log keeps of a value that is not a file** (review of PR #478): its type and length; a bare string as its first 12 characters
+only when it is a word-like label (`chat_upload`), else as the form of those characters (letters `a`/`A`, digits `9`), so an identifier or a
+token a host sends in place of a file is not written down; an object by the names of the keys a file object has and a count of the
+others; a path by its root. (C `test_the_logged_shape_never_holds_a_value_that_could_be_a_token_or_a_name`.)
+
 **Egress and time from a Vercel function.** The fetch is an outbound HTTPS request from the same function that answers the tool call
 (60 seconds maximum, `vercel.json`): the fetch is capped at 15 seconds, leaving the rest for the preview of up to 20 MB. Memory for a
 20 MB file (the bytes, then the decoded text, then the parsed rows) is not measured on the platform; the existing upload page holds the
