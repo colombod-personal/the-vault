@@ -81,16 +81,17 @@ function ImportPreview({ file, preview: p, busy, onConfirm, onCancel }) {
           </ul>
           {kept > 0 && <p style={{ fontSize: 13, marginTop: 10 }}>{bkPlural(kept, 'card', 'cards')} you changed here since the last import {kept === 1 ? 'is' : 'are'} kept.</p>}
           {both > 0 && <p style={{ fontSize: 13, marginTop: 10 }}>{bkPlural(both, 'card', 'cards')} changed both in the file and here: your change here is kept.</p>}
+          {p.matching_line && <p style={{ fontSize: 13, marginTop: 10 }}>{p.matching_line}</p>}
           {p.unmatched_rows > 0 && (
-            <div style={{ fontSize: 13, marginTop: 10 }}>
-              <p>{bkPlural(p.unmatched_rows, 'row has', 'rows have')} no printing the Vault can identify (set code or number missing or unknown). They are kept and matched later by name.</p>
-              <ul className="bucket-holds" aria-label="Rows without a known printing">
+            <details style={{ fontSize: 13, marginTop: 10 }}>
+              <summary>{bkPlural(p.unmatched_rows, 'row', 'rows')} without a printing yet (nothing for you to do)</summary>
+              <ul className="bucket-holds" aria-label="Rows without a printing yet">
                 {(p.unmatched || []).slice(0, UNMATCHED_SHOWN).map((u) => (
                   <li key={u.row}><span>Row {u.row}: {u.name}</span><span className="muted">{(u.set || '?').toUpperCase()} {u.number || '?'}</span></li>
                 ))}
               </ul>
               {p.unmatched_rows > UNMATCHED_SHOWN && <p className="muted" style={{ fontSize: 12 }}>The first {UNMATCHED_SHOWN} are listed.</p>}
-            </div>
+            </details>
           )}
           {left && (
             <p style={{ fontSize: 13, marginTop: 10 }}>

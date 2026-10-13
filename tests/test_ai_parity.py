@@ -81,7 +81,7 @@ def test_the_preview_route_never_writes(agent):
     assert res.status_code == 200 and agent.get(f"{V1}/imports").json()["total"] == imports
 
 
-def test_the_preview_lists_rows_it_cannot_match_so_the_file_can_be_fixed_first(agent, bot):
+def test_the_preview_lists_rows_with_no_printing_and_never_asks_for_the_file_to_be_fixed(agent, bot):
     from test_agents import CSV
     lines = CSV.decode().splitlines()
     bogus = "my cards,1,0,Not A Real Card,ZZZ,Nowhere,9999,Mint,Normal,English,0.10,2024-01-01,0.01,0.20,0.09"
@@ -89,8 +89,10 @@ def test_the_preview_lists_rows_it_cannot_match_so_the_file_can_be_fixed_first(a
     write = make_token(agent, scopes=["read", "write"])
     preview = call_tool(bot, write, "import_collection_csv", csv=file)["structuredContent"]
     assert preview["matched_rows"] + preview["unmatched_rows"] == preview["rows"]
-    assert {"row": preview["rows"], "name": "Not A Real Card", "set": "zzz", "number": "9999", "quantity": 1} in preview["unmatched"]
-    assert "Fix the set code and collector number" in preview["note"]
+    assert {"row": preview["rows"], "name": "Not A Real Card", "set": "zzz", "number": "9999", "quantity": 1,
+            "why": "not_found"} in preview["unmatched"]
+    assert preview["not_found_rows"] >= 1 and "kept" in preview["matching_line"]  # kept as written, in one line
+    assert "ix the set code" not in preview["note"] and "fix" not in preview["matching_line"].lower()  # vault-0n9.1
 
 
 def test_deck_overlap_finds_cards_several_decks_need_and_the_copies_short(agent, bot):

@@ -670,8 +670,9 @@ TOOLS = [
          body=lambda a: {k: a[k] for k in ("file", "bucket_id") if a.get(k) is not None}, write=True, any_scope=True,
          meta={"openai/fileParams": ["file"]}, loose=("file",)),
     Tool("get_staged_upload", "A file the person uploaded through start_collection_upload: still waiting, or what "
-         "importing it would change (what comes from their app, which Vault edits are kept, the conflicts) and which rows "
-         "match no known printing (they need fixing in the file and a new upload). Names the bucket the upload goes into, if any, and "
+         "importing it would change (what comes from their app, which Vault edits are kept, the conflicts) and how its rows "
+         "matched: `matching_line` says it in one line and `matched_by` counts the rows by method. Every row is kept as "
+         "written; a row the catalog does not hold is listed in `unmatched` with its `why`, and nothing in it is for the person to do. Names the bucket the upload goes into, if any, and "
          "what it leaves alone. It changes nothing, and any connection may read it (read-only ones too); the person uploads "
          "the file on the link first, so it is `waiting` until they have.",
          {"upload_id": ID, **MERGE_ARGS}, ["upload_id"], path=lambda a: f"{V1}/uploads/{int(a['upload_id'])}",
