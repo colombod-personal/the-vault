@@ -645,10 +645,11 @@ TOOLS = [
           "filename": {"type": "string", "default": "agent-import.csv"}, "confirm": CONFIRM, **IMPORT_BUCKET, **MERGE_ARGS}, ["csv"],
          method="POST", path=lambda a: f"{V1}/imports" if a.get("confirm") is True else f"{V1}/imports/preview",
          query=MERGE_QUERY + ("bucket_id",), write=True, destructive=True),
-    Tool("start_collection_upload", "How a collection file reaches the Vault from a chat: a link, good for one hour, for the "
-         "person to upload the file in their browser, so the file never passes through the conversation. It is not single-use: "
-         "it works until it expires, and a second upload replaces the first file. It is what a file the "
-         "person attached or names (an export from their app) needs, of any size. Nothing is imported: the file waits until "
+    Tool("start_collection_upload", "The fallback for a collection file that import_collection_file cannot take (an app that cannot "
+         "hand over the attached file, or a file that is not in the chat): a link, good for one hour, for the "
+         "person to upload the file in their browser. It is not single-use: "
+         "it works until it expires, and a second upload replaces the first file. A file the person attached in the chat goes "
+         "to import_collection_file first. Nothing is imported: the file waits until "
          "they confirm. The uploaded file is then read by get_staged_upload. Any connection may make the link, read-only ones "
          "included, because it changes nothing in the person's collection or decks; importing the uploaded file is "
          "confirm_staged_upload, which needs the write permission. A person has at most 5 open links: asking for a sixth makes the "

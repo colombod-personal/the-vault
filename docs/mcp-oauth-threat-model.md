@@ -242,6 +242,11 @@ A stranger sets `client_id=https://x/...` and the Vault fetches it. Mitigations 
 - Residual: the Vault can be made to fetch any public https URL on 443 at the rate limit; the response is
   discarded unless it is a valid document.
 
+Hardening added with the file intake (vault-0n9.3, review of PR #478): `public_address` also refuses the IPv4-compatible form
+(`::a.b.c.d`), SIIT-translated addresses, site-local `fec0::/10`, the local-use NAT64 prefix and the 6to4 relay anycast
+`192.88.99.0/24` (C `test_the_public_address_check_refuses_the_forms_a_plain_is_global_test_passes` in `tests/test_file_intake.py`).
+None was reachable on the lane host; it closes a gap that needed DNS control of an allowed name.
+
 ### 11. Dynamic registration abuse
 - Public clients only, validated redirect URIs (same rules), at most 10 URIs, 8 KB body, names cleaned and capped.
 - Rate limited per IP (`OAUTH_REGISTER_RATE_LIMIT`, 20 a minute), and at most `OAUTH_CLIENT_CAP` (2000) client rows;
@@ -1138,24 +1143,36 @@ the conversation. That is an SSRF surface, so every step is bounded (C = `tests/
   one bad address among good ones refuses the host), and **the connection goes to the address that was checked**, with the name kept
   for TLS (SNI) and the Host header: the name is resolved once per hop, so DNS rebinding between check and use does nothing (C
   `test_a_name_that_resolves_to_a_private_address_is_never_contacted`, `test_the_connection_goes_to_the_address_that_was_checked_and_the_name_is_resolved_once`).
-- **At most 2 redirects**, each target checked by exactly the same rules (https, allow-list, public addresses, own DNS check); any
-  other redirect is refused (C `test_a_redirect_that_breaks_a_rule_is_not_followed`, `test_at_most_two_redirects_are_followed`).
-- **Size and time.** At most `MAX_UPLOAD_BYTES` (20 MB, the importer's cap) is read, in plain bytes (`Accept-Encoding: identity`; a
+- **At most 2 redirects**, each target checked by exactly the same rules (https, allow-list, public addresses, own DNS check; a
+  relative `Location` is resolved against the address just fetched); any other redirect is refused (C
+  `test_a_redirect_that_breaks_a_rule_is_not_followed`, `test_at_most_two_redirects_are_followed`,
+  `test_a_relative_redirect_is_resolved_against_the_current_address_and_checked_again`). **This differs from the first draft of the
+  brief ("no redirects")**, on purpose: the real host and its redirects are unknown before the first real run, a refused redirect
+  would cost a whole iteration, and a hop to a host that is on the allow-list and resolves to public addresses is no wider than the
+  first request.
+- **Size and time.** At most `INTAKE_MAX_BYTES` (**5 MB**; the importer's own cap is 20 MB, see "Egress and time" for why the intake
+  takes less) is read, in plain bytes (`Accept-Encoding: identity`; a
   compressed answer is refused), checked against `Content-Length` and while streaming; 15 seconds in total, as a wall clock the
   caller waits on (the fetch, including DNS, runs in a worker joined with a timeout), so a server that drips or never answers
   cannot hold the request (C size, drip and slow-resolver tests). At most 4 fetches at once per process; a fifth is told it is busy.
 - **Content type is text-like** (`text/*` except `text/html`, `application/csv`, `application/vnd.ms-excel`); a generic
   `application/octet-stream` counts only when the host's own description says CSV or text (storage hosts answer octet-stream).
 - **A bare GET**: no cookie, no authorization, no referrer, no proxy from the environment (C
-  `test_the_fetch_is_a_bare_get_with_no_cookie_no_authorization_and_no_referrer`).
+  `test_the_fetch_is_a_bare_get_with_no_cookie_no_authorization_and_no_referrer`; the proxy is tested with the production client, no
+  transport, a listener standing in for HTTPS_PROXY: `test_environment_proxies_are_ignored_by_the_real_client`).
 - **The address is never logged and never returned.** `httpx` and `httpcore` log requests at INFO with the address, so their loggers
   are held at WARNING; exceptions from the client are reduced to their class name; answers are fixed sentences (C
   `test_the_address_never_reaches_the_log_or_an_answer_whatever_happens_to_it`). A non-address `file` value (the string
-  `chat_upload` a phone app sends, a path, a missing key) is answered in one sentence and its **shape only** is logged: type, a
-  12-character prefix for a bare token, length; a path is logged by its root only (`C:`), never the rest, which may name the person.
+  `chat_upload` a phone app sends, a path, a missing key) is answered in one sentence and its **shape only** is logged: type, length
+  and a masked prefix (only the known sentinel `chat_upload` as it is; anything else as its form); a path is logged by its root only
+  (`C:`), never the rest, which may name the person.
 
 **What a malicious file name or content can do.** The declared `file_name` is used only to label the staged file, with any path and
-control characters removed, 255 characters; it is never used to name a path on the server. The bytes are parsed by the existing
+control, format (bidirectional overrides, zero-width), line-separator and unassigned characters removed, 255 characters; it is
+still the app's own text and is treated as data wherever it is shown (it appears in the tool answer and in `list_imports`), and it
+is never used to name a path on the server (C `test_the_filename_shown_for_a_staged_file_is_the_declared_name_without_a_path`).
+A file that cannot be read is answered with a phrase the Vault wrote (not the library's message, which can quote a cell: C
+`test_an_unreadable_answer_never_repeats_text_from_the_file`). The bytes are parsed by the existing
 importer (UTF-8 check, 20 MB, the same row and column limits as an upload through the link), and shown to the person only through
 the preview, whose text the Vault writes. A file holding an instruction to the assistant is data, as for any import.
 
@@ -1171,7 +1188,9 @@ rows have no ticket: `ticket_hash` starts `intake-`, which no sha256 digest can 
 `POST /uploads/{id}/apply`, write scope, 403 (C `test_a_read_only_connection_can_drop_a_file_and_see_the_preview_but_cannot_import_it`).
 A staged file belongs to the person, not to the app: another person's id is the same 404 for read and apply (C
 `test_another_person_cannot_read_or_import_a_file_that_was_dropped_in_the_chat`); a bucket that is not the person's is a 404 before
-anything is fetched. The same residual as the link applies: a write-scope assistant told an upload id could confirm what a read-only
+anything is fetched. **A read-only connection can replace the pending fetched file of a write connection** (a person holds one
+fetched file at a time): the write app's `confirm_staged_upload` with the old id then answers 404 and it drops the file again. It is
+the same person's files, nothing is imported or changed in the collection, and the `content_hash` binding holds. The same residual as the link applies: a write-scope assistant told an upload id could confirm what a read-only
 app staged, with the preview's `content_hash`, and the person's yes in the chat (text, not verified by the server).
 
 **One at a time.** The replace-or-reuse decision is made under the per-person advisory lock the upload links use (5 s lock timeout,
@@ -1194,9 +1213,11 @@ only when it is the one known sentinel `chat_upload` (ChatGPT mobile, issue #185
 others; a path by its root. (C `test_the_logged_shape_never_holds_a_value_that_could_be_a_token_or_a_name`.)
 
 **Egress and time from a Vercel function.** The fetch is an outbound HTTPS request from the same function that answers the tool call
-(60 seconds maximum, `vercel.json`): the fetch is capped at 15 seconds, leaving the rest for the preview of up to 20 MB. Memory for a
-20 MB file (the bytes, then the decoded text, then the parsed rows) is not measured on the platform; the existing upload page holds the
-same. No change to the function's permissions or secrets.
+(60 seconds maximum, `vercel.json`): the fetch is capped at 15 seconds, leaving the rest for the preview. **The intake takes 5 MB, not the
+importer's 20 MB** (review of PR #478): measured in a lane process, a 17.9 MB, 190,000-row file took 8.9 s and about 450 MB of memory for
+one request, for any token, read-only included, 10 calls a minute per person; the upload page is cut near 4 MB by the hosting platform
+in production, so 20 MB had never been processed there. Memory on Vercel is not measured. A larger file is answered `too_large`, naming
+'Import CSV' on the website. No change to the function's permissions or secrets.
 
 Residual risks, stated:
 

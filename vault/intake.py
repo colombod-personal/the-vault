@@ -11,7 +11,7 @@ collection changes**: the import is ``POST /uploads/{id}/apply``, write scope, o
   duplicate call gives the same id). Fetched rows are told apart by ``ticket_hash`` starting ``intake-``, a value no ticket can
   hash to, so there is no link for them.
 * ``file`` that is not an object with a web address (the string a phone app sends, a local path, a missing key) is answered with
-  one plain sentence, and its shape (type, a 12-character prefix, length) goes to the log, never the value of a web address.
+  one plain sentence, and its shape (type, length and a masked prefix: only the known sentinel chat_upload as it is) goes to the log, never the value of a web address.
 * The person's import allowance (``IMPORT_LIMIT`` a minute) counts every try, on a counter of its own.
 """
 
@@ -43,7 +43,8 @@ SAY = {
                     "once more with the same file; if it fails again, the person can bring the file in with 'Import CSV' on "
                     "the Vault website, which works with the same file.",
     "busy": "The Vault is fetching other files right now. The collection was not changed. Call this tool once more in a moment.",
-    "too_large": "The file is bigger than the 20 MB the Vault takes, so it was not read. The collection was not changed.",
+    "too_large": "The file is bigger than the 5 MB the Vault takes from a chat, so it was not read. The collection was not changed. "
+                 "The person can bring it in with 'Import CSV' on the Vault website.",
     "not_text": "The file is not a CSV or a text export, so the Vault did not read it. The collection was not changed.",
 }
 
@@ -73,6 +74,17 @@ class IntakeAnswer(BaseModel):
     bucket: dict | None = None
     content_hash: str | None = None
     next: str | None = None
+
+
+def plain_reason(exc: Exception) -> str:
+    """Why a file could not be read, in words the Vault wrote. The importer's message is not repeated: for a bad cell the library
+    quotes it, and the sentence is read by an assistant."""
+    text = str(exc)
+    if text.startswith("File is not UTF-8"):
+        return "it is not UTF-8 text"
+    if text.startswith("File is too large"):
+        return "it is too large"
+    return "no cards could be read from its columns and cells"
 
 
 def _now() -> datetime:
@@ -119,8 +131,9 @@ def build_router(get_db, current_user, settings) -> APIRouter:
             raise HTTPException(404, str(exc)) from exc
         except ImportError_ as exc:
             log(request, "unreadable", bytes=len(fetched.content), content_type=fetched.content_type)
-            return {"status": "unreadable", "changed": False, "detail": str(exc),
-                    "say": f"The Vault could not read this file as a collection export ({exc}). The collection was not changed."}
+            reason = plain_reason(exc)  # a fixed phrase: the library's message can quote a cell of the file
+            return {"status": "unreadable", "changed": False, "detail": reason,
+                    "say": f"The Vault could not read this file as a collection export ({reason}). The collection was not changed."}
         staged = stage(db, user, fetched.content, file_fetch.clean_filename(handoff.file_name), body.bucket_id)
         log(request, "staged", bytes=len(fetched.content), content_type=fetched.content_type, rows=preview["rows"],
             source=preview["source"])

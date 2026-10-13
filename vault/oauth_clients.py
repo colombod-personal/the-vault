@@ -219,6 +219,12 @@ def check_client_id_url(url: str) -> str:
     return host
 
 
+# Ranges that are not on the public internet although a plain is_global test passes some of them (review of PR #478): the
+# IPv4-compatible form (::a.b.c.d), SIIT-translated addresses, site-local, the local-use NAT64 prefix, the 6to4 relay anycast.
+DENIED_V6 = tuple(ipaddress.ip_network(n) for n in ("::/96", "::ffff:0:0:0/96", "fec0::/10", "64:ff9b:1::/48"))
+DENIED_V4 = tuple(ipaddress.ip_network(n) for n in ("192.88.99.0/24",))
+
+
 def public_address(value: str) -> bool:
     """True for an address on the public internet. IPv4-mapped, NAT64 and 6to4 forms are judged
     by the IPv4 address they carry; Teredo and anything private, loopback, link-local, shared
@@ -236,6 +242,10 @@ def public_address(value: str) -> bool:
             return public_address(str(ipaddress.IPv4Address((int(ip) >> 80) & 0xFFFFFFFF)))
         if ip in ipaddress.ip_network("2001::/32"):
             return False
+        if any(ip in net for net in DENIED_V6):
+            return False
+    elif any(ip in net for net in DENIED_V4):
+        return False
     return ip.is_global and not ip.is_multicast
 
 

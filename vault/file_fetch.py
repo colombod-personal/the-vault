@@ -13,7 +13,7 @@ step here is built against it (docs/mcp-oauth-threat-model.md, "A file dropped i
   header, so DNS cannot answer differently between the check and the connection;
 * at most 2 redirects, each one checked against exactly the same rules (a redirect to another host must be on the
   allow-list too, and resolve to public addresses);
-* at most ``MAX_UPLOAD_BYTES`` read, in plain bytes (``Accept-Encoding: identity``; a compressed answer is refused), and 15
+* at most ``INTAKE_MAX_BYTES`` (5 MB) read, in plain bytes (``Accept-Encoding: identity``; a compressed answer is refused), and 15
   seconds in total, as a wall clock the caller waits on, however slowly the server drips;
 * a text-like content type only; no cookies, no authorization, no referrer: a bare GET;
 * the address is never logged and never returned, and no error repeats it (HTTP client libraries log requests at INFO: that is
@@ -29,13 +29,13 @@ import logging
 import re
 import threading
 import time
+import unicodedata
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 import httpx
 
 from .config import DEFAULT_FILE_INTAKE_HOSTS, DOMAIN, parse_hosts
-from .importer import MAX_UPLOAD_BYTES
 from .oauth_clients import interleaved, public_address, system_resolver
 
 # httpx logs "HTTP Request: GET <url>" at INFO, and the address carries the file's token (and, pinned, it is the IP).
@@ -43,6 +43,10 @@ for _name in ("httpx", "httpcore"):
     logging.getLogger(_name).setLevel(logging.WARNING)
 
 FETCH_SECONDS = 15.0
+# What the intake takes from a chat: about what production already handles (the upload page is cut near 4 MB by the platform). The
+# importer's own cap is 20 MB; a 17.9 MB, 190,000-row file measured 8.9 s and about 450 MB of memory for one request (review of PR
+# #478), and a read-only connection may make 10 such calls a minute, so the intake does not take it.
+INTAKE_MAX_BYTES = 5 * 1024 * 1024
 MAX_URL = 4096  # signed links are long
 MAX_REDIRECTS = 2
 MAX_ADDRESSES = 3  # of a host's addresses: so many unreachable records cannot hold a fetch for minutes
@@ -103,7 +107,8 @@ def mask(text: str) -> str:
 
 
 def shape_of(value) -> dict:
-    """The shape of a value, for the log: its type, a 12-character prefix and its length, and nothing that could be a secret.
+    """The shape of a value, for the log: its type, its length and a prefix (a known sentinel as it is, anything else as its form), and
+    nothing that could be a secret.
     A web address is recorded as its scheme only; a path as its root only (a path may name the person); a bare string whole only
     when it is the known sentinel (``chat_upload``), else as the form of its first 12 characters (``mask``);
     an object by the names of its keys when they are the ones a file object has, and by how many others there are."""
@@ -152,10 +157,13 @@ def read_handoff(value) -> Handoff:
 
 
 def clean_filename(name: str | None) -> str:
-    """The name to show for the staged file: the declared file name without any path, control characters or blanks at the ends."""
+    """The name to show for the staged file: the declared file name without any path, and without control, format (bidirectional
+    overrides, zero-width), line-separator or unassigned characters; runs of blanks become one. It is still the app's own text, and
+    every place that shows it treats it as data, never as an instruction."""
     base = re.split(r"[\\/]", name or "")[-1]
-    base = re.sub(r"[\x00-\x1f\x7f]", "", base).strip()
-    return (base or "chat-upload.csv")[:255]
+    kept = "".join(ch for ch in base if unicodedata.category(ch)[0] != "C" and unicodedata.category(ch) not in ("Zl", "Zp"))
+    base = " ".join(kept.split())
+    return (base if base not in (".", "..") and base else "chat-upload.csv")[:255]
 
 
 # -- the allow-list ----------------------------------------------------------------------------------------------------
@@ -222,7 +230,7 @@ class FileFetcher:
     address that was checked (``pin``)."""
 
     def __init__(self, hosts: tuple[str, ...] = DEFAULT_HOSTS, transport: httpx.BaseTransport | None = None, resolver=None, *,
-                 pin: bool | None = None, seconds: float = FETCH_SECONDS, max_bytes: int = MAX_UPLOAD_BYTES):
+                 pin: bool | None = None, seconds: float = FETCH_SECONDS, max_bytes: int = INTAKE_MAX_BYTES):
         self.hosts = hosts
         self.transport = transport
         self.resolver = resolver or system_resolver
