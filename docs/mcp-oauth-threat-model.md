@@ -1193,6 +1193,14 @@ fetched file at a time): the write app's `confirm_staged_upload` with the old id
 the same person's files, nothing is imported or changed in the collection, and the `content_hash` binding holds. The same residual as the link applies: a write-scope assistant told an upload id could confirm what a read-only
 app staged, with the preview's `content_hash`, and the person's yes in the chat (text, not verified by the server).
 
+**A retry replays.** `POST /uploads/from-file` honours `Idempotency-Key` like the other creating POSTs (`vault/api/idempotency.py`; the MCP
+tool forwards the header, and a batch gets one key per call): the staged row and the stored answer commit together, a retry whose answer was
+lost gets that answer again and fetches nothing, even when another file was dropped in between and replaced the row (C
+`test_a_retry_with_the_same_key_replays_the_answer_even_after_another_file_was_dropped`). Only a staged file is stored under the key; an
+answer that staged nothing (cannot hand over, failed fetch, unreadable) is not, so a retry with the same key runs again (C
+`test_a_key_is_not_spent_on_an_answer_that_staged_nothing`). The stored answer is the preview of the person's own file, kept 24 hours
+with the other stored answers (erased with the account).
+
 **One at a time.** The replace-or-reuse decision is made under the per-person advisory lock the upload links use (5 s lock timeout,
 then the usual 503 with Retry-After), so simultaneous drops cannot leave two fetched files or two ids for one file (C
 `test_two_drops_at_once_leave_one_row_and_one_upload_id`).

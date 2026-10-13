@@ -689,7 +689,9 @@ def test_two_drops_at_once_leave_one_row_and_one_upload_id(app, agent):
         with app.state.db.sessions() as db:
             user = db.get(User, uid)
             barrier.wait()
-            return intake.stage(db, user, content, "a.csv", None).id
+            staged_id = intake.stage(db, user, content, "a.csv", None).id
+            db.commit()  # stage() leaves the transaction to its caller
+            return staged_id
 
     with ThreadPoolExecutor(6) as pool:
         same = list(pool.map(drop, [CSV] * 6))
@@ -884,3 +886,64 @@ def test_the_public_address_check_refuses_the_forms_a_plain_is_global_test_passe
         assert public_address(address) is False, address
     for address in ("93.184.216.34", "2606:4700:4700::1111", "::ffff:93.184.216.34"):
         assert public_address(address) is True, address
+
+
+# ---- review of PR #478: Idempotency-Key on a creating POST (CLAUDE.md) --------------------------------------------------------
+
+def mcp_call(bot, token, key, **arguments):
+    from tests.test_agents import auth
+    res = bot.post("/api/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                     "params": {"name": "import_collection_file", "arguments": arguments}},
+                   headers={**auth(token), "Idempotency-Key": key})
+    assert res.status_code == 200, res.text
+    return res.json()["result"]
+
+
+def test_a_retry_with_the_same_key_replays_the_answer_even_after_another_file_was_dropped(app, agent, bot):
+    """A's answer is lost, B is dropped, A is retried: the retry must be A's answer again, not a second staging that replaces B."""
+    token = token_of(agent, "read", "write")
+    fetched: list = []
+
+    def serving(content):
+        def handler(request):
+            fetched.append(request)
+            return httpx.Response(200, content=content, headers={"content-type": "text/csv"})
+        return handler
+
+    intake_with(app, serving(CSV))
+    a = mcp_call(bot, token, "key-A", file=file_arg())
+    assert not a["isError"] and a["structuredContent"]["status"] == "uploaded"
+    intake_with(app, serving(CSV + b"\n"))  # another file, another key: it replaces A's staged row
+    b = mcp_call(bot, token, "key-B", file=file_arg(f"https://{HOST}/file-other?sig=other"))["structuredContent"]
+    assert b["id"] != a["structuredContent"]["id"] and staged_rows(app) == 1
+    seen = len(fetched)
+    again = mcp_call(bot, token, "key-A", file=file_arg())
+    assert again["structuredContent"] == a["structuredContent"]  # the first answer, replayed
+    assert len(fetched) == seen  # nothing was fetched again
+    assert staged_rows(app) == 1
+    assert call_tool(bot, token, "get_staged_upload", upload_id=b["id"])["structuredContent"]["status"] == "uploaded"  # B untouched
+    with app.state.db.sessions() as db:
+        assert db.get(StagedUpload, b["id"]) is not None
+
+
+def test_a_key_is_not_spent_on_an_answer_that_staged_nothing(app, agent, bot):
+    """A failed fetch is not stored under the key: the retry with the same key fetches again and can succeed."""
+    token = token_of(agent, "read", "write")
+    intake_with(app, lambda r: httpx.Response(503, content=b"later"))
+    first = mcp_call(bot, token, "key-C", file=file_arg())["structuredContent"]
+    assert first["status"] == "fetch_failed" and staged_rows(app) == 0
+    intake_with(app)
+    second = mcp_call(bot, token, "key-C", file=file_arg())["structuredContent"]
+    assert second["status"] == "uploaded" and staged_rows(app) == 1
+
+
+def test_the_rest_route_replays_with_the_header(app, agent):
+    intake_with(app)
+    token = make_token(agent, scopes=["read", "write"])
+    with TestClient(app) as bot:
+        headers = {"Authorization": f"Bearer {token['token']}", "Idempotency-Key": "rest-key-1"}
+        first = bot.post(f"{V1}/uploads/from-file", json={"file": file_arg()}, headers=headers)
+        again = bot.post(f"{V1}/uploads/from-file", json={"file": file_arg()}, headers=headers)
+        assert first.status_code == again.status_code == 200
+        assert first.json() == again.json() and again.headers.get("idempotent-replayed") == "true"
+        assert "idempotent-replayed" not in first.headers and staged_rows(app) == 1

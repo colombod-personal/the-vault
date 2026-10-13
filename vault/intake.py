@@ -23,11 +23,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session
 
 from . import file_fetch, locks, observability
+from .api.idempotency import idempotent
 from .api.schemas import MAX_ID
 from .importer import ImportError_, ImportOptions, NoSuchBucket, preview_import
 from .models import Bucket, StagedUpload, User
@@ -87,6 +89,15 @@ def plain_reason(exc: Exception) -> str:
     return "no cards could be read from its columns and cells"
 
 
+class Declined(Exception):
+    """An answer that is not a staged file (the app cannot hand it over, the fetch failed, the file is unreadable): raised out of
+    the idempotent work so it is not stored under the key, and answered as it is. A retry with the same key then runs again."""
+
+    def __init__(self, payload: dict):
+        super().__init__("declined")
+        self.payload = payload
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -108,43 +119,54 @@ def build_router(get_db, current_user, settings) -> APIRouter:
     @router.post(f"{V1}/uploads/from-file", tags=["imports"], response_model=IntakeAnswer, response_model_exclude_none=True,
                  summary="Stage a collection file the chat app hands over by address (fetched by the Vault, previewed, not imported)")
     def stage_from_file(request: Request, body: FileIntake, user: User = Depends(current_user),
-                        db: Session = Depends(get_db)) -> dict:
+                        db: Session = Depends(get_db)):
         if body.bucket_id is not None and db.scalar(
                 select(Bucket.id).where(Bucket.id == body.bucket_id, Bucket.user_id == user.id)) is None:
             raise HTTPException(404, "Bucket not found")  # another person's id is the same 404
         per_user(request, "file intake", user.id, settings.import_limit, db)  # every try counts, on a counter of its own
         fetcher: file_fetch.FileFetcher = request.app.state.file_fetcher
+
+        def run() -> dict:
+            """The work, left uncommitted for ``idempotent`` (Idempotency-Key, CLAUDE.md): a retry of a request whose answer was
+            lost replays that answer, whatever was dropped in between, and fetches nothing. Only a staged file is stored under
+            the key: every other answer is raised as ``Declined`` so a retry runs again."""
+            try:
+                handoff = file_fetch.read_handoff(body.file)
+                fetcher.host_of(handoff.url)
+            except file_fetch.Refused as exc:
+                # The shape of what arrived, so the first real run says what the host really sends (never a path or query).
+                raise Declined(answer(request, exc.kind, reason=exc.reason, host=exc.host,
+                                      shape=file_fetch.shape_of(body.file))) from None
+            try:
+                fetched = fetcher.fetch(handoff)  # no database statement has run since the key was reserved: no connection held
+            except file_fetch.Refused as exc:
+                raise Declined(answer(request, exc.kind, reason=exc.reason, host=exc.host, status=exc.status)) from None
+            try:
+                preview = preview_import(db, user, fetched.content, ImportOptions(bucket_id=body.bucket_id))
+            except NoSuchBucket as exc:
+                raise HTTPException(404, str(exc)) from exc
+            except ImportError_ as exc:
+                log(request, "unreadable", bytes=len(fetched.content), content_type=fetched.content_type)
+                reason = plain_reason(exc)  # a fixed phrase: the library's message can quote a cell of the file
+                raise Declined({"status": "unreadable", "changed": False, "detail": reason,
+                                "say": f"The Vault could not read this file as a collection export ({reason}). "
+                                       "The collection was not changed."}) from None
+            staged = stage(db, user, fetched.content, file_fetch.clean_filename(handoff.file_name), body.bucket_id)
+            log(request, "staged", bytes=len(fetched.content), content_type=fetched.content_type, rows=preview["rows"],
+                source=preview["source"])
+            bucket = db.get(Bucket, staged.bucket_id) if staged.bucket_id is not None else None
+            return {"id": staged.id, "status": "uploaded", "changed": False, "filename": staged.filename,
+                    "expires_at": staged.expires_at.isoformat(),
+                    "bucket": {"id": bucket.id, "name": bucket.name} if bucket is not None else None,
+                    "content_hash": content_hash(staged.content, staged.bucket_id), **preview,
+                    "next": "Nothing has been imported. Show the person what would change and the few things that deserve a look, "
+                            "and ask for one yes. On their yes, call confirm_staged_upload with this id as upload_id, confirm true "
+                            "and this content_hash."}
+
         try:
-            handoff = file_fetch.read_handoff(body.file)
-            fetcher.host_of(handoff.url)
-        except file_fetch.Refused as exc:
-            # The shape of what arrived, so the first real run says what the host really sends (never an address's path or query).
-            return answer(request, exc.kind, reason=exc.reason, host=exc.host, shape=file_fetch.shape_of(body.file))
-        db.commit()  # the connection goes back to the pool while the file's host answers
-        try:
-            fetched = fetcher.fetch(handoff)
-        except file_fetch.Refused as exc:
-            return answer(request, exc.kind, reason=exc.reason, host=exc.host, status=exc.status)
-        try:
-            preview = preview_import(db, user, fetched.content, ImportOptions(bucket_id=body.bucket_id))
-        except NoSuchBucket as exc:
-            raise HTTPException(404, str(exc)) from exc
-        except ImportError_ as exc:
-            log(request, "unreadable", bytes=len(fetched.content), content_type=fetched.content_type)
-            reason = plain_reason(exc)  # a fixed phrase: the library's message can quote a cell of the file
-            return {"status": "unreadable", "changed": False, "detail": reason,
-                    "say": f"The Vault could not read this file as a collection export ({reason}). The collection was not changed."}
-        staged = stage(db, user, fetched.content, file_fetch.clean_filename(handoff.file_name), body.bucket_id)
-        log(request, "staged", bytes=len(fetched.content), content_type=fetched.content_type, rows=preview["rows"],
-            source=preview["source"])
-        bucket = db.get(Bucket, staged.bucket_id) if staged.bucket_id is not None else None
-        return {"id": staged.id, "status": "uploaded", "changed": False, "filename": staged.filename,
-                "expires_at": staged.expires_at.isoformat(),
-                "bucket": {"id": bucket.id, "name": bucket.name} if bucket is not None else None,
-                "content_hash": content_hash(staged.content, staged.bucket_id), **preview,
-                "next": "Nothing has been imported. Show the person what would change and the few things that deserve a look, "
-                        "and ask for one yes. On their yes, call confirm_staged_upload with this id as upload_id, confirm true "
-                        "and this content_hash."}
+            return idempotent(request, db, user, 200, run)
+        except Declined as declined:
+            return JSONResponse(declined.payload)
 
     return router
 
@@ -154,7 +176,8 @@ def stage(db: Session, user: User, content: bytes, filename: str, bucket_id: int
 
     One decision at a time per person, to the end of this transaction (the same advisory lock the upload links use, so a start
     and a drop are ordered too): without it two simultaneous drops both found no row and each inserted one, which broke "one
-    fetched file" and "a duplicate call is the same upload id". Bounded wait, then the usual 503 with Retry-After."""
+    fetched file" and "a duplicate call is the same upload id". Bounded wait, then the usual 503 with Retry-After. Does not commit:
+    ``idempotent`` commits the staged row and the stored answer together."""
     db.execute(text(f"SET LOCAL lock_timeout = '{locks.LOCK_TIMEOUT}'"))
     db.execute(select(func.pg_advisory_xact_lock(UPLOAD_LOCK_CLASS, user.id)))
     now = _now()
@@ -172,5 +195,5 @@ def stage(db: Session, user: User, content: bytes, filename: str, bucket_id: int
                             uploaded_at=now, bucket_id=bucket_id, bucket_bound=bucket_id is not None)
         db.add(kept)
     kept.expires_at = now + LIFETIME
-    db.commit()
+    db.flush()  # the id; the caller commits (with the stored answer of its Idempotency-Key), so the advisory lock is held until then
     return kept
