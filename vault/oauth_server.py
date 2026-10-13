@@ -231,7 +231,7 @@ def _replay(db: Session, token_hash: str, token: str, client_id: str, scope: str
         refuse = "another resource"
     elif _aware(grant.refresh_expires) < _now() or _now() > _aware(grant.created_at) + GRANT_MAX_AGE:
         refuse = "the grant is past its life"  # never revived by a retry
-    elif age > REFRESH_GRACE:
+    elif age >= REFRESH_GRACE:
         refuse = "after the window"
     else:
         access, refresh_new = _successor(key, token)
