@@ -1178,7 +1178,7 @@ the preview, whose text the Vault writes. A file holding an instruction to the a
 
 **Rate and storage.** Every try counts against the person's import allowance (`IMPORT_LIMIT`, 10 a minute) on a counter of its own
 (`file intake`), so a loop does not keep the person's own `/imports` at 429. A person holds **one** fetched file at a time (a new one
-replaces the earlier, an identical one is the same row, so a host's duplicate call returns the same id); that is one 20 MB row beside
+replaces the earlier, an identical one is the same row, so a host's duplicate call returns the same id); that is one 5 MB row beside
 the five link rows already allowed (the link cap, the replacement of the oldest waiting link and the list of held
 files count links only: C `test_a_dropped_file_is_not_one_of_the_five_links_and_is_not_listed_with_them`), expiring in one hour like a link, deleted by the daily retention job and when applied. Fetched
 rows have no ticket: `ticket_hash` starts `intake-`, which no sha256 digest can equal, so `/upload` can never open one (C
