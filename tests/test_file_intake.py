@@ -703,7 +703,7 @@ def test_the_file_host_twin_serves_a_file_the_way_the_documentation_says_and_the
     assert not out["isError"] and out["structuredContent"]["status"] == "uploaded", out
     assert universe.openai_files.calls[-1].path == "/" + handed["file_id"] and not universe.escapes
     # the link has run out (five minutes), or is answered with another type, or redirects away: nothing is staged
-    universe.openai_files.expire(handed["file_id"])
+    universe.openai_files.advance(301)  # past the link's five minutes: the expiry in the link itself
     assert call_tool(bot, token, "import_collection_file", file=handed)["structuredContent"]["status"] == "fetch_failed"
     other = universe.openai_files.attach(CSV, file_name="other.csv")
     universe.openai_files.serve_as(other["file_id"], "application/json")
@@ -725,9 +725,35 @@ def test_the_logged_shape_never_holds_a_value_that_could_be_a_token_or_a_name(ap
     call_tool(bot, token, "import_collection_file", file={"download_url": "x", "file_id": "y", "jane.doe@example.com": 1, "sig-9f2c": 2})
     call_tool(bot, token, "import_collection_file", file="ftp-9f2c71d4e0a5b://x")
     first, second, third = event_lines(caplog)[-3:]
+    for label in ("session_token", "john_smith", "secretkey://x"):  # words and schemes a caller chose are not kept either
+        call_tool(bot, token, "import_collection_file", file=label)
+    assert [e["shape"]["prefix"] for e in event_lines(caplog)[-3:]] == ["aaaaaaa_aaaa", "aaaa_aaaaa", "aaaaaaaaa://"]
     assert first["shape"] == {"type": "str", "kind": "token", "prefix": "Aa9aAa9AaAaA", "length": len(secret)}  # its form, not its characters
     assert second["shape"]["keys"] == ["download_url", "file_id"] and second["shape"]["other_keys"] == 2
     assert third["shape"]["kind"] == "other_scheme" and "9f2c71d4e0a5b" not in json.dumps(third)
-    for secret_text in (secret, secret[:12], "jane.doe", "example.com", "sig-9f2c", "9f2c71d4e0a5b"):
+    for secret_text in (secret, secret[:12], "jane.doe", "example.com", "sig-9f2c", "9f2c71d4e0a5b", "session_token", "john_smith", "secretkey"):
         assert secret_text not in caplog.text, secret_text
     assert file_fetch.mask("Ab3dEf9GhIjK") == "Aa9aAa9AaAaA" and file_fetch.shape_of("chat_upload")["prefix"] == "chat_upload"
+
+
+def test_a_dropped_file_is_not_one_of_the_five_links_and_is_not_listed_with_them(app, agent, bot):
+    """Review of PR #478: the dropped file shares the table with the upload links; the link cap, the replacement of the oldest
+    waiting link and the list of held files must count links only, so 'one dropped file beside five links' holds."""
+    from vault import uploads
+    intake_with(app)
+    token = token_of(agent, "read", "write")
+    dropped = call_tool(bot, token, "import_collection_file", file=file_arg())["structuredContent"]
+    links = [call_tool(bot, token, "start_collection_upload")["structuredContent"] for _ in range(uploads.MAX_OPEN)]
+    assert all("url" in link and "replaced_upload_id" not in link for link in links)  # five links fit beside the dropped file
+    assert staged_rows(app) == uploads.MAX_OPEN + 1
+    sixth = call_tool(bot, token, "start_collection_upload")["structuredContent"]
+    assert sixth["replaced_upload_id"] == links[0]["id"]  # the oldest waiting link goes, never the dropped file
+    assert call_tool(bot, token, "get_staged_upload", upload_id=dropped["id"])["structuredContent"]["status"] == "uploaded"
+    with app.state.db.sessions() as db:  # every link now holds a file
+        for row in db.query(StagedUpload).filter(StagedUpload.content.is_(None)):
+            row.content, row.filename, row.uploaded_at = b"x", "a.csv", row.expires_at
+        db.commit()
+    denied = call_tool(bot, token, "start_collection_upload")
+    text = denied["content"][0]["text"]
+    assert denied["isError"] is True and "a file has been uploaded through each one" in text
+    assert f"id {sixth['id']} (" in text and f"id {dropped['id']} (" not in text  # the listing is of links

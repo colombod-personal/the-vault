@@ -32,10 +32,10 @@ from .api.schemas import MAX_ID
 from .importer import ImportError_, ImportOptions, NoSuchBucket, preview_import
 from .models import Bucket, StagedUpload, User
 from .ratelimit import per_user
-from .uploads import LIFETIME, UPLOAD_LOCK_CLASS, content_hash
+from .uploads import INTAKE_MARKER, LIFETIME, UPLOAD_LOCK_CLASS, content_hash
 
 V1 = "/api/v1"
-MARKER = "intake-"  # the start of a fetched row's ticket_hash: 7 + 56 hex characters = 63, never a sha256 digest
+MARKER = INTAKE_MARKER  # the start of a fetched row's ticket_hash: 7 + 56 hex characters = 63, never a sha256 digest
 
 SAY = {
     "cannot_hand_over": file_fetch.CANNOT_HAND_OVER,

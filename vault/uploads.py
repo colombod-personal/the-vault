@@ -51,6 +51,7 @@ V1 = "/api/v1"
 LIFETIME = timedelta(hours=1)
 MAX_OPEN = 5  # links a person can have open at once
 STARTS_PER_MINUTE = 10
+INTAKE_MARKER = "intake-"  # the start of the ticket_hash of a file the chat app handed over (vault/intake.py): no link, not counted as one
 UPLOAD_LOCK_CLASS = 7301  # pg_advisory_xact_lock(class, user id): one start at a time per person (a number no other lock uses)
 
 
@@ -140,7 +141,8 @@ def _held_files(db: Session, user_id: int) -> str:
     by assistants (get_staged_upload answers it as data, in its own field)."""
     rows = db.execute(select(StagedUpload.id, func.length(StagedUpload.content).label("size"), StagedUpload.uploaded_at,
                              StagedUpload.expires_at)
-                      .where(StagedUpload.user_id == user_id, StagedUpload.content.is_not(None))
+                      .where(StagedUpload.user_id == user_id, StagedUpload.content.is_not(None),
+                             StagedUpload.ticket_hash.not_like(INTAKE_MARKER + "%"))  # a dropped file is not a link
                       .order_by(StagedUpload.expires_at, StagedUpload.id)).all()
     return "; ".join(f"id {r.id} ({r.size:,} bytes, uploaded {_hm(r.uploaded_at)}, link ends {_hm(r.expires_at)})" for r in rows)
 
@@ -172,7 +174,8 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         db.execute(text(f"SET LOCAL lock_timeout = '{locks.LOCK_TIMEOUT}'"))
         db.execute(select(func.pg_advisory_xact_lock(UPLOAD_LOCK_CLASS, user.id)))
         db.execute(delete(StagedUpload).where(StagedUpload.expires_at <= _now()))
-        open_links = db.scalar(select(func.count()).select_from(StagedUpload).where(StagedUpload.user_id == user.id))
+        open_links = db.scalar(select(func.count()).select_from(StagedUpload).where(
+            StagedUpload.user_id == user.id, StagedUpload.ticket_hash.not_like(INTAKE_MARKER + "%")))  # links only: a dropped file has its own row
         replaced = None
         if open_links >= MAX_OPEN:
             replaced = _supersede_oldest_waiting(db, user.id)

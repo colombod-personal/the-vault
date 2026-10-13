@@ -1162,7 +1162,8 @@ the preview, whose text the Vault writes. A file holding an instruction to the a
 **Rate and storage.** Every try counts against the person's import allowance (`IMPORT_LIMIT`, 10 a minute) on a counter of its own
 (`file intake`), so a loop does not keep the person's own `/imports` at 429. A person holds **one** fetched file at a time (a new one
 replaces the earlier, an identical one is the same row, so a host's duplicate call returns the same id); that is one 20 MB row beside
-the five link rows already allowed, expiring in one hour like a link, deleted by the daily retention job and when applied. Fetched
+the five link rows already allowed (the link cap, the replacement of the oldest waiting link and the list of held
+files count links only: C `test_a_dropped_file_is_not_one_of_the_five_links_and_is_not_listed_with_them`), expiring in one hour like a link, deleted by the daily retention job and when applied. Fetched
 rows have no ticket: `ticket_hash` starts `intake-`, which no sha256 digest can equal, so `/upload` can never open one (C
 `test_a_fetched_upload_has_no_link_the_upload_page_could_open`).
 
@@ -1188,8 +1189,8 @@ can also "take a file you attach in the chat and keep it for an hour, and read w
 Write." (C `tests/test_upload_read_only.py::test_the_consent_screen_tells_a_person_that_read_includes_the_upload_link`.)
 
 **What the log keeps of a value that is not a file** (review of PR #478): its type and length; a bare string as its first 12 characters
-only when it is a word-like label (`chat_upload`), else as the form of those characters (letters `a`/`A`, digits `9`), so an identifier or a
-token a host sends in place of a file is not written down; an object by the names of the keys a file object has and a count of the
+only when it is the one known sentinel `chat_upload` (ChatGPT mobile, issue #185), else as the form of those characters (letters
+`a`/`A`, digits `9`), and a scheme the same way, so an identifier, a name or a token a host sends in place of a file is not written down; an object by the names of the keys a file object has and a count of the
 others; a path by its root. (C `test_the_logged_shape_never_holds_a_value_that_could_be_a_token_or_a_name`.)
 
 **Egress and time from a Vercel function.** The fetch is an outbound HTTPS request from the same function that answers the tool call

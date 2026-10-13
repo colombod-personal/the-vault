@@ -93,7 +93,7 @@ def _printable(text: str, limit: int) -> str:
 
 
 KNOWN_KEYS = ("download_url", "file_id", "mime_type", "file_name", "name", "id", "url", "path", "size", "type", "file")
-LABEL = re.compile(r"[a-z][a-z_]{2,23}")  # a word-like label ('chat_upload'), not an identifier or a name
+SENTINELS = ("chat_upload",)  # the one string a host is known to send in place of a file (ChatGPT mobile, issue #185): kept as it is
 
 
 def mask(text: str) -> str:
@@ -104,8 +104,8 @@ def mask(text: str) -> str:
 
 def shape_of(value) -> dict:
     """The shape of a value, for the log: its type, a 12-character prefix and its length, and nothing that could be a secret.
-    A web address is recorded as its scheme only; a path as its root only (a path may name the person); a bare string as its
-    first 12 characters only when it is a word-like label (``chat_upload``), else as the form of those characters (``mask``);
+    A web address is recorded as its scheme only; a path as its root only (a path may name the person); a bare string whole only
+    when it is the known sentinel (``chat_upload``), else as the form of its first 12 characters (``mask``);
     an object by the names of its keys when they are the ones a file object has, and by how many others there are."""
     if isinstance(value, str):
         low = value.lower()
@@ -120,11 +120,9 @@ def shape_of(value) -> dict:
         elif value.startswith(("/", "\\")):
             kind, prefix = "posix_path", value[:1]
         elif "://" in value:
-            scheme = value.split("://", 1)[0]
-            kind, prefix = "other_scheme", (scheme if re.fullmatch(r"[a-z][a-z0-9+.-]{0,11}", scheme) else mask(scheme[:12])) + "://"
+            kind, prefix = "other_scheme", mask(value.split("://", 1)[0][:12]) + "://"  # a scheme is caller-chosen text too
         else:
-            head = value[:12]
-            kind, prefix = "token", (head if LABEL.fullmatch(value[:24]) and len(value) <= 24 else mask(head))
+            kind, prefix = "token", value if value in SENTINELS else mask(value[:12])
         return {"type": "str", "kind": kind, "prefix": prefix, "length": len(value)}
     if isinstance(value, dict):
         names = [str(k) for k in value]
