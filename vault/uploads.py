@@ -6,7 +6,7 @@ picks the file on a plain page, the file waits (staged, not imported), the assis
   ``bucket_id`` the upload goes into that bucket only (#124): the link is bound to it, the preview and the apply use it, and
   the page cannot change it. Without, the page offers the person a picker of their own buckets when they have more than one.
 - ``GET /upload?ticket=`` and ``POST /upload``: the page. The ticket is the only credential; it works for one hour,
-  for this person only, and a new file replaces the staged one (to upload a fixed file).
+  for this person only, and a new file replaces the staged one.
 - ``GET /api/v1/uploads/{id}`` (read): waiting, or the same preview as an import (changes, unmatched rows) with the
   ``content_hash`` of the file previewed.
 - ``POST /api/v1/uploads/{id}/apply?content_hash=`` (write): imports the staged file and deletes it, but only if it is the
@@ -79,8 +79,11 @@ def _live(db: Session, ticket: str) -> StagedUpload | None:
 
 def _preview_html(preview: dict) -> str:
     changes = preview.get("changes") or {}
-    rows = "".join(f"<li>Row {esc(u['row'])}: {esc(u['name'])} ({esc(u['set'] or '?')} {esc(u['number'] or '?')})</li>"
-                   for u in preview["unmatched"][:20])
+    why = {"not_found": "not in the card catalog yet, kept as written", "later": "matched by the daily update"}
+    ruled = "".join(f"<li>Row {esc(r['row'])}: {esc(r['name'])} ({esc(r['set'] or '?')} {esc(r['number'] or '?')}): "
+                    f"{esc(r['range'])}</li>" for r in [x for x in (preview.get("found_by_rule") or []) if x.get("candidates", 1) > 1][:20])
+    rows = "".join(f"<li>Row {esc(u['row'])}: {esc(u['name'])} ({esc(u['set'] or '?')} {esc(u['number'] or '?')}): "
+                   f"{esc(why.get(u.get('why'), 'kept as written'))}</li>" for u in preview["unmatched"][:20])
     more = preview["unmatched_rows"] - min(20, len(preview["unmatched"]))
     n = lambda count, one, many: f"{count:,} {one if count == 1 else many}"  # noqa: E731
     removed = changes.get("removed", 0)
@@ -104,9 +107,12 @@ def _preview_html(preview: dict) -> str:
             f"<li>More copies: {n(changes.get('increased', 0), 'card', 'cards')}; "
             f"fewer copies: {n(changes.get('decreased', 0), 'card', 'cards')}</li>"
             f"<li>Unchanged: {n(changes.get('unchanged', 0), 'card', 'cards')}</li></ul>"
-            f"<p>{n(preview['matched_rows'], 'row matches', 'rows match')} a known printing; "
-            f"{n(preview['unmatched_rows'], 'row does', 'rows do')} not.</p>"
-            + (f"<ul>{rows}</ul>" + (f"<p>and {more} more.</p>" if more > 0 else "") if rows else ""))
+            f"<p>{esc(preview.get('matching_line') or '')}</p>"
+            + (f"<details><summary>Cards that could be several printings (nothing for you to do)</summary>"
+               f"<ul>{ruled}</ul></details>" if ruled else "")
+            + (f"<details><summary>{n(preview['unmatched_rows'], 'row', 'rows')} without a printing yet "
+               "(nothing for you to do)</summary>"
+               f"<ul>{rows}</ul>" + (f"<p>and {more} more.</p>" if more > 0 else "") + "</details>" if rows else ""))
 
 
 def _supersede_oldest_waiting(db: Session, user_id: int) -> int | None:
@@ -186,7 +192,8 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         db.commit()  # the replacement and the new link are one transaction: if the insert fails, the old link is still there
         answer = {"id": staged.id, "url": f"{settings.base_url}/upload?ticket={ticket}",
                   "expires_at": staged.expires_at.isoformat(), "bucket": bucket_ref(db, staged),
-                  "next": "Give the person the link. When they say they uploaded the file, call get_staged_upload."}
+                  "next": "Give the person the link. When they say they uploaded the file, call get_staged_upload: its "
+                          "matching_line says how the rows matched, and nothing in it is for the person to fix."}
         if replaced is not None:
             answer["replaced_upload_id"] = replaced
             answer["next"] += (f" The person had {MAX_OPEN} open links, so the oldest one that held no file (id {replaced}) no "

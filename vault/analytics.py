@@ -70,10 +70,13 @@ PRINTING = ("coalesce(e.extra->>'Printing', CASE e.finish WHEN 'foil' THEN 'Foil
             "ELSE 'Normal' END)")
 GROUP_KEY = (f"concat_ws(chr(31), e.name, {SET_CODE}, coalesce(e.collector_number, ''), {PRINTING}, "
              "e.condition, e.language)")
-SNAPSHOT_PRICE = _plausible("CASE coalesce(e.price_finish, e.finish) WHEN 'foil' THEN l.usd_foil "
-                            "WHEN 'etched' THEN l.usd_etched ELSE l.usd END")
 FILE_PRICE = _plausible("CASE WHEN json_typeof(e.source_prices->'market') = 'number' "
                         "THEN (e.source_prices->>'market')::float8 END")
+# A card found by name (the file did not name the printing) is worth the file's own price where it has one, as
+# vault.prices.unit_price says: the catalog's price only once the printing is named.
+SNAPSHOT_PRICE = ("CASE WHEN e.match_method IN ('name_set', 'name_number', 'name') AND " + FILE_PRICE + " IS NOT NULL THEN NULL ELSE "
+                  + _plausible("CASE coalesce(e.price_finish, e.finish) WHEN 'foil' THEN l.usd_foil "
+                               "WHEN 'etched' THEN l.usd_etched ELSE l.usd END") + " END")
 
 # Colour and main type of the printing in ``c`` (a ``cards`` row, or NULLs when unknown).
 COLOR = ("CASE WHEN c.scryfall_id IS NULL THEN 'unknown' "
