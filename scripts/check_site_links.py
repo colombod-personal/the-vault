@@ -19,7 +19,9 @@ It fails (exit 1, one line per problem) on:
   makes no request to another origin, only an ``<a>`` link may point there; an ``https://`` address with no host name;
 - ``<form>`` and its fields (a guide collects nothing);
 - things a plain guide has no use for and that can load or run something: ``<base>``, ``<iframe>``, ``<object>``, ``<embed>``, ``<svg>``,
-  ``<meta http-equiv="refresh">``, an inline ``<script>``, an ``on...=`` event handler, ``@import`` in CSS;
+  ``<meta http-equiv="refresh">``, an inline ``<script>``, an ``on...=`` event handler, ``@import`` in CSS, a CSS function that
+  loads from a string or element (``image-set()``, ``-webkit-image-set()``, ``cross-fade()``, ``element()``, ``src()``) and a
+  backslash escape in CSS (comments are removed before the check, so a name split by one is still caught);
 - any attribute that is not on the allow-list (GLOBAL_ATTRS, TAG_ATTRS): default-deny, because attributes such as ``background``,
   ``ping``, ``cite``, ``longdesc``, ``manifest``, ``formaction`` and ``usemap`` can make the browser request an address the
   checker would not otherwise see.
@@ -71,8 +73,12 @@ TAG_ATTRS = {
     "td": {"colspan", "rowspan", "headers"}, "th": {"colspan", "rowspan", "headers", "scope", "abbr"},
     "ol": {"start", "type", "reversed"}, "li": {"value"}, "details": {"open"}, "time": {"datetime"},
 }
-CSS_URL =re.compile(r"url\(\s*(?:\"([^\"]*)\"|'([^']*)'|([^)\s]*))\s*\)", re.IGNORECASE)
+CSS_URL = re.compile(r"url\(\s*(?:\"([^\"]*)\"|'([^']*)'|([^)\s]*))\s*\)", re.IGNORECASE)
 CSS_IMPORT = re.compile(r"@import\b", re.IGNORECASE)
+CSS_COMMENT = re.compile(r"/\*.*?(?:\*/|$)", re.DOTALL)  # an unclosed comment runs to the end
+# Functions that load a file from a string or an element and that a guide's CSS has no use for, with or without a vendor prefix
+# (-webkit-image-set). Only url() is followed by this checker, so these are refused outright rather than parsed.
+CSS_LOADING_FUNCTION = re.compile(r"(?<![\w-])(?:-[a-z]+-)?(image-set|cross-fade|image|element|paint|src)\s*\(", re.IGNORECASE)
 
 
 class Scan(HTMLParser):
@@ -88,6 +94,13 @@ class Scan(HTMLParser):
         self._style_text: list[str] = []
 
     def css(self, text: str, line: int) -> None:
+        text = CSS_COMMENT.sub("", text)  # a comment inside a name (image/**/-set) must not hide it
+        if "\\" in text:
+            self.problems.append((line, "a backslash in CSS is not allowed: an escape can spell a function or an address the checker "
+                                  "would not recognise"))
+        for found in CSS_LOADING_FUNCTION.finditer(text):
+            self.problems.append((line, f"{found.group(1).lower()}() in CSS is not allowed: it can load a file from a string the "
+                                  "checker does not follow (use a plain url() to a file in the guide)"))
         if CSS_IMPORT.search(text):
             self.problems.append((line, "@import in CSS is not allowed: it loads another file the checker cannot follow"))
         for match in CSS_URL.finditer(text):

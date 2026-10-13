@@ -397,6 +397,28 @@ BAD = {
     "a stylesheet import": ("<style>@import url(other.css);</style>", "@import in CSS is not allowed"),
     "a css url from another site": ('<div style="background:url(https://example.com/x.png)">x</div>', "loaded from another site"),
     "a missing css url file": ("<style>.a{background:url('assets/none.png')}</style>", "broken internal link: assets/none.png"),
+    "image-set with a quoted address in a style attribute": (
+        '<div style="background-image:image-set(\'https://tracker.example/x.png\' 1x)">x</div>', "image-set() in CSS is not allowed"),
+    "image-set with a double-quoted address": (
+        '<div style=\'background-image:image-set("https://tracker.example/x.png" 1x)\'>x</div>', "image-set() in CSS is not allowed"),
+    "image-set with url()": ('<div style="background-image:image-set(url(https://tracker.example/x.png) 1x)">x</div>',
+                             "image-set() in CSS is not allowed"),
+    "a prefixed image-set": ('<div style="background-image:-webkit-image-set(\'https://tracker.example/x.png\' 1x)">x</div>',
+                             "image-set() in CSS is not allowed"),
+    "an image-set in upper case": ('<div style="background-image:IMAGE-SET(\'https://tracker.example/x.png\' 1x)">x</div>',
+                                   "image-set() in CSS is not allowed"),
+    "an image-set name split by a comment": ('<div style="background-image:image/**/-set(\'https://tracker.example/x.png\' 1x)">x</div>',
+                                             "image-set() in CSS is not allowed"),
+    "a css function name written with an escape": ('<div style="background-image:\\69mage-set(\'https://tracker.example/x.png\' 1x)">x</div>',
+                                                   "a backslash in CSS is not allowed"),
+    "image-set in a style block": ("<style>.a{background-image:image-set('https://tracker.example/x.png' 1x)}</style>",
+                                   "image-set() in CSS is not allowed"),
+    "cross-fade in a style block": ("<style>.a{background-image:cross-fade('https://tracker.example/x.png', 50%)}</style>",
+                                    "cross-fade() in CSS is not allowed"),
+    "a prefixed element()": ("<style>.a{background:-moz-element(#x)}</style>", "element() in CSS is not allowed"),
+    "src() in a style attribute": ('<div style="background:src(\'https://tracker.example/x.png\')">x</div>', "src() in CSS is not allowed"),
+    "a backslash in a style block": ("<style>.a{background:\\75rl(https://tracker.example/x.png)}</style>",
+                                     "a backslash in CSS is not allowed"),
     "a root-relative link": ('<a href="/connect.html">x</a>', "root-relative link"),
     "an escaped root-relative link": ('<a href="%2Fetc/hostname">x</a>', "root-relative link"),
     "an escaped way out of the site": ('<a href="..%2F..%2Fetc/hostname">x</a>', "points outside the site"),
@@ -439,6 +461,36 @@ def test_the_link_check_fails_on_a_stylesheet_that_imports_or_loads_from_another
     assert any(p.startswith("style.css:") and "@import in CSS" in p for p in problems), problems
     assert any(p.startswith("style.css:") and "loaded from another site" in p for p in problems), problems
     assert any(p.startswith("style.css:") and "broken internal link: shot.png" in p for p in problems), problems
+
+
+@pytest.mark.parametrize("css", [
+    ".a{background-image:image-set('https://tracker.example/x.png' 1x)}",
+    ".a{background-image:image-set(\"https://tracker.example/x.png\" 1x)}",
+    ".a{background-image:image-set(url(https://tracker.example/x.png) 1x)}",
+    ".a{background-image:-webkit-image-set('https://tracker.example/x.png' 1x)}",
+    ".a{background-image:image/* split */-set('https://tracker.example/x.png' 1x)}",
+    ".a{background-image:Image-Set('https://tracker.example/x.png' 1x)}",
+    ".a{background-image:\\69mage-set('https://tracker.example/x.png' 1x)}",
+    ".a{background:cross-fade('https://tracker.example/x.png', 50%)}",
+    ".a{background:src('https://tracker.example/x.png')}",
+])
+def test_the_link_check_refuses_css_that_loads_from_a_string_in_the_stylesheet_file(tmp_path, css):
+    src = source_site(tmp_path / "src", {"index.html": home()})
+    (src / "style.css").write_text(css, encoding="utf-8")
+    out = tmp_path / "_site"
+    build_site.build(src, out)
+    problems = problems_of(out)
+    assert any(p.startswith("style.css:") and ("() in CSS is not allowed" in p or "a backslash in CSS" in p) for p in problems), problems
+
+
+def test_ordinary_css_properties_are_not_mistaken_for_loading_functions(tmp_path):
+    css = ("body { background: #fff; background-image: url(shot.png); font: 16px/1.6 system-ui, -apple-system, 'Segoe UI'; }\n"
+           "/* image-set( in a comment is only a comment */\n.a { mask-image: none; list-style-image: none; src: local('x'); }\n")
+    src = source_site(tmp_path / "src", {"index.html": home(), "shot.png": "png"})
+    (src / "style.css").write_text(css, encoding="utf-8")
+    out = tmp_path / "_site"
+    build_site.build(src, out)
+    assert problems_of(out) == []
 
 
 def test_the_link_check_passes_on_good_links_and_counts_them(tmp_path):
