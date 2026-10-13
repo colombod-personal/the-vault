@@ -137,7 +137,7 @@ Tools (the `share_id` argument reads a collection someone shared with you):
 | `list_export_formats` (download links for Dragon Shield, Moxfield, Archidekt, generic CSV, text) | `/collection/exports` |
 | `list_shared_with_me`, `get_shared_deck` | `/shared` |
 
-\* write tools, listed only for tokens with the write scope; the exceptions are `start_collection_upload` (a link that waits for the person to confirm) and `sign_out` (it ends only the connection that calls it), which a read-only token lists too.
+\* write tools, listed only for tokens with the write scope; the exceptions are `import_collection_file` (a file dropped in the chat, fetched and staged for the person to confirm), `start_collection_upload` (a link that waits for the person to confirm) and `sign_out` (it ends only the connection that calls it), which a read-only token lists too.
 
 Each tool calls the API in-process with the caller's credentials (an OAuth token is accepted on those calls and on `/api/mcp`, nowhere else), so the API enforces every
 rule: tenancy, sharing, scopes, validation and paging. Tool arguments are checked against the

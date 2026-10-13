@@ -39,6 +39,11 @@ Microsoft's `amplifier-bundle-digital-twin-universe`.
   such a file existing. `tests/conformance` checks the two answers with one HEAD each; the tests never reach the host. The rolling window
   (#417) also reads Scryfall's list of sets (one request, `GET /sets`: code, set type, release day), which the Scryfall twin builds from the cards
   it holds (`add_card(..., set_type=..., released_at=...)`); a conformance check compares its shape with the real list's.
+- **The host ChatGPT serves an attached file from** (`twins/openai_files.py`, vault-0n9.3): `files.oaiusercontent.com`, a link with a signed query that
+  works for five minutes, from OpenAI's documentation of GPT Actions (read 2026-10-12). **It is the documentation's reading, not a
+  recording**: the Apps SDK documents `download_url` but not its host, lifetime, redirects or content type, and no real address has
+  been captured. The Vault logs the host and content type of every real hand-over (`file_intake`); `tests/conformance/test_openai_files_live.py`
+  compares the twin with a real synthetic file's address by hand, and has not run. Knobs: `attach`, `advance` (the link's expiry is the signed `se` it shows), `serve_as`, `redirect`.
 - **Archidekt is never contacted by a schedule**: the live Archidekt conformance checks run by hand only
   (`TWINS_LIVE_ARCHIDEKT=1`), fetch one named public deck and never search (docs/compliance.md).
 - **Archidekt decks are as heavy as real ones**: the twin sends every field of the real API (captured 2026-10-06 in

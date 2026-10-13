@@ -165,7 +165,7 @@ distinct counts do not (the section 5 rule; `tests/test_analytics_filters.py`). 
 inventory only, so a filtered `/history` prices the copies held now in the selection at each recorded day's prices.
 
 Built since (#124, import into one bucket; server, MCP and the assistant's upload page): `bucket_id` on `POST /imports`, `POST /imports/preview`,
-`POST /uploads` (and the MCP tools `import_collection_csv`, `start_collection_upload`, `confirm_staged_upload`). One code path (section 6): a file
+`POST /uploads` (and the MCP tools `import_collection_csv`, `import_collection_file` (a file dropped in the chat: `POST /uploads/from-file`), `start_collection_upload`, `confirm_staged_upload`). One code path (section 6): a file
 maps to one bucket, only that bucket's rows are compared, merged and replaced (`vault/importer.py`), every other bucket's copies, tags and notes
 are untouched, and a preview names the bucket and totals what it leaves alone (`bucket`, `untouched`). Without `bucket_id` nothing changed.
 What the design left open, and how it was decided:

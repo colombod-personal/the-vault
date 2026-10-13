@@ -17,6 +17,7 @@ from .base import Twin
 from .github import GitHubTwin
 from .mcp_client import ClientHostTwin
 from .neon import NeonTwin
+from .openai_files import OpenAIFilesTwin
 from .resend import ResendTwin
 from .identity import AppleTwin, FacebookTwin, GoogleTwin, IdentityTwin, MicrosoftTwin
 from .scryfall import ScryfallTwin
@@ -42,9 +43,11 @@ class Universe:
         self.resend = ResendTwin()  # the one mail the Vault sends: a sign-in confirmation code (vault/email.py)
         self.client_hosts = ClientHostTwin()  # where MCP clients publish their OAuth metadata documents
         self.seventeenlands = SeventeenLandsTwin()  # 17Lands' public data sets (jobs/sync_limited.py)
+        self.openai_files = OpenAIFilesTwin()  # where ChatGPT serves an attached file from (vault/file_fetch.py)
         self.twins: dict[str, Twin] = {t.name: t for t in (self.google, self.microsoft, self.apple, self.facebook,
                                                            self.scryfall, self.archidekt, self.vercel, self.spellbook, self.wizards,
-                                                           self.github, self.neon, self.resend, self.client_hosts, self.seventeenlands)}
+                                                           self.github, self.neon, self.resend, self.client_hosts, self.seventeenlands,
+                                                           self.openai_files)}
         self.by_host: dict[str, Twin] = {h: t for t in self.twins.values() for h in t.hosts}
         self.escapes: list[str] = []
         self.transport = httpx.MockTransport(self.handle)
@@ -61,7 +64,9 @@ class Universe:
         return twin.handle(request)
 
     def resolve(self, host: str) -> list[str]:
-        """DNS for the universe (the Vault's OAuth client-metadata fetcher uses it)."""
+        """DNS for the universe (the Vault's OAuth client-metadata fetcher and its file fetcher use it)."""
+        if host in self.openai_files.hosts:
+            return self.openai_files.resolve(host)
         return self.client_hosts.resolve(host)
 
     def client(self, **kwargs) -> httpx.Client:
