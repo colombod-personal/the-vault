@@ -68,7 +68,7 @@ COMPACT = {
     "search_rules": "Searches the Comprehensive Rules for a topic; best matches first, at most 10, each with its number and the edition.",
     "verify_citation": "Checks that a quote is verbatim in the rule, Oracle text or ruling it is attributed to; a failed check returns the true text.",
     "import_deck_from_link": "Saves a public Archidekt deck to the person's decks from its link, with its sections, format and author's credit. A saved link is left unchanged unless `update` is true.",
-    "import_collection_file": "Brings in the collection file the person attached to the chat: stages it and previews what importing would change. Imports nothing; any sign-in may call it.",
+    "import_collection_file": "Takes the collection file the person attached to the chat as `file`: stages it and previews what importing would change. Imports nothing; any sign-in may call it.",
     "start_collection_upload": "Makes a one-hour link for the person to upload a collection file in their browser, only when the app cannot hand the attached file over. Any sign-in may make it.",
     "refresh_deck": "Compares a saved deck with its Archidekt link; with the preview's fingerprint and `confirm` it replaces the saved list with the source's.",
     "update_owned_cards": "Previews small edits to the cards the person owns (bought, sold, traded): add, remove or set copies. Changes nothing; returns a confirmation.",
