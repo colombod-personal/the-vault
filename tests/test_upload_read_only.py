@@ -82,10 +82,10 @@ def test_a_read_only_connection_is_offered_the_upload_link_and_nothing_that_chan
     # the tool is honest about what it is: it creates a link, so it is not marked read-only; it destroys nothing
     notes = tools["start_collection_upload"]["annotations"]
     assert notes["readOnlyHint"] is False and notes["destructiveHint"] is False
-    # and these are the only write tools a read-only connection is given (the link, and ending its own sign-in: vault-wxy.3.1):
-    # a new one has to be added here on purpose
-    assert {t.name for t in mcp.TOOLS if t.write and t.any_scope} == {"start_collection_upload", "sign_out"}
-    assert {n for n in tools if mcp.BY_NAME[n].write} == {"start_collection_upload", "sign_out"}
+    # and these are the only write tools a read-only connection is given (the link, the file a chat app hands over, and ending
+    # its own sign-in: vault-wxy.3.1): a new one has to be added here on purpose
+    assert {t.name for t in mcp.TOOLS if t.write and t.any_scope} == {"start_collection_upload", "import_collection_file", "sign_out"}
+    assert {n for n in tools if mcp.BY_NAME[n].write} == {"start_collection_upload", "import_collection_file", "sign_out"}
 
 
 def test_a_read_only_connection_can_start_an_upload_and_read_it_waiting(read):
@@ -96,7 +96,8 @@ def test_a_read_only_connection_can_start_an_upload_and_read_it_waiting(read):
 
 def test_the_apply_route_is_not_open_to_a_read_only_caller():
     assert "/api/v1/uploads" in vault_app.READ_ONLY_POSTS
-    assert not [p for p in vault_app.READ_ONLY_POSTS if p.startswith("/api/v1/uploads/")]  # the apply is not in it
+    # the apply is not in it; the fetch of a file the chat app hands over (vault-0n9.3) is, at exactly its own path
+    assert [p for p in vault_app.READ_ONLY_POSTS if p.startswith("/api/v1/uploads/")] == ["/api/v1/uploads/from-file"]
 
 
 # -- nothing is imported until the person confirms, and confirming needs write ------------------------------------------
@@ -295,6 +296,7 @@ def test_the_consent_screen_tells_a_person_that_read_includes_the_upload_link(ap
     client.sign_in()
     text = html.unescape(client.authorize(scope="read write").text)
     assert "give you a one-hour link to upload a collection file" in text
+    assert "take a file you attach in the chat and keep it for an hour" in text  # vault-0n9.3: the Vault fetches it, for any connection
     assert "read what importing that file would change. Importing it needs Write." in text
 
 
@@ -309,7 +311,7 @@ BEFORE_THIS_CHANGE = {("POST", p) for p in (
 # ...and the routes that take no access token's authority at all (sign-in, and two public catalog computations).
 TAKE_NO_ACCESS_TOKEN = {("POST", "/api/v1/auth/native/{provider}"), ("POST", "/api/v1/auth/token"),
                         ("POST", "/api/v1/catalog/walkthrough"), ("POST", "/api/v1/catalog/verify-citation")}
-THE_ONE_EXEMPTION = {("POST", "/api/v1/uploads")}
+THE_ONE_EXEMPTION = {("POST", "/api/v1/uploads"), ("POST", "/api/v1/uploads/from-file")}  # the link, and the file a chat app hands over (vault-0n9.3): both stage, neither imports
 # ...and the one that ends the caller's own app connection (vault-wxy.3.1): any connection may end itself, and nothing else.
 ENDS_ITS_OWN_CONNECTION = {("POST", "/api/v1/agent/sign-out")}
 END_THE_TOKEN = ("/api/v1/auth/revoke", "/api/v1/agent/sign-out")

@@ -5,11 +5,26 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import re
 from dataclasses import dataclass, field
 
 
 def _env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
+
+
+DEFAULT_FILE_INTAKE_HOSTS = "oaiusercontent.com,openai.com,chatgpt.com"
+DOMAIN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")  # a name of at least two labels
+
+
+def parse_hosts(text: str) -> tuple[str, ...]:
+    """A comma-separated list of domains: each allows the domain and its subdomains. A leading ``*.`` is accepted."""
+    out = []
+    for part in text.split(","):
+        entry = part.strip().lower().removeprefix("*.").strip(".")
+        if entry:
+            out.append(entry)
+    return tuple(out)
 
 
 def _default_base_url() -> str:
@@ -85,6 +100,9 @@ class Settings:
     lookup_refresh_limit: int = field(default_factory=lambda: int(_env("LOOKUP_REFRESH_LIMIT", "20")))
     archidekt_limit: int = field(default_factory=lambda: int(_env("ARCHIDEKT_LIMIT", "30")))
     import_limit: int = field(default_factory=lambda: int(_env("IMPORT_LIMIT", "10")))
+    # Hosts a chat app may hand a collection file from (vault.file_fetch): each entry is a domain and its subdomains, comma-separated.
+    # The default is OpenAI's own file hosts. A host that is refused is logged by name, so a real run says which one to add.
+    file_intake_hosts: tuple[str, ...] = field(default_factory=lambda: parse_hosts(_env("FILE_INTAKE_HOSTS", DEFAULT_FILE_INTAKE_HOSTS)))
     lab_limit: int = field(default_factory=lambda: int(_env("LAB_LIMIT", "120")))  # GET /collection/spare, /spare/printings and /pnl: each reads the whole collection
     archidekt_interval: float = field(default_factory=lambda: float(_env("ARCHIDEKT_INTERVAL", "1.0")))
     max_decks: int = field(default_factory=lambda: int(_env("MAX_DECKS", "200")))
@@ -145,5 +163,7 @@ class Settings:
             raise RuntimeError("EMAIL_FROM must be an address, e.g. 'The Vault <login@mtgvault.cards>'")
         if self.email_daily_cap < 1:
             raise RuntimeError("EMAIL_DAILY_CAP must be at least 1")
+        if not self.file_intake_hosts or not all(DOMAIN.match(h) for h in self.file_intake_hosts):
+            raise RuntimeError("FILE_INTAKE_HOSTS must list domains with at least two labels (example.com), comma-separated")
         if self.reviewer_passphrase and len(self.reviewer_passphrase) < 16:
             raise RuntimeError("REVIEWER_PASSPHRASE must be at least 16 characters (it is the way in for the stores' reviewers)")

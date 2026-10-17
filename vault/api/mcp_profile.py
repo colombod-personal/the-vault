@@ -9,7 +9,8 @@ A client whose own ``initialize`` names it (``codex-mcp-client``) therefore gets
 
 * the **core** tools: what a player's first questions need, with one-sentence descriptions (the full text is one
   ``vault_tools`` call away). A write tool is listed only to a token that may write (the exceptions are
-  ``start_collection_upload``, which only makes a link, and ``sign_out``, which ends only the caller's own connection: both are listed to every token), and keeps its own approval hints;
+  ``start_collection_upload`` and ``import_collection_file``, which stage a file and import nothing, and ``sign_out``, which ends
+  only the caller's own connection: all are listed to every token), and keeps its own approval hints;
 * ``vault_tools``: lists every other tool with a one-line summary, or returns one tool's full description and schema;
 * ``vault_call``: runs any other **read** tool by name; ``vault_write``: runs any other non-destructive **write** tool by
   name. Two tools, so a host's "always allow" for reading never pre-approves changing anything. Both go through exactly the
@@ -38,10 +39,10 @@ COMPACT_CLIENTS = ("codex-mcp-client",)
 CORE = (
     "whoami",
     "list_decks", "get_deck", "deck_stats", "deck_legality", "validate_deck_changes", "find_upgrades",
-    "council_brief", "expert_brief", "simulate_draws", "find_combos", "shopping_list",
+    "council_brief", "simulate_draws", "find_combos", "shopping_list",
     "get_collection_summary", "search_cards", "check_decklist",
     "get_card_oracle", "get_rule", "search_rules", "verify_citation",
-    "import_deck_from_link", "refresh_deck", "start_collection_upload",
+    "import_deck_from_link", "refresh_deck", "import_collection_file", "start_collection_upload",
     "sign_out",
     "update_owned_cards", "confirm_owned_cards_update", "undo_owned_cards_update", "confirm_staged_upload",
 )
@@ -56,7 +57,6 @@ COMPACT = {
     "validate_deck_changes": "Checks proposed cuts and adds against a deck: cards exist, are legal and in colours, the result is legal, and the cost is within budget.",
     "find_upgrades": "Legal upgrade candidates within a budget for the roles a deck is short of, plus cut candidates. Check a chosen change with validate_deck_changes.",
     "council_brief": "The expert council's panel and procedure for a deck review, rules dispute or synergy question, with each member's brief and the deck's facts.",
-    "expert_brief": "One council expert's brief (the rules judge, the Commander expert and others), to answer a question as that expert.",
     "simulate_draws": "How a deck's curve plays: sample games and odds over many (land drops, mana by turn, cards in hand); lists what it does not model.",
     "find_combos": "Combos in a decklist and combos one card short, from Commander Spellbook and attributed; finding none does not mean the deck has none.",
     "shopping_list": "The cards of a deck the person does not own, with dated Scryfall prices, as paste-ready text for a store's own list tool.",
@@ -68,7 +68,8 @@ COMPACT = {
     "search_rules": "Searches the Comprehensive Rules for a topic; best matches first, at most 10, each with its number and the edition.",
     "verify_citation": "Checks that a quote is verbatim in the rule, Oracle text or ruling it is attributed to; a failed check returns the true text.",
     "import_deck_from_link": "Saves a public Archidekt deck to the person's decks from its link, with its sections, format and author's credit. A saved link is left unchanged unless `update` is true.",
-    "start_collection_upload": "Makes a one-hour link for the person to upload a collection file in their browser, so the file never passes through the chat. Any sign-in may make it.",
+    "import_collection_file": "Brings in the collection file the person attached to the chat: stages it and previews what importing would change. Imports nothing; any sign-in may call it.",
+    "start_collection_upload": "Makes a one-hour link for the person to upload a collection file in their browser, only when the app cannot hand the attached file over. Any sign-in may make it.",
     "refresh_deck": "Compares a saved deck with its Archidekt link; with the preview's fingerprint and `confirm` it replaces the saved list with the source's.",
     "update_owned_cards": "Previews small edits to the cards the person owns (bought, sold, traded): add, remove or set copies. Changes nothing; returns a confirmation.",
     "confirm_owned_cards_update": "Applies the change previewed by update_owned_cards, with the same lines and that preview's confirmation. Recorded in history and undoable.",

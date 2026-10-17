@@ -2,6 +2,15 @@
 
 Status: agreed by the owner on 2026-10-08 (#287: decisions 1 to 4, all as recommended; the owner's "all as recommended" on 2026-10-09 covers the sub-designs below). It is the root of the Collections epic (#117): the schema (#121), buckets (#123) and tags (#127) are built (see "What is built" at the end); #122, #124, #125, #128, #129 and #130 follow.
 
+## Matching an import's rows (vault-0n9.1, 2026-10-12)
+
+A file from a known app is never given back to the person to fix. **The row is kept exactly as written** (name, set code, collector number, so the Dragon Shield round trip stays byte for byte); the Vault only decides which printing to tie it to, with the library's one ladder (`mtg_toolkits.matching`, the same the daily sync uses): the printing in the file (`id`, `set_number`, also through a fallback code such as `VTHB`, only when that printing is the row's card), then the card by name with the set, with the collector number, then by name alone.
+
+- **What an import stores is what it always stored**: a printing the Vault already holds, the id in the file, and what the daily sync had already matched. A printing found only in the catalog, and a card found only by name, are left to the daily sync, which ties them with the same ladder, sets the finish a printing exists in, and re-resolves a name match every day (`match_method` `name_set`, `name_number` or `name`: not exact, never written to an export as the printing). An unchanged re-import keeps what the sync resolved.
+- **Which printing, when the file does not say**: the row's language, then regular printings only (no token, art series, memorabilia, digital or oversized printing), then the cheapest in its finish, then a fixed order. The library says how many printings it chose among and their price range, and the preview shows that (`found_by_rule`).
+- **What such a row is worth**: the file's own price where it has one (the app knows the printing the person owns; the cheapest printing would show a loss that is not there), the catalog's price once the printing is named. `price.source` says which (`file` or `scryfall`).
+- **A row nothing finds** stays as written, priced from the file where it has a price; the preview says so in one line (`matching_line`) and lists such rows in `unmatched` with the reason (`not_found`: not in the Vault's card list yet; `later`: the daily update matches it), which nobody has to act on.
+
 ## What exists today (checked in the code, 2026-10-06)
 
 - `entries` holds one row per printing, finish, condition, language and **folder**, with `quantity` and `trade_quantity`. Every import **replaces all of a person's entries**; the change against the old collection is stored on `imports.summary`.
@@ -156,7 +165,7 @@ distinct counts do not (the section 5 rule; `tests/test_analytics_filters.py`). 
 inventory only, so a filtered `/history` prices the copies held now in the selection at each recorded day's prices.
 
 Built since (#124, import into one bucket; server, MCP and the assistant's upload page): `bucket_id` on `POST /imports`, `POST /imports/preview`,
-`POST /uploads` (and the MCP tools `import_collection_csv`, `start_collection_upload`, `confirm_staged_upload`). One code path (section 6): a file
+`POST /uploads` (and the MCP tools `import_collection_csv`, `import_collection_file` (a file dropped in the chat: `POST /uploads/from-file`), `start_collection_upload`, `confirm_staged_upload`). One code path (section 6): a file
 maps to one bucket, only that bucket's rows are compared, merged and replaced (`vault/importer.py`), every other bucket's copies, tags and notes
 are untouched, and a preview names the bucket and totals what it leaves alone (`bucket`, `untouched`). Without `bucket_id` nothing changed.
 What the design left open, and how it was decided:

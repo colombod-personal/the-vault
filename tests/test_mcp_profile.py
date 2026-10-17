@@ -121,7 +121,7 @@ def test_a_token_that_may_only_read_is_shown_no_write_tool_and_no_writer(agent, 
     # the upload link and signing out (Tool.any_scope) are the only write tools a read-only sign-in is shown
     assert names == [n for n in mcp_profile.CORE if mcp.BY_NAME[n].listed_for({"read"})] + [L, C]
     assert {"start_collection_upload", "sign_out"} <= set(names)
-    assert {n for n in names if n in mcp.BY_NAME and mcp.BY_NAME[n].write} == {"start_collection_upload", "sign_out"}
+    assert {n for n in names if n in mcp.BY_NAME and mcp.BY_NAME[n].write} == {"start_collection_upload", "import_collection_file", "sign_out"}
 
 
 def test_every_other_client_and_an_older_client_keep_the_full_list(agent, bot):  # noqa: F811

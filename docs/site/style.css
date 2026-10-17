@@ -1,0 +1,43 @@
+:root {
+  --bg: #ffffff;
+  --text: #1c1b22;
+  --muted: #5a5866;
+  --border: #d9d7e2;
+  --surface: #f6f5fa;
+  --accent: #4b3fb5;
+  --warn-bg: #fff6dd;
+  --warn-border: #c99a1c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14131a;
+    --text: #ece9f6;
+    --muted: #a6a3b5;
+    --border: #38364a;
+    --surface: #1d1c27;
+    --accent: #a99dff;
+    --warn-bg: #2b2412;
+    --warn-border: #b58a1b;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.wrap { max-width: 760px; margin: 0 auto; padding: 0 16px; }
+a { color: var(--accent); }
+h1 { font-size: 1.9rem; line-height: 1.25; margin: 28px 0 12px; }
+h2 { font-size: 1.25rem; margin: 28px 0 8px; }
+.site-header { border-bottom: 1px solid var(--border); background: var(--surface); padding: 12px 0 0; }
+.site-header .wrap { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; }
+.brand { font-weight: 700; color: var(--text); text-decoration: none; }
+.site-header nav { display: flex; flex-wrap: wrap; gap: 4px 16px; padding-top: 8px; padding-bottom: 12px; justify-content: flex-start; }
+.site-header nav a { color: var(--muted); text-decoration: none; }
+.site-header nav a[aria-current="page"] { color: var(--text); font-weight: 600; text-decoration: underline; }
+.status { border: 1px solid var(--warn-border); background: var(--warn-bg); border-radius: 8px; padding: 12px 14px; margin: 20px 0; }
+.status p { margin: 0; }
+.checked { color: var(--muted); font-size: 0.9rem; }
+.pages { list-style: none; padding: 0; }
+.pages li { border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin: 8px 0; background: var(--surface); }
+.pages .tag { color: var(--muted); font-size: 0.9rem; }
+img { max-width: 100%; height: auto; }
+.site-footer { border-top: 1px solid var(--border); margin-top: 48px; padding: 16px 0 32px; color: var(--muted); font-size: 0.9rem; }
+.legal { font-size: 0.8rem; }
