@@ -169,7 +169,10 @@ against it and what is built (a recent sign-in, re-confirmed by a passkey, a pro
   another resource (M `test_the_window_is_for_the_same_client_and_the_same_scopes_only`), a token two rotations old (M
   `test_the_window_does_not_cover_a_token_two_rotations_back`; only the immediately previous token qualifies, because the
   derived pair must equal the grant's *current* pair), a grant past its refresh expiry or its 90 days. A replay writes
-  nothing: no new token, no new retired row. Logged (grant id, client id, age; never a token): a retry at `info`, a
+  nothing: no new token, no new retired row. This holds for the request that **loses the compare-and-swap** too: if it is
+  not an exact retry (other scopes, resource or client, or past the window) it is routed to the same reuse handling and ends
+  the grant, whatever the timing (M `test_a_swap_loser_asking_for_other_scopes_is_a_copy_and_ends_the_grant`; an exact retry
+  gets the winner's answer: M `test_a_swap_loser_asking_for_the_same_scopes_gets_the_winners_answer`). Logged (grant id, client id, age; never a token): a retry at `info`, a
   refused reuse at `warning`.
 - **How the same tokens are handed back with only hashes stored (a design for the reviewer to judge).** The successor pair is
   not drawn at random: it is `HMAC-SHA256(key, label : presented-token)`, so the second request recomputes what the first
@@ -203,8 +206,10 @@ against it and what is built (a recent sign-in, re-confirmed by a passkey, a pro
   refresh; with the window, theft is no longer self-revealing. This is inherent to any same-successor grace window and is
   the exact cost of the owner's decision (OD-07). The only signal is an `info` log line, which nobody reads; a real
   detection signal (for example, binding the replay to the caller's network address and refusing a replay from another one)
-  is a follow-up bead, not part of this change. A `client_id` is public, so the "same client" check does not stop a thief by
-  itself; the length of the window limits how fast a thief must act, not whether he can keep going.
+  is a follow-up, not part of this change: bead **vault-wxy.17** (how a stolen token used inside the window is noticed).
+  Making the retry key its own required secret is bead **vault-wxy.16** (`OAUTH_REFRESH_KEY` required, set with the deploy).
+  A `client_id` is public, so the "same client" check does not stop a thief by itself; the length of the window limits how
+  fast a thief must act, not whether he can keep going.
 - **On a deployment without https the key is derivable.** `SESSION_SECRET` defaults to `dev-insecure-secret` and `check()`
   refuses that default only when `BASE_URL` is https. With the default secret the derived key is computable from the source,
   and any successor is forgeable from one old token. Production is https and refuses the default at start; do not run a
@@ -221,7 +226,8 @@ against it and what is built (a recent sign-in, re-confirmed by a passkey, a pro
 - Tokens are never accepted in the query string (M `test_tokens_are_not_accepted_in_the_query_string`).
 - Residual: a thief who refreshes before the owner wins the race; the owner's next refresh then trips reuse
   detection and revokes the grant (unless it falls inside the 60 second window, above), so the exposure ends at the next
-  legitimate use after the window.
+  legitimate use after the window, **and not at all for a thief who keeps presenting inside it: see the shadowing case
+  above** (a thief who repeats it at every renewal is not noticed, indefinitely, up to the 90 day cap).
 
 ### 7. Consent phishing and clickjacking
 - Names are cleaned of everything that draws nothing or reorders text: control characters, all Unicode format characters (soft hyphen,

@@ -708,6 +708,49 @@ def test_the_window_is_for_the_same_client_and_the_same_scopes_only(app, client,
     assert other.status_code == 400 and grant_of(app) is None
 
 
+def lose_the_swap(app, settings, client, old, scope):
+    """Run a refresh with ``old`` that loses the compare-and-swap, deterministically: another request (a separate
+    session, as a parallel process would be) rotates the same token after this one read the grant and before it
+    swapped. Returns (the loser's result or its OAuthError, the winner's answer)."""
+    key, winner = settings.oauth_refresh_secret(), {}
+    real = oauth_server._successor
+
+    def successor(k, presented):
+        if not winner:  # once: the other request commits its rotation in the gap
+            winner.update(db_do(app, lambda db: oauth_server.refresh(db, client.client_id, old, None, client.resource, key)))
+        return real(k, presented)
+
+    oauth_server._successor = successor
+    try:
+        with app.state.db.sessions() as db:
+            try:
+                return oauth_server.refresh(db, client.client_id, old, scope, client.resource, key), winner
+            except oauth_server.OAuthError as exc:
+                return exc, winner
+    finally:
+        oauth_server._successor = real
+
+
+def test_a_swap_loser_asking_for_the_same_scopes_gets_the_winners_answer(app, settings, client):  # vault-wxy.12
+    client.sign_in()
+    client.tokens = client.redeem(client.approve(write=True, scope="read write")["code"]).json()
+    got, winner = lose_the_swap(app, settings, client, client.tokens["refresh_token"], "read write")
+    assert isinstance(got, dict) and winner
+    assert {k: v for k, v in got.items() if k != "expires_in"} == {k: v for k, v in winner.items() if k != "expires_in"}
+    assert grant_of(app) is not None
+
+
+def test_a_swap_loser_asking_for_other_scopes_is_a_copy_and_ends_the_grant(app, settings, client):  # vault-wxy.12, review thread
+    """The loser of the swap is not always a retry: with other scopes than the winner's answer it is a copy of a token
+    that was just retired, and it ends the grant whatever the timing (the same as the sequential case)."""
+    client.sign_in()
+    client.tokens = client.redeem(client.approve(write=True, scope="read write")["code"]).json()
+    got, winner = lose_the_swap(app, settings, client, client.tokens["refresh_token"], "read")
+    assert isinstance(got, oauth_server.OAuthError) and got.code == "invalid_grant" and winner
+    assert grant_of(app) is None
+    assert client.mcp("ping", token=winner["access_token"]).status_code == 401  # the winner's tokens went with the grant
+
+
 def test_a_retry_naming_another_resource_is_refused_and_ends_the_grant(app, client):  # vault-wxy.12, review F5
     first = client.connect()
     assert client.refresh(first["refresh_token"]).status_code == 200

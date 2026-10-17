@@ -292,7 +292,9 @@ def refresh(db: Session, client_id: str, refresh_token: str, scope: str | None, 
         replayed = _replay(db, h, refresh_token, client_id, scope, resource, key)
         if replayed is not None:
             return replayed
-        raise OAuthError("invalid_grant", "The refresh token is invalid, expired or revoked")
+        # Not an exact retry (other scopes, resource or client, or past the window): the token is retired now, so this
+        # is a copy and it ends the grant here too, whatever the timing.
+        _unknown_refresh(db, h)
     db.execute(delete(OAuthRetiredRefresh).where(OAuthRetiredRefresh.grant_id == grant.id,
                                                  OAuthRetiredRefresh.expires_at < _now()))
     db.add(OAuthRetiredRefresh(user_id=grant.user_id, grant_id=grant.id, token_hash=h, expires_at=grant.refresh_expires))
