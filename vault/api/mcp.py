@@ -225,7 +225,7 @@ IMPORT_BUCKET = {"bucket_id": {**ID, "description": "Import into this bucket onl
 # The file object ChatGPT hands a tool whose _meta["openai/fileParams"] names the parameter (developers.openai.com/plugins/reference,
 # "Define file inputs"): all four properties declared, download_url and file_id required.
 FILE_ARG = {"type": "object", "required": ["download_url", "file_id"],
-            "description": "The file the person attached to the chat: pass the attachment here.",
+            "description": "The file the person attached to the chat: the attachment itself.",
             "properties": {"download_url": {"type": "string", "description": "A temporary download address"},
                            "file_id": {"type": "string", "description": "The app's id of the file"},
                            "mime_type": {"type": "string", "description": "The file's media type"},
@@ -665,7 +665,7 @@ TOOLS = [
          "when the link is made; without it the upload page lets the person pick one of their buckets, or the whole collection.",
          {"bucket_id": IMPORT_BUCKET["bucket_id"]}, method="POST", path=lambda a: f"{V1}/uploads", query=("bucket_id",), write=True,
          any_scope=True),
-    Tool("import_collection_file", "Brings in the collection file the person attached to the chat (pass it as `file`): the Vault fetches it, stages it "
+    Tool("import_collection_file", "Brings in the collection file the person attached to the chat, given as `file`: the Vault fetches it, stages it "
          "as that person's upload and returns what importing it would change (what comes from their app, which Vault edits are "
          "kept, the conflicts) with the upload's id and `content_hash`. It changes nothing in the collection: the import is "
          "confirm_staged_upload. Any connection may use it, read-only ones included. If the app cannot hand the file over the "

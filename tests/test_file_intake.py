@@ -571,7 +571,7 @@ def test_the_host_is_shown_the_file_as_required_in_the_full_and_the_compact_list
         assert tool["_meta"] == {"openai/fileParams": ["file"]}, label
         file = tool["inputSchema"]["properties"]["file"]
         assert set(file["properties"]) == {"download_url", "file_id", "mime_type", "file_name"} and file["required"] == ["download_url", "file_id"]
-        assert "attached to the chat" in file["description"] and "pass" in file["description"].lower(), label
+        assert "attached to the chat" in file["description"] and "the attachment" in file["description"], label
         assert "`file`" in tool["description"] and "attached to the chat" in tool["description"], label
     # the check a call goes through leaves `file` to the endpoint, whatever the host sends
     assert "file" not in mcp.BY_NAME["import_collection_file"].checked_schema()["required"]
