@@ -265,4 +265,4 @@ def test_the_logging_note_lists_exactly_the_fields_of_the_event():
     note = doc[start: doc.index("\n- ", start)]
     named = {f for f in FIELDS if f"`{f}`" in note}
     assert named == FIELDS, FIELDS - named
-    assert "no value" in note.lower() and "nothing about the person" in note
+    assert "no value" in note.lower() and "anything about the person is logged" in note
