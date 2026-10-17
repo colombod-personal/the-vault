@@ -67,7 +67,8 @@ and `AGENTS.md` states the rule. CI cannot prove a review took place; it makes t
 
 Authorization code flow with PKCE S256 only. The authorization server and the MCP server are this one
 app. Clients are public. Codes live 60 seconds and are single use. Access tokens (`vault_oat_...`) last
-1 hour, refresh tokens (`vault_ort_...`) 30 days and rotate on every use. A grant (one person, one app)
+1 hour, refresh tokens (`vault_ort_...`) 30 days and rotate on every use (a retry of the same use within 60 seconds is
+answered with the same tokens: section 6). A grant (one person, one app)
 carries the scopes the person allowed (`read`, optionally `write`) and the MCP resource it is for. Tokens
 work on `/api/mcp` only and never carry the `account` power. Only SHA-256 hashes are stored. Personal
 access tokens are unchanged.
@@ -149,10 +150,72 @@ against it and what is built (a recent sign-in, re-confirmed by a passkey, a pro
 - Rotating refresh tokens; the old one is kept (hash) until its natural expiry. If a rotated token comes back,
   the whole grant is revoked, including the access token the thief might hold (M `test_a_reused_refresh_token_revokes_the_whole_grant`).
 - A refresh token presented by a different `client_id` revokes the grant (M `test_a_stolen_refresh_token_cannot_be_used_by_another_client`).
-- Rotation is a compare-and-swap, so two racing refreshes cannot both succeed. Of two parallel refreshes with one token,
-  exactly one wins (M `test_two_parallel_refreshes_with_one_token`, Postgres). The loser is **not** treated as theft when it
-  lost the swap itself (it may be a retry; the grant survives), and **is** when it arrives after the rotation (reuse: the
-  grant is revoked). Either way the old token never works again, and presenting it later revokes the grant.
+- Rotation is a compare-and-swap, so two racing refreshes cannot both succeed: exactly one rotates the token
+  (M `test_two_parallel_refreshes_with_one_token`, Postgres). Until 2026-10-12 the other was revoked as a copy when it
+  arrived after the rotation committed, and that revoked a real app's grant: on 2026-10-11 the ChatGPT desktop app's log showed
+  `invalid_grant` on refresh and then the Vault's tools gone with no re-login, and the production log showed 15 x 400 on
+  `/oauth/token` within two seconds after hours of 200s (vault-wxy.12). The cause (several processes of the app refreshing
+  from one credential store at once) is a hypothesis, not proven. What follows is a **mitigation, not a cure**: the client's
+  own coordination of refreshes (Codex's `mcp_oauth_refresh_coordination`) is still off by default, and replays seen from
+  Codex after gaps of 76 s up to 59 minutes are not covered by any window and still end the grant.
+- **A retry window (`REFRESH_GRACE`, 60 seconds; the owner decides the number).** A rotated refresh token that comes back
+  within 60 seconds of its rotation, **from the same client, for the same resource and exactly the scopes of the first
+  answer**, gets the very tokens the first refresh got, and the grant lives (M
+  `test_the_same_refresh_token_again_within_seconds_gets_the_same_answer`, `test_a_replay_within_the_window_stores_nothing_new`,
+  `test_the_window_ends_at_sixty_seconds`, parallel: `test_two_parallel_refreshes_with_one_token`). The window is measured
+  from the rotation and never extended. The replayed access token is the first answer's, and its `expires_in` is what it has
+  left (M `test_the_replayed_access_token_works_and_reports_what_it_has_left`). **Still revoking the whole grant:** later than
+  the window (M `test_a_retired_refresh_token_after_the_window_still_revokes_the_grant`), another client or other scopes or
+  another resource (M `test_the_window_is_for_the_same_client_and_the_same_scopes_only`), a token two rotations old (M
+  `test_the_window_does_not_cover_a_token_two_rotations_back`; only the immediately previous token qualifies, because the
+  derived pair must equal the grant's *current* pair), a grant past its refresh expiry or its 90 days. A replay writes
+  nothing: no new token, no new retired row. This holds for the request that **loses the compare-and-swap** too: if it is
+  not an exact retry (other scopes, or past the window; another client and another resource are decided before the swap) it is routed to the same reuse handling and ends
+  the grant, whatever the timing (M `test_a_swap_loser_asking_for_other_scopes_is_a_copy_and_ends_the_grant`; an exact retry
+  gets the winner's answer: M `test_a_swap_loser_asking_for_the_same_scopes_gets_the_winners_answer`). Logged (grant id, client id, age; never a token): a retry at `info`, a
+  refused reuse at `warning`.
+- **How the same tokens are handed back with only hashes stored (a design for the reviewer to judge).** The successor pair is
+  not drawn at random: it is `HMAC-SHA256(key, label : presented-token)`, so the second request recomputes what the first
+  returned. Two properties: **the input is the plaintext token the client presented**, never the stored hash, so a database
+  read, even with the key, yields no token (the recomputation needs a token only the client holds); and the replay is
+  accepted only when the result's hashes equal the grant's current hashes, so a wrong key or token yields a refusal, never a
+  foreign token. **The key** is `OAUTH_REFRESH_KEY` when set (at least 32 characters, checked at start); otherwise it is derived
+  from `SESSION_SECRET` under its own label (`vault:oauth-refresh-successor-key:v1`), so it is a different key from the
+  session secret but not an independent secret: the owner may set `OAUTH_REFRESH_KEY` to take it out of the session secret's
+  reach, a deployment step this change does not require. It lives only in the process environment (Vercel project
+  environment), is never stored or logged. **Rotating it** invalidates no stored token (only hashes are stored), but a retry
+  that falls inside the window across the change cannot be matched, goes down the reuse path and **ends that grant** (the
+  person signs in again); nothing else is affected.
+- **What a leak of the key allows (the cost of derived tokens).** Random tokens make a copied *old* refresh token worthless.
+  With derived tokens, someone who holds the key **and** a copy of any refresh token of a grant can compute every later token
+  of the chain **without presenting anything to the Vault**, so reuse detection never sees them: they follow the owner's
+  session silently until the grant ends (revoked, or 90 days). A leak of the key alone, or of the database with the key,
+  yields no token. Bounding it: the key leak is already as bad as a `SESSION_SECRET` leak when it is derived (that secret
+  forges every session cookie); with `OAUTH_REFRESH_KEY` set it is a smaller secret; replacing the key cuts the chain at the
+  next rotation. The alternative with no server key is to store the new pair encrypted under a key derived from the
+  presented token (AEAD) on the retired row for the window, wiped at the next rotation: no forward computation is possible,
+  at the price of a migration and a stored ciphertext. Not built; the reviewer may prefer it.
+- **What the window costs.** A thief who holds a copy of the token and presents it within 60 seconds of the owner's rotation,
+  naming the same client, receives the same pair as the owner and is **not detected**; the same holds the other way round
+  (the owner, within 60 seconds of a thief's refresh, receives the thief's pair). **A thief can keep a stolen copy quietly,
+  with no end:** one who holds the owner's token (R_k and its access token), checks that the access token stopped working
+  (the owner rotated), and presents R_k **inside the window after every rotation** gets the owner's exact next pair every
+  time, never presents a token older than the window, and is never detected or revoked. Shown by the independent review
+  (4 rotations: every thief presentation answered 200 with the owner's tokens, grant alive). It is one pair, not a second
+  lineage, and the 90 day cap on the grant still holds. Before this change a copy was always exposed at the owner's next
+  refresh; with the window, theft is no longer self-revealing. This is inherent to any same-successor grace window and is
+  the exact cost of the owner's decision (OD-07). The only signal is an `info` log line, which nobody reads; a real
+  detection signal (for example, binding the replay to the caller's network address and refusing a replay from another one)
+  is a follow-up, not part of this change: bead **vault-wxy.17** (how a stolen token used inside the window is noticed).
+  Making the retry key its own required secret is bead **vault-wxy.16** (`OAUTH_REFRESH_KEY` required, set with the deploy).
+  A `client_id` is public, so the "same client" check does not stop a thief by itself; the length of the window limits how
+  fast a thief must act, not whether he can keep going.
+- **On a deployment without https the key is derivable.** `SESSION_SECRET` defaults to `dev-insecure-secret` and `check()`
+  refuses that default only when `BASE_URL` is https. With the default secret the derived key is computable from the source,
+  and any successor is forgeable from one old token. Production is https and refuses the default at start; do not run a
+  public http deployment on it.
+- Not settled here: what a person sees and does when a grant is revoked anyway. In the ChatGPT desktop app on 2026-10-11 the
+  tools stayed gone with no re-login prompt; criterion (e) of vault-wxy.12 records the observed path.
 - **A grant has an absolute age of 90 days from first consent**: refreshing never extends it, the refresh token's expiry is
   capped at it, and a refresh after it revokes the grant (M `test_a_grant_has_an_absolute_maximum_age`).
 - Found: "sign out everywhere" (`POST /api/auth/logout?everywhere=true`) rotates only the account's *browser* session key; the
@@ -162,7 +225,9 @@ against it and what is built (a recent sign-in, re-confirmed by a passkey, a pro
 - Expired tokens are refused (M `test_expired_access_and_refresh_tokens_are_refused`); 1 hour access tokens limit the window.
 - Tokens are never accepted in the query string (M `test_tokens_are_not_accepted_in_the_query_string`).
 - Residual: a thief who refreshes before the owner wins the race; the owner's next refresh then trips reuse
-  detection and revokes the grant, so the exposure ends at the next legitimate use.
+  detection and revokes the grant (unless it falls inside the 60 second window, above), so the exposure ends at the next
+  legitimate use after the window, **and not at all for a thief who keeps presenting inside it: see the shadowing case
+  above** (a thief who repeats it at every renewal is not noticed, indefinitely, up to the 90 day cap).
 
 ### 7. Consent phishing and clickjacking
 - Names are cleaned of everything that draws nothing or reorders text: control characters, all Unicode format characters (soft hyphen,

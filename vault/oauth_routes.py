@@ -463,7 +463,7 @@ def build_router(get_db, settings: Settings, fetcher: clients.ClientFetcher, aut
             elif grant_type == "refresh_token":
                 if not refresh_token:
                     raise server.OAuthError("invalid_request", "refresh_token is required")
-                result = server.refresh(db, client_id, refresh_token, scope, resource_)
+                result = server.refresh(db, client_id, refresh_token, scope, resource_, settings.oauth_refresh_secret())
             else:
                 raise server.OAuthError("unsupported_grant_type", "grant_type must be authorization_code or refresh_token")
         except (server.OAuthError, clients.ClientError) as exc:

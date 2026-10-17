@@ -66,7 +66,10 @@ URL. The threat model, with the tests that prove each mitigation, is in
   person's own computer. No custom schemes. A bad `client_id` or `redirect_uri` shows an error page, never a redirect.
 - Codes last 60 seconds, work once, and are bound to client, redirect URI, challenge, resource and person. Using one twice
   revokes what the first use issued.
-- A rotated refresh token coming back (it was copied) revokes the whole grant. A refresh can narrow scopes, never widen them.
+- A rotated refresh token coming back (it was copied) revokes the whole grant. One exception: the same app asking again with
+  the token it just used, within 60 seconds and for the same scopes, gets the same new tokens back (several processes of one
+  app refreshing at once); a client should still serialise its refreshes and store the new tokens before using them.
+  A refresh can narrow scopes, never widen them.
   A grant lasts at most 90 days from the person's consent, however often it is refreshed; then the app asks again.
 - **read** is the default. **write** is offered only if the app asks for it, and it is an unticked box on the consent screen.
 - Tokens are for `https://<host>/api/mcp` only (RFC 8707). Used on `/api/v1` directly they are refused (401).
