@@ -8,6 +8,9 @@ scopes decide; what they refuse first is presentation policy.
 """
 
 import json
+import re
+import sys
+import tomllib
 from pathlib import Path
 
 import yaml
@@ -381,6 +384,152 @@ def test_every_skill_that_names_a_tool_outside_the_core_list_tells_the_assistant
         outside = [n for n in meta["metadata"]["vault-tools"].split() if n in mcp.BY_NAME and n not in mcp_profile.CORE]
         if outside:
             assert "`vault_tools`" in text and "look it up by that name" in text, f"{path.parent.name} names {outside[:3]}... with no way to reach them"
+
+
+# ---- every brief and agent definition that names a tool outside the core list says how to reach it (vault-wxy.5.2 F1) --------
+# In ChatGPT the council members are exactly this path: an expert's brief names get_rulings, list_buckets, get_deck_ideas ..., none
+# of which a compact client lists. The skills carried the paragraph; the agents, their generated definitions for every host and
+# the briefs the connector's expert_brief / council_brief hand out did not.
+
+ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+import build_plugin as bp  # noqa: E402  (which agents are also skills)
+
+NAMED = re.compile(r"`([a-z][a-z_]+)`")
+
+
+def outside_the_core(text: str, declared=()) -> list[str]:
+    """The tools a text names (in backticks, or declared in a ``vault-tools`` list) that a compact client does not list."""
+    named = set(NAMED.findall(text)) | set(declared)
+    return sorted(n for n in named if n in mcp.BY_NAME and n not in mcp_profile.CORE)
+
+
+def says_how_to_reach_them(text: str) -> bool:
+    flat = " ".join(text.split())
+    return "`vault_tools`" in flat and "look it up by that name" in flat
+
+
+def agent_texts() -> dict[str, tuple[str, list[str]]]:
+    """Every text an expert's brief reaches an assistant in: the source, each host's generated definition, the plugins' copies
+    and the briefs inside vault.experts_data (what expert_brief and council_brief return). Value: (text, declared tools)."""
+    from vault.experts_data import DATA
+
+    out = {}
+    for path in sorted((ROOT / "agents").glob("*.md")):
+        text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+        meta = yaml.safe_load(text[4:].split("\n---\n", 1)[0])
+        out[f"agents/{path.name}"] = (text, meta.get("vault-tools", []))
+    patterns = ("agent-definitions/*/*", "plugins/*/agents/*.md", "plugins/*/com.github.copilot/agents/*.md", "plugins/*/skills/vault-*/SKILL.md")
+    for pattern in patterns:
+        for path in sorted(ROOT.glob(pattern)):
+            if path.is_file() and path.name != "README.md":
+                out[str(path.relative_to(ROOT)).replace("\\", "/")] = (path.read_text(encoding="utf-8"), [])
+    for name, expert in DATA["experts"].items():
+        out[f"experts_data:{name}"] = (expert["brief"], [])
+    return out
+
+
+AGENT_PARAGRAPH = ("A tool not in your list: look it up by that name "
+                   "(`vault_tools`, then `vault_call`).")
+# Every place one agent's brief reaches an assistant (the keys of agent_texts()).
+RENDITIONS = ("agents/{n}.md", "agent-definitions/codex/{n}.toml", "agent-definitions/copilot/{n}.agent.md",
+              "agent-definitions/cursor/{n}.md", "plugins/the-vault/agents/{n}.md", "plugins/the-vault-openai/agents/{n}.md",
+              "plugins/the-vault/com.github.copilot/agents/{n}.agent.md", "plugins/the-vault-openai/skills/{n}/SKILL.md",
+              "experts_data:{n}")
+
+
+def test_every_expert_brief_and_agent_definition_that_names_a_tool_outside_the_core_list_tells_the_assistant_how_to_reach_it():
+    """Any text that names a non-core tool says how to reach it; and each agent that names one carries the paragraph, word for word
+    (so a reworded vault_call clause fails), once, in each of its renditions (nine for an expert, eight for the others). ``vault-synergy-analyst`` names its non-core
+    tools (``get_rulings``, ``present_steps``) only in its ``vault-tools`` list, so the declared list counts as naming them."""
+    texts = agent_texts()
+    missing = {where: outside_the_core(text, declared)[:3] for where, (text, declared) in texts.items()
+               if outside_the_core(text, declared) and not says_how_to_reach_them(text)}
+    assert not missing, f"names a tool a compact client does not list, with no way to reach it: {missing}"
+    names = sorted(p.stem for p in (ROOT / "agents").glob("*.md") if outside_the_core(*texts[f"agents/{p.name}"]))
+    assert len(names) >= 13 and "vault-casual-table" not in names, names  # the casual table names no tool outside the core list
+    flat = {where: " ".join(text.split()) for where, (text, _) in texts.items()}
+    for name in names:
+        for template in RENDITIONS:
+            if "/skills/" in template and name not in bp.EXPERT_SKILLS:
+                continue  # only the council's experts are also skills for ChatGPT and Codex (the buyer, curator and deckbuilder are not)
+            where = template.format(n=name)
+            assert where in texts, f"{where} is missing: the agent has a rendition the check does not see"
+            assert flat[where].count(AGENT_PARAGRAPH) == 1, f"{where} does not carry the paragraph, once, word for word"
+
+
+def test_a_codex_agent_that_names_a_tool_outside_the_core_list_can_actually_reach_it_and_one_that_does_not_gets_no_readers():
+    """Codex is the compact-list client and ``enabled_tools`` is its allow list for the server: without ``vault_tools`` and
+    ``vault_call`` in it, a subagent sees only the core tools among its own and the paragraph in its brief is inert. The
+    effective set is computed here: what the compact list shows (core tools) among ``enabled_tools``, plus the readers. An agent
+    whose tools are all core gets neither reader (vault_call runs any read tool, so it is not handed out for nothing), and none
+    gets vault_write."""
+    files = sorted((ROOT / "agent-definitions" / "codex").glob("*.toml"))
+    assert len(files) >= 14
+    readers = {mcp_profile.LOOKUP, mcp_profile.CALL}
+    needs_readers = 0
+    for path in files:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        enabled = data["mcp_servers"]["vault"]["enabled_tools"]
+        own = [t for t in enabled if t not in readers]
+        assert mcp_profile.WRITE not in enabled, f"{path.name} is read-only"
+        assert len(set(enabled)) == len(enabled), path.name
+        listed = {t for t in enabled if t in mcp_profile.CORE}  # what the compact list shows this agent directly
+        outside = [t for t in own if t not in mcp_profile.CORE]
+        if outside:
+            needs_readers += 1
+            assert readers <= set(enabled), f"{path.name} names {outside[:3]} and cannot reach them"
+            for name in outside:  # reachable: the lookup lists it and the reader runs it
+                assert mcp_profile.refusal(mcp.BY_NAME[name], mcp_profile.CALL, scopes=("read",)) is None, f"{path.name}: {name}"
+            assert says_how_to_reach_them(data["developer_instructions"]), path.name
+        else:
+            assert not readers & set(enabled), f"{path.name} names only core tools and does not need the readers"
+            assert set(own) == listed
+    assert needs_readers >= 13
+
+
+def test_a_brief_that_names_a_tool_outside_the_core_list_without_the_paragraph_fails_the_check():
+    bare = "You are the judge. Look up every card with `get_card_oracle` and `get_rulings`; call `rules_changes` for a recent update."
+    assert outside_the_core(bare) == ["get_rulings", "rules_changes"] and not says_how_to_reach_them(bare)
+    paragraph = ("A tool named below that is not in your list: look it up by that name before saying it is missing. If you have "
+                 "`vault_tools`, reach it through `vault_tools` and `vault_call`.")
+    assert says_how_to_reach_them(paragraph + "\n\n" + bare)
+    assert outside_the_core("Use `get_card_oracle` and `whoami`.") == []  # core tools are listed: nothing to say
+
+
+def test_every_tool_an_agent_names_outside_the_core_list_is_a_read_the_paragraph_can_reach_with_vault_call():
+    """The paragraph in the agents offers vault_call only: so each of their non-core tools must be one vault_call will run."""
+    for path in sorted((ROOT / "agents").glob("*.md")):
+        text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+        meta = yaml.safe_load(text[4:].split("\n---\n", 1)[0])
+        for name in outside_the_core(text, meta.get("vault-tools", [])):
+            why = mcp_profile.refusal(mcp.BY_NAME[name], mcp_profile.CALL, scopes=("read",))
+            assert why is None, f"{path.name}: {name} cannot be reached with vault_call by a read-only token: {why}"
+
+
+def test_nothing_sends_the_assistant_to_expert_brief_without_the_way_to_reach_it():
+    """expert_brief left the compact list (#478): it is reached through vault_call (vault_tools lists it). Every paragraph of a skill, an
+    agent, a brief, a prompt or the chair's procedure that names it says how, so none tells a compact client to call it directly."""
+    from vault.api.mcp_catalog import PROMPTS
+
+    assert "expert_brief" in mcp.BY_NAME and "expert_brief" not in mcp_profile.CORE
+    texts = {where: text for where, (text, _) in agent_texts().items()}
+    for path in sorted((ROOT / "skills").glob("*/SKILL.md")):
+        texts[str(path.relative_to(ROOT)).replace("\\", "/")] = path.read_text(encoding="utf-8")
+    for prompt in PROMPTS:
+        texts[f"prompt:{prompt['name']}"] = prompt["text"]
+    texts["vault/experts.py"] = (ROOT / "vault" / "experts.py").read_text(encoding="utf-8")
+    bare, seen = {}, 0
+    for where, text in texts.items():
+        text = text.replace("\r\n", "\n")
+        if text.startswith("---\n"):
+            text = text.split("\n---\n", 1)[1]  # the front matter lists tool names; it is not an instruction
+        for paragraph in text.split("\n\n"):
+            if "expert_brief" in paragraph:
+                seen += 1
+                if "vault_call" not in paragraph:
+                    bare[where] = " ".join(paragraph.split())[:120]
+    assert seen >= 2 and not bare, bare
 
 
 # The tools a skill names that a compact client can only get through the web app (they delete or revoke): the skills say so.

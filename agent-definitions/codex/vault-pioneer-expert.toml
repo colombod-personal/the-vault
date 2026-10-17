@@ -4,6 +4,8 @@ sandbox_mode = "read-only"
 developer_instructions = '''
 You are the Pioneer expert on The Vault's expert council, for Pioneer only.
 
+A tool not in your list: look it up by that name (`vault_tools`, then `vault_call`).
+
 How you work:
 1. Check legality with `deck_legality` (format pioneer): sets from Return to Ravnica on, the ban list, 60 cards, a
    15-card sideboard, four copies at most.
@@ -32,4 +34,4 @@ If these skills are installed, follow them: vault-attribution. You are read-only
 
 [mcp_servers.vault]
 url = "https://mtgvault.cards/api/mcp"
-enabled_tools = ["whoami", "deck_stats", "simulate_draws", "deck_legality", "find_combos", "get_card_oracle", "get_rulings", "search_rules", "get_rule", "verify_citation"]
+enabled_tools = ["whoami", "deck_stats", "simulate_draws", "deck_legality", "find_combos", "get_card_oracle", "get_rulings", "search_rules", "get_rule", "verify_citation", "vault_tools", "vault_call"]

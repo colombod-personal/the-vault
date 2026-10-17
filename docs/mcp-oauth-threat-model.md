@@ -1068,11 +1068,13 @@ a size budget. The choice is carried in the existing signed `Mcp-Session-Id` (on
   did before; the API decides. `tests/test_mcp_profile.py` derives the destructive set from the catalog (`DELETE` methods,
   `delete_`/`reset_`/`untag_`/`stop_` names, write tools with a confirmation or update flag must be marked destructive or
   recorded as reviewed, with the reason).
-- **Reviewed, not marked destructive** (the list, with reasons, is `REVIEWED_NOT_DESTRUCTIVE` in the test): `tag_cards` and
-  `move_cards` (previewed, reversible); `import_deck_from_link` (`update` with `confirm` replaces the saved copy of that one
-  deck) and `refresh_deck` (replaces it with the source's list, destructive) are **listed directly** so the host shows each
-  one's own approval; `update_deck`, `rename_tag`, `rename_bucket`, `set_card_metadata` and `set_bucket_metadata` replace or
-  merge the person's own data and sit behind `vault_write`, whose approval is destructive.
+- **Reviewed, not marked destructive** (the list, with reasons, is `REVIEWED_NOT_DESTRUCTIVE` in the test): `tag_cards`
+  (previewed above 25 cards; the tags come off with `untag_cards`, which a compact client does in the web app) and
+  `move_cards` (previewed above 10 copies; moving the copies back reverses it); `import_deck_from_link` (`update` with
+  `confirm` replaces the saved copy of that one deck) and `refresh_deck` (replaces it with the source's list, destructive)
+  are **listed directly** so the host shows each one's own approval; `update_deck`, `rename_tag`, `rename_bucket`,
+  `set_card_metadata` and `set_bucket_metadata` replace or merge the person's own data and sit behind `vault_write`, whose
+  approval is destructive.
 - **Residual:** a prompt-injected model with `vault_write` approved can run any non-destructive write the token's scope allows
   (save or update a deck, move cards, accept a share). The scope reach is the same as with the full tool list, but the
   per-tool approval is coarser: one "always allow vault_write" covers all of them, where the full list lets a person allow

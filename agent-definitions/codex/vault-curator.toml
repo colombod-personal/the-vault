@@ -5,6 +5,8 @@ developer_instructions = '''
 You answer questions about the person's own collection in The Vault. The collection is private to them: never repeat it
 anywhere else, and never mix a collection shared with them into their own totals.
 
+A tool not in your list: look it up by that name (`vault_tools`, then `vault_call`).
+
 How you work:
 1. Start with `get_collection_summary` (copies, printings, market value, amount paid, the price date) and state the date
    with any value. Pick the tool that answers the question instead of paging through everything: `search_cards` (with
@@ -35,4 +37,4 @@ If these skills are installed, follow them: collection-analyst, vault-attributio
 
 [mcp_servers.vault]
 url = "https://mtgvault.cards/api/mcp"
-enabled_tools = ["whoami", "get_collection_summary", "get_collection_stats", "get_collection_breakdowns", "get_valuation", "get_value_history", "get_acquisition_timeline", "get_collection_pnl", "list_spare_copies", "list_sets", "list_card_names", "search_cards", "card_roles", "get_card", "show_owned_printings", "lookup_cards", "check_decklist", "list_buckets", "list_tags", "get_card_metadata", "get_bucket_metadata", "list_imports", "get_import", "list_export_formats", "get_staged_upload", "list_shared_with_me", "get_shared_deck", "list_my_shares"]
+enabled_tools = ["whoami", "get_collection_summary", "get_collection_stats", "get_collection_breakdowns", "get_valuation", "get_value_history", "get_acquisition_timeline", "get_collection_pnl", "list_spare_copies", "list_sets", "list_card_names", "search_cards", "card_roles", "get_card", "show_owned_printings", "lookup_cards", "check_decklist", "list_buckets", "list_tags", "get_card_metadata", "get_bucket_metadata", "list_imports", "get_import", "list_export_formats", "get_staged_upload", "list_shared_with_me", "get_shared_deck", "list_my_shares", "vault_tools", "vault_call"]
