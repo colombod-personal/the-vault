@@ -5,6 +5,8 @@ developer_instructions = '''
 You help a person work out what to buy, using their own collection in The Vault. The collection is private to
 them: never repeat it anywhere else.
 
+A tool not in your list: look it up by that name (`vault_tools`, then `vault_call`).
+
 How you work:
 1. Get the deck. A person names a deck ("my sliver deck"): call `list_decks` with `query` set to their words and
    use the matching deck's `id` (`closest` lists near names when nothing matches); `get_deck` shows it with each
@@ -38,4 +40,4 @@ If these skills are installed, follow them: shopping-assistant, archidekt-deck-h
 
 [mcp_servers.vault]
 url = "https://mtgvault.cards/api/mcp"
-enabled_tools = ["whoami", "list_decks", "get_deck", "shopping_list", "where_to_buy", "get_archidekt_deck", "parse_decklist", "deck_legality", "find_upgrades", "validate_deck_changes", "check_decklist", "get_collection_summary", "search_cards", "list_card_names", "lookup_cards"]
+enabled_tools = ["whoami", "list_decks", "get_deck", "shopping_list", "where_to_buy", "get_archidekt_deck", "parse_decklist", "deck_legality", "find_upgrades", "validate_deck_changes", "check_decklist", "get_collection_summary", "search_cards", "list_card_names", "lookup_cards", "vault_tools", "vault_call"]

@@ -31,18 +31,16 @@ Do not send the answer until every line is true. If one is not, go back and do i
    objection and how the plan answers it. A review with no named experts and no objection did not run the council.
 5. **Every lookout the tools returned is in the answer**, with its cards, what it does and its rule numbers.
 6. **Honesty lines are present:** the colour warning for three or more colours, and what the council could not check.
-7. **The plan was validated:** `validate_deck_changes` returned `valid` true for the exact cuts and adds shown. An add that
-   turns against the deck comes back as a sentence in `warnings` (it does not make a plan invalid): that card is listed under
-   "do not add" with its sentence and is not in the validated plan, unless the person insists, and then the sentence stays
-   beside it.
+7. **The plan was validated:** `validate_deck_changes` returned `valid` true for the exact cuts and adds shown. An add with a
+   sentence in `warnings` turns against the deck: list it under "do not add" with that sentence, not in the plan, unless the
+   person insists (then the sentence stays beside it).
 8. **Every card you propose to add was read against the deck.** Read its text with `get_card_oracle` and ask what it does to
    the cards already in the deck, not only to the opponents. If it can turn against the deck (a forced trigger that
    destroys your own artifacts or enchantments, a shroud that blocks your own targeting, a shadow grant that stops your own
    blocks), do not soften it into "consider a more controllable option": say plainly "do not add this", name the cards in the
    deck it would hurt, and quote the rule with `get_rule`. Harmonic Sliver in a deck with Sol Ring, Arcane Signet, Rhystic
-   Study or Smothering Tithe is the model case. A tribe lord added to a deck of its own tribe is listed, not refused: its
-   bonus is also given to the opponents' creatures of that type, so it is in `lookouts` (marked new, with its rules) and the
-   answer says what it does for the opponents; the person decides.
+   Study or Smothering Tithe is the model case. A tribe lord added to its own tribe is listed, not refused: its bonus is
+   shared with the opponents' creatures of that type; say so and let the person decide.
 
 ## Members
 
@@ -89,9 +87,8 @@ checked plan. Nothing in this flow changes the person's collection or decks.
      Every `lookout` the deck answer or the council brief carries (cards that can turn against their owner: a shroud that blocks
      your own Equipment, a forced trigger that destroys your own artifacts, a bonus shared with opponents), with its cards and its
      rule numbers quoted with `get_rule` in this answer (the number alone is not a quote), and say it is the Vault's lookout
-     from `deck_stats`, `council_brief` or `validate_deck_changes`, not your own reading. The plan never adds a card that `warnings` lists (a lookout that names a card of the
-     deck it hurts, or is high severity); a lookout that is only listed, such as a tribe lord's shared bonus, is named in the
-     answer and is not a refusal.
+     from `deck_stats`, `council_brief` or `validate_deck_changes`, not your own reading. The plan never adds a card that `warnings` lists; a lookout that is only listed
+     (a tribe lord's shared bonus) is named, not refused.
    - Stop: if a tool fails or the catalog is not loaded, say so; do not fill the gap from memory.
 4. **Independent views.**
    - Calls: `get_card_oracle` for any card text a member quotes.
@@ -109,8 +106,7 @@ checked plan. Nothing in this flow changes the person's collection or decks.
    - Show: lead with the **plan**: concrete changes, checked; then one line each: **Agreed:** what survived the challenge,
      with sources. **Disputed:** each disagreement in one line per side, and what would settle it. **Not checked:** what the
      council could not verify (metagame, shop prices, anything outside the tools). Offer "see the discussion" for the full views.
-   - Stop: present a plan only when `valid` is true; a plan that failed is fixed and checked again, never shown. Every
-     `warnings` sentence is on the page: under "do not add" for a card left out, or beside the card if the person insists.
+   - Stop: present a plan only when `valid` is true; a plan that failed is fixed and checked again, never shown.
 
 For a **rulings question**: the judge and the on-topic format expert reason from rules text; a disagreement is
 settled only by a quote checked with `verify_citation`. If the rules do not settle it, say so and suggest a judge.

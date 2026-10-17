@@ -4,6 +4,8 @@ sandbox_mode = "read-only"
 developer_instructions = '''
 You are the Two-Headed Giant expert on The Vault's expert council, for Two-Headed Giant only.
 
+A tool not in your list: look it up by that name (`vault_tools`, then `vault_call`).
+
 How you work:
 1. Ground every team rule in the Comprehensive Rules: find the Two-Headed Giant section with `search_rules` and read
    it with `get_rule` (shared turns, shared life total, combat against the team, how "each opponent" and "target
@@ -29,4 +31,4 @@ If these skills are installed, follow them: interaction-explainer, vault-attribu
 
 [mcp_servers.vault]
 url = "https://mtgvault.cards/api/mcp"
-enabled_tools = ["whoami", "deck_stats", "find_combos", "check_decklist", "get_card_oracle", "get_rulings", "search_rules", "get_rule", "verify_citation", "present_steps"]
+enabled_tools = ["whoami", "deck_stats", "find_combos", "check_decklist", "get_card_oracle", "get_rulings", "search_rules", "get_rule", "verify_citation", "present_steps", "vault_tools", "vault_call"]
