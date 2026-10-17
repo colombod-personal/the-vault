@@ -170,7 +170,7 @@ against it and what is built (a recent sign-in, re-confirmed by a passkey, a pro
   `test_the_window_does_not_cover_a_token_two_rotations_back`; only the immediately previous token qualifies, because the
   derived pair must equal the grant's *current* pair), a grant past its refresh expiry or its 90 days. A replay writes
   nothing: no new token, no new retired row. This holds for the request that **loses the compare-and-swap** too: if it is
-  not an exact retry (other scopes, resource or client, or past the window) it is routed to the same reuse handling and ends
+  not an exact retry (other scopes, or past the window; another client and another resource are decided before the swap) it is routed to the same reuse handling and ends
   the grant, whatever the timing (M `test_a_swap_loser_asking_for_other_scopes_is_a_copy_and_ends_the_grant`; an exact retry
   gets the winner's answer: M `test_a_swap_loser_asking_for_the_same_scopes_gets_the_winners_answer`). Logged (grant id, client id, age; never a token): a retry at `info`, a
   refused reuse at `warning`.
