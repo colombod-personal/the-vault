@@ -15,7 +15,8 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.test_agents import CSV, V1, agent, bot, call_tool, make_token  # noqa: F401 - fixtures
+from tests.test_agents import CSV, V1, agent, bot, call_tool, make_token, rpc  # noqa: F401 - fixtures
+from tests.test_mcp_profile import hello, listed
 from vault import file_fetch, importer, intake
 from vault.api import mcp, mcp_profile
 from vault.file_fetch import FileFetcher, Handoff, Refused
@@ -539,6 +540,51 @@ def test_a_missing_file_key_is_the_same_sentence(app, agent, bot):
     intake_with(app)
     out = call_tool(bot, token_of(agent), "import_collection_file")
     assert not out["isError"] and out["structuredContent"]["status"] == "cannot_receive"
+
+
+def test_a_missing_file_key_is_answered_over_http_200_with_the_plain_sentence_never_a_schema_error(app, agent, bot, caplog):
+    """The model may call the tool with nothing (the real-app run on a540c43 did): the person must never see a schema error."""
+    caplog.set_level(logging.DEBUG)
+    intake_with(app)
+    res = rpc(bot, "tools/call", {"name": "import_collection_file", "arguments": {}}, token_of(agent))
+    body = res.json()
+    assert res.status_code == 200 and "error" not in body, body
+    out = body["result"]
+    assert not out["isError"] and out["structuredContent"]["status"] == "cannot_receive" and out["structuredContent"]["changed"] is False
+    say = out["structuredContent"]["say"]
+    assert say.count(".") == 1 and "cannot hand the file" in say and "nothing was changed" in say and "Import CSV" in say
+    assert event_lines(caplog)[-1]["outcome"] == "cannot_hand_over"
+    assert staged_rows(app) == 0
+
+
+@pytest.mark.parametrize("scopes", [("read",), ("read", "write")], ids=["read-only token", "write token"])
+def test_the_host_is_shown_the_file_as_required_in_the_full_and_the_compact_list(agent, bot, scopes):
+    """The model fills what the schema requires: with `file` optional it called the tool with {}. Served as required, in both
+    lists, with the OpenAI file declaration and all four properties kept."""
+    token = token_of(agent, *scopes)
+    full = rpc(bot, "tools/list", {}, token).json()["result"]["tools"]
+    compact = listed(bot, token, hello(bot, token, "codex-mcp-client"))
+    assert len(compact) <= 30 and len(json.dumps(compact)) < 30_000
+    for label, tools in (("full", full), ("compact", compact)):
+        tool = {t["name"]: t for t in tools}["import_collection_file"]
+        assert tool["inputSchema"]["required"] == ["file"], label
+        assert tool["_meta"] == {"openai/fileParams": ["file"]}, label
+        file = tool["inputSchema"]["properties"]["file"]
+        assert set(file["properties"]) == {"download_url", "file_id", "mime_type", "file_name"} and file["required"] == ["download_url", "file_id"]
+        assert "attached to the chat" in file["description"] and "the attachment" in file["description"], label
+        assert "`file`" in tool["description"] and "attached to the chat" in tool["description"], label
+    # the check a call goes through leaves `file` to the endpoint, whatever the host sends
+    assert "file" not in mcp.BY_NAME["import_collection_file"].checked_schema()["required"]
+    assert mcp.BY_NAME["import_collection_file"].checked_schema()["properties"]["file"] == {}
+    # and no other tool's required list is touched
+    assert mcp.BY_NAME["get_deck"].checked_schema() == mcp.BY_NAME["get_deck"].schema()["inputSchema"]
+
+
+def test_a_proper_file_object_is_imported_as_before(app, agent, bot):
+    intake_with(app)
+    out = call_tool(bot, token_of(agent), "import_collection_file", file=file_arg())
+    assert not out["isError"] and out["structuredContent"]["status"] != "cannot_receive", out
+    assert staged_rows(app) == 1
 
 
 def event_lines(caplog):
