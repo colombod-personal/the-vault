@@ -712,11 +712,12 @@ def lose_the_swap(app, settings, client, old, scope):
     """Run a refresh with ``old`` that loses the compare-and-swap, deterministically: another request (a separate
     session, as a parallel process would be) rotates the same token after this one read the grant and before it
     swapped. Returns (the loser's result or its OAuthError, the winner's answer)."""
-    key, winner = settings.oauth_refresh_secret(), {}
+    key, winner, fired = settings.oauth_refresh_secret(), {}, []
     real = oauth_server._successor
 
     def successor(k, presented):
-        if not winner:  # once: the other request commits its rotation in the gap
+        if not fired:  # once: the other request commits its rotation in the gap
+            fired.append(1)  # before it runs: its own refresh calls this function too
             winner.update(db_do(app, lambda db: oauth_server.refresh(db, client.client_id, old, None, client.resource, key)))
         return real(k, presented)
 
