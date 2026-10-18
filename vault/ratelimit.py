@@ -94,7 +94,8 @@ def limited(bucket: str, *, verify: bool = False, setting: str | None = None) ->
     return [Depends(check)]
 
 
-def per_user(request: Request, bucket: str, user_id: int, allowed: int, db: Session | None = None, *, kind: str = "user") -> None:
+def per_user(request: Request, bucket: str, user_id: int, allowed: int, db: Session | None = None, *, kind: str = "user",
+             commit: bool = True) -> None:
     """Limit one signed-in user's calls to an expensive endpoint (e.g. a refresh that calls
     Scryfall) to ``allowed`` a minute, whichever device or token they come from. Counted like the
     sign-in limits, under a keyed hash of the bucket and user id, so the rows name no one.
@@ -103,7 +104,10 @@ def per_user(request: Request, bucket: str, user_id: int, allowed: int, db: Sess
 
     ``kind`` names what ``user_id`` is: a different ``kind`` is a different counter even for the same number, so a credential
     that is not a person (an upload link's id) can have a counter of its own. Every try counts, accepted or refused: a caller
-    that loops keeps its own counter above the limit, which is why that counter must not be one the person also needs."""
+    that loops keeps its own counter above the limit, which is why that counter must not be one the person also needs.
+
+    ``commit=False`` (with ``db``) leaves the transaction open: the count is then part of the caller's own decision and is undone with
+    it (a file in parts debits its upload from inside the lock that creates it, so simultaneous first parts count once)."""
     settings: Settings = request.app.state.settings
     now = time.time()
     minute = int(now // WINDOW)
@@ -112,15 +116,16 @@ def per_user(request: Request, bucket: str, user_id: int, allowed: int, db: Sess
         with request.app.state.db.sessions() as own:
             count = _count(own, key, minute)
     else:
-        count = _count(db, key, minute)
+        count = _count(db, key, minute, commit)
     if count > allowed:
         wait = max(1, math.ceil((minute + 1) * WINDOW - now))
         raise HTTPException(429, f"Too many {bucket} requests. Try again in {wait} seconds.", headers={"Retry-After": str(wait)})
 
 
-def _count(db: Session, key: str, minute: int) -> int:
+def _count(db: Session, key: str, minute: int, commit: bool = True) -> int:
     count = hit(db, key, minute)
     if count == 1:
         db.execute(delete(RateHit).where(RateHit.minute < minute - KEEP))
-    db.commit()
+    if commit:
+        db.commit()
     return count

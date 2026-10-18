@@ -152,13 +152,13 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         observability.event(level, "file_intake", request_id=state.get("request_id", ""), outcome=outcome,
                             **{k: v for k, v in fields.items() if v is not None})
 
-    def answer(request: Request, kind: str, **fields) -> dict:
+    def answer(request: Request, kind: str, *, bucket_id: int | None = None, **fields) -> dict:
         """A refusal as the model reads it: what happened in a word, one plain sentence, and that nothing changed."""
         log(request, kind, **fields)
         say = SAY[kind]() if callable(SAY[kind]) else SAY[kind]
         out = {"status": "cannot_receive" if kind == "cannot_hand_over" else kind, "say": say, "changed": False}
         if kind == "cannot_hand_over":
-            out["next"] = file_parts.steps()  # for a coding assistant that has the file's path: read it in parts, never for the person
+            out["next"] = file_parts.steps(bucket_id)  # for a coding assistant that has the file's path: read it in parts, never for the person
         return out
 
     @router.post(f"{V1}/uploads/from-file", tags=["imports"], response_model=IntakeAnswer, response_model_exclude_none=True,
@@ -184,7 +184,7 @@ def build_router(get_db, current_user, settings) -> APIRouter:
             except file_fetch.Refused as exc:
                 # The shape of what arrived, so the first real run says what the host really sends (never a path or query).
                 raise Declined(answer(request, exc.kind, reason=exc.reason, host=exc.host,
-                                      shape=file_fetch.shape_of(body.file))) from None
+                                      shape=file_fetch.shape_of(body.file), bucket_id=body.bucket_id)) from None
             try:
                 fetched = fetcher.fetch(handoff)  # no database statement has run since the key was reserved: no connection held
             except file_fetch.Refused as exc:
@@ -220,7 +220,7 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         if any(isinstance(v, bool) or not isinstance(v, int) for v in numbers.values()):
             return bad_part(request, "numbers_missing", given=sorted(k for k, v in numbers.items() if v is not None))
         part, parts, lines, total_sum = body.part, body.parts, body.lines, body.sum
-        if not (1 <= part <= parts <= file_parts.MAX_PARTS and 0 <= lines and 0 <= total_sum <= 0xFFFFFFFF):
+        if not (1 <= part <= parts <= file_parts.max_parts() and 0 <= lines and 0 <= total_sum <= 0xFFFFFFFF):
             return bad_part(request, "numbers_out_of_range", parts=min(max(parts, 0), 10**6))
         try:
             data = file_parts.to_bytes(body.text)
@@ -230,9 +230,6 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         if len(data) > limit:
             return JSONResponse(answer(request, "too_large", bytes=len(data), parts=parts))
         key = file_parts.set_key(user.id, total_sum, parts, lines, body.bucket_id)
-        known = db.scalar(select(StagedUpload.id).where(StagedUpload.ticket_hash == key, StagedUpload.user_id == user.id))
-        if known is None:  # a new upload: it counts once, here, not once per part
-            per_user(request, "file intake", user.id, settings.import_limit, db)
         per_user(request, "file intake part", user.id, settings.import_part_limit, db)  # the parts have a counter of their own
 
         def run() -> dict:
@@ -251,6 +248,9 @@ def build_router(get_db, current_user, settings) -> APIRouter:
                                    bucket_bound=body.bucket_id is not None)
                 db.add(row)
                 db.flush()
+                # A new upload counts once against the allowance, here, under the lock that creates it (a hundred parts count once, and
+                # eight first parts sent at the same moment count once, not eight times); over the allowance the row is undone with it.
+                per_user(request, "file intake", user.id, settings.import_limit, db, commit=False)
             digest = file_parts.part_hash(data)
             existing = db.get(StagedUploadPart, (row.id, part))
             if existing is None:

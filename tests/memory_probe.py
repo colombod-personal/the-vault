@@ -15,16 +15,9 @@ from __future__ import annotations
 
 import json
 import os
-import resource
 import sys
 import time
 import zlib
-
-from fastapi.testclient import TestClient
-
-from vault.app import create_app
-from vault.config import Settings, import_max_bytes
-from vault.models import Card
 
 HEADER = ('"sep=,"\nFolder Name,Quantity,Trade Quantity,Card Name,Set Code,Set Name,Card Number,Condition,Printing,Language,'
           "Price Bought,Date Bought,LOW,MID,MARKET\n")
@@ -34,6 +27,8 @@ NUMBERS = 125  # 5,000 printings in the catalog the rows are matched against; th
 
 
 def rss_mb() -> float:
+    import resource  # not on Windows: the file builder below is imported by tests that run there too
+
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # KiB on Linux
 
 
@@ -59,6 +54,12 @@ def synthetic_csv(size: int, shape: str) -> bytes:
 
 
 def main(mode: str, shape: str) -> None:
+    from fastapi.testclient import TestClient
+
+    from vault.app import create_app
+    from vault.config import Settings, import_max_bytes
+    from vault.models import Card
+
     settings = Settings(database_url=os.environ["VAULT_TEST_DATABASE_URL"], session_secret="probe", dev_login=True,
                         base_url="http://testserver")
     app = create_app(settings, serve_static=False)

@@ -26,8 +26,10 @@ import hashlib
 import zlib
 from collections.abc import Iterable
 
+from . import config
+
 MARKER = "intake-"  # the start of the ticket_hash of a file a chat app handed over (vault.uploads.INTAKE_MARKER)
-MAX_PARTS = 4096  # a file in parts of 1,024 characters or more, at the largest size the Vault takes, has fewer
+MIN_PARTS_CAP = 4096
 MAX_LISTED = 50  # missing parts named in an answer
 FILE_NAME = "chat-upload.csv"
 UNITS = "utf-16-le"
@@ -36,6 +38,12 @@ MIN_PART_CHARS = 1024
 TOKEN_BUDGET = 10000  # exec_command's default max_output_tokens
 REJECT_TOKENS = 9000  # a read that reports more than this was probably truncated
 PARALLEL = 8  # reads, and sends, at a time
+
+
+def max_parts() -> int:
+    """Parts a file may have: enough for a file of the import-size limit in parts of the smallest size the script falls back to (8,192
+    for 8 MiB, one character a byte), and never fewer than 4,096."""
+    return max(MIN_PARTS_CAP, -(-config.import_max_bytes() // MIN_PART_CHARS))
 
 
 def set_key(user_id: int, total_sum: int, parts: int, lines: int, bucket_id: int | None) -> str:
@@ -119,7 +127,7 @@ def assemble(chunks: Iterable[bytes], lines: int, total_sum: int) -> bytes:
 # can change it). The plan command prints the file's line count and the cut offsets (never inside a surrogate pair); each read prints one
 # part as a JSON string. A read is rejected when it reports more than REJECT_TOKENS tokens or does not parse; the whole file is then
 # read again in halves. The parts are checked against the shell's own count of the file (length and lines) before anything is sent.
-RECIPE = r"""const P=String.raw`<PATH>`;
+RECIPE = r"""const P="<PATH>";
 const q=P.replace(/'/g,"''"),sh=c=>tools.exec_command({cmd:c,login:false});
 const T=[];for(let n=0,c;n<256;n++){c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;T[n]=c>>>0}
 const crc=a=>{let h=-1;for(const s of a)for(let i=0;i<s.length;i++){const u=s.charCodeAt(i);h=T[(h^u)&255]^(h>>>8);h=T[(h^(u>>>8))&255]^(h>>>8)}return(h^-1)>>>0};
@@ -136,26 +144,28 @@ for(let N=@PART@;N>=@MIN@&&!res;N=N>>1){
  const s=rs.join('');
  if(rs.includes(null)||s.length!==cut[n]||s.split('\n').length-1!==lines)continue;
  const sum=crc(rs),ans=[];
- for(let i=0;i<n;i+=@PARALLEL@)ans.push(...await Promise.all(par(Math.min(@PARALLEL@,n-i)).map(j=>tools.mcp__the_vault__import_collection_file({text:rs[i+j],part:i+j+1,parts:n,lines,sum}))));
+ for(let i=0;i<n;i+=@PARALLEL@)ans.push(...await Promise.all(par(Math.min(@PARALLEL@,n-i)).map(j=>tools.mcp__the_vault__import_collection_file({text:rs[i+j],part:i+j+1,parts:n,lines,sum@BUCKET@}))));
  const a=ans.map(x=>x.structuredContent||{});
  res=a.find(x=>x.status==='uploaded')||(a.some(x=>x.status==='mismatch')?null:a[a.length-1]);
 }
 text(JSON.stringify(res||{status:'not_read'}));"""
 
 
-def recipe() -> str:
-    """The script with its numbers filled in. In the PowerShell text ``@@N`` stays the part size of the loop in progress."""
-    return (RECIPE.replace("@@N", '"+N+"').replace("@PART@", str(PART_CHARS)).replace("@MIN@", str(MIN_PART_CHARS))
+def recipe(bucket_id: int | None = None) -> str:
+    """The script with its numbers filled in, and the bucket the call was made for, if any (every part goes into it). In the PowerShell
+    text ``@@N`` stays the part size of the loop in progress."""
+    return (RECIPE.replace("@@N", '"+N+"').replace("@BUCKET@", "" if bucket_id is None else f",bucket_id:{int(bucket_id)}").replace("@PART@", str(PART_CHARS)).replace("@MIN@", str(MIN_PART_CHARS))
             .replace("@REJECT@", str(REJECT_TOKENS)).replace("@PARALLEL@", str(PARALLEL)))
 
 
-def steps() -> str:
+def steps(bucket_id: int | None = None) -> str:
     """What ``next`` says when the call carries neither ``file`` nor ``text``: for the model, never for the person."""
     return (
         "If the attached file's local path is in your context (a line 'Files mentioned by the user: <path>') and you can run "
         "JavaScript with tools.exec_command, do not show the person `say`: read the file yourself and send it to this tool in "
-        "parts, in one script, so its text never passes through your context. Run this script once with <PATH> set to the path, "
-        "exactly as given, backslashes and all, and nothing else changed: " + recipe() + "\nIt reads the file in parts of " + str(PART_CHARS)
+        "parts, in one script, so its text never passes through your context. Run this script once with <PATH> set to the path "
+        "as the inside of a JavaScript string in double quotes (write / in place of each backslash, and put a backslash before any "
+        "double quote in it), and nothing else changed: " + recipe(bucket_id) + "\nIt reads the file in parts of " + str(PART_CHARS)
         + " characters (halved, down to " + str(MIN_PART_CHARS) + ", when a read comes back truncated or does not match the "
         "file's own line count), calls this tool with each part (text, part, parts, lines, sum), and prints the last answer. "
         "Sending a part again is harmless, so run it again if it was cut short. Each answer to a part names the parts still "

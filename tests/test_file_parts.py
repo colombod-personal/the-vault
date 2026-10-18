@@ -122,11 +122,14 @@ HARNESS = textwrap.dedent(r"""
     const fs = require('fs'), cp = require('child_process');
     const [, , recipePath, filePath, shell, cap] = process.argv;
     const BS = String.fromCharCode(92);
-    const code = fs.readFileSync(recipePath, 'utf8').replace('<PATH>', filePath.split('/').join(BS));
+    const winPath = filePath.split('/').join(BS);
+    const code = fs.readFileSync(recipePath, 'utf8').replace('<PATH>', () => JSON.stringify(winPath).slice(1, -1));
     const calls = [], printed = []; let shellCalls = 0;
     const fileText = () => { const t = fs.readFileSync(filePath).toString('utf8'); return t.charCodeAt(0) === 0xFEFF ? t.slice(1) : t; };
     const escape = s => JSON.stringify(s).replace(/[^ -~]/g, c => BS + 'u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
     function standIn(cmd) {  // what the two PowerShell commands print, computed here
+      const named = /ReadAllText\('((?:[^']|'')*)'\)/.exec(cmd);
+      if (!named || named[1].split("''").join("'") !== winPath) throw new Error('the shell was given another path: ' + (named && named[1]));
       const t = fileText();
       const plan = /\$i=(\d+);/.exec(cmd);
       if (plan) {
@@ -165,11 +168,12 @@ HARNESS = textwrap.dedent(r"""
 """)
 
 
-def run_recipe(tmp_path, text: str, shell: str = "standin", cap: int | None = None, name: str = "my cards.csv") -> dict:
+def run_recipe(tmp_path, text: str, shell: str = "standin", cap: int | None = None, name: str = "my cards.csv",
+               bucket_id: int | None = None) -> dict:
     """Run the recipe in Node over a file made of ``text`` (written as UTF-8, with a BOM when ``text`` begins with one)."""
     file = tmp_path / name
     file.write_bytes(text.encode("utf-8"))
-    (tmp_path / "recipe.js").write_text(file_parts.recipe(), encoding="utf-8")
+    (tmp_path / "recipe.js").write_text(file_parts.recipe(bucket_id), encoding="utf-8")
     (tmp_path / "harness.js").write_text(HARNESS, encoding="utf-8")
     args = [NODE, str(tmp_path / "harness.js"), str(tmp_path / "recipe.js"), str(file).replace("\\", "/"), shell]
     done = subprocess.run(args + ([str(cap)] if cap else []), capture_output=True, text=True, timeout=120)
@@ -198,6 +202,26 @@ def test_the_script_sends_every_part_with_the_files_own_line_count_and_the_check
     assert {c["sum"] for c in calls} == {checksum(sent)}  # the JavaScript checksum is the server's
     assert json.loads(ran["printed"][0])["status"] == "uploaded"
     assert all(len(c["text"]) <= file_parts.PART_CHARS for c in calls)
+
+
+@needs_node
+def test_a_path_is_data_in_the_script_nothing_in_a_file_name_is_evaluated_or_changed(tmp_path):
+    """Review of PR 483: the path went into a template literal, where ${...} is evaluated. It goes into a JSON string now; the stand-in
+    shell fails the run if it is given any path other than the file's."""
+    for name in ("cards${1+1}.csv", "my `cards` $HOME.csv", "owner's cards (2026).csv"):
+        ran = run_recipe(tmp_path, sample_text(20), name=name)
+        assert ran["calls"] and json.loads(ran["printed"][0])["status"] == "uploaded", name
+    steps = file_parts.steps()
+    assert "String.raw" not in file_parts.recipe() and "JavaScript string in double quotes" in steps and "backslash" in steps
+
+
+@needs_node
+def test_every_part_goes_into_the_bucket_the_call_was_made_for(tmp_path):
+    """Review of PR 483: the script never sent bucket_id, so a call that named a bucket staged a whole-collection preview."""
+    ran = run_recipe(tmp_path, sample_text(400), bucket_id=7)
+    assert len(ran["calls"]) > 1 and {c["bucket_id"] for c in ran["calls"]} == {7}
+    assert all("bucket_id" not in c for c in run_recipe(tmp_path, sample_text(400))["calls"])
+    assert ",bucket_id:7" in file_parts.steps(7) and "bucket_id" not in file_parts.steps()
 
 
 @needs_node

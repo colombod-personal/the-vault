@@ -17,7 +17,7 @@ from sqlalchemy import text as sql
 
 from tests.test_agents import CSV, V1, agent, auth, bot, call_tool, make_token  # noqa: F401 - fixtures
 from tests.test_mcp_profile import hello, send
-from vault import file_parts, retention
+from vault import config, file_parts, retention
 from vault.api import mcp
 from vault.models import Import, StagedUpload, StagedUploadPart
 
@@ -241,7 +241,7 @@ def test_a_read_cut_short_can_never_become_a_partial_import(app, agent, bot):  #
 
 def test_numbers_that_do_not_make_sense_are_answered_in_one_sentence_and_store_nothing(app, agent, bot):  # noqa: F811
     token = token_of(agent)
-    bad = [dict(part=0, parts=3), dict(part=4, parts=3), dict(part=1, parts=file_parts.MAX_PARTS + 1), dict(part=1, parts=3, lines=-1),
+    bad = [dict(part=0, parts=3), dict(part=4, parts=3), dict(part=1, parts=file_parts.max_parts() + 1), dict(part=1, parts=3, lines=-1),
            dict(part=1, parts=3, sum=2 ** 32)]
     for extra in bad:
         args = {"text": "a,b\n", "part": 1, "parts": 3, "lines": 1, "sum": 5, **extra}
@@ -250,6 +250,60 @@ def test_numbers_that_do_not_make_sense_are_answered_in_one_sentence_and_store_n
     out = call_tool(bot, token, "import_collection_file", text="a,b\n", part=1)["structuredContent"]  # the others are missing
     assert out["status"] == "bad_part"
     assert tables(app) == (0, 0)
+
+
+def test_a_file_at_the_import_limit_in_parts_of_the_smallest_size_the_script_uses_is_within_the_cap(app, agent, bot):  # noqa: F811
+    """Review of PR 483: 8 MiB in parts of 1,024 characters is 8,192 parts, which a cap of 4,096 refused as bad_part."""
+    token = token_of(agent)
+    assert file_parts.max_parts() == config.import_max_bytes() // file_parts.MIN_PART_CHARS == 8192
+    first = call_tool(bot, token, "import_collection_file", text="a,b\n", part=1, parts=8192, lines=1, sum=5)["structuredContent"]
+    assert first["status"] == "part_received" and first["parts"] == 8192 and len(first["missing"]) == file_parts.MAX_LISTED
+    over = call_tool(bot, token, "import_collection_file", text="a,b\n", part=1, parts=8193, lines=1, sum=5)["structuredContent"]
+    assert over["status"] == "bad_part"
+
+
+def test_simultaneous_first_parts_of_one_file_count_once_against_the_import_allowance(app, agent):  # noqa: F811
+    """Review of PR 483: the check for a new upload ran before the lock, so eight first parts sent together each debited the allowance."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    token = make_token(agent, scopes=["read"])
+    pieces = cut(BASE, 8)
+    barrier = threading.Barrier(8)
+
+    def send(i: int) -> dict:
+        with TestClient(app) as http:
+            barrier.wait()
+            res = http.post(f"{V1}/uploads/from-file", headers=auth(token),
+                            json={"text": pieces[i - 1], "part": i, "parts": 8, **facts(BASE)})
+            assert res.status_code == 200, res.text
+            return res.json()
+
+    with ThreadPoolExecutor(8) as pool:
+        answers = list(pool.map(send, range(1, 9)))
+    assert sum(a["status"] == "uploaded" for a in answers) == 1 and tables(app) == (1, 0)
+    allowance = app.state.settings.import_limit
+    with TestClient(app) as http:
+        codes = [http.post(f"{V1}/uploads/from-file", headers=auth(token), json={"text": f"x{n}\n", "part": 1, "parts": 1, **facts(f"x{n}\n")}).status_code
+                 for n in range(allowance)]
+    assert codes[:allowance - 1] == [200] * (allowance - 1) and codes[-1] == 429  # one upload used one of the allowance, no more
+
+
+def test_a_new_upload_over_the_allowance_leaves_nothing_behind(app, agent, bot):  # noqa: F811
+    token = token_of(agent)
+    for n in range(app.state.settings.import_limit):
+        assert not send_part(bot, token, [f"u{n}\n"], 1)["isError"]
+    before = tables(app)
+    refused = send_part(bot, token, [cut(BASE, 2)[0], cut(BASE, 2)[1]], 1)
+    assert refused["isError"] is True and tables(app) == before  # the row the first part made was undone with the refused count
+
+
+def test_a_call_naming_a_bucket_is_told_to_send_every_part_into_it(app, agent, bot):  # noqa: F811
+    token = token_of(agent, "read", "write")
+    bucket = call_tool(bot, token, "create_bucket", name="Binder")["structuredContent"]
+    answer = call_tool(bot, token, "import_collection_file", bucket_id=bucket["id"])["structuredContent"]
+    assert answer["status"] == "cannot_receive" and f",bucket_id:{bucket['id']}" in answer["next"]
+    assert answer["next"] == file_parts.steps(bucket["id"])
 
 
 def test_a_part_that_is_not_valid_text_is_refused_without_storing_anything(app, agent, bot):  # noqa: F811

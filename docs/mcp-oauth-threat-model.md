@@ -1317,7 +1317,7 @@ checks, the script the assistant is told to run), `vault/intake.py` (the route: 
   bound to the preview's `content_hash` (C `test_a_read_only_connection_can_send_parts_and_see_the_preview_but_cannot_import_them`).
 - **Size and memory caps.** The stored parts of a file are added up as each part arrives against `IMPORT_MAX_BYTES` (below); over it the
   whole set is deleted with its parts and one sentence is the answer, nothing staged (C `test_parts_that_add_up_to_more_than_the_import_limit_are_dropped_and_nothing_is_staged`);
-  a single part over the limit is refused before anything is stored; at most 4096 parts a file. The file is assembled **once**, inside
+  a single part over the limit is refused before anything is stored; at most 8,192 parts a file for the default limit (`max(4096, IMPORT_MAX_BYTES / 1024)`: the biggest file in parts of the smallest size the script falls back to; C `test_a_file_at_the_import_limit_in_parts_of_the_smallest_size_the_script_uses_is_within_the_cap`). The file is assembled **once**, inside
   the request that completes it, and the cost of that is measured (below). The hosting request limit (about 4.5 MB) bounds each part, not the total.
 - **Storage and retention.** One new table, `staged_upload_parts`: the staged upload's id, the part's number, the SHA-256 of the part and
   its UTF-8 bytes; primary key (staged upload, number); `ON DELETE CASCADE` from `staged_uploads`. **The parts live exactly as long as the
@@ -1339,15 +1339,18 @@ checks, the script the assistant is told to run), `vault/intake.py` (the route: 
   each answer names the parts still missing. Part writes of one person are ordered by the advisory lock the upload links use, and
   `Idempotency-Key` is honoured as for every creating POST (C `test_a_part_sent_again_changes_nothing_and_a_different_text_for_its_number_replaces_it_until_the_file_is_complete`,
   `test_the_answer_to_a_part_names_the_parts_still_missing`, `test_a_retry_with_the_same_key_replays_the_answer`).
-- **Rate.** One upload counts **once** against `IMPORT_LIMIT` (when its first part creates the staged upload), so a hundred parts do not
-  trip the 10 a minute; the parts count against a counter of their own, `IMPORT_PART_LIMIT` (default 1200 a minute per person: 512 parts is
+- **Rate.** One upload counts **once** against `IMPORT_LIMIT`, debited inside the per-person lock at the moment its first part creates the
+  staged upload (and undone with it when the person is over the allowance), so a hundred parts do not trip the 10 a minute and eight
+  first parts sent at the same moment count once, not eight times (C `test_simultaneous_first_parts_of_one_file_count_once_against_the_import_allowance`); the parts count against a counter of their own, `IMPORT_PART_LIMIT` (default 1200 a minute per person: 512 parts is
   the biggest file at the default part size, doubled for one retry in halves, rounded up). Both are per person, whichever token (C
   `test_a_hundred_parts_count_once_against_the_import_allowance_and_a_new_upload_counts_again`, `test_the_parts_have_a_counter_of_their_own`).
 - **Another person** cannot reach a part or the file: the set's identity includes the person's id, the staged row is theirs, and another
   person's id is the same 404 (C `test_another_person_cannot_reach_a_file_that_is_sent_in_parts`).
 - **What the model is told.** `next` in the answer to a call with neither `file` nor `text` (and in any `cannot_receive`) is a fixed text the
-  Vault wrote, with a script the assistant runs in its own sandbox (a JavaScript isolate with no network and no file system, and its shell,
-  which reads the path the person's own message names). It tells the assistant nothing to do to the person. Residual: a prompt injection in
+  Vault wrote (with the call's `bucket_id`, if it named one, in every part's call), with a script the assistant runs in its own sandbox (a JavaScript isolate with no network and no file system, and its shell,
+  which reads the path the person's own message names). It tells the assistant nothing to do to the person. The one thing the assistant fills in is the file's path, **as the inside of a
+  double-quoted JavaScript string** (not a template literal, where `${...}` would be evaluated; review of PR 483), so a file name is data in the
+  script (C `test_a_path_is_data_in_the_script_nothing_in_a_file_name_is_evaluated_or_changed`). Residual: a prompt injection in
   the conversation could make the assistant read a different local file than the attached one and send it into the person's own account;
   it would be staged (not imported) for an hour, answered as unreadable unless it is a collection, and never leaves that account.
 - **Logging.** The `file_intake_call` event has the same fixed fields; the new argument names (`text`, `part`, `parts`, `lines`, `sum`)
