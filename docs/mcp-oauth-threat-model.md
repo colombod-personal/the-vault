@@ -1301,7 +1301,10 @@ not been read): 8 MiB is about 4.9 times the largest real export seen (1.7 MB, a
 exactly 8 MiB with 29-byte rows (291,740 rows) and measured a peak of 577 MB (preview) and 595 MB (parts), more than the ceiling the first
 draft claimed as "the worst case". The row limit closes that: it is a bounded, quote-aware count of CSV **records** (`importer.record_count`, with the rules of the `csv` module the formats read with: a quote opens a quoted field only at the **start** of a
 field, so `5" Wall` is ordinary text and cannot hide the rows after it (the review's file of one stray quote and 291,740 rows counted 2
-records before and 291,742 now); the delimiter is the one a `sep=X` first line declares, else a comma; a record ends at an unquoted LF, CR or CRLF;
+records before and 291,742 now); the delimiter comes from the first line by the predicates the library itself applies (`importer.lexing_candidates`: format detection takes a
+declaration only when the stripped line is exactly `sep=X`, Dragon Shield's reader when it merely begins `sep=`, and which reader runs depends on a
+choice made after the preflight), so a first line that is not a clean declaration (`sep=,"`, `sep=;ignored,quantity,...`) is lexed every way a reader might
+and the most is counted, pinned against the library's own lexing by `test_the_preflight_counts_a_file_at_least_as_the_library_lexes_it_for_every_form_of_first_line`; a record ends at an unquoted LF, CR or CRLF;
 blank and whitespace-only lines are none; one pass over the quotes only, constant memory, stopping at the limit; C `test_the_preflight_agrees_with_the_csv_module_on_what_a_record_is`,
 `test_a_stray_quote_cannot_hide_the_rows_after_it_from_the_row_guard`), run on the file as it came, before `restore_csv` rewrites a marked file row
 by row and before any entry is built, on every path (and again on the parsed rows), so that file is refused in a fraction of a second with one sentence and nothing staged (C `test_the_row_limit_is_a_setting_with_a_default_and_a_file_of_tiny_rows_is_refused_before_it_is_parsed`,
@@ -1370,7 +1373,9 @@ checks, the script the assistant is told to run), `vault/intake.py` (the route: 
   `Idempotency-Key` is honoured as for every creating POST, **per request**: the same key on two different parts replays the first answer, so a
   client that sets one must use a key for each part (C `test_a_part_sent_again_changes_nothing_and_a_different_text_for_its_number_replaces_it_until_the_file_is_complete`,
   `test_the_answer_to_a_part_names_the_parts_still_missing`, `test_a_retry_with_the_same_key_replays_the_answer`).
-- **Rate.** One upload counts **once** against `IMPORT_LIMIT`, debited inside the per-person lock at the moment its first part creates the
+- **Rate.** Asking for the recipe (a call with neither `file` nor `text`, or a `file` that is not an address) is not an upload and debits a cheap counter of its own
+  (`file intake help`, `IMPORT_PART_LIMIT` a minute; C `test_asking_for_the_recipe_is_not_an_upload_and_the_whole_file_follows_on_a_one_upload_allowance`,
+  `test_recipe_discovery_is_bounded_by_a_counter_of_its_own`). One upload counts **once** against `IMPORT_LIMIT`, debited inside the per-person lock at the moment its first part creates the
   staged upload (and undone with it when the person is over the allowance), so a hundred parts do not trip the 10 a minute and eight
   first parts sent at the same moment count once, not eight times (C `test_simultaneous_first_parts_of_one_file_count_once_against_the_import_allowance`); the parts count against a counter of their own, `IMPORT_PART_LIMIT`
   (default 1,200 a minute per person). The script sends parts of 16,384 bytes and, when a read comes back truncated, of 8,192 at the smallest,

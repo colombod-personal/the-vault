@@ -28,18 +28,46 @@ HEADER_RECORDS = 2  # the records a file may carry besides its rows (a "sep=," l
 LINE_ENDS = re.compile(r"[\r\n]+")
 
 
+def lexing_candidates(text: str) -> list[tuple[str, int]]:
+    """The ways the readers can lex ``text``, as (delimiter, where the data starts), decided from its first line by the SAME predicates the
+    library uses (``mtg_toolkits.dragonshield.parse`` and ``mtg_toolkits.formats.detect``), because which one applies depends on the
+    format they choose and the preflight runs before that choice:
+
+    * always a comma over the whole text (the generic and Moxfield readers, and every first line that declares nothing);
+    * Dragon Shield's reader: when the first line, stripped of line ends, quotes and blanks, STARTS with ``sep=`` (case-insensitive) the
+      line is discarded and the rest is lexed with the character after ``sep=`` (a comma if none);
+    * format detection: only when that stripped line is EXACTLY ``sep=X`` (five characters) is a separator declared.
+
+    A malformed first line (``sep=,"``, ``"sep=,``, ``sep=;ignored,quantity,...``) is therefore lexed every way a reader might, and the
+    preflight counts the most. A clean ``sep=,`` (the owner's own file) adds nothing: its candidate is the comma one."""
+    nl = text.find("\n")
+    first = text[:min(nl if nl >= 0 else len(text), 200)]
+    marker = first.strip('\r\n "')
+    found = [(",", 0)]
+    if marker.lower().startswith("sep="):  # Dragon Shield's reader
+        found.append((marker[4:5] or ",", (nl + 1) if nl >= 0 else len(text)))
+    lines = text[:200].splitlines(True)  # format detection's first line (splitlines, not the first line feed)
+    if lines:
+        declared = lines[0].strip('\r\n "').lower()
+        if declared.startswith("sep=") and len(declared) == 5:
+            found.append((declared[4], len(lines[0])))
+    return list(dict.fromkeys(found))
+
+
 def record_count(text: str, limit: int) -> int:
-    """How many CSV records ``text`` holds, counted before any entry is built, with the rules of the ``csv`` module the formats read with:
-    a quote opens a quoted field only at the START of a field (the start of the file, after the file's delimiter, after a line end), and
+    """How many CSV records ``text`` holds, counted before any entry is built: the most of ``_records`` over ``lexing_candidates``."""
+    return max(_records(text, limit, delimiter, start) for delimiter, start in lexing_candidates(text))
+
+
+def _records(text: str, limit: int, delimiter: str = ",", start: int = 0) -> int:
+    """The records of ``text`` from ``start``, with the rules of the ``csv`` module the formats read with:
+    a quote opens a quoted field only at the START of a field (the start of the data, after the delimiter, after a line end), and
     a quote anywhere else (``5" Wall``) is an ordinary character; inside a quoted field a doubled quote is a quote and a single one
     closes it; a record ends at a line feed, a carriage return or both outside a quoted field; a line with nothing but blanks is no
     record. One pass over the quotes only (so a long row costs nothing), constant memory, stopping as soon as the count is over
-    ``limit``. The delimiter is the one a ``sep=X`` first line declares (Dragon Shield), else a comma. It runs on the file as it came,
-    before ``restore_csv`` rewrites a marked file row by row."""
-    marker = text[:200].partition("\n")[0].strip('\r\n "')
-    delimiter = (marker[4:5] or ",") if marker.lower().startswith("sep=") else ","
+    ``limit``. It runs on the file as it came, before ``restore_csv`` rewrites a marked file row by row."""
     starts = delimiter + "\r\n"
-    n, pos, records, last, pending = len(text), 0, 0, 0, False
+    n, pos, records, last, pending = len(text), start, 0, start, False
     while pos < n:
         quote = text.find('"', pos)
         end = n if quote < 0 else quote
@@ -51,7 +79,7 @@ def record_count(text: str, limit: int) -> int:
             pending, last = False, found.end()
         if quote < 0:
             break
-        if quote == 0 or text[quote - 1] in starts:  # a quote at the start of a field: quoted until a single quote
+        if quote == start or text[quote - 1] in starts:  # a quote at the start of a field: quoted until a single quote
             pos = quote + 1
             while True:
                 closing = text.find('"', pos)

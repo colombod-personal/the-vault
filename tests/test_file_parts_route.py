@@ -514,3 +514,25 @@ def test_the_parts_migration_goes_down_and_up_again(blank_database_url):
         assert "staged_upload_parts" in inspect(database.engine).get_table_names()
     finally:
         database.engine.dispose()
+
+
+def test_asking_for_the_recipe_is_not_an_upload_and_the_whole_file_follows_on_a_one_upload_allowance(app, agent, bot):  # noqa: F811
+    """Review of PR 483 (thread): a call that only returns the recipe debited the upload counter, and the first part debited it again, so
+    with IMPORT_LIMIT=1 the first part got a 429. Discovery has a counter of its own; the upload is debited once, at its first part."""
+    object.__setattr__(app.state.settings, "import_limit", 1)  # the route reads the same settings object
+    token = token_of(agent)
+    for _ in range(3):  # the recipe, asked for in each of the ways that return it
+        assert call_tool(bot, token, "import_collection_file")["structuredContent"]["status"] == "cannot_receive"
+    assert call_tool(bot, token, "import_collection_file", file="C:\\Users\\x\\my_cards.csv")["structuredContent"]["status"] == "cannot_receive"
+    assert call_tool(bot, token, "import_collection_file", file="chat_upload")["structuredContent"]["status"] == "cannot_receive"
+    answers = sent(bot, token, cut(BASE, 4))
+    assert [a["status"] for a in answers] == ["part_received"] * 3 + ["uploaded"]
+    second = send_part(bot, token, ["another file\n"], 1)  # one upload used the allowance of one
+    assert second["isError"] is True and "Too many" in second["content"][0]["text"]
+
+
+def test_recipe_discovery_is_bounded_by_a_counter_of_its_own(app, agent, bot):  # noqa: F811
+    object.__setattr__(app.state.settings, "import_part_limit", 3)
+    token = token_of(agent)
+    answers = [call_tool(bot, token, "import_collection_file") for _ in range(5)]
+    assert [a["isError"] for a in answers] == [False] * 3 + [True] * 2 and "Too many" in answers[-1]["content"][0]["text"]

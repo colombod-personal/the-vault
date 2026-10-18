@@ -182,7 +182,7 @@ def test_a_file_at_the_row_limit_is_taken(app, agent, monkeypatch):  # noqa: F81
     ('"unterminated\nstill the same record', 1), ('x\n"unterminated\nmore', 2), ("'@x,1\n'@y,2\n", 2),
     # a quote inside an unquoted cell is an ordinary character (the csv module's rule), a quote at the start of a field opens one
     ('5" Wall,1\nb,2\n', 2), ('x",1\ny,2\nz,3\n', 3), ('a,5" Wall\nb,2\n', 2), ('a,"x\ny"\nb\n', 2), ('a, "x\ny"\nb\n', 3),
-    ('sep=;\na;"x\ny"\nb\n', 3), ('sep=;\na,"x\ny"\nb\n', 4), ('"sep=\t"\na\t"x\ny"\nb\n', 3), ('a\n   ', 1), ('a\n \t \n', 1),
+    ('a\n   ', 1), ('a\n \t \n', 1),
 ], ids=lambda v: None)
 def test_records_are_counted_by_the_quote_state_for_lf_crlf_and_bare_cr_and_blank_lines_are_none(text, records):
     from vault import importer
@@ -271,8 +271,82 @@ def test_a_stray_quote_cannot_hide_the_rows_after_it_from_the_row_guard():
     assert importer.record_count(five_inches, 10**9) == 6
 
 
-def test_a_last_line_of_blanks_is_no_record_and_a_delimiter_declared_by_the_sep_line_is_the_one_a_quote_follows():
+def test_a_last_line_of_blanks_is_no_record():
     from vault import importer
     assert importer.record_count("a\nb\n          ", 10**9) == 2 and importer.record_count("a\nb\n\t", 10**9) == 2
-    assert importer.record_count('sep=;\nx;"a\nb"\n', 10**9) == 2  # after a semicolon a quote opens a field: the sep line and one record
-    assert importer.record_count('sep=;\nx,"a\nb"\n', 10**9) == 3  # after a comma it does not: the file's delimiter is the semicolon
+
+
+FIRST_LINES = [
+    "sep=,", "sep=;", "sep=\t", "SEP=;", '"sep=;"', ' "sep=;"', "sep=;ignored,quantity,name,set_code,finish,condition", 'sep=,"', '"sep=,', "sep=",
+    "sep=;x", "sep=;,", 'x"sep=;', "Card Name,Quantity,Set Code", "quantity,name,set_code,finish,condition", "Count,Name",
+]
+BODIES = [
+    'x;",1,y,,nonfoil,NM\n' + "z,1\n" * 30,  # Copilot's shape: a quote after a semicolon in a comma file
+    'a;"p\nq";1\n' + "b;2\n" * 30,  # a quoted multi-line cell after a semicolon
+    'a,"p\nq",1\n' + "b,2\n" * 30,  # the same after a comma
+    '5" Wall,1\n' + "b,2\n" * 30,  # a stray quote
+    'a\t"p\nq"\t1\n' + "b\t2\n" * 30,  # after a tab
+]
+
+
+@pytest.mark.parametrize("first", FIRST_LINES, ids=repr)
+def test_the_preflight_counts_a_file_at_least_as_the_library_lexes_it_for_every_form_of_first_line(first, monkeypatch):
+    """Review of PR 483 (thread, L1): the preflight took any first line that began with sep= as a declaration; the readers do not
+    (format detection needs the whole stripped line to be sep=X, Dragon Shield's reader needs it to begin with sep=, and both are applied
+    to the same file). The oracle here is the library itself: csv.reader is wrapped while mtg_toolkits.formats.parse reads the file, and
+    the rows it really lexes (its delimiter, its text) are counted. The preflight must count at least as many."""
+    import csv
+    import io
+
+    from mtg_toolkits import formats
+
+    from vault import importer
+    real = csv.reader
+    seen = []
+
+    def spy(source, *args, **kwargs):
+        if isinstance(source, io.StringIO):
+            seen.append((source.getvalue(), kwargs.get("delimiter", ",")))
+        return real(source, *args, **kwargs)
+
+    for body in BODIES:
+        text = first + "\n" + body
+        seen.clear()
+        monkeypatch.setattr(csv, "reader", spy)
+        try:
+            formats.parse(text)
+        except ValueError:
+            pass  # the library may refuse the file; what it lexed before is what matters
+        monkeypatch.setattr(csv, "reader", real)
+        lexed = max(seen, key=lambda call: len(call[0]), default=None)
+        if lexed is None:
+            continue
+        oracle = sum(1 for row in real(io.StringIO(lexed[0], newline=""), delimiter=lexed[1]) if row)
+        counted = importer.record_count(text, 10**9)
+        assert counted >= oracle, (first, body[:20], counted, oracle)
+        if first in ("sep=,", "Card Name,Quantity,Set Code"):
+            assert counted <= oracle + 1, (first, counted, oracle)  # the owner's own file: counted as the library reads it, give or take its sep line
+
+
+def test_a_first_line_that_only_looks_like_a_separator_declaration_cannot_hide_the_rows_after_it():
+    """Copilot's case: format detection takes this file as a comma file (the line is not exactly sep=X), so the quote after the semicolon
+    is an ordinary character and the file has 291,742 records; the preflight took the semicolon as the delimiter and counted 2."""
+    import csv
+    import io
+    import time
+
+    from vault import importer
+    text = "sep=;ignored,quantity,name,set_code,finish,condition\n" + 'x;",1,y,,nonfoil,NM\n' + "z,1,y,,nonfoil,NM\n" * 291_740
+    assert sum(1 for r in csv.reader(io.StringIO(text, newline=""))) == 291_742
+    assert importer.record_count(text, 10**9) == 291_742
+    started = time.perf_counter()
+    with pytest.raises(importer.ImportError_, match="too many rows"):
+        importer.read_file(text.encode())
+    assert time.perf_counter() - started < 1.0
+    # the malformed forms the review measured as under-counting
+    for first in ('sep=,"', '"sep=,', ' "sep=,"', "sep=;ignored,quantity"):
+        bad = first + "\n" + 'x;",1\n' + "z,1\n" * 291_740
+        assert importer.record_count(bad, 10**9) >= 291_741, first
+    # a clean declaration is still honoured, and the owner's own file starts with one
+    assert importer.lexing_candidates('"sep=,"\nCard Name,Quantity\n') == [(",", 0), (",", 8)]  # the whole text, and what is left when the line is discarded
+    assert importer.lexing_candidates("sep=;\na;b\n") == [(",", 0), (";", 6)]

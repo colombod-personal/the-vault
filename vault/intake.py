@@ -174,8 +174,17 @@ def build_router(get_db, current_user, settings) -> APIRouter:
             raise HTTPException(404, "Bucket not found")  # another person's id is the same 404
         if body.file is None and body.text is not None:
             return stage_parts(request, body, user, db)
-        per_user(request, "file intake", user.id, settings.import_limit, db)  # every try counts, on a counter of its own
         fetcher: file_fetch.FileFetcher = request.app.state.file_fetcher
+        try:  # the cheap checks the work below repeats: is there an address the Vault could fetch at all?
+            fetcher.host_of(file_fetch.read_handoff(body.file).url)
+            fetchable = True
+        except file_fetch.Refused:
+            fetchable = False
+        if fetchable:  # a fetch is an upload: every try counts, on a counter of its own
+            per_user(request, "file intake", user.id, settings.import_limit, db)
+        else:  # nothing is fetched or stored: the answer is the sentence and the steps for a coding app (`next`). That discovery is
+            # not an upload (a file in parts debits its upload once, at its first part), so it has a cheap counter of its own
+            per_user(request, "file intake help", user.id, settings.import_part_limit, db)
 
         def run() -> dict:
             """The work, left uncommitted for ``idempotent`` (Idempotency-Key, CLAUDE.md): a retry of a request whose answer was
