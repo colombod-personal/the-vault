@@ -1,7 +1,7 @@
 name: mirror-postgres
-# Copies the official postgres:16 image (linux/amd64, what the runners use) from AWS public ECR to this organisation's
+# Copies the official postgres:16 image (linux/amd64, what the runners use) from Google's Docker Hub mirror to this organisation's
 # GitHub package, so tests.yml and deploy.yml can pull it from ghcr.io with the job's own token instead of an anonymous
-# public pull: public.ecr.aws refused the anonymous pull three times on 2026-10-11/12 ("toomanyrequests", vault-1dm).
+# public pull: public.ecr.aws refused the anonymous pull again and again ("toomanyrequests", vault-1dm).
 # Weekly, so the mirror follows 16's patch releases; by hand when needed; only from main. The digests go in the summary.
 on:
   schedule:
@@ -23,7 +23,7 @@ jobs:
     steps:
       - name: Copy postgres:16 (linux/amd64) to GHCR, digest unchanged
         env:
-          SOURCE: docker://public.ecr.aws/docker/library/postgres:16
+          SOURCE: docker://mirror.gcr.io/library/postgres:16  # Google's Docker Hub mirror: public ECR refused even this copy
           TARGET: docker://ghcr.io/${{ github.repository_owner }}/postgres:16
           ACTOR: ${{ github.actor }}
           GH_TOKEN: ${{ github.token }}  # the job's own token (packages: write above), not a stored secret
