@@ -93,3 +93,30 @@ def test_the_connect_page_and_the_reviewers_guide_give_the_one_line_that_makes_a
 
     guide = rr.page("https://example.test").replace("&#x27;", "'").replace("&#39;", "'")
     assert line in guide and "Used The Vault" in guide
+
+
+def test_the_terms_and_the_privacy_notice_tell_the_truth_about_write():
+    """vault-0n9.5 and the security review of #484 (H2, L1): Write is pre-ticked for an app identified by its web address, it can delete
+    decks and replace the collection, and the Vault does not check the person's yes before most changes. The page must not promise a
+    preview and a yes the server does not enforce, and must not say the person always chose Write."""
+    from vault.oauth_routes import SCOPE_TEXT
+
+    terms = " ".join(re.sub(r"<[^>]+>", " ", page("terms.html")).split())
+    assert "Changes show a preview first and need your yes" not in terms
+    for must in ("deleting decks", "replacing your whole collection", "already ticked", "untick it and the app can only read",
+                 "The Vault does not ask you again before most changes", "some cannot be undone"):
+        assert must in terms, must
+    privacy = " ".join(re.sub(r"<[^>]+>", " ", page("privacy.html")).split())
+    assert "write if you left it ticked or ticked it yourself" in privacy and "write if you chose it" not in privacy
+    # the consent page's own Write text and the Terms name the same dangerous things
+    assert "deleting decks" in SCOPE_TEXT["write"] and "replacing your whole collection" in SCOPE_TEXT["write"]
+
+
+def test_no_setup_page_calls_the_connection_read_only_or_tells_the_person_to_leave_write_unticked():
+    """The security review of #484 (M3): a plain Allow can now give Write, so a setup page must not promise read-only."""
+    pages = sorted((PUBLIC / "setup").glob("*.md"))
+    assert len(pages) >= 5
+    for path in pages:
+        text = path.read_text(encoding="utf-8")
+        assert "This setup is read-only" not in text and "Write unticked" not in text and "Write is a separate step" not in text, path.name
+        assert "deleting decks and replacing your whole collection" in text or "Write: delete decks, replace the collection" in text, path.name
