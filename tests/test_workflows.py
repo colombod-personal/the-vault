@@ -410,3 +410,13 @@ def test_only_the_guide_deploy_job_can_publish_pages():
     assert set(wf["on"]) == {"push", "workflow_dispatch"} and wf["on"]["push"]["branches"] == ["main"]
     assert "docs/site/**" in wf["on"]["push"]["paths"]
     assert wf["jobs"]["build"]["if"] == "github.ref == 'refs/heads/main'", "a run from a branch does nothing"
+
+
+def test_the_test_job_pulls_postgres_from_our_mirror_with_a_read_only_token():
+    # Anonymous pulls from Docker Hub (#424) and public ECR ("toomanyrequests", vault-1dm) stalled CI; the test job
+    # pulls the copy mirror-postgres.yml keeps on ghcr.io, with the job's own token and read access only.
+    job = load(ROOT / ".github" / "workflows" / "tests.yml")["jobs"]["test"]
+    service = job["services"]["postgres"]
+    assert service["image"] == "ghcr.io/colombod-personal/postgres:16"
+    assert service["credentials"] == {"username": "${{ github.actor }}", "password": "${{ github.token }}"}
+    assert job["permissions"] == {"contents": "read", "packages": "read"}
