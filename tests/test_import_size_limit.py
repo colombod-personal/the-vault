@@ -139,12 +139,12 @@ def test_the_row_limit_is_a_setting_with_a_default_and_a_file_of_tiny_rows_is_re
         config.Settings(database_url="postgresql://x", session_secret="s", dev_login=True, base_url="http://localhost").check()
 
 
-@pytest.mark.parametrize("rows", ["2", "4"], ids=["refused on the records before parsing", "refused on the parsed rows"])
+@pytest.mark.parametrize("rows", ["2", "4"], ids=["refused: more rows than the limit, with the sep line", "refused: more rows than the limit, no sep line"])
 def test_every_path_refuses_a_file_over_the_row_limit_in_one_sentence_and_stages_nothing(app, agent, bot, monkeypatch, rows):  # noqa: F811
     from tests.test_agents import CSV  # five card rows, a header and the sep line
     monkeypatch.setenv("IMPORT_MAX_ROWS", rows)
     if rows == "4":
-        CSV = CSV.split(b"\n", 1)[1]  # without the sep line: six records, five rows: past the row limit but inside the record preflight
+        CSV = CSV.split(b"\n", 1)[1]  # without the sep line: a header and five rows, one past the row limit of four
     write = make_token(agent, scopes=["read", "write"])
     for route in ("/imports", "/imports/preview"):
         refused = agent.post(f"{V1}{route}", files={"file": ("my_cards.csv", CSV, "text/csv")})
@@ -173,180 +173,86 @@ def test_a_file_at_the_row_limit_is_taken(app, agent, monkeypatch):  # noqa: F81
     assert agent.post(f"{V1}/imports/preview", files={"file": ("my_cards.csv", CSV, "text/csv")}).status_code == 200
 
 
-# ---- the record preflight: a bounded, quote-aware count of records before any entry is built --------------------------------------------
+# ---- the row guard counts with the library's own reader, lazily, before any entry is built ----------------------------------------------------
 
-@pytest.mark.parametrize("text, records", [
-    ("", 0), ("a\n", 1), ("a", 1), ("a\nb\nc", 3), ("a\r\nb\r\nc\r\n", 3), ("a\rb\rc\r", 3), ("a\rb\r\nc\nd", 4),
-    ("a\n\n\nb\n", 2), ("\r\n\r\na\r\n", 1), ("\n", 0),
-    ('a,"x\ny\nz"\nb,"p\r\nq"\n', 2), ('"a""\n""b"\n"c"\n', 2), ('a,"x\ry"\rb\r', 2),
-    ('"unterminated\nstill the same record', 1), ('x\n"unterminated\nmore', 2), ("'@x,1\n'@y,2\n", 2),
-    # a quote inside an unquoted cell is an ordinary character (the csv module's rule), a quote at the start of a field opens one
-    ('5" Wall,1\nb,2\n', 2), ('x",1\ny,2\nz,3\n', 3), ('a,5" Wall\nb,2\n', 2), ('a,"x\ny"\nb\n', 2), ('a, "x\ny"\nb\n', 3),
-    ('a\n   ', 1), ('a\n \t \n', 1),
-], ids=lambda v: None)
-def test_records_are_counted_by_the_quote_state_for_lf_crlf_and_bare_cr_and_blank_lines_are_none(text, records):
-    from vault import importer
-    assert importer.record_count(text, 10**9) == records
+@pytest.fixture
+def entries_built(monkeypatch):
+    """Counts the entries the library builds, so a test can show that a refused file built none."""
+    from mtg_toolkits import dragonshield, formats, moxfield
+    built = []
+    for module in (dragonshield, formats, moxfield):
+        real = module.CollectionEntry
+        monkeypatch.setattr(module, "CollectionEntry", lambda *a, _real=real, **k: (built.append(1), _real(*a, **k))[1])
+    return built
 
 
-def test_the_count_stops_as_soon_as_it_is_over_the_limit():
-    from vault import importer
-    assert importer.record_count("a\n" * 1_000_000, 10) == 11
+def test_the_guard_uses_the_delimiter_and_the_rows_the_library_chose_and_builds_no_entry(monkeypatch, entries_built):
+    """Review of PR 483 (threads on the sep= preflight): the first line was probed by a copy of the library's rules, 200 characters of it
+    and with a comma reading beside it. The guard now opens the reader the library would open (its own sep= rules, its own format) and
+    counts that reader's rows."""
+    import time
 
-
-def test_the_preflight_sees_what_a_line_count_missed(monkeypatch):
-    """Review of PR 483 (thread 1): bare-CR files had no line feed at all, and quoted multiline cells made five records look like many
-    lines. The generic-CSV marker case turns separators into line feeds in restore_csv, so the guard runs before it."""
     from vault import importer
     monkeypatch.setenv("IMPORT_MAX_ROWS", "5")
-    header = "Card Name,Quantity\r"
-    many_cr = header + "".join(f"Sol Ring {n},1\r" for n in range(50))  # no line feed anywhere: 51 records
+    owners = '"sep=,"\r\nFolder Name,Quantity,Trade Quantity,Card Name,Set Code,Set Name,Card Number,Condition,Printing,Language\r\n'
+    rows = "".join(f"my cards,1,0,Sol Ring {n},C21,Commander 2021,{n},Mint,Normal,English\r\n" for n in range(5))
+    assert len(importer.read_file((owners + rows).encode())[1]) == 5  # the owner's own header shape, a real-looking body: taken
     with pytest.raises(importer.ImportError_, match="too many rows"):
-        importer.read_file(many_cr.encode())
-    five_multiline = header + "".join(f'"Sol\nRing\n{n}",1\r' for n in range(5))  # six records, ten line feeds
-    try:
-        importer.read_file(five_multiline.encode())
-    except importer.ImportError_ as caught:
-        assert "too many rows" not in str(caught)  # not refused on the count: whatever else the parser says
-    blank = "Card Name,Quantity\n" + "\n" * 500 + "Sol Ring,1\n" + "\r\n" * 500  # blank lines are none
-    assert importer.record_count(blank, 10**9) == 2
-    try:
-        importer.read_file(blank.encode())
-    except importer.ImportError_ as caught:
-        assert "too many rows" not in str(caught)
+        importer.read_file((owners + rows + "my cards,1,0,Sol Ring 9,C21,Commander 2021,9,Mint,Normal,English\r\n").encode())
+    assert len(entries_built) == 5  # only the file that was taken built entries
 
-    def never(text):
-        raise AssertionError("restore_csv ran before the row guard")
-
-    monkeypatch.setattr(importer, "restore_csv", never)  # the marker case: a marked file is rewritten row by row by restore_csv
-    marked = "Card Name,Quantity\n" + "".join(f"'@Invented {n},1\n" for n in range(50))
+    monkeypatch.delenv("IMPORT_MAX_ROWS")
+    # Copilot's first file: 201 spaces before the declaration, then a quote after a semicolon that is only text in a semicolon file
+    padded = " " * 201 + "sep=;\nCard Name;Quantity;Note\n" + 'Sol Ring;1;,"\n' + "Sol Ring;1;\n" * 291_740
+    before = len(entries_built)
+    started = time.perf_counter()
     with pytest.raises(importer.ImportError_, match="too many rows"):
-        importer.read_file(marked.encode())
+        importer.read_file(padded.encode())
+    assert time.perf_counter() - started < 1.5 and len(entries_built) == before  # refused without building a single entry
+
+    # Copilot's second file: valid, semicolons, 50,000 records of three lines each in a quoted cell (950,030 bytes), is taken
+    valid = "sep=;\nCard Name;Quantity;Note\n" + 'Sol Ring;1;"p\nq\nr"\n' * 50_000
+    assert 940_000 < len(valid.encode()) < 960_000
+    assert len(importer.read_file(valid.encode())[1]) == 50_000
 
 
-def test_the_preflight_costs_little_on_the_biggest_file_the_limits_allow_and_on_a_file_that_quotes_every_cell():
+@pytest.mark.parametrize("first", ['sep=,"', '"sep=,', ' "sep=,"', "sep=;ignored,quantity,name,set_code,finish,condition", "sep=", "sep=;x", "SEP=;",
+                                   "Card Name,Quantity", "quantity,name,set_code,finish,condition", "Count,Name"], ids=repr)
+def test_no_form_of_first_line_lets_a_file_of_more_rows_than_the_limit_through(first, entries_built):
+    """The reviewer's malformed sep= forms and the plain headers: a stray quote after the first row and 291,740 rows after it are refused,
+    whichever reader the library picks for the file (or the file is refused as unreadable), and none of them builds an entry."""
+    from vault import importer
+    text = first + "\n" + 'x;",1,y,,nonfoil,NM\n' + "Sol Ring;1;\nSol Ring,1,y,,nonfoil,NM\n" * 145_870
+    with pytest.raises(importer.ImportError_):
+        importer.read_file(text.encode())
+    assert entries_built == []
+
+
+def test_the_guard_reaches_the_reader_of_every_format_the_importer_reads(monkeypatch):
+    """If a library update stops opening its readers through the module-level csv name, the guard must fail loudly, not skip itself."""
+    from vault import importer
+    monkeypatch.setenv("IMPORT_MAX_ROWS", "2")
+    samples = {
+        "dragonshield": "Folder Name,Quantity,Card Name\nf,1,A\nf,1,B\nf,1,C\n",
+        "moxfield": "Count,Name,Edition\n1,A,c21\n1,B,c21\n1,C,c21\n",
+        "csv": "quantity,name,set_code,finish,condition\n1,A,c21,nonfoil,NM\n1,B,c21,nonfoil,NM\n1,C,c21,nonfoil,NM\n",
+    }
+    for expected, text in samples.items():
+        assert importer.formats.detect(text) == expected
+        with pytest.raises(importer.ImportError_, match="too many rows"):
+            importer.read_file(text.encode())
+
+
+def test_the_guard_costs_little_on_the_biggest_file_the_limits_allow_and_on_a_file_that_quotes_every_cell():
     import time
 
     from tests.memory_probe import synthetic_csv
     from vault import importer
     worst = synthetic_csv(config.DEFAULT_IMPORT_MAX_BYTES, "worst").decode()
     started = time.perf_counter()
-    assert importer.record_count(worst, 10**9) == 100_002  # 100,000 rows, the sep line and the header
-    quoted = '"Card Name","Quantity","Set"\n' + '"Sol Ring","1","C21"\n' * 100_000
-    assert importer.record_count(quoted, 10**9) == 100_001
+    importer.check_rows("dragonshield", worst, 100_000)  # 100,000 rows: taken
+    quoted = 'Card Name,Quantity,Set Code\n' + '"Sol Ring","1","C21"\n' * 100_000
+    importer.check_rows("dragonshield", quoted, 100_000)
+    with pytest.raises(importer.ImportError_):
+        importer.check_rows("dragonshield", "Card Name,Quantity\n" + "x,1\n" * 4_000_000, 100_000)  # stops at the limit, not at the end
     assert time.perf_counter() - started < 6.0
-
-
-def test_the_preflight_agrees_with_the_csv_module_on_what_a_record_is():
-    """Review of PR 483 (thread, L1): a quote in the middle of a cell must not open a quoted field. The count is compared with
-    csv.reader's rows (a blank line is no record) on a few thousand short strings made of the characters that matter."""
-    import csv
-    import io
-    import random
-
-    from vault import importer
-    rng = random.Random(483)
-    for _ in range(4000):
-        text = "".join(rng.choice('a,"\n\r"') for _ in range(rng.randint(0, 14)))
-        rows = [r for r in csv.reader(io.StringIO(text, newline=""))]
-        assert importer.record_count(text, 10**9) == sum(1 for r in rows if r), repr(text)
-
-
-def test_a_stray_quote_cannot_hide_the_rows_after_it_from_the_row_guard():
-    """The shape from the review: one stray quote in a cell swallowed the rest of the file as 'one record' (2 records counted where
-    csv.reader sees 291,742), so the guard before the parse let 291,740 rows through."""
-    import csv
-    import io
-    import time
-
-    from vault import importer
-    text = 'Card Name,Quantity\nx",1\n' + "y,1\n" * 291_740
-    assert sum(1 for r in csv.reader(io.StringIO(text, newline=""))) == 291_742
-    started = time.perf_counter()
-    with pytest.raises(importer.ImportError_, match="too many rows"):
-        importer.read_file(text.encode())
-    assert time.perf_counter() - started < 1.0
-    assert importer.record_count(text, 10**9) == 291_742
-    five_inches = 'Card Name,Quantity\n' + "".join(f'5" Wall {n},1\n' for n in range(5))  # five rows with a quote inside the cell
-    assert importer.record_count(five_inches, 10**9) == 6
-
-
-def test_a_last_line_of_blanks_is_no_record():
-    from vault import importer
-    assert importer.record_count("a\nb\n          ", 10**9) == 2 and importer.record_count("a\nb\n\t", 10**9) == 2
-
-
-FIRST_LINES = [
-    "sep=,", "sep=;", "sep=\t", "SEP=;", '"sep=;"', ' "sep=;"', "sep=;ignored,quantity,name,set_code,finish,condition", 'sep=,"', '"sep=,', "sep=",
-    "sep=;x", "sep=;,", 'x"sep=;', "Card Name,Quantity,Set Code", "quantity,name,set_code,finish,condition", "Count,Name",
-]
-BODIES = [
-    'x;",1,y,,nonfoil,NM\n' + "z,1\n" * 30,  # Copilot's shape: a quote after a semicolon in a comma file
-    'a;"p\nq";1\n' + "b;2\n" * 30,  # a quoted multi-line cell after a semicolon
-    'a,"p\nq",1\n' + "b,2\n" * 30,  # the same after a comma
-    '5" Wall,1\n' + "b,2\n" * 30,  # a stray quote
-    'a\t"p\nq"\t1\n' + "b\t2\n" * 30,  # after a tab
-]
-
-
-@pytest.mark.parametrize("first", FIRST_LINES, ids=repr)
-def test_the_preflight_counts_a_file_at_least_as_the_library_lexes_it_for_every_form_of_first_line(first, monkeypatch):
-    """Review of PR 483 (thread, L1): the preflight took any first line that began with sep= as a declaration; the readers do not
-    (format detection needs the whole stripped line to be sep=X, Dragon Shield's reader needs it to begin with sep=, and both are applied
-    to the same file). The oracle here is the library itself: csv.reader is wrapped while mtg_toolkits.formats.parse reads the file, and
-    the rows it really lexes (its delimiter, its text) are counted. The preflight must count at least as many."""
-    import csv
-    import io
-
-    from mtg_toolkits import formats
-
-    from vault import importer
-    real = csv.reader
-    seen = []
-
-    def spy(source, *args, **kwargs):
-        if isinstance(source, io.StringIO):
-            seen.append((source.getvalue(), kwargs.get("delimiter", ",")))
-        return real(source, *args, **kwargs)
-
-    for body in BODIES:
-        text = first + "\n" + body
-        seen.clear()
-        monkeypatch.setattr(csv, "reader", spy)
-        try:
-            formats.parse(text)
-        except ValueError:
-            pass  # the library may refuse the file; what it lexed before is what matters
-        monkeypatch.setattr(csv, "reader", real)
-        lexed = max(seen, key=lambda call: len(call[0]), default=None)
-        if lexed is None:
-            continue
-        oracle = sum(1 for row in real(io.StringIO(lexed[0], newline=""), delimiter=lexed[1]) if row)
-        counted = importer.record_count(text, 10**9)
-        assert counted >= oracle, (first, body[:20], counted, oracle)
-        if first in ("sep=,", "Card Name,Quantity,Set Code"):
-            assert counted <= oracle + 1, (first, counted, oracle)  # the owner's own file: counted as the library reads it, give or take its sep line
-
-
-def test_a_first_line_that_only_looks_like_a_separator_declaration_cannot_hide_the_rows_after_it():
-    """Copilot's case: format detection takes this file as a comma file (the line is not exactly sep=X), so the quote after the semicolon
-    is an ordinary character and the file has 291,742 records; the preflight took the semicolon as the delimiter and counted 2."""
-    import csv
-    import io
-    import time
-
-    from vault import importer
-    text = "sep=;ignored,quantity,name,set_code,finish,condition\n" + 'x;",1,y,,nonfoil,NM\n' + "z,1,y,,nonfoil,NM\n" * 291_740
-    assert sum(1 for r in csv.reader(io.StringIO(text, newline=""))) == 291_742
-    assert importer.record_count(text, 10**9) == 291_742
-    started = time.perf_counter()
-    with pytest.raises(importer.ImportError_, match="too many rows"):
-        importer.read_file(text.encode())
-    assert time.perf_counter() - started < 1.0
-    # the malformed forms the review measured as under-counting
-    for first in ('sep=,"', '"sep=,', ' "sep=,"', "sep=;ignored,quantity"):
-        bad = first + "\n" + 'x;",1\n' + "z,1\n" * 291_740
-        assert importer.record_count(bad, 10**9) >= 291_741, first
-    # a clean declaration is still honoured, and the owner's own file starts with one
-    assert importer.lexing_candidates('"sep=,"\nCard Name,Quantity\n') == [(",", 0), (",", 8)]  # the whole text, and what is left when the line is discarded
-    assert importer.lexing_candidates("sep=;\na;b\n") == [(",", 0), (";", 6)]

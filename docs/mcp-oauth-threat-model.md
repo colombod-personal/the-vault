@@ -1299,24 +1299,26 @@ now the importer (`/imports`, `/imports/preview`), the upload page, `import_coll
 not been read): 8 MiB is about 4.9 times the largest real export seen (1.7 MB, about 7,000 cards, 243 bytes a row, so about 34,000 rows in
 8 MiB), and 100,000 rows is about 7 times the owner's 14,597. **The size alone does not bound memory**: the review of PR #483 built a file of
 exactly 8 MiB with 29-byte rows (291,740 rows) and measured a peak of 577 MB (preview) and 595 MB (parts), more than the ceiling the first
-draft claimed as "the worst case". The row limit closes that: it is a bounded, quote-aware count of CSV **records** (`importer.record_count`, with the rules of the `csv` module the formats read with: a quote opens a quoted field only at the **start** of a
-field, so `5" Wall` is ordinary text and cannot hide the rows after it (the review's file of one stray quote and 291,740 rows counted 2
-records before and 291,742 now); the delimiter comes from the first line by the predicates the library itself applies (`importer.lexing_candidates`: format detection takes a
-declaration only when the stripped line is exactly `sep=X`, Dragon Shield's reader when it merely begins `sep=`, and which reader runs depends on a
-choice made after the preflight), so a first line that is not a clean declaration (`sep=,"`, `sep=;ignored,quantity,...`) is lexed every way a reader might
-and the most is counted, pinned against the library's own lexing by `test_the_preflight_counts_a_file_at_least_as_the_library_lexes_it_for_every_form_of_first_line`; a record ends at an unquoted LF, CR or CRLF;
-blank and whitespace-only lines are none; one pass over the quotes only, constant memory, stopping at the limit; C `test_the_preflight_agrees_with_the_csv_module_on_what_a_record_is`,
-`test_a_stray_quote_cannot_hide_the_rows_after_it_from_the_row_guard`), run on the file as it came, before `restore_csv` rewrites a marked file row
-by row and before any entry is built, on every path (and again on the parsed rows), so that file is refused in a fraction of a second with one sentence and nothing staged (C `test_the_row_limit_is_a_setting_with_a_default_and_a_file_of_tiny_rows_is_refused_before_it_is_parsed`,
-`test_every_path_refuses_a_file_over_the_row_limit_in_one_sentence_and_stages_nothing`). What the two limits together let in is measured:
+draft claimed as "the worst case". The row limit closes that, and it uses **the library's own reader, not a copy of its rules** (review of PR #483, four threads on
+a hand-written lexer that mis-read `sep=` first lines and quotes inside cells): `importer.check_rows` runs `formats.parse` only until the reader
+the library would read with is opened (`dragonshield`, `moxfield` and `formats` reach `csv` through a thin proxy that, for the one call that set
+a context variable, hands over that reader's text and delimiter unread), so the library's own `sep=` rules and format choice decide what a
+row is, and then counts that reader's rows by iterating it lazily, in constant memory, stopping the moment the count passes the limit; no
+list, no entry is built, and a blank row is none. It runs on what the parser will read (after `restore_csv`, which rewrites a marked file
+row by row into a text of the same size and keeps nothing per row), on every path, so a file of 29-byte rows, of one stray quote followed by
+291,740 rows, or of a padded `sep=;` line is refused in a fraction of a second with one sentence and nothing staged (C `test_the_row_limit_is_a_setting_with_a_default_and_a_file_of_tiny_rows_is_refused_before_it_is_parsed`,
+`test_the_guard_uses_the_delimiter_and_the_rows_the_library_chose_and_builds_no_entry`, `test_no_form_of_first_line_lets_a_file_of_more_rows_than_the_limit_through`,
+`test_every_path_refuses_a_file_over_the_row_limit_in_one_sentence_and_stages_nothing`); a valid `sep=;` file of 50,000 records with line feeds
+inside quoted cells is taken. If a library update stopped opening its readers through the module-level `csv`, the guard fails loudly
+instead of skipping itself (C `test_the_guard_reaches_the_reader_of_every_format_the_importer_reads`). A file the reader cannot lex (a bare-CR
+file, a field over the csv limit) is left to the parse, which refuses it. What the two limits together let in is measured:
 `tests/test_import_size_memory.py` builds a synthetic file of exactly 8 MiB with exactly 100,000 rows, every row matched to the catalog, and runs the
 existing preview path and the assembled-parts path: the process peak resident size is 331 MB (preview) and 340 MB (parts) where it held
 151 MB before, in 3.4 s and 7.1 s, and the test fails above 512 MB (the file of 77,579 rows of 108 bytes measured 327 and 342 MB, the
 owner's real shape of 35,078 rows 259 and 277 MB). Matched rows are not the most the limits allow: the delta review of PR #483 measured
-378 MB for 100,000 rows none of which matches the catalog, so 340 MB is the matched case and 512 MB is the ceiling for both. The row
-check counts records, not lines (review of PR #483, thread 1: a line count missed bare-CR files and over-counted quoted multi-line cells);
-it costs 22 ms on the 8 MiB / 100,000-row file and 87 ms on 100,000 rows with every cell quoted (C `test_the_preflight_costs_little_on_the_biggest_file_the_limits_allow_and_on_a_file_that_quotes_every_cell`,
-`test_the_preflight_sees_what_a_line_count_missed`), and the memory figures above were re-measured with it in place (330 and 340 MB). One import at the limits fits a 1 GB function with room to spare; four at the same
+378 MB for 100,000 rows none of which matches the catalog, so 340 MB is the matched case and 512 MB is the ceiling for both. The guard costs 77 ms on the 8 MiB / 100,000-row file, 39 ms on 100,000 rows with
+every cell quoted and 46 ms to refuse two million tiny rows (C `test_the_guard_costs_little_on_the_biggest_file_the_limits_allow_and_on_a_file_that_quotes_every_cell`),
+and the memory figures above were re-measured with it in place (331 and 341 MB). One import at the limits fits a 1 GB function with room to spare; four at the same
 moment would not, and the instance size and its concurrency are **not verified**. The hosting platform's request limit (about 4.5 MB)
 bounds each request, so each part and each upload-page file, not the total. A larger file is answered `too_large`, and one with too many
 rows `unreadable`, each in one sentence, nothing staged. No change to the function's permissions or secrets.
