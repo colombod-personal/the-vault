@@ -236,8 +236,8 @@ be revoked (Account → Connected apps for OAuth).
     `bucket_id` it compares with and replaces that bucket only and says what it leaves alone),
     a file the person drops in the chat (up to 8 MB, `IMPORT_MAX_BYTES`): `import_collection_file` (the Vault fetches it from the chat app, or takes it as text in ordered parts from a coding app that has the file's path, and stages it, with the
     preview and the upload's id and `content_hash`; nothing is imported; a read-only connection can do it; also takes `bucket_id`), then
-    `get_staged_upload` and `confirm_staged_upload` (needs write); only when the app answers `cannot_receive` (it cannot hand the file over)
-    or the file is not in the chat: the link, good for one hour (the page takes about 4 MB),
+    `get_staged_upload` and `confirm_staged_upload` (needs write); when the app answers `cannot_receive`, follow its `next` (a coding app with the file's path and a PowerShell shell sends the file in parts);
+    only when that is not possible, or the file is not in the chat: the link, good for one hour (the page takes about 4 MB),
     which a read-only connection can make: `start_collection_upload` (also takes `bucket_id`),
     (Dragon Shield, Moxfield or generic CSV), `list_export_formats`, `list_shared_with_me`,
     `get_shared_deck`, `list_my_shares`, `accept_share`, `stop_sharing` (asks first)

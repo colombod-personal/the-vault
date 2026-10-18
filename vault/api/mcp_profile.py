@@ -69,7 +69,7 @@ COMPACT = {
     "verify_citation": "Checks that a quote is verbatim in the rule, Oracle text or ruling it is attributed to; a failed check returns the true text.",
     "import_deck_from_link": "Saves a public Archidekt deck from its link, with sections, format and the author's credit. A saved link is left unchanged unless `update` is true.",
     "import_collection_file": "Stages the attached collection file and previews what importing would change; imports nothing. Pass `file`, or call with {} for how to send it in parts. Any sign-in may call it.",
-    "start_collection_upload": "A one-hour browser upload link, only when the app cannot hand over the attached file. Any sign-in may make it.",
+    "start_collection_upload": "A one-hour browser upload link, only when the file cannot be sent with import_collection_file. Any sign-in may make it.",
     "refresh_deck": "Compares a saved deck with its Archidekt link; with the preview's fingerprint and `confirm` it replaces the saved list with the source's.",
     "update_owned_cards": "Previews small edits to the cards the person owns (bought, sold, traded): add, remove or set copies. Changes nothing; returns a confirmation.",
     "confirm_owned_cards_update": "Applies the change previewed by update_owned_cards, with the same lines and that preview's confirmation. Recorded in history and undoable.",

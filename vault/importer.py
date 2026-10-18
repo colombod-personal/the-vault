@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import math
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date
@@ -23,7 +24,37 @@ from .prices import MAX_PRICE, compute_values
 from .printing_lookup import front, printings_of
 
 EXACT = ("set_number", "id")
-HEADER_LINES = 3  # the lines a file may carry besides its rows (a "sep=," line, a header, a last line): the row limit is checked on lines first
+HEADER_RECORDS = 2  # the records a file may carry besides its rows (a "sep=," line and a header): the row limit is checked on records first
+RECORD_END = re.compile(r"\r\n|\n|\r")
+
+
+def record_count(text: str, limit: int) -> int:
+    """How many CSV records ``text`` holds, counted before any entry is built: a record ends at a line feed, a carriage return or a CRLF
+    that is not inside double quotes, and a blank line is none (a quoted cell with line feeds in it is one record; a file whose lines end
+    in a bare CR has as many records as lines). One pass with the quote state, constant memory, and it stops as soon as the count is
+    over ``limit``. The quote is the only one of the formats this importer reads (Dragon Shield, Moxfield, Archidekt, generic CSV), and it
+    runs on the file as it came, before ``restore_csv`` rewrites a marked file row by row."""
+    n, pos, records, inside, pending = len(text), 0, 0, False, False
+    while pos < n:
+        quote = text.find('"', pos)
+        if inside:
+            if quote < 0:
+                break
+            inside, pending, pos = False, True, quote + 1
+            continue
+        end = n if quote < 0 else quote
+        last = pos
+        for found in RECORD_END.finditer(text, pos, end):
+            if pending or found.start() > last:
+                records += 1
+                if records > limit:
+                    return records
+            pending, last = False, found.end()
+        pending = pending or end > last
+        if quote < 0:
+            break
+        inside, pending, pos = True, True, quote + 1
+    return records + (1 if pending else 0)
 # The CSV formats other apps import: a cell that starts like a formula is written with a leading single quote, and
 # removed again when the Vault reads such a file back (vault/csv_safe.py, #351). Dragon Shield is neither.
 SAFE_CSV = ("moxfield", "archidekt", "csv")
@@ -181,7 +212,7 @@ def read_file(content: bytes):
     except UnicodeDecodeError as exc:
         raise ImportError_("File is not UTF-8 text") from exc
     rows_max = config.import_max_rows()  # the second product limit: memory follows rows more than bytes (before anything is parsed)
-    if text.count("\n") > rows_max + HEADER_LINES:
+    if record_count(text, rows_max + HEADER_RECORDS) > rows_max + HEADER_RECORDS:
         raise ImportError_(f"File has too many rows ({rows_max:,} max)")
     try:
         source = formats.detect(text)

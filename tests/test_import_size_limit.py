@@ -139,10 +139,12 @@ def test_the_row_limit_is_a_setting_with_a_default_and_a_file_of_tiny_rows_is_re
         config.Settings(database_url="postgresql://x", session_secret="s", dev_login=True, base_url="http://localhost").check()
 
 
-@pytest.mark.parametrize("rows", ["2", "4"], ids=["refused on the lines before parsing", "refused on the parsed rows"])
+@pytest.mark.parametrize("rows", ["2", "4"], ids=["refused on the records before parsing", "refused on the parsed rows"])
 def test_every_path_refuses_a_file_over_the_row_limit_in_one_sentence_and_stages_nothing(app, agent, bot, monkeypatch, rows):  # noqa: F811
     from tests.test_agents import CSV  # five card rows, a header and the sep line
     monkeypatch.setenv("IMPORT_MAX_ROWS", rows)
+    if rows == "4":
+        CSV = CSV.split(b"\n", 1)[1]  # without the sep line: six records, five rows: past the row limit but inside the record preflight
     write = make_token(agent, scopes=["read", "write"])
     for route in ("/imports", "/imports/preview"):
         refused = agent.post(f"{V1}{route}", files={"file": ("my_cards.csv", CSV, "text/csv")})
@@ -169,3 +171,64 @@ def test_a_file_at_the_row_limit_is_taken(app, agent, monkeypatch):  # noqa: F81
     from tests.test_agents import CSV
     monkeypatch.setenv("IMPORT_MAX_ROWS", "5")
     assert agent.post(f"{V1}/imports/preview", files={"file": ("my_cards.csv", CSV, "text/csv")}).status_code == 200
+
+
+# ---- the record preflight: a bounded, quote-aware count of records before any entry is built --------------------------------------------
+
+@pytest.mark.parametrize("text, records", [
+    ("", 0), ("a\n", 1), ("a", 1), ("a\nb\nc", 3), ("a\r\nb\r\nc\r\n", 3), ("a\rb\rc\r", 3), ("a\rb\r\nc\nd", 4),
+    ("a\n\n\nb\n", 2), ("\r\n\r\na\r\n", 1), ("\n", 0),
+    ('a,"x\ny\nz"\nb,"p\r\nq"\n', 2), ('"a""\n""b"\n"c"\n', 2), ('a,"x\ry"\rb\r', 2),
+    ('"unterminated\nstill the same record', 1), ('x\n"unterminated\nmore', 2), ("'@x,1\n'@y,2\n", 2),
+], ids=lambda v: None)
+def test_records_are_counted_by_the_quote_state_for_lf_crlf_and_bare_cr_and_blank_lines_are_none(text, records):
+    from vault import importer
+    assert importer.record_count(text, 10**9) == records
+
+
+def test_the_count_stops_as_soon_as_it_is_over_the_limit():
+    from vault import importer
+    assert importer.record_count("a\n" * 1_000_000, 10) == 11
+
+
+def test_the_preflight_sees_what_a_line_count_missed(monkeypatch):
+    """Review of PR 483 (thread 1): bare-CR files had no line feed at all, and quoted multiline cells made five records look like many
+    lines. The generic-CSV marker case turns separators into line feeds in restore_csv, so the guard runs before it."""
+    from vault import importer
+    monkeypatch.setenv("IMPORT_MAX_ROWS", "5")
+    header = "Card Name,Quantity\r"
+    many_cr = header + "".join(f"Sol Ring {n},1\r" for n in range(50))  # no line feed anywhere: 51 records
+    with pytest.raises(importer.ImportError_, match="too many rows"):
+        importer.read_file(many_cr.encode())
+    five_multiline = header + "".join(f'"Sol\nRing\n{n}",1\r' for n in range(5))  # six records, ten line feeds
+    try:
+        importer.read_file(five_multiline.encode())
+    except importer.ImportError_ as caught:
+        assert "too many rows" not in str(caught)  # not refused on the count: whatever else the parser says
+    blank = "Card Name,Quantity\n" + "\n" * 500 + "Sol Ring,1\n" + "\r\n" * 500  # blank lines are none
+    assert importer.record_count(blank, 10**9) == 2
+    try:
+        importer.read_file(blank.encode())
+    except importer.ImportError_ as caught:
+        assert "too many rows" not in str(caught)
+
+    def never(text):
+        raise AssertionError("restore_csv ran before the row guard")
+
+    monkeypatch.setattr(importer, "restore_csv", never)  # the marker case: a marked file is rewritten row by row by restore_csv
+    marked = "Card Name,Quantity\n" + "".join(f"'@Invented {n},1\n" for n in range(50))
+    with pytest.raises(importer.ImportError_, match="too many rows"):
+        importer.read_file(marked.encode())
+
+
+def test_the_preflight_costs_little_on_the_biggest_file_the_limits_allow_and_on_a_file_that_quotes_every_cell():
+    import time
+
+    from tests.memory_probe import synthetic_csv
+    from vault import importer
+    worst = synthetic_csv(config.DEFAULT_IMPORT_MAX_BYTES, "worst").decode()
+    started = time.perf_counter()
+    assert importer.record_count(worst, 10**9) == 100_002  # 100,000 rows, the sep line and the header
+    quoted = '"Card Name","Quantity","Set"\n' + '"Sol Ring","1","C21"\n' * 100_000
+    assert importer.record_count(quoted, 10**9) == 100_001
+    assert time.perf_counter() - started < 6.0
