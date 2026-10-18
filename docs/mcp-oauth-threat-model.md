@@ -1299,10 +1299,13 @@ exactly 8 MiB with 29-byte rows (291,740 rows) and measured a peak of 577 MB (pr
 draft claimed as "the worst case". The row limit closes that: it is checked on the lines before anything is parsed (and on the parsed rows),
 so that file is refused in a fraction of a second with one sentence and nothing staged (C `test_the_row_limit_is_a_setting_with_a_default_and_a_file_of_tiny_rows_is_refused_before_it_is_parsed`,
 `test_every_path_refuses_a_file_over_the_row_limit_in_one_sentence_and_stages_nothing`). What the two limits together let in is measured:
-`tests/test_import_size_memory.py` builds a synthetic file of exactly 8 MiB with exactly 100,000 rows (the most they allow) and runs the
+`tests/test_import_size_memory.py` builds a synthetic file of exactly 8 MiB with exactly 100,000 rows, every row matched to the catalog, and runs the
 existing preview path and the assembled-parts path: the process peak resident size is 331 MB (preview) and 340 MB (parts) where it held
 151 MB before, in 3.4 s and 7.1 s, and the test fails above 512 MB (the file of 77,579 rows of 108 bytes measured 327 and 342 MB, the
-owner's real shape of 35,078 rows 259 and 277 MB). One import at the limits fits a 1 GB function with room to spare; four at the same
+owner's real shape of 35,078 rows 259 and 277 MB). Matched rows are not the most the limits allow: the delta review of PR #483 measured
+378 MB for 100,000 rows none of which matches the catalog, so 340 MB is the matched case and 512 MB is the ceiling for both. The row
+check counts line feeds, quoted ones included, so a file whose cells hold line feeds is counted by lines (a file of 99,010 rows of
+which 990 hold one extra line is refused as 'too many rows'): accepted and documented, a Dragon Shield export has no such cell. One import at the limits fits a 1 GB function with room to spare; four at the same
 moment would not, and the instance size and its concurrency are **not verified**. The hosting platform's request limit (about 4.5 MB)
 bounds each request, so each part and each upload-page file, not the total. A larger file is answered `too_large`, and one with too many
 rows `unreadable`, each in one sentence, nothing staged. No change to the function's permissions or secrets.
@@ -1363,7 +1366,10 @@ checks, the script the assistant is told to run), `vault/intake.py` (the route: 
   staged upload (and undone with it when the person is over the allowance), so a hundred parts do not trip the 10 a minute and eight
   first parts sent at the same moment count once, not eight times (C `test_simultaneous_first_parts_of_one_file_count_once_against_the_import_allowance`); the parts count against a counter of their own, `IMPORT_PART_LIMIT`
   (default 1,200 a minute per person). The script sends parts of 16,384 bytes and, when a read comes back truncated, of 8,192 at the smallest,
-  and sends nothing until every read of a size has succeeded: a file at the size limit is at most 8 MiB / 8,192 = 1,024 calls in one pass, so
+  and sends nothing until every read of a size has succeeded; it reads nothing at all when the first small read says the file is over
+  `IMPORT_MAX_BYTES` or would be more than 1,024 parts, and it stops at the first answer that is not progress (`bad_part`, `too_large`,
+  `unreadable`, `mismatch`, a refusal), printing the Vault's sentence (C `test_the_script_stops_at_the_first_answer_that_is_not_progress_and_prints_the_vaults_sentence`,
+  `test_a_file_over_the_size_limit_or_in_too_many_parts_is_not_read_at_all`): a file at the size limit is at most 8 MiB / 8,192 = 1,024 calls in one pass, so
   1,200 covers a pass with 17% to spare (a halving of the part size before the first send costs reads, not calls; a smaller part is never
   used). A send answered 429 is retried after the wait the answer names, up to four times, and the script stops naming the parts it could not
   send (C `test_a_throttled_part_is_sent_again_after_the_wait_and_a_failed_one_stops_the_script_naming_it`, `test_the_smallest_part_size_keeps_a_pass_inside_the_default_part_allowance`). Both counters are per person,

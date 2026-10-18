@@ -23,7 +23,8 @@ DEFAULT_FILE_INTAKE_HOSTS = "oaiusercontent.com,openai.com,chatgpt.com"
 DEFAULT_IMPORT_MAX_BYTES = 8 * 1024 * 1024
 # The most rows a file may hold, a product rule next to the size: about 7 times the owner's 14,597 rows. Memory follows rows more than
 # bytes (a file of 29-byte rows at the size limit has 291,740 rows and peaked at 577 MB in a review of PR #483), so the size limit alone
-# does not bound it; tests/test_import_size_memory.py measures a file of exactly this many rows at exactly the size limit.
+# does not bound it; tests/test_import_size_memory.py measures a file of exactly this many rows, matched to the catalog, at exactly the
+# size limit (340 MB peak; the delta review of PR #483 measured 378 MB for 100,000 rows that match nothing; the test ceiling is 512 MB).
 DEFAULT_IMPORT_MAX_ROWS = 100_000
 # Part writes a minute for one person (a file sent in parts counts ONE against IMPORT_LIMIT, its parts against this). The script sends
 # parts of 16,384 bytes and, when a read comes back truncated, of 8,192 bytes at the smallest (and sends nothing until every read of a

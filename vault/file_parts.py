@@ -32,6 +32,7 @@ route itself, with the database, is ``vault.intake``.
 from __future__ import annotations
 
 import hashlib
+import json
 import zlib
 from collections.abc import Iterable
 
@@ -44,6 +45,7 @@ FILE_NAME = "chat-upload.csv"
 UNITS = "utf-16-le"
 PART_BYTES = 16384  # first part size the script reads (bytes of the file)
 MIN_PART_BYTES = 8192  # the smallest: 8 MiB / 8,192 = 1,024 calls in a pass, inside IMPORT_PART_LIMIT
+MAX_PASS_PARTS = 1024  # the script sends no more parts than this in a pass (the default limit / MIN_PART_BYTES); raise it with IMPORT_PART_LIMIT
 TOKEN_BUDGET = 10000  # exec_command's default max_output_tokens
 REJECT_TOKENS = 9000  # a read that reports more than this was probably truncated
 PARALLEL = 8  # reads, and sends, at a time
@@ -152,20 +154,22 @@ const rd="$h='"+H+"';$p=-join(0..($h.Length/4-1)|%{[char][Convert]::ToInt32($h.S
 const r0=await sh(rd+"$b=[IO.File]::ReadAllBytes($p);$o=0;if($b.Length -ge 3 -and $b[0] -eq 239 -and $b[1] -eq 187 -and $b[2] -eq 191){$o=3};$t=[Text.UTF8Encoding]::new($false,$true).GetString($b,$o,$b.Length-$o);[Console]::Out.Write($t.Length.ToString()+','+($t.Split([char]10).Length-1)+','+($b.Length-$o)+','+$o)");
 const m=!(r0.original_token_count>=100)&&/^\d+,\d+,\d+,\d+$/.test(last(r0))?last(r0).split(",").map(Number):null;
 let res;
-if(m){const[L,K,Z,O]=m;
+if(m){const[L,K,Z,O]=m,big={status:"too_large",changed:false,say:@SAYBIG@},ok=["part_received","uploaded","already_staged"];
+if(Z>@MAXB@)res=big;
 for(let N=@PART@;N>=@MIN@&&!res;N=N>>1){
  const n=Math.max(1,Math.ceil(Z/N)),rs=[];
+ if(n>@MAXP@){res=big;break}
  const get=async k=>{const r=await sh(rd+"$f=[IO.File]::OpenRead($p);function b($k){if($k -le 0){return "+O+"};$q=[Math]::Min($f.Length,"+O+"+$k*"+N+");if($q -ge $f.Length){return $f.Length};$f.Position=$q;for($i=0;$i -lt 3;$i++){$c=$f.ReadByte();if($c -lt 128 -or $c -gt 191){break};$q++};return $q};$s=(b "+k+");$e=(b "+(k+1)+");$f.Position=$s;$m=[IO.BinaryReader]::new($f).ReadBytes($e-$s);$f.Close();$t=[Text.UTF8Encoding]::new($false,$true).GetString($m);[Console]::Out.Write([regex]::Replace(($t|ConvertTo-Json -Compress),'[^ -~]',{param($x)'\\u{0:x4}' -f [int][char]$x.Value}))");try{return r.original_token_count>@REJECT@?null:JSON.parse(last(r))}catch{return null}};
  for(let i=0;i<n;i+=@PARALLEL@)rs.push(...await Promise.all(par(Math.min(@PARALLEL@,n-i)).map(j=>get(i+j))));
  const s=rs.join("");
  if(rs.includes(null)||s.length!==L||s.split("\n").length-1!==K)continue;
- const sum=crc(rs),a=[];
- const send=async i=>{for(let t=0;;t++){const r=await tools.mcp__the_vault__import_collection_file({text:rs[i],part:i+1,parts:n,lines:K,chars:L,sum@BUCKET@}),c=r.structuredContent||{};if(!r.isError&&c.status)return c;if(t<4&&(c.status===429||/Too many/.test(JSON.stringify(r.content)))){await sh("Start-Sleep -Seconds "+Math.min(60,c.retry_after_seconds||5));continue}return{status:"failed",part:i+1}}};
- for(let i=0;i<n&&!a.some(x=>x.status==="failed");i+=@PARALLEL@)a.push(...await Promise.all(par(Math.min(@PARALLEL@,n-i)).map(j=>send(i+j))));
- const done=a.find(x=>x.status==="uploaded"||x.status==="already_staged");
+ const sum=crc(rs),a=[];let halt=false;
+ const send=async i=>{if(halt)return{status:"skipped"};for(let t=0;;t++){const r=await tools.mcp__the_vault__import_collection_file({text:rs[i],part:i+1,parts:n,lines:K,chars:L,sum@BUCKET@}),c=r.structuredContent||{};if(!r.isError&&c.status){if(!ok.includes(c.status))halt=true;return c}if(t<4&&(c.status===429||/Too many/.test(JSON.stringify(r.content)))){await sh("Start-Sleep -Seconds "+Math.min(60,c.retry_after_seconds||5));continue}halt=true;return{status:"failed",part:i+1}}};
+ for(let i=0;i<n&&!halt;i+=@PARALLEL@)a.push(...await Promise.all(par(Math.min(@PARALLEL@,n-i)).map(j=>send(i+j))));
+ const bad=a.find(x=>x.status!=="skipped"&&x.status!=="failed"&&!ok.includes(x.status));
  if(a.some(x=>x.status==="failed"))res={status:"stopped",failed_parts:a.filter(x=>x.status==="failed").map(x=>x.part)};
- else if(done)res=done;
- else if(!a.some(x=>x.status==="mismatch"))res=a.find(x=>x.status!=="part_received")||a[a.length-1];
+ else if(bad)res=bad;
+ else res=a.find(x=>x.status==="uploaded"||x.status==="already_staged")||a.filter(x=>x.status!=="skipped").pop();
 }}
 text(JSON.stringify(res||{status:"not_read"}));"""
 
@@ -173,7 +177,10 @@ text(JSON.stringify(res||{status:"not_read"}));"""
 def recipe(bucket_id: int | None = None) -> str:
     """The script with its numbers filled in, and the bucket the call was made for, if any (every part goes into it)."""
     return (RECIPE.replace("@BUCKET@", "" if bucket_id is None else f",bucket_id:{int(bucket_id)}").replace("@PART@", str(PART_BYTES))
-            .replace("@MIN@", str(MIN_PART_BYTES)).replace("@REJECT@", str(REJECT_TOKENS)).replace("@PARALLEL@", str(PARALLEL)))
+            .replace("@MIN@", str(MIN_PART_BYTES)).replace("@REJECT@", str(REJECT_TOKENS)).replace("@PARALLEL@", str(PARALLEL))
+            .replace("@MAXB@", str(config.import_max_bytes())).replace("@MAXP@", str(MAX_PASS_PARTS)).replace("@SAYBIG@", json.dumps(
+                f"The file is bigger than the {config.size_text(config.import_max_bytes())} the Vault takes, so it was not read "
+                "and the collection was not changed.")))
 
 
 def steps(bucket_id: int | None = None) -> str:
@@ -187,9 +194,12 @@ def steps(bucket_id: int | None = None) -> str:
         "else changed: " + recipe(bucket_id) + "\nIt first reads the file's length and line feeds, then the file in parts of "
         + str(PART_BYTES) + " bytes (halved once, to " + str(MIN_PART_BYTES) + ", when a read comes back truncated or does not match "
         "that length and line count), sends nothing until every part has been read, calls this tool with each part (text, part, parts, "
-        "lines, chars, sum), and prints the last answer. Sending a part again is harmless, so run it again if it was cut short; if it "
-        "prints the parts it could not send, run it again. Each answer to a part names the parts still missing. When it prints "
-        "already_staged the file is complete: call get_staged_upload with its id for the preview. Then show the person the preview "
+        "lines, chars, sum), and prints the last answer. It stops at the first answer that is not progress (too large, unreadable, a part "
+        "the Vault refuses) and prints it: give the person the one sentence in its `say` and stop, with no link. If it prints not_read "
+        "the file could not be read here: give the person the sentence in the `say` you started from, and stop, with no link. Sending a "
+        "part again is harmless, so run it again if it was cut short; if it prints the parts it could not send, run it again. Each "
+        "answer to a part names the parts still missing. When it prints already_staged the file is complete: call get_staged_upload "
+        "with its id for the preview. Then show the person the preview "
         "(what would change, and the few things that deserve a look), ask for one yes, and on their yes call confirm_staged_upload as "
         "that answer's `next` says. Never send the person to a link when a file was attached. If there is no readable path, or your "
         "shell is not PowerShell, give the person `say`.")

@@ -5,7 +5,8 @@ function instance (the instance size has not been read). So the cost of one impo
 existing preview path and on the new assembled-parts path, and must stay under a stated ceiling. The measure is the process's peak
 resident set size (``ru_maxrss``), taken in a fresh interpreter (``tests/memory_probe.py``) so it is this import's and not the test
 run's. The file is synthetic: invented names, Dragon Shield-shaped, exactly 8 MiB long with exactly 100,000 rows (shape ``worst``:
-the most the two limits let in).
+the most rows the two limits let in, all matched to the catalog; 100,000 rows that match nothing peaked at 378 MB in the delta
+review of PR #483, which the ceiling also covers).
 
 Why two limits: a review of PR #483 built a file of exactly 8 MiB with 29-byte rows (291,740 rows) and measured a peak of 577 MB
 (preview) and 595 MB (parts) with no row limit; memory follows rows more than bytes. With the row limit that file is refused before it is

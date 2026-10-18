@@ -156,6 +156,7 @@ HARNESS = textwrap.dedent(r"""
       let named = ''; for (let i = 0; i < hex[1].length; i += 4) named += String.fromCharCode(parseInt(hex[1].slice(i, i + 4), 16));
       if (named !== winPath) throw new Error('the shell was given another path: ' + named);
       const bytes = fs.readFileSync(filePath);
+      if (cmd.includes('ReadAllBytes') && opts.fake_size) return '1000,10,' + opts.fake_size + ',0';  // a file of any size, without making one
       if (cmd.includes('ReadAllBytes')) {
         const o = bytes.length >= 3 && bytes[0] === 239 && bytes[1] === 187 && bytes[2] === 191 ? 3 : 0;
         let t; try { t = strict.decode(bytes.subarray(o)); } catch (e) { return 'Exception calling GetString: invalid UTF-8'; }
@@ -191,6 +192,7 @@ HARNESS = textwrap.dedent(r"""
           return {isError: true, content: [{type: 'text', text: 'Too many file intake part requests'}], structuredContent: {status: 429, retry_after_seconds: 1}};
         }
         if (opts.fail_part === a.part) return {isError: true, content: [{type: 'text', text: 'boom'}]};
+        if (opts.answer_part === a.part) return {structuredContent: {status: opts.answer_status, changed: false, say: 'The Vault says: ' + opts.answer_status}};
         calls.push(a);
         const same = calls.filter(c => c.parts === a.parts);
         const done = new Set(same.map(c => c.part)).size === a.parts;
@@ -368,3 +370,39 @@ def test_the_steps_for_the_model_say_what_to_do_and_tell_the_person_nothing_to_d
     assert "PowerShell" in steps and "macOS or Linux" in steps and "give the person `say`" in steps  # the limit is stated, not hidden
     assert "already_staged" in steps and "get_staged_upload" in steps
     assert "@PART@" not in steps and "@PARALLEL@" not in steps and "@MIN@" not in steps and "@BUCKET@" not in steps
+
+
+@needs_node
+@pytest.mark.parametrize("status", ["bad_part", "too_large", "unreadable", "mismatch", "cannot_receive"])
+def test_the_script_stops_at_the_first_answer_that_is_not_progress_and_prints_the_vaults_sentence(tmp_path, status):
+    """Review of the delta of PR 483: the script did not stop on bad_part, too_large or unreadable. It sends no group after the one in
+    which such an answer came, and prints the answer, whose `say` is what the person is told."""
+    ran = run_recipe(tmp_path, sample_text(3000), answer_part=2, answer_status=status)
+    printed = json.loads(ran["printed"][0])
+    assert printed["status"] == status and printed["say"] == "The Vault says: " + status
+    assert ran["sends"] <= file_parts.PARALLEL < len(sample_text(3000).encode()) // file_parts.PART_BYTES  # the group it was in, no more
+
+
+@needs_node
+def test_a_file_over_the_size_limit_or_in_too_many_parts_is_not_read_at_all(tmp_path, monkeypatch):
+    """Review of the delta of PR 483: a mocked 200 MB file produced 12,208 reads and sends. The size comes from the first small read."""
+    ran = run_recipe(tmp_path, sample_text(10), fake_size=200_000_000)
+    printed = json.loads(ran["printed"][0])
+    assert printed["status"] == "too_large" and "8 MB" in printed["say"] and printed["say"].count(".") == 1
+    assert ran["shellCalls"] == 1 and ran["sends"] == 0  # the one small read, nothing else
+    monkeypatch.setenv("IMPORT_MAX_BYTES", str(64 * 1024 * 1024))  # a raised limit: 32 MiB is inside it but is 2,048 parts of 16 KiB
+    ran = run_recipe(tmp_path, sample_text(10), fake_size=32 * 1024 * 1024)
+    assert json.loads(ran["printed"][0])["status"] == "too_large" and ran["shellCalls"] == 1 and ran["sends"] == 0
+    assert 8 * 1024 * 1024 // file_parts.MIN_PART_BYTES == file_parts.MAX_PASS_PARTS
+
+
+def test_the_steps_say_what_to_do_with_each_result_the_script_can_print():
+    steps = file_parts.steps()
+    assert "not_read" in steps and "give the person the sentence in the `say` you started from, and stop, with no link" in steps
+    assert "stops at the first answer that is not progress" in steps and "one sentence in its `say`" in steps
+
+
+def test_where_ci_runs_the_tests_it_has_node_and_powershell_so_the_real_shell_tests_run_and_are_not_skipped():
+    """The tests above that need a real PowerShell are skipped where there is none. On the GitHub runner they must run."""
+    if os.environ.get("GITHUB_ACTIONS"):
+        assert NODE and POWERSHELL, "the runner has no Node or no PowerShell: the real-shell tests would be skipped"
