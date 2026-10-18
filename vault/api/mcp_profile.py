@@ -49,35 +49,39 @@ CORE = (
 
 # One or two whole sentences for each core tool, written by hand (the first sentence of the full text is often cut mid-clause).
 COMPACT = {
-    "whoami": "Who the person is connected as, the scopes the sign-in has, and the data versions the Vault holds. Use it to check the connection.",
-    "list_decks": "The person's saved decks: name, format, commander(s), card count and source. Pass `query` with words from a deck's name to find one.",
-    "get_deck": "One saved deck by `deck_id`: overview, how much of it the person owns and what is missing with dated prices, and the decklist.",
+    "whoami": "Who the person is connected as, the sign-in's scopes and the data versions the Vault holds. Use it to check the connection.",
+    "list_decks": "The person's saved decks: name, format, commander(s), card count and source. Pass `query` with words from a name to find one.",
+    "get_deck": "One saved deck by `deck_id`: overview, what the person owns and what is missing with dated prices, and the decklist.",
     "deck_stats": "A deck's counts, mana curve, colours, roles, Game Changers, cost, lookouts (cards that can turn against it) and Commander bracket floor.",
     "deck_legality": "Whether a deck (`deck_id` or pasted `text`) is legal in a format: banned cards, copy limits, size, colour identity; says what it did not check.",
     "validate_deck_changes": "Checks proposed cuts and adds against a deck: cards exist, are legal and in colours, the result is legal, and the cost is within budget.",
-    "find_upgrades": "Legal upgrade candidates within a budget for the roles a deck is short of, plus cut candidates. Check a chosen change with validate_deck_changes.",
+    "find_upgrades": "Legal upgrades within a budget for the roles a deck is short of, plus cut candidates. Check a chosen change with validate_deck_changes.",
     "council_brief": "The expert council's panel and procedure for a deck review, rules dispute or synergy question, with each member's brief and the deck's facts.",
     "simulate_draws": "How a deck's curve plays: sample games and odds over many (land drops, mana by turn, cards in hand); lists what it does not model.",
     "find_combos": "Combos in a decklist and combos one card short, from Commander Spellbook and attributed; finding none does not mean the deck has none.",
     "shopping_list": "The cards of a deck the person does not own, with dated Scryfall prices, as paste-ready text for a store's own list tool.",
-    "get_collection_summary": "Totals for the collection: copies, printings, sets, market value, amount paid, price date and breakdowns; one bucket or tag with `bucket` or `tag`.",
+    "get_collection_summary": "Totals for the collection: copies, printings, sets, market value, amount paid, price date and breakdowns; `bucket` or `tag` narrows it.",
     "search_cards": "Finds printings in the collection with name, set, finish, condition, quantity, price, value and card data. Paged.",
     "check_decklist": "Which cards of a pasted decklist the person owns, partly owns or is missing. Accepts Archidekt, Moxfield, Arena and MTGO text.",
     "get_card_oracle": "A card's official Oracle text, types, legalities and tags, by exact name or Oracle id, with its recorded legality changes.",
     "get_rule": "One rule by number (e.g. 613.1a) or glossary term, with its place in the rules; the only source for a rule's current wording.",
     "search_rules": "Searches the Comprehensive Rules for a topic; best matches first, at most 10, each with its number and the edition.",
     "verify_citation": "Checks that a quote is verbatim in the rule, Oracle text or ruling it is attributed to; a failed check returns the true text.",
-    "import_deck_from_link": "Saves a public Archidekt deck to the person's decks from its link, with its sections, format and author's credit. A saved link is left unchanged unless `update` is true.",
-    "import_collection_file": "Takes the collection file the person attached to the chat as `file`: stages it and previews what importing would change. Imports nothing; any sign-in may call it.",
-    "start_collection_upload": "Makes a one-hour link for the person to upload a collection file in their browser, only when the app cannot hand the attached file over. Any sign-in may make it.",
+    "import_deck_from_link": "Saves a public Archidekt deck from its link, with sections, format and the author's credit. A saved link is left unchanged unless `update` is true.",
+    "import_collection_file": "Stages the attached collection file and previews what importing would change; imports nothing. Pass `file`, or call with {} for how to send it in parts. Any sign-in may call it.",
+    "start_collection_upload": "A one-hour link to upload a collection file in the browser, only when the app cannot hand over the attached file. Any sign-in may make it.",
     "refresh_deck": "Compares a saved deck with its Archidekt link; with the preview's fingerprint and `confirm` it replaces the saved list with the source's.",
     "update_owned_cards": "Previews small edits to the cards the person owns (bought, sold, traded): add, remove or set copies. Changes nothing; returns a confirmation.",
     "confirm_owned_cards_update": "Applies the change previewed by update_owned_cards, with the same lines and that preview's confirmation. Recorded in history and undoable.",
-    "undo_owned_cards_update": "Reverts the most recent change made through an assistant if nothing else changed the collection; shows what it would change first.",
+    "undo_owned_cards_update": "Reverts the latest assistant change if nothing else changed the collection; shows what it would change first.",
     "confirm_staged_upload": "Imports the file uploaded through start_collection_upload: a preview first, then confirm with the preview's `content_hash`.",
-    "sign_out": "Signs this app out of the Vault; its next call asks to sign in again, as another account if wanted. Needs `confirm` true; without it, it only shows which account and app.",
+    "sign_out": "Signs this app out of the Vault; its next call asks to sign in again, as another account if wanted. Needs `confirm` true; without it, only shows the account and app.",
 }
 assert set(COMPACT) == set(CORE), "every core tool has a hand-written description"
+
+# Tools that take a file as an object or as text in parts: the compact list (the coding apps, which are given a path and no file object)
+# does not require the object; the full list still does (ChatGPT fills `file` from the attachment only when the schema asks for it).
+PARTS_TOOLS = {"import_collection_file": ("file",)}
 
 # Parameters whose meaning the generic cut loses (a shortened text must keep what a wrong value would cost).
 PARAM_TEXT = {
@@ -163,6 +167,8 @@ def compact_schema(tool, ui: bool = False) -> dict:
     annotations, so a call built from it is checked exactly as before."""
     full = tool.schema(ui=ui)
     schema = _shrink(full["inputSchema"])
+    if tool.name in PARTS_TOOLS:  # a coding app has no file object to pass: the parts are as valid as `file` (vault.file_parts)
+        schema["required"] = [name for name in schema.get("required", []) if name not in PARTS_TOOLS[tool.name]]
     for (name, prop), text in PARAM_TEXT.items():
         if name == tool.name and prop in schema.get("properties", {}):
             schema["properties"][prop]["description"] = text
@@ -197,7 +203,7 @@ def dispatcher_tools(scopes=("read", "write")) -> list[dict]:
     if "write" in scopes:
         out.append(_runner(WRITE, "Run a Vault tool that changes something",
                            "Runs one of the Vault's other tools that changes the person's data, by name, with its arguments "
-                           "(previews and confirmations work as for any tool). Not for tools that delete or revoke.", reads=False))
+                           "(previews and confirmations work as usual). Not for tools that delete or revoke.", reads=False))
     return out
 
 

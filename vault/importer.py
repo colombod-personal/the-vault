@@ -16,13 +16,12 @@ from mtg_toolkits.models import CollectionEntry, Finish
 from sqlalchemy import delete, func, select, tuple_, update
 from sqlalchemy.orm import Session
 
-from . import buckets, merge
+from . import buckets, config, merge
 from .csv_safe import neutralise_csv, restore_csv
 from .models import Bucket, BucketBaseline, Card, CollectionBaseline, Entry, Import, TagAssignment, User, utcnow
 from .prices import MAX_PRICE, compute_values
 from .printing_lookup import front, printings_of
 
-MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 EXACT = ("set_number", "id")
 # The CSV formats other apps import: a cell that starts like a formula is written with a leading single quote, and
 # removed again when the Vault reads such a file back (vault/csv_safe.py, #351). Dragon Shield is neither.
@@ -174,8 +173,8 @@ def _prepare(db: Session, user: User, source: str, entries: list[CollectionEntry
 
 def read_file(content: bytes):
     """The file's format and entries, checked (size, encoding, limits). Raises ImportError_."""
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise ImportError_("File is too large (20 MB max)")
+    if len(content) > config.import_max_bytes():  # the one import-size limit (IMPORT_MAX_BYTES)
+        raise ImportError_(f"File is too large ({config.size_text(config.import_max_bytes())} max)")
     try:
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError as exc:

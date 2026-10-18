@@ -37,11 +37,11 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, 
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.orm import Session
 
-from . import locks
+from . import config, locks
 from .api.idempotency import idempotent
 from .api.import_params import BucketId, answer_options
 from .api.schemas import MAX_ID
-from .importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, ImportOptions, NoSuchBucket, import_collection,
+from .importer import (ImportConflict, ImportError_, ImportOptions, NoSuchBucket, import_collection,
                        preview_import)
 from .models import Bucket, Import, StagedUpload, User
 from .oauth_routes import esc, page
@@ -123,7 +123,8 @@ def _supersede_oldest_waiting(db: Session, user_id: int) -> int | None:
     locked) is skipped for the next oldest. The removed row answers exactly as an expired one does (the page and
     ``/uploads/{id}`` both say no such link), so the replacement tells nothing about the old one to whoever holds its ticket.
     The caller commits the removal together with the new link."""
-    oldest = (select(StagedUpload.id).where(StagedUpload.user_id == user_id, StagedUpload.content.is_(None))
+    oldest = (select(StagedUpload.id).where(StagedUpload.user_id == user_id, StagedUpload.content.is_(None),
+                                            StagedUpload.ticket_hash.not_like(INTAKE_MARKER + "%"))  # a file in parts is not a link
               .order_by(StagedUpload.expires_at, StagedUpload.id).limit(1).with_for_update(skip_locked=True).scalar_subquery())
     gone = db.execute(delete(StagedUpload).where(StagedUpload.id == oldest, StagedUpload.content.is_(None),
                                                  StagedUpload.user_id == user_id)
@@ -305,7 +306,7 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         # Plain values, read once: the session commits below (the rate counter) and the link may be replaced meanwhile, so no
         # attribute of the row is read after this point.
         staged_id, owner_id, bound, bound_bucket = staged.id, staged.user_id, staged.bucket_bound, staged.bucket_id
-        # Up to 20 MB of parsing and matching, limited to IMPORT_LIMIT a minute per link, on a counter of its own: the shared
+        # Up to IMPORT_MAX_BYTES of parsing and matching, limited to IMPORT_LIMIT a minute per link, on a counter of its own: the shared
         # per-person "import" counter counts refused tries too, so whoever still holds a link (an app the person has since
         # disconnected) could loop here and keep the person's own /imports at 429. A made-up ticket was refused above and is
         # counted nowhere. A person is bounded by 5 links x IMPORT_LIMIT, and a link that is being looped is replaced by a new one.
@@ -330,10 +331,11 @@ def build_router(get_db, current_user, settings) -> APIRouter:
                     return page("Unknown bucket", "<h1>That bucket was not found</h1><p>Go back and pick one of your buckets, "
                                 "or the whole collection.</p>", status=400)
                 chosen = found
-        content = await file.read(MAX_UPLOAD_BYTES + 1)
-        if len(content) > MAX_UPLOAD_BYTES:
-            return page("File too large", "<h1>The file is too large</h1><p>20 MB at most, and about 4 MB on mtgvault.cards, "
-                        "where the hosting platform refuses a bigger request first.</p>", status=413)
+        limit = config.import_max_bytes()
+        content = await file.read(limit + 1)
+        if len(content) > limit:
+            return page("File too large", f"<h1>The file is too large</h1><p>{config.size_text(limit)} at most, and about 4 MB on "
+                        "mtgvault.cards, where the hosting platform refuses a bigger request first.</p>", status=413)
         # One conditional UPDATE, not an attribute write: the link may have been replaced (a sixth link at the cap removes the
         # oldest one that held no file, see _supersede_oldest_waiting) or may have expired while the file was being read. If no
         # row matched, the file is not kept and the person is told so, never "File received".

@@ -30,7 +30,7 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 
-from .. import analytics, card_roles, deck_ideas, experts, observability
+from .. import analytics, card_roles, config, deck_ideas, experts, observability
 from ..deck_tools import FORMATS
 from ..models import User
 from . import mcp_profile, mcp_session, mcp_ui
@@ -228,9 +228,14 @@ IMPORT_BUCKET = {"bucket_id": {**ID, "description": "Import into this bucket onl
 FILE_ARG = {"type": "object", "required": ["download_url", "file_id"],
             "description": "The file the person attached to the chat: the attachment itself.",
             "properties": {"download_url": {"type": "string", "description": "A temporary download address"},
-                           "file_id": {"type": "string", "description": "The app's id of the file"},
-                           "mime_type": {"type": "string", "description": "The file's media type"},
-                           "file_name": {"type": "string", "description": "The file's name"}}}
+                           "file_id": {"type": "string", "description": "The app's file id"},
+                           "mime_type": {"type": "string"}, "file_name": {"type": "string"}}}
+# A file sent as text in ordered parts, for a coding app that has the file's path but no file object (vault.file_parts, vault.intake).
+PART_ARGS = {"text": {"type": "string", "description": "One part's text"},
+             "part": {"type": "integer", "description": "Its number, from 1"},
+             "parts": {"type": "integer", "description": "Number of parts"},
+             "lines": {"type": "integer", "description": "Line feeds in the whole file"},
+             "sum": {"type": "integer", "description": "CRC-32 of the whole text"}}
 SHARE = {"share_id": {**ID, "description": "Read a collection someone shared with you (from list_shared_with_me) instead of your own"}}
 DECKLIST = {"type": "string", "maxLength": 50_000}  # as the API's TextIn and DeckIn
 CONFIRM = {"type": "boolean", "description": "true only after the person agreed to this exact change"}
@@ -251,15 +256,15 @@ CARD_IDS = {"type": "array", "minItems": 1, "maxItems": 200, "items": {"type": "
             "description": "Card ids from search_cards (a tag is on the card, so every printing of it gives the same tag)"}
 OWNED_LINES = {"type": "array", "minItems": 1, "maxItems": 50, "items": {
     "type": "object", "required": ["action", "name", "quantity"], "additionalProperties": False, "properties": {
-        "action": {"type": "string", "enum": ["add", "remove", "set"], "description": "add or remove copies, or set how many"},
-        "name": {"type": "string", "minLength": 1, "maxLength": 300, "description": "The card's name"},
+        "action": {"type": "string", "enum": ["add", "remove", "set"], "description": "add, remove or set copies"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 300},
         "quantity": {"type": "integer", "minimum": 0, "maximum": 999},
-        "set": {"type": "string", "maxLength": 20, "description": "The printing's set code (with number)"},
-        "number": {"type": "string", "maxLength": 30, "description": "The printing's collector number (with set)"},
+        "set": {"type": "string", "maxLength": 20, "description": "Set code (with number)"},
+        "number": {"type": "string", "maxLength": 30, "description": "Collector number (with set)"},
         "finish": {"type": "string", "enum": ["nonfoil", "foil", "etched"]},
         "printing_unknown": {"type": "boolean", "description": "The person does not know the printing (adds only)"},
         "printings_page": {"type": "integer", "minimum": 1, "maximum": 20,
-                           "description": "The next page of printings to choose from, when the answer says there are more"}}}}
+                           "description": "The next page of printings, when the answer says there are more"}}}}
 # null clears them on update_deck (as on the API), so it is advertised as allowed.
 SOURCE_URL = {"anyOf": [{"type": "string", "maxLength": 500}, {"type": "null"}],
               "description": "Where the deck came from (an http or https link); null clears it"}
@@ -660,19 +665,23 @@ TOOLS = [
          "oldest link that holds no file stop working (the answer names its id); a link that holds an uploaded file is never "
          "replaced, and when all five hold one the call is refused and lists them. There is no list or cancel yet, so use the link "
          "already given in this chat when there is one; the server takes a file of "
-         "up to 20 MB, but on mtgvault.cards the hosting platform caps "
+         f"up to {config.size_text(config.import_max_bytes())}, but on mtgvault.cards the hosting platform caps "
          "a request at about 4 MB, so a bigger file is refused before the Vault sees it. "
          "With bucket_id the upload goes into that bucket only, fixed "
          "when the link is made; without it the upload page lets the person pick one of their buckets, or the whole collection.",
          {"bucket_id": IMPORT_BUCKET["bucket_id"]}, method="POST", path=lambda a: f"{V1}/uploads", query=("bucket_id",), write=True,
          any_scope=True),
-    Tool("import_collection_file", "Brings in the collection file the person attached to the chat, given as `file`: the Vault fetches it, stages it "
-         "as that person's upload and returns what importing it would change (what comes from their app, which Vault edits are "
-         "kept, the conflicts) with the upload's id and `content_hash`. It changes nothing in the collection: the import is "
-         "confirm_staged_upload. Any connection may use it, read-only ones included. If the app cannot hand the file over the "
-         "answer says so in a sentence.",
-         {"file": FILE_ARG, "bucket_id": IMPORT_BUCKET["bucket_id"]}, required=["file"], method="POST", path=lambda a: f"{V1}/uploads/from-file",
-         body=lambda a: {k: a[k] for k in ("file", "bucket_id") if a.get(k) is not None}, write=True, any_scope=True,
+    Tool("import_collection_file", "Brings in the collection file the person attached to the chat and returns what importing it would change "
+         "(what comes from their app, which Vault edits are kept, the conflicts) with the upload's id and `content_hash`. It changes "
+         "nothing in the collection: the import is confirm_staged_upload. Any connection may use it, read-only ones included. "
+         "Given `file`, the Vault fetches it from the chat app and stages it. A coding app that gives no file object but the file's "
+         "local path sends the file's text in ordered parts instead: `text` (a part), `part` (its number from 1), `parts` (how many), "
+         "`lines` (the file's line feeds) and `sum` (CRC-32 of the whole text's UTF-16 code units); a call with neither returns the "
+         "exact steps in `next`. The preview comes when every part is here and checked; each answer names the parts still missing. "
+         "If the app can hand the file over by neither route the answer says so in a sentence.",
+         {"file": FILE_ARG, "bucket_id": IMPORT_BUCKET["bucket_id"], **PART_ARGS}, required=["file"], method="POST",
+         path=lambda a: f"{V1}/uploads/from-file",
+         body=lambda a: {k: a[k] for k in ("file", "bucket_id", *PART_ARGS) if a.get(k) is not None}, write=True, any_scope=True,
          meta={"openai/fileParams": ["file"]}, loose=("file",)),
     Tool("get_staged_upload", "A file the person uploaded through start_collection_upload: still waiting, or what "
          "importing it would change (what comes from their app, which Vault edits are kept, the conflicts) and how its rows "
@@ -826,7 +835,8 @@ BY_NAME = {t.name: t for t in TOOLS}
 # nothing about the person. Every field is cut to a fixed vocabulary or a short bounded form before it is logged: a name a
 # caller chose is never logged as it is, whatever it looks like (a name can hold an identifier or a secret).
 KEY_VOCABULARY = frozenset({
-    "file", "bucket_id", "download_url", "file_id", "mime_type", "file_name",  # the tool's own and ChatGPT's file object
+    "file", "bucket_id", "text", "part", "parts", "lines", "sum",  # the tool's own (a file sent in parts: vault.file_parts)
+    "download_url", "file_id", "mime_type", "file_name",  # ChatGPT's file object
     "url", "uri", "href", "link", "path", "file_path", "name", "filename", "id", "type", "size", "mime", "content_type",
     "content", "data", "text", "base64", "downloadUrl", "fileId", "mimeType", "fileName", "filePath", "contentType"})
 MAX_KEYS = 12

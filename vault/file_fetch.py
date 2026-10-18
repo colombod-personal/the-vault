@@ -13,7 +13,7 @@ step here is built against it (docs/mcp-oauth-threat-model.md, "A file dropped i
   header, so DNS cannot answer differently between the check and the connection;
 * at most 2 redirects, each one checked against exactly the same rules (a redirect to another host must be on the
   allow-list too, and resolve to public addresses);
-* at most ``INTAKE_MAX_BYTES`` (5 MB) read, in plain bytes (``Accept-Encoding: identity``; a compressed answer is refused), and 15
+* at most ``IMPORT_MAX_BYTES`` (the one import-size limit, ``vault.config``) read, in plain bytes (``Accept-Encoding: identity``; a compressed answer is refused), and 15
   seconds in total, as a wall clock the caller waits on, however slowly the server drips;
 * a text-like content type only; no cookies, no authorization, no referrer: a bare GET;
 * the address is never logged and never returned, and no error repeats it (HTTP client libraries log requests at INFO: that is
@@ -35,6 +35,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from . import config
 from .config import DEFAULT_FILE_INTAKE_HOSTS, DOMAIN, parse_hosts
 from .oauth_clients import interleaved, public_address, system_resolver
 
@@ -43,10 +44,7 @@ for _name in ("httpx", "httpcore"):
     logging.getLogger(_name).setLevel(logging.WARNING)
 
 FETCH_SECONDS = 15.0
-# What the intake takes from a chat: about what production already handles (the upload page is cut near 4 MB by the platform). The
-# importer's own cap is 20 MB; a 17.9 MB, 190,000-row file measured 8.9 s and about 450 MB of memory for one request (review of PR
-# #478), and a read-only connection may make 10 such calls a minute, so the intake does not take it.
-INTAKE_MAX_BYTES = 5 * 1024 * 1024
+# What the intake takes from a chat is the one import-size limit (IMPORT_MAX_BYTES, vault.config), the same as every other path.
 MAX_URL = 4096  # signed links are long
 MAX_REDIRECTS = 2
 MAX_ADDRESSES = 3  # of a host's addresses: so many unreachable records cannot hold a fetch for minutes
@@ -230,14 +228,17 @@ class FileFetcher:
     address that was checked (``pin``)."""
 
     def __init__(self, hosts: tuple[str, ...] = DEFAULT_HOSTS, transport: httpx.BaseTransport | None = None, resolver=None, *,
-                 pin: bool | None = None, seconds: float = FETCH_SECONDS, max_bytes: int = INTAKE_MAX_BYTES):
+                 pin: bool | None = None, seconds: float = FETCH_SECONDS):
         self.hosts = hosts
         self.transport = transport
         self.resolver = resolver or system_resolver
         self.pin = transport is None if pin is None else pin
         self.seconds = seconds
-        self.max_bytes = max_bytes
         self._slots = threading.BoundedSemaphore(MAX_CONCURRENT)
+
+    @property
+    def max_bytes(self) -> int:
+        return config.import_max_bytes()  # read each time: one limit for every path
 
     # -- checks that cost nothing ------------------------------------------------------------------------------------
 

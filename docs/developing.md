@@ -234,7 +234,9 @@ box that opens one fixed account of made-up data (`vault/reviewer.py`, guide at 
 **Limits to know:**
 - Vercel caps a request or response at 4.5 MB. Responses are gzip-compressed (a 21k-card
   collection is 0.5 MB on the wire, and a test guards this). CSV uploads over about 4.5 MB
-  (roughly 38k rows) would be refused.
+  (roughly 38k rows) would be refused: that request limit bounds each upload-page file and each part of a file a chat app sends in
+  parts, not the total. The Vault's own limit on the assembled file, on every path, is `IMPORT_MAX_BYTES` (default 8 MiB, a product rule;
+  `.env.example`).
 - After a quiet spell the first request takes 1–2 s while the function and database wake up.
 
 ### Sign-in providers

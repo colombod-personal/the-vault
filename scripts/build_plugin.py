@@ -59,7 +59,7 @@ NAME = "the-vault"
 # the client's reverse-domain namespace. VS Code documents that it reads GitHub Copilot's agents from
 # ``com.github.copilot/agents/`` in a plugin (docs/skills.md); no other client's namespace is documented, so none is made.
 COPILOT_NAMESPACE = "com.github.copilot"
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 HOST = "https://mtgvault.cards"
 # One line a person puts in a Claude Project's instructions (or their preferences), or opens a chat with. Measured in claude.ai on
 # 2026-10-08 (issue #319): without it a rules question that does not name the Vault was answered from memory in 2 of 2 runs; with
@@ -1104,7 +1104,7 @@ OPENAI_REVIEW_AND_INTERFACE = {
 OPENAI_MANIFEST = {
     "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
     "name": NAME,
-    "version": "0.1.0",
+    "version": VERSION,
     "description": ("Magic: The Gathering rules, cards, decks and your collection for ChatGPT and Codex, grounded in "
                     "Scryfall and the Comprehensive Rules, with sources shown, and an expert council for deck reviews. "
                     "Unofficial fan content."),

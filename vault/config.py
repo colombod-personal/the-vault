@@ -14,6 +14,16 @@ def _env(name: str, default: str = "") -> str:
 
 
 DEFAULT_FILE_INTAKE_HOSTS = "oaiusercontent.com,openai.com,chatgpt.com"
+# The one import-size limit (vault-0n9.3), a product rule: the biggest collection file the Vault takes, as the assembled bytes, on
+# every path (the Import CSV button and the upload page, import_collection_csv, a file fetched from a chat app, and a file sent in
+# parts). 8 MiB is about 4.9 times the largest real export seen (1.7 MB for about 7,000 cards, about 243 bytes a row), which is about
+# 34,000 rows. It is NOT derived from the memory of a function instance (that size has not been read); a test measures what the
+# preview costs at exactly this size (tests/test_import_size_memory.py). The hosting platform's request limit (about 4.5 MB) bounds
+# each request, so each part and each upload-page file, not the total.
+DEFAULT_IMPORT_MAX_BYTES = 8 * 1024 * 1024
+# Part writes a minute for one person (a file sent in parts counts ONE against IMPORT_LIMIT, its parts against this): 512 parts is
+# the biggest file in the default part size (16 KiB), doubled for one retry in halves, rounded up.
+DEFAULT_IMPORT_PART_LIMIT = 1200
 DOMAIN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")  # a name of at least two labels
 
 
@@ -25,6 +35,20 @@ def parse_hosts(text: str) -> tuple[str, ...]:
         if entry:
             out.append(entry)
     return tuple(out)
+
+
+def import_max_bytes() -> int:
+    """The import-size limit (env ``IMPORT_MAX_BYTES``, default 8 MiB), read each time so there is one source for every path."""
+    return int(_env("IMPORT_MAX_BYTES", str(DEFAULT_IMPORT_MAX_BYTES)))
+
+
+def size_text(size: int) -> str:
+    """A size as the sentences and the pages say it: whole megabytes (1 MB = 1 MiB) when it is one, else one decimal, and bytes
+    for a small limit."""
+    megabytes = size / (1024 * 1024)
+    if megabytes >= 1 and megabytes == int(megabytes):
+        return f"{int(megabytes)} MB"
+    return f"{megabytes:.1f} MB" if megabytes >= 0.1 else f"{size:,} bytes"
 
 
 def _default_base_url() -> str:
@@ -100,6 +124,7 @@ class Settings:
     lookup_refresh_limit: int = field(default_factory=lambda: int(_env("LOOKUP_REFRESH_LIMIT", "20")))
     archidekt_limit: int = field(default_factory=lambda: int(_env("ARCHIDEKT_LIMIT", "30")))
     import_limit: int = field(default_factory=lambda: int(_env("IMPORT_LIMIT", "10")))
+    import_part_limit: int = field(default_factory=lambda: int(_env("IMPORT_PART_LIMIT", str(DEFAULT_IMPORT_PART_LIMIT))))
     # Hosts a chat app may hand a collection file from (vault.file_fetch): each entry is a domain and its subdomains, comma-separated.
     # The default is OpenAI's own file hosts. A host that is refused is logged by name, so a real run says which one to add.
     file_intake_hosts: tuple[str, ...] = field(default_factory=lambda: parse_hosts(_env("FILE_INTAKE_HOSTS", DEFAULT_FILE_INTAKE_HOSTS)))
@@ -165,5 +190,9 @@ class Settings:
             raise RuntimeError("EMAIL_DAILY_CAP must be at least 1")
         if not self.file_intake_hosts or not all(DOMAIN.match(h) for h in self.file_intake_hosts):
             raise RuntimeError("FILE_INTAKE_HOSTS must list domains with at least two labels (example.com), comma-separated")
+        if import_max_bytes() < 1:
+            raise RuntimeError("IMPORT_MAX_BYTES must be a number of bytes, at least 1 (default 8388608, 8 MiB)")
+        if self.import_part_limit < 1:
+            raise RuntimeError("IMPORT_PART_LIMIT must be at least 1")
         if self.reviewer_passphrase and len(self.reviewer_passphrase) < 16:
             raise RuntimeError("REVIEWER_PASSPHRASE must be at least 16 characters (it is the way in for the stores' reviewers)")

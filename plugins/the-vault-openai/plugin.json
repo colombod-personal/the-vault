@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "the-vault",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Magic: The Gathering rules, cards, decks and your collection for ChatGPT and Codex, grounded in Scryfall and the Comprehensive Rules, with sources shown, and an expert council for deck reviews. Unofficial fan content.",
   "author": {
     "name": "The Vault",

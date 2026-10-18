@@ -18,7 +18,7 @@ from tests.test_reimport_mcp import catalog  # noqa: F401 - fixture: the catalog
 from test_reimport_merge import KILLER, base_file, copies_of, file, line
 from twins.mcp_client import McpClient
 from vault import app as vault_app
-from vault import importer, uploads
+from vault import config, uploads
 from vault.api import mcp
 from vault.api.mcp import _marked_as_mcp
 from vault.models import Import, StagedUpload
@@ -206,10 +206,10 @@ def test_a_read_only_connection_names_only_the_persons_own_buckets(app, read):
         assert [r.bucket_id for r in db.query(StagedUpload)] == [mine["id"]]  # only the person's own link was stored
 
 
-def test_a_link_started_by_a_read_only_connection_takes_no_more_than_twenty_megabytes(app, read):
+def test_a_link_started_by_a_read_only_connection_takes_no_more_than_the_import_limit(app, read):
     started = ok(read, "start_collection_upload")
-    big = person_uploads(app, ticket_of(started), b"x" * (importer.MAX_UPLOAD_BYTES + 1))
-    assert big.status_code == 413 and "20 MB" in big.text and "about 4 MB" in big.text
+    big = person_uploads(app, ticket_of(started), b"x" * (config.import_max_bytes() + 1))
+    assert big.status_code == 413 and config.size_text(config.import_max_bytes()) in big.text and "about 4 MB" in big.text
     with app.state.db.sessions() as db:
         assert db.get(StagedUpload, started["id"]).content is None  # nothing was kept
     assert ok(read, "get_staged_upload", upload_id=started["id"])["status"] == "waiting"
@@ -275,12 +275,12 @@ def test_another_person_cannot_read_or_apply_an_upload_a_read_only_app_started(a
 
 def test_the_tool_descriptions_state_the_limits_the_server_enforces():
     text = mcp.BY_NAME["start_collection_upload"].description
-    assert f"at most {uploads.MAX_OPEN} open links" in text and f"{importer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB" in text
+    assert f"at most {uploads.MAX_OPEN} open links" in text and f"up to {config.size_text(config.import_max_bytes())}" in text
     assert "read-only" in text and "confirm_staged_upload" in text and "write permission" in text
     assert "not single-use" in text and "There is no list or cancel yet" in text  # said where the link is described
     assert "oldest link that holds no file stop working" in text and "is never replaced" in text  # the cap, as it behaves
     assert "changes nothing in the person's collection or decks" in text
-    # the server's own limit is 20 MB; on the hosted site the platform's request cap (docs/developing.md) is what a person meets
+    # the server's own limit is IMPORT_MAX_BYTES; on the hosted site the platform's request cap (docs/developing.md) is what a person meets
     assert "mtgvault.cards" in text and "about 4 MB" in text and "before the Vault sees it" in text
     assert "a file may be 20 MB" not in text  # the old sentence: true for the server, false for the hosted site
 

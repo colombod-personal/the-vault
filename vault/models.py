@@ -914,6 +914,21 @@ class StagedUpload(Base):
     bucket_bound: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))  # made for it: the page can't change it
 
 
+class StagedUploadPart(Base):
+    """One part of a collection file a chat app sent as text in ordered parts (``import_collection_file`` with ``text``, vault-0n9.3),
+    kept until all parts are there and checked. Its lifetime is the staged upload's: the row goes with it (``ON DELETE CASCADE``:
+    expiry, an apply, the person's erasure), and when the file is complete the parts are deleted and only the assembled file
+    remains, as for any other staged file. ``part_hash`` is the SHA-256 of ``content`` (the part's UTF-8 text): the same part sent
+    again is the same row, a different text for the same index replaces it before the file is complete."""
+
+    __tablename__ = "staged_upload_parts"
+
+    staged_upload_id: Mapped[int] = mapped_column(ForeignKey("staged_uploads.id", ondelete="CASCADE"), primary_key=True)
+    part_index: Mapped[int] = mapped_column(Integer, primary_key=True)  # 1-based
+    part_hash: Mapped[str] = mapped_column(String(64))
+    content: Mapped[bytes] = mapped_column(LargeBinary)
+
+
 class ArchidektDeckCache(Base):
     """A public Archidekt deck's JSON as last fetched, so repeat reads never reach Archidekt (docs/compliance.md: its
     terms forbid automated requests and its developers warned they would lock the API if it is hammered). Public data

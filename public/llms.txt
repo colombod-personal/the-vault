@@ -234,7 +234,7 @@ be revoked (Account → Connected apps for OAuth).
   - imports, exports and sharing: `list_imports`, `get_import`, `import_collection_csv` (preview first: it
     keeps edits made here and applies only what changed in the person's app, and lists conflicts; with
     `bucket_id` it compares with and replaces that bucket only and says what it leaves alone),
-    a file the person drops in the chat (up to 5 MB): `import_collection_file` (the Vault fetches it from the chat app and stages it, with the
+    a file the person drops in the chat (up to 8 MB, `IMPORT_MAX_BYTES`): `import_collection_file` (the Vault fetches it from the chat app, or takes it as text in ordered parts from a coding app that has the file's path, and stages it, with the
     preview and the upload's id and `content_hash`; nothing is imported; a read-only connection can do it; also takes `bucket_id`), then
     `get_staged_upload` and `confirm_staged_upload` (needs write); only when the app answers `cannot_receive` (it cannot hand the file over)
     or the file is not in the chat: the link, good for one hour (the page takes about 4 MB),

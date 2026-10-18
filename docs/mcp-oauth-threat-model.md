@@ -915,8 +915,8 @@ What a read-only caller can now cause, and what stops it (all in `vault/uploads.
   10 are started a minute per person (429), expired rows are deleted by the next start and by the daily retention job
   (`tests/test_staged_upload.py`, `tests/test_upload_read_only.py::test_a_read_only_app_can_rotate_the_persons_waiting_links_but_not_read_or_import_what_they_hold`, `test_a_read_only_connection_names_only_the_persons_own_buckets`).
 - **Storage, bounded and not new.** A file is stored only by `POST /upload`, which needs the ticket, which the tool answer gives the
-  caller as it gives a write caller. One file per link (a new one replaces it), 20 MB at most (413, nothing kept:
-  `test_a_link_started_by_a_read_only_connection_takes_no_more_than_twenty_megabytes`), so at most 5 x 20 MB for one hour per person,
+  caller as it gives a write caller. One file per link (a new one replaces it), `IMPORT_MAX_BYTES` at most (413, nothing kept:
+  `test_a_link_started_by_a_read_only_connection_takes_no_more_than_the_import_limit`; it was a fixed 20 MB until vault-0n9.3), so at most 5 files of that size for one hour per person,
   the same ceiling a write connection has. The cost is the person's own allowance, not the server's.
 - **It imports nothing and changes nothing in the collection or decks.** The file waits. The preview (`GET /uploads/{id}`, a read) compares it with the collection, which
   a read connection can already read in full, so it shows the caller nothing new. The import is `POST /uploads/{id}/apply`: write
@@ -934,7 +934,7 @@ What a read-only caller can now cause, and what stops it (all in `vault/uploads.
   needs Write." (`tests/test_upload_read_only.py::test_the_consent_screen_tells_a_person_that_read_includes_the_upload_link`.)
   This is the one file of section 6's list that this change touches, only for that sentence.
 - **An allowance of its own on the page (review of 2026-10-11, corrected after the re-review of `56939d5`).** `POST /upload` is the
-  one route that parses and matches up to 20 MB for a ticket's holder, and it had no limit; the first fix counted it against the
+  one route that parses and matches up to `IMPORT_MAX_BYTES` for a ticket's holder, and it had no limit; the first fix counted it against the
   person's `import` counter. That counter counts refused tries too, so an app the person had since disconnected, still holding its
   ticket, could loop on the page and keep the person's own `/imports` at 429 for as long as it looped. The page now has a counter
   per link (`import_limit` a minute for each link, 429 page with `Retry-After`, a different counter key kind from the person's), so
@@ -1205,7 +1205,7 @@ the conversation. That is an SSRF surface, so every step is bounded (C = `tests/
   A refused host is logged **by host name only** (`file_intake` event, `host`), never with its path or query, which carry the token,
   and only its **last three labels** (`*.files.example.com` for `<token>.files.example.com`), so a secret in the first labels of a
   name stays out of the log (C `test_a_host_name_is_logged_by_its_last_three_labels_so_a_secret_in_the_first_ones_stays_out`).
-- **What a real drop sends is logged as a shape** (vault-0n9.3): the `file_intake_call` event, one per `import_collection_file` call, has exactly the fields `event`, `ts`, `request_id`, `tool_definition_sha256` (12 hex of the hash of the tool entry this server serves this client now, by its session id: a client that kept an older list across a deploy is not seen, so its own copy is unknown), `arg_keys`, `file_type` (the type name of `file`, or `absent`), `file_keys` (key names inside an object value), `protocol_version` (the `MCP-Protocol-Version` header: a date, `other` or `absent`), `user_agent` (at most four `name/version` tokens, the version digits and dots only, nothing in parentheses, the name only if it is on a fixed list of known clients and libraries, else `other`, `unknown` if none), `compact` and `apps_ui`. A key name is logged only if it is on a fixed list of expected field names (`url`, `file_id`, `download_url`, ...), else as `other`, whatever it looks like. No value, address, path, file name, token or anything about the person is logged (C `tests/test_file_intake_log.py`).
+- **What a real drop sends is logged as a shape** (vault-0n9.3): the `file_intake_call` event, one per `import_collection_file` call, has exactly the fields `event`, `ts`, `request_id`, `tool_definition_sha256` (12 hex of the hash of the tool entry this server serves this client now, by its session id: a client that kept an older list across a deploy is not seen, so its own copy is unknown), `arg_keys`, `file_type` (the type name of `file`, or `absent`), `file_keys` (key names inside an object value), `protocol_version` (the `MCP-Protocol-Version` header: a date, `other` or `absent`), `user_agent` (at most four `name/version` tokens, the version digits and dots only, nothing in parentheses, the name only if it is on a fixed list of known clients and libraries, else `other`, `unknown` if none), `compact` and `apps_ui`. A key name is logged only if it is on a fixed list of expected field names (`url`, `file_id`, `download_url`, and the parts' `text`, `part`, `parts`, `lines`, `sum`, ...), else as `other`, whatever it looks like. No value, address, path, file name, token or anything about the person is logged (C `tests/test_file_intake_log.py`).
 - **The name is resolved here and every address must be public** (`oauth_clients.public_address`: private, loopback, link-local
   including the cloud metadata address, shared 100.64/10, multicast, reserved, unspecified, IPv4-mapped, NAT64 and 6to4 forms, Teredo;
   one bad address among good ones refuses the host), and **the connection goes to the address that was checked**, with the name kept
@@ -1218,8 +1218,8 @@ the conversation. That is an SSRF surface, so every step is bounded (C = `tests/
   brief ("no redirects")**, on purpose: the real host and its redirects are unknown before the first real run, a refused redirect
   would cost a whole iteration, and a hop to a host that is on the allow-list and resolves to public addresses is no wider than the
   first request.
-- **Size and time.** At most `INTAKE_MAX_BYTES` (**5 MB**; the importer's own cap is 20 MB, see "Egress and time" for why the intake
-  takes less) is read, in plain bytes (`Accept-Encoding: identity`; a
+- **Size and time.** At most `IMPORT_MAX_BYTES` (**8 MiB** by default: the one import-size limit every path uses, see "Egress and time")
+  is read, in plain bytes (`Accept-Encoding: identity`; a
   compressed answer is refused), checked against `Content-Length` and while streaming; 15 seconds in total, as a wall clock the
   caller waits on (the fetch, including DNS, runs in a worker joined with a timeout), so a server that drips or never answers
   cannot hold the request (C size, drip and slow-resolver tests). At most 4 fetches at once per process; a fifth is told it is busy.
@@ -1241,12 +1241,12 @@ still the app's own text and is treated as data wherever it is shown (it appears
 is never used to name a path on the server (C `test_the_filename_shown_for_a_staged_file_is_the_declared_name_without_a_path`).
 A file that cannot be read is answered with a phrase the Vault wrote (not the library's message, which can quote a cell: C
 `test_an_unreadable_answer_never_repeats_text_from_the_file`). The bytes are parsed by the existing
-importer (UTF-8 check, 20 MB, the same row and column limits as an upload through the link), and shown to the person only through
+importer (UTF-8 check, `IMPORT_MAX_BYTES`, the same row and column limits as an upload through the link), and shown to the person only through
 the preview, whose text the Vault writes. A file holding an instruction to the assistant is data, as for any import.
 
 **Rate and storage.** Every try counts against the person's import allowance (`IMPORT_LIMIT`, 10 a minute) on a counter of its own
 (`file intake`), so a loop does not keep the person's own `/imports` at 429. A person holds **one** fetched file at a time (a new one
-replaces the earlier, an identical one is the same row, so a host's duplicate call returns the same id); that is one 5 MB row beside
+replaces the earlier, an identical one is the same row, so a host's duplicate call returns the same id); that is one row of at most `IMPORT_MAX_BYTES` beside
 the five link rows already allowed (the link cap, the replacement of the oldest waiting link and the list of held
 files count links only: C `test_a_dropped_file_is_not_one_of_the_five_links_and_is_not_listed_with_them`), expiring in one hour like a link, deleted by the daily retention job and when applied. Fetched
 rows have no ticket: `ticket_hash` starts `intake-`, which no sha256 digest can equal, so `/upload` can never open one (C
@@ -1289,11 +1289,76 @@ only when it is the one known sentinel `chat_upload` (ChatGPT mobile, issue #185
 others; a path by its root. (C `test_the_logged_shape_never_holds_a_value_that_could_be_a_token_or_a_name`.)
 
 **Egress and time from a Vercel function.** The fetch is an outbound HTTPS request from the same function that answers the tool call
-(60 seconds maximum, `vercel.json`): the fetch is capped at 15 seconds, leaving the rest for the preview. **The intake takes 5 MB, not the
-importer's 20 MB** (review of PR #478): measured in a lane process, a 17.9 MB, 190,000-row file took 8.9 s and about 450 MB of memory for
-one request, for any token, read-only included, 10 calls a minute per person; the upload page is cut near 4 MB by the hosting platform
-in production, so 20 MB had never been processed there. Memory on Vercel is not measured. A larger file is answered `too_large`, naming
-'Import CSV' on the website. No change to the function's permissions or secrets.
+(60 seconds maximum, `vercel.json`): the fetch is capped at 15 seconds, leaving the rest for the preview. **Every path takes the same size, `IMPORT_MAX_BYTES` (8 MiB by default).** History: the first draft took the importer's own 20 MB, and the
+review of PR #478 measured a 17.9 MB, 190,000-row file at 8.9 s and about 450 MB of memory for one request, so the intake was cut to 5 MB;
+now the importer (`/imports`, `/imports/preview`), the upload page, `import_collection_csv`, the fetch and the parts share one setting
+(vault-0n9.3). 8 MiB is a **product rule**, about 4.9 times the largest real export seen (1.7 MB, about 7,000 cards, 243 bytes a row, so
+about 34,000 rows in 8 MiB), and not a figure derived from the memory of an instance (the size of a Vercel 'standard' function has not
+been read). What it costs is measured: `tests/test_import_size_memory.py` builds a synthetic file of exactly the limit (77,579 short rows,
+the worst case, and 35,078 rows of the real shape) and runs the existing preview path and the assembled-parts path: the process peak
+resident size is 327 MB (preview) and 342 MB (parts) where it held 152 MB before, in 3.3 s and 6.8 s, and the test fails above 512 MB.
+One import at the limit fits a 1 GB function with room to spare; four at the same moment would not, and the instance size and its
+concurrency are **not verified**. The hosting platform's request limit (about 4.5 MB) bounds each request, so each part and each
+upload-page file, not the total. A larger file is answered `too_large` in one sentence, nothing staged. No change to the function's
+permissions or secrets.
+
+**A file sent as text in ordered parts** (content parts, vault-0n9.3, 2026-10-18). What changed: in the ChatGPT desktop app's code
+mode (Codex) the model is given **no file object** for a dropped file, only the text 'Files mentioned by the user: <local path>' (Codex
+rollouts of 2026-10-17). It can read that file with its shell and call the Vault's tool in the same script, so `import_collection_file`
+also takes the file as `text` in ordered parts (`text`, `part`, `parts`, `lines`, `sum`). Files: `vault/file_parts.py` (the checksum, the
+checks, the script the assistant is told to run), `vault/intake.py` (the route: the same path, the same tool, the same
+`READ_ONLY_POSTS` entry), `vault/models.py` and migration 0124 (`staged_upload_parts`). C = `tests/test_file_parts_route.py`, `tests/test_file_parts.py`,
+`tests/test_import_size_limit.py`, `tests/test_import_size_memory.py`.
+
+- **No new network surface.** Nothing is fetched and nothing is sent anywhere: a part is text in the body of the same authenticated call a
+  `file` object arrives in. The shell read happens on the person's own computer, by the person's own assistant, under that app's own
+  sandbox; the Vault is not involved in it and learns only the text it is sent. Authentication, scopes and `READ_ONLY_POSTS` are
+  unchanged: a read-only connection can send parts and read the preview, and importing is still `confirm_staged_upload`, write scope,
+  bound to the preview's `content_hash` (C `test_a_read_only_connection_can_send_parts_and_see_the_preview_but_cannot_import_them`).
+- **Size and memory caps.** The stored parts of a file are added up as each part arrives against `IMPORT_MAX_BYTES` (below); over it the
+  whole set is deleted with its parts and one sentence is the answer, nothing staged (C `test_parts_that_add_up_to_more_than_the_import_limit_are_dropped_and_nothing_is_staged`);
+  a single part over the limit is refused before anything is stored; at most 4096 parts a file. The file is assembled **once**, inside
+  the request that completes it, and the cost of that is measured (below). The hosting request limit (about 4.5 MB) bounds each part, not the total.
+- **Storage and retention.** One new table, `staged_upload_parts`: the staged upload's id, the part's number, the SHA-256 of the part and
+  its UTF-8 bytes; primary key (staged upload, number); `ON DELETE CASCADE` from `staged_uploads`. **The parts live exactly as long as the
+  staged upload**: one hour, deleted with it by the daily retention job and with the account, and deleted by the Vault as soon as the file
+  is complete (only the assembled file remains, as for any staged file; C `test_parts_expire_with_the_staged_upload_and_go_with_the_account`).
+  A person has **one** file in progress at a time (starting another deletes the unfinished one with its parts), and a file in progress
+  is not one of the five links (C `test_a_new_file_replaces_the_one_in_progress_and_a_file_in_progress_is_not_one_of_the_five_links`). Its
+  staged row has a `ticket_hash` starting `intake-` (no ticket opens it) and no content until it is complete. No route reads a part: a
+  file can be seen only as the preview of the complete, checked file, by its owner.
+- **Truncation guard.** Nothing is previewed, and nothing is staged for import, until every part is present and the whole has been checked:
+  the part count and that the numbers are contiguous, the **total line count** (counted by the assistant's shell on the whole file, not
+  from the parts it sent), the **checksum** (CRC-32 over the UTF-16 code units of the whole text, the same algorithm on both sides, tested
+  with non-ASCII text, CRLF, a byte-order mark and a character split between two parts) and that the parts join into valid text. A mismatch
+  deletes the set, answers one sentence, stages nothing and changes nothing (C `test_parts_that_do_not_match_the_file_are_refused_in_one_sentence_and_nothing_is_staged`,
+  `test_a_read_cut_short_can_never_become_a_partial_import`). The checksum protects against truncation and corruption, **not against a
+  malicious sender**: whoever holds the token could send any file anyway, and the import still needs the person's yes.
+- **Resending, order, what is missing.** The same part again (same number, same hash) is a no-op; a different text for a number replaces it
+  until the file is complete; a part sent after completion changes nothing and answers the same preview. Parts may arrive in any order, and
+  each answer names the parts still missing. Part writes of one person are ordered by the advisory lock the upload links use, and
+  `Idempotency-Key` is honoured as for every creating POST (C `test_a_part_sent_again_changes_nothing_and_a_different_text_for_its_number_replaces_it_until_the_file_is_complete`,
+  `test_the_answer_to_a_part_names_the_parts_still_missing`, `test_a_retry_with_the_same_key_replays_the_answer`).
+- **Rate.** One upload counts **once** against `IMPORT_LIMIT` (when its first part creates the staged upload), so a hundred parts do not
+  trip the 10 a minute; the parts count against a counter of their own, `IMPORT_PART_LIMIT` (default 1200 a minute per person: 512 parts is
+  the biggest file at the default part size, doubled for one retry in halves, rounded up). Both are per person, whichever token (C
+  `test_a_hundred_parts_count_once_against_the_import_allowance_and_a_new_upload_counts_again`, `test_the_parts_have_a_counter_of_their_own`).
+- **Another person** cannot reach a part or the file: the set's identity includes the person's id, the staged row is theirs, and another
+  person's id is the same 404 (C `test_another_person_cannot_reach_a_file_that_is_sent_in_parts`).
+- **What the model is told.** `next` in the answer to a call with neither `file` nor `text` (and in any `cannot_receive`) is a fixed text the
+  Vault wrote, with a script the assistant runs in its own sandbox (a JavaScript isolate with no network and no file system, and its shell,
+  which reads the path the person's own message names). It tells the assistant nothing to do to the person. Residual: a prompt injection in
+  the conversation could make the assistant read a different local file than the attached one and send it into the person's own account;
+  it would be staged (not imported) for an hour, answered as unreadable unless it is a collection, and never leaves that account.
+- **Logging.** The `file_intake_call` event has the same fixed fields; the new argument names (`text`, `part`, `parts`, `lines`, `sum`)
+  are on the fixed list of key names. `file_intake` gains the outcomes `part`, `mismatch` and `bad_part`, with counts only (the part's number,
+  the number of parts, byte counts, a fixed reason word). No text, checksum or line count is logged (C `test_the_log_holds_no_value_from_a_file_sent_in_parts`).
+- **Not verified in a real app:** that the ChatGPT desktop app's code mode runs the script as written (`tools.exec_command` with
+  `login:false`, parallel reads and calls, the `exec` tool's own 30-second yield, `original_token_count` marking a truncated read). The script
+  was run with Node against a stand-in shell and against the real Windows PowerShell 5.1 and 7, on synthetic files only
+  (C `test_the_script_works_with_the_real_powershell_for_a_path_with_spaces_and_an_apostrophe`, which runs where PowerShell exists).
+- **A finding, not a decision of this route:** a CRLF Dragon Shield file whose first line is `"sep=,"` is not recognised by the library's
+  format detection on any route (the upload page answers unreadable too).
 
 Residual risks, stated:
 
