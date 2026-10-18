@@ -8,7 +8,9 @@ jobs:
     timeout-minutes: 60  # the suite takes about 30 minutes; a hung step must not run for GitHub's default six hours
     services:
       postgres:  # the Vault runs on Postgres only (Neon in production): so do the tests
-        image: public.ecr.aws/docker/library/postgres:16  # the official image from AWS public ECR: Docker Hub rate-limits anonymous runners (#424)
+        # The official image through Google's Docker Hub mirror (same digest as Docker Hub's library/postgres:16):
+        # anonymous pulls from Docker Hub (#424) and then public ECR ("toomanyrequests", vault-1dm) stalled CI.
+        image: mirror.gcr.io/library/postgres:16
         env:
           POSTGRES_USER: vault
           POSTGRES_PASSWORD: vault
