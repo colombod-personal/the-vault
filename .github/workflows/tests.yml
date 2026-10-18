@@ -6,17 +6,11 @@ jobs:
   test:
     runs-on: ubuntu-24.04  # pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19 (#180); move deliberately
     timeout-minutes: 60  # the suite takes about 30 minutes; a hung step must not run for GitHub's default six hours
-    permissions:
-      contents: read
-      packages: read  # pull the postgres mirror below with the job's own token
     services:
       postgres:  # the Vault runs on Postgres only (Neon in production): so do the tests
-        # Our own copy of the official image (mirror-postgres.yml, weekly, digest checked): the anonymous pulls from
-        # Docker Hub (#424) and then public ECR ("toomanyrequests", vault-1dm) stalled CI on #478, #480 and #481.
-        image: ghcr.io/colombod-personal/postgres:16
-        credentials:
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
+        # The official image through Google's Docker Hub mirror (same digest as Docker Hub's library/postgres:16):
+        # anonymous pulls from Docker Hub (#424) and then public ECR ("toomanyrequests", vault-1dm) stalled CI.
+        image: mirror.gcr.io/library/postgres:16
         env:
           POSTGRES_USER: vault
           POSTGRES_PASSWORD: vault
