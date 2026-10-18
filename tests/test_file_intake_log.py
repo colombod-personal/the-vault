@@ -173,7 +173,7 @@ def test_hostile_values_never_reach_the_log_and_the_record_is_bounded(app, agent
 def test_the_record_is_bounded_even_when_every_list_is_full(app, agent, bot, caplog):
     caplog.set_level(logging.DEBUG)
     intake_with(app)
-    names = dict.fromkeys(sorted(mcp.KEY_VOCABULARY)[:20], 1)  # more names than the cap
+    names = dict.fromkeys(sorted(mcp.KEY_VOCABULARY - {"file"})[:20], 1)  # more names than the cap
     post(bot, token_of(agent), {"file": names, **names}, **{"MCP-Protocol-Version": "2025-06-18", "User-Agent": " ".join(f"{'p' * 30}/{'9' * 15}" for _ in range(9))})
     (line,) = raw_lines(caplog)
     event = json.loads(line)
