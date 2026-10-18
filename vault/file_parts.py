@@ -138,7 +138,8 @@ def assemble(chunks: Iterable[bytes], lines: int, chars: int, total_sum: int) ->
 # The script a coding assistant runs. <PATH> is the only thing it fills in, and it goes into the script as a JavaScript string and
 # reaches the shell only as hex digits, never as text of a command. Every PowerShell command is one line with single quotes only
 # and no backslash (a command line may mangle double quotes), and prints only ASCII (the part is JSON-escaped, so no console encoding
-# can change it). One small read first prints four numbers (the text's length in UTF-16 code units, its line feeds, the bytes after any
+# can change it). One tiny command first prints the file's length from FileInfo, and nothing is read when that is over the size limit; then one
+# small read prints four numbers (the text's length in UTF-16 code units, its line feeds, the bytes after any
 # byte-order mark, and the mark's size) that no output cap can cut; each part is then read by byte offsets, cut forward to a character
 # boundary, so no part holds half a character and no read opens the whole file. A read is rejected when it reports more than
 # REJECT_TOKENS tokens, does not parse or is not valid UTF-8; the file is then read again in halves, once. Nothing is sent until the
@@ -151,10 +152,13 @@ const crc=a=>{let h=-1;for(const s of a)for(let i=0;i<s.length;i++){const u=s.ch
 const last=r=>r.output.trim().split(/\r?\n/).pop();
 const H=Array.from({length:P.length},(_,i)=>P.charCodeAt(i).toString(16).padStart(4,"0")).join("");
 const rd="$h='"+H+"';$p=-join(0..($h.Length/4-1)|%{[char][Convert]::ToInt32($h.Substring($_*4,4),16)});";
-const r0=await sh(rd+"$b=[IO.File]::ReadAllBytes($p);$o=0;if($b.Length -ge 3 -and $b[0] -eq 239 -and $b[1] -eq 187 -and $b[2] -eq 191){$o=3};$t=[Text.UTF8Encoding]::new($false,$true).GetString($b,$o,$b.Length-$o);[Console]::Out.Write($t.Length.ToString()+','+($t.Split([char]10).Length-1)+','+($b.Length-$o)+','+$o)");
-const m=!(r0.original_token_count>=100)&&/^\d+,\d+,\d+,\d+$/.test(last(r0))?last(r0).split(",").map(Number):null;
+const r1=await sh(rd+"[Console]::Out.Write([IO.FileInfo]::new($p).Length)"),sz=!(r1.original_token_count>=100)&&/^\d+$/.test(last(r1))?Number(last(r1)):NaN;
+const big={status:"too_large",changed:false,say:@SAYBIG@},ok=["part_received","uploaded","already_staged"];
 let res;
-if(m){const[L,K,Z,O]=m,big={status:"too_large",changed:false,say:@SAYBIG@},ok=["part_received","uploaded","already_staged"];
+if(sz>@MAXB@+3)res=big;
+const r0=res||isNaN(sz)?null:await sh(rd+"$b=[IO.File]::ReadAllBytes($p);$o=0;if($b.Length -ge 3 -and $b[0] -eq 239 -and $b[1] -eq 187 -and $b[2] -eq 191){$o=3};$t=[Text.UTF8Encoding]::new($false,$true).GetString($b,$o,$b.Length-$o);[Console]::Out.Write($t.Length.ToString()+','+($t.Split([char]10).Length-1)+','+($b.Length-$o)+','+$o)");
+const m=r0&&!(r0.original_token_count>=100)&&/^\d+,\d+,\d+,\d+$/.test(last(r0))?last(r0).split(",").map(Number):null;
+if(m){const[L,K,Z,O]=m;
 if(Z>@MAXB@)res=big;
 for(let N=@PART@;N>=@MIN@&&!res;N=N>>1){
  const n=Math.max(1,Math.ceil(Z/N)),rs=[];

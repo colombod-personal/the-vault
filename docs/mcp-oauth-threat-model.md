@@ -1296,8 +1296,11 @@ now the importer (`/imports`, `/imports/preview`), the upload page, `import_coll
 not been read): 8 MiB is about 4.9 times the largest real export seen (1.7 MB, about 7,000 cards, 243 bytes a row, so about 34,000 rows in
 8 MiB), and 100,000 rows is about 7 times the owner's 14,597. **The size alone does not bound memory**: the review of PR #483 built a file of
 exactly 8 MiB with 29-byte rows (291,740 rows) and measured a peak of 577 MB (preview) and 595 MB (parts), more than the ceiling the first
-draft claimed as "the worst case". The row limit closes that: it is a bounded, quote-aware count of CSV **records** (`importer.record_count`: a record ends at an unquoted LF, CRLF or bare CR, blank
-lines are none, one pass, constant memory, stopping at the limit), run on the file as it came, before `restore_csv` rewrites a marked file row
+draft claimed as "the worst case". The row limit closes that: it is a bounded, quote-aware count of CSV **records** (`importer.record_count`, with the rules of the `csv` module the formats read with: a quote opens a quoted field only at the **start** of a
+field, so `5" Wall` is ordinary text and cannot hide the rows after it (the review's file of one stray quote and 291,740 rows counted 2
+records before and 291,742 now); the delimiter is the one a `sep=X` first line declares, else a comma; a record ends at an unquoted LF, CR or CRLF;
+blank and whitespace-only lines are none; one pass over the quotes only, constant memory, stopping at the limit; C `test_the_preflight_agrees_with_the_csv_module_on_what_a_record_is`,
+`test_a_stray_quote_cannot_hide_the_rows_after_it_from_the_row_guard`), run on the file as it came, before `restore_csv` rewrites a marked file row
 by row and before any entry is built, on every path (and again on the parsed rows), so that file is refused in a fraction of a second with one sentence and nothing staged (C `test_the_row_limit_is_a_setting_with_a_default_and_a_file_of_tiny_rows_is_refused_before_it_is_parsed`,
 `test_every_path_refuses_a_file_over_the_row_limit_in_one_sentence_and_stages_nothing`). What the two limits together let in is measured:
 `tests/test_import_size_memory.py` builds a synthetic file of exactly 8 MiB with exactly 100,000 rows, every row matched to the catalog, and runs the
@@ -1368,8 +1371,8 @@ checks, the script the assistant is told to run), `vault/intake.py` (the route: 
   staged upload (and undone with it when the person is over the allowance), so a hundred parts do not trip the 10 a minute and eight
   first parts sent at the same moment count once, not eight times (C `test_simultaneous_first_parts_of_one_file_count_once_against_the_import_allowance`); the parts count against a counter of their own, `IMPORT_PART_LIMIT`
   (default 1,200 a minute per person). The script sends parts of 16,384 bytes and, when a read comes back truncated, of 8,192 at the smallest,
-  and sends nothing until every read of a size has succeeded; it reads nothing at all when the first small read says the file is over
-  `IMPORT_MAX_BYTES` or would be more than 1,024 parts, and it stops at the first answer that is not progress (`bad_part`, `too_large`,
+  and sends nothing until every read of a size has succeeded; it reads nothing at all when the file's length, asked first on its own (`FileInfo`, a number; a 12 MiB file runs one
+  command), is over `IMPORT_MAX_BYTES`, or when the small read that follows says it would be more than 1,024 parts (C `test_a_file_far_over_the_limit_is_refused_from_its_length_alone_without_being_read`), and it stops at the first answer that is not progress (`bad_part`, `too_large`,
   `unreadable`, `mismatch`, a refusal), printing the Vault's sentence (C `test_the_script_stops_at_the_first_answer_that_is_not_progress_and_prints_the_vaults_sentence`,
   `test_a_file_over_the_size_limit_or_in_too_many_parts_is_not_read_at_all`): a file at the size limit is at most 8 MiB / 8,192 = 1,024 calls in one pass, so
   1,200 covers a pass with 17% to spare (a halving of the part size before the first send costs reads, not calls; a smaller part is never

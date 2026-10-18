@@ -180,6 +180,9 @@ def test_a_file_at_the_row_limit_is_taken(app, agent, monkeypatch):  # noqa: F81
     ("a\n\n\nb\n", 2), ("\r\n\r\na\r\n", 1), ("\n", 0),
     ('a,"x\ny\nz"\nb,"p\r\nq"\n', 2), ('"a""\n""b"\n"c"\n', 2), ('a,"x\ry"\rb\r', 2),
     ('"unterminated\nstill the same record', 1), ('x\n"unterminated\nmore', 2), ("'@x,1\n'@y,2\n", 2),
+    # a quote inside an unquoted cell is an ordinary character (the csv module's rule), a quote at the start of a field opens one
+    ('5" Wall,1\nb,2\n', 2), ('x",1\ny,2\nz,3\n', 3), ('a,5" Wall\nb,2\n', 2), ('a,"x\ny"\nb\n', 2), ('a, "x\ny"\nb\n', 3),
+    ('sep=;\na;"x\ny"\nb\n', 3), ('sep=;\na,"x\ny"\nb\n', 4), ('"sep=\t"\na\t"x\ny"\nb\n', 3), ('a\n   ', 1), ('a\n \t \n', 1),
 ], ids=lambda v: None)
 def test_records_are_counted_by_the_quote_state_for_lf_crlf_and_bare_cr_and_blank_lines_are_none(text, records):
     from vault import importer
@@ -232,3 +235,44 @@ def test_the_preflight_costs_little_on_the_biggest_file_the_limits_allow_and_on_
     quoted = '"Card Name","Quantity","Set"\n' + '"Sol Ring","1","C21"\n' * 100_000
     assert importer.record_count(quoted, 10**9) == 100_001
     assert time.perf_counter() - started < 6.0
+
+
+def test_the_preflight_agrees_with_the_csv_module_on_what_a_record_is():
+    """Review of PR 483 (thread, L1): a quote in the middle of a cell must not open a quoted field. The count is compared with
+    csv.reader's rows (a blank line is no record) on a few thousand short strings made of the characters that matter."""
+    import csv
+    import io
+    import random
+
+    from vault import importer
+    rng = random.Random(483)
+    for _ in range(4000):
+        text = "".join(rng.choice('a,"\n\r"') for _ in range(rng.randint(0, 14)))
+        rows = [r for r in csv.reader(io.StringIO(text, newline=""))]
+        assert importer.record_count(text, 10**9) == sum(1 for r in rows if r), repr(text)
+
+
+def test_a_stray_quote_cannot_hide_the_rows_after_it_from_the_row_guard():
+    """The shape from the review: one stray quote in a cell swallowed the rest of the file as 'one record' (2 records counted where
+    csv.reader sees 291,742), so the guard before the parse let 291,740 rows through."""
+    import csv
+    import io
+    import time
+
+    from vault import importer
+    text = 'Card Name,Quantity\nx",1\n' + "y,1\n" * 291_740
+    assert sum(1 for r in csv.reader(io.StringIO(text, newline=""))) == 291_742
+    started = time.perf_counter()
+    with pytest.raises(importer.ImportError_, match="too many rows"):
+        importer.read_file(text.encode())
+    assert time.perf_counter() - started < 1.0
+    assert importer.record_count(text, 10**9) == 291_742
+    five_inches = 'Card Name,Quantity\n' + "".join(f'5" Wall {n},1\n' for n in range(5))  # five rows with a quote inside the cell
+    assert importer.record_count(five_inches, 10**9) == 6
+
+
+def test_a_last_line_of_blanks_is_no_record_and_a_delimiter_declared_by_the_sep_line_is_the_one_a_quote_follows():
+    from vault import importer
+    assert importer.record_count("a\nb\n          ", 10**9) == 2 and importer.record_count("a\nb\n\t", 10**9) == 2
+    assert importer.record_count('sep=;\nx;"a\nb"\n', 10**9) == 2  # after a semicolon a quote opens a field: the sep line and one record
+    assert importer.record_count('sep=;\nx,"a\nb"\n', 10**9) == 3  # after a comma it does not: the file's delimiter is the semicolon

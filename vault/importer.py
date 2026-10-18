@@ -25,36 +25,49 @@ from .printing_lookup import front, printings_of
 
 EXACT = ("set_number", "id")
 HEADER_RECORDS = 2  # the records a file may carry besides its rows (a "sep=," line and a header): the row limit is checked on records first
-RECORD_END = re.compile(r"\r\n|\n|\r")
+LINE_ENDS = re.compile(r"[\r\n]+")
 
 
 def record_count(text: str, limit: int) -> int:
-    """How many CSV records ``text`` holds, counted before any entry is built: a record ends at a line feed, a carriage return or a CRLF
-    that is not inside double quotes, and a blank line is none (a quoted cell with line feeds in it is one record; a file whose lines end
-    in a bare CR has as many records as lines). One pass with the quote state, constant memory, and it stops as soon as the count is
-    over ``limit``. The quote is the only one of the formats this importer reads (Dragon Shield, Moxfield, Archidekt, generic CSV), and it
-    runs on the file as it came, before ``restore_csv`` rewrites a marked file row by row."""
-    n, pos, records, inside, pending = len(text), 0, 0, False, False
+    """How many CSV records ``text`` holds, counted before any entry is built, with the rules of the ``csv`` module the formats read with:
+    a quote opens a quoted field only at the START of a field (the start of the file, after the file's delimiter, after a line end), and
+    a quote anywhere else (``5" Wall``) is an ordinary character; inside a quoted field a doubled quote is a quote and a single one
+    closes it; a record ends at a line feed, a carriage return or both outside a quoted field; a line with nothing but blanks is no
+    record. One pass over the quotes only (so a long row costs nothing), constant memory, stopping as soon as the count is over
+    ``limit``. The delimiter is the one a ``sep=X`` first line declares (Dragon Shield), else a comma. It runs on the file as it came,
+    before ``restore_csv`` rewrites a marked file row by row."""
+    marker = text[:200].partition("\n")[0].strip('\r\n "')
+    delimiter = (marker[4:5] or ",") if marker.lower().startswith("sep=") else ","
+    starts = delimiter + "\r\n"
+    n, pos, records, last, pending = len(text), 0, 0, 0, False
     while pos < n:
         quote = text.find('"', pos)
-        if inside:
-            if quote < 0:
-                break
-            inside, pending, pos = False, True, quote + 1
-            continue
         end = n if quote < 0 else quote
-        last = pos
-        for found in RECORD_END.finditer(text, pos, end):
-            if pending or found.start() > last:
+        for found in LINE_ENDS.finditer(text, pos, end):
+            if pending or (found.start() > last and not text[last:found.start()].isspace()):
                 records += 1
                 if records > limit:
                     return records
             pending, last = False, found.end()
-        pending = pending or end > last
         if quote < 0:
             break
-        inside, pending, pos = True, True, quote + 1
-    return records + (1 if pending else 0)
+        if quote == 0 or text[quote - 1] in starts:  # a quote at the start of a field: quoted until a single quote
+            pos = quote + 1
+            while True:
+                closing = text.find('"', pos)
+                if closing < 0:
+                    return records + 1  # unterminated: the rest is one record
+                if text[closing + 1:closing + 2] == '"':
+                    pos = closing + 2
+                    continue
+                pos = closing + 1
+                break
+            pending = True
+        else:  # an ordinary character inside an unquoted field
+            pending, pos = True, quote + 1
+    return records + (1 if pending or (n > last and not text[last:n].isspace()) else 0)
+
+
 # The CSV formats other apps import: a cell that starts like a formula is written with a leading single quote, and
 # removed again when the Vault reads such a file back (vault/csv_safe.py, #351). Dragon Shield is neither.
 SAFE_CSV = ("moxfield", "archidekt", "csv")

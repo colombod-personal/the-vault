@@ -155,6 +155,7 @@ HARNESS = textwrap.dedent(r"""
       if (!hex) throw new Error('a command that does not begin by decoding the path from hex digits');
       let named = ''; for (let i = 0; i < hex[1].length; i += 4) named += String.fromCharCode(parseInt(hex[1].slice(i, i + 4), 16));
       if (named !== winPath) throw new Error('the shell was given another path: ' + named);
+      if (cmd.includes('FileInfo')) return String(opts.fake_size || fs.statSync(filePath).size);  // the length, without reading the file
       const bytes = fs.readFileSync(filePath);
       if (cmd.includes('ReadAllBytes') && opts.fake_size) return '1000,10,' + opts.fake_size + ',0';  // a file of any size, without making one
       if (cmd.includes('ReadAllBytes')) {
@@ -303,7 +304,7 @@ def test_a_truncated_first_read_sends_nothing_because_the_length_and_line_count_
     """Review of PR 483 (thread 1): the offsets list was read in one capped output; a truncated list could parse and make its last offset
     the file's length. Now the length and line count come from a four-number read of their own, and a cut one is not used."""
     ran = run_recipe(tmp_path, sample_text(300), cap=6)  # the four numbers are longer than 6 characters
-    assert ran["calls"] == [] and json.loads(ran["printed"][0]) == {"status": "not_read"} and ran["shellCalls"] == 1
+    assert ran["calls"] == [] and json.loads(ran["printed"][0]) == {"status": "not_read"} and ran["shellCalls"] == 2  # the length, then the cut read
 
 
 @needs_node
@@ -392,7 +393,7 @@ def test_a_file_over_the_size_limit_or_in_too_many_parts_is_not_read_at_all(tmp_
     assert ran["shellCalls"] == 1 and ran["sends"] == 0  # the one small read, nothing else
     monkeypatch.setenv("IMPORT_MAX_BYTES", str(64 * 1024 * 1024))  # a raised limit: 32 MiB is inside it but is 2,048 parts of 16 KiB
     ran = run_recipe(tmp_path, sample_text(10), fake_size=32 * 1024 * 1024)
-    assert json.loads(ran["printed"][0])["status"] == "too_large" and ran["shellCalls"] == 1 and ran["sends"] == 0
+    assert json.loads(ran["printed"][0])["status"] == "too_large" and ran["shellCalls"] == 2 and ran["sends"] == 0  # length, then the small read
     assert 8 * 1024 * 1024 // file_parts.MIN_PART_BYTES == file_parts.MAX_PASS_PARTS
 
 
@@ -406,3 +407,16 @@ def test_where_ci_runs_the_tests_it_has_node_and_powershell_so_the_real_shell_te
     """The tests above that need a real PowerShell are skipped where there is none. On the GitHub runner they must run."""
     if os.environ.get("GITHUB_ACTIONS"):
         assert NODE and POWERSHELL, "the runner has no Node or no PowerShell: the real-shell tests would be skipped"
+
+
+@needs_node
+def test_a_file_far_over_the_limit_is_refused_from_its_length_alone_without_being_read(tmp_path):
+    """Review of PR 483 (thread, L3/L4): the first command read the whole file, decoded and split it before JavaScript looked at a size.
+    The first command now asks only for the file's length (FileInfo), and nothing else runs when it is over the limit: a 12 MiB file."""
+    ran = run_recipe(tmp_path, "", raw=b"x" * (12 * 1024 * 1024))
+    printed = json.loads(ran["printed"][0])
+    assert printed["status"] == "too_large" and printed["say"].count(".") == 1
+    assert ran["shellCalls"] == 1 and "FileInfo" in ran["cmds"][0] and "ReadAllBytes" not in ran["cmds"][0] and ran["sends"] == 0
+    # over the limit even after allowing for a byte-order mark (three bytes that are not counted)
+    limit = 8 * 1024 * 1024
+    assert json.loads(run_recipe(tmp_path, "", raw=b"y" * (limit + 4))["printed"][0])["status"] == "too_large"
