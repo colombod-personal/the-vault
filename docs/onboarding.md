@@ -79,7 +79,7 @@ A new MCP prompt, available in every host that lists prompts, and quoted in the 
 
 ## Read-only versus write
 
-Read-only by default (OAuth consent has Write unticked; tokens are created read-only). The setup page does not ask for write. A later section, "Let it save decks and imports", says how to grant write: re-run the OAuth consent with Write ticked, or create a write token in Account, Agents and API. Destructive tools already preview and ask first.
+Read-only unless the app asks for write (the OAuth consent page shows Write, ticked, only when the app asked for it; the person can untick it; personal access tokens are created read-only). The setup page does not ask for write. A later section, "Let it save decks and imports", says what to do when the assistant has only read access: re-run the OAuth consent and leave Write ticked, or create a write token in Account, Agents and API. Destructive tools already preview and ask first.
 
 ## Safety (carried into every setup page)
 

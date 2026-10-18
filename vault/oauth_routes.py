@@ -257,15 +257,20 @@ def sign_in_page(req: AuthRequest, providers: list[str], passkeys: bool, dev_log
 
 
 def consent_page(req: AuthRequest, user: User, nonce: str) -> HTMLResponse:
-    write = ('<label><input type="checkbox" name="write" value="on"> <strong>Write.</strong> '
+    # Write is offered only when the app asked for it, and then it is ticked, like Read: the person who clicks Allow gets what the
+    # app asked for (a read-only grant made the import fail, vault-0n9.5; owner decision 2026-10-18). Unticking it grants read only.
+    # decide() still grants Write only when "write" is among the REQUESTED scopes, whatever the form says.
+    write = ('<label><input type="checkbox" name="write" value="on" checked> <strong>Write.</strong> '
              f"{esc(SCOPE_TEXT['write'])}</label>") if "write" in req.scopes else ""
+    write_note = ("<p class=small>Write is ticked because this app asked for it. Untick Write to let it read only.</p>"
+                  if write else "")
     never = "".join(f"<li>{esc(n)}</li>" for n in NEVER)
     body = (f"<h1>Connect {esc(client_label(req.client))} to your Vault?</h1><p>{who_is_asking(req.client)}</p>"
             f"{where_it_returns(req.redirect_uri)}"
             f'<p class=small>Signed in as <strong>{esc(user.name or user.email or "your account")}</strong>.</p>'
             '<form method="post" action="/oauth/authorize"><input type="hidden" name="nonce" value="' + esc(nonce) + '">'
             f"<fieldset><legend>It will be able to</legend><label><input type=\"checkbox\" checked disabled> "
-            f"<strong>Read.</strong> {esc(SCOPE_TEXT['read'])}</label>{write}</fieldset>"
+            f"<strong>Read.</strong> {esc(SCOPE_TEXT['read'])}</label>{write}</fieldset>{write_note}"
             f"<p>It will <strong>never</strong> be able to:</p><ul class=never>{never}</ul>"
             '<button type="submit" name="decision" value="allow">Allow</button>'
             '<button type="submit" name="decision" value="deny">Cancel</button>'

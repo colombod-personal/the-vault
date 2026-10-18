@@ -189,7 +189,7 @@ def test_the_consent_screen_names_the_app_the_scopes_and_what_is_never_allowed(c
     text = page.text
     assert "Twin Agent" in text and "app.example" in text
     assert "Read your collection" in text and "Make changes" in text
-    assert 'name="write"' in text and "checked" not in text.split('name="write"')[1].split(">")[0]  # write: opt in
+    assert 'name="write"' in text and "checked" in write_box(text)  # the app asked for it: ticked (vault-0n9.5)
     for never in ("Delete your account", "Export all your data", "Create or revoke access tokens"):
         assert never in text
     assert "will receive the answer" not in text  # an https redirect: only its host is shown
@@ -211,9 +211,74 @@ def test_read_only_request_shows_no_write_option(client):
     assert 'name="write"' not in client.authorize(scope=None).text  # no scope asked: read only
 
 
+def write_box(text: str) -> str:
+    """The Write checkbox of a consent page, exactly as rendered."""
+    return re.search(r'<input[^>]*name="write"[^>]*>', text).group(0)
+
+
+def test_write_is_ticked_on_the_consent_page_when_the_app_asked_for_it(client):
+    """vault-0n9.5 (owner: "Yes pre tick write too"): the person who only presses Allow gets what the app asked for."""
+    client.sign_in()
+    text = client.authorize(scope="read write").text
+    assert write_box(text) == '<input type="checkbox" name="write" value="on" checked>'  # ticked, and the person can untick it
+    assert '<input type="checkbox" checked disabled> <strong>Read.</strong>' in text  # Read: ticked and fixed
+    assert "Make changes: import collections" in text  # what Write allows is still stated, next to the box
+    assert "Untick Write to let it read only." in text  # and the page says read only is one click away
+    assert client.form_as_shown(client.authorize(scope="read write")).get("write") == "on"  # what a browser posts untouched
+
+
+def test_read_only_request_has_no_write_box_to_tick(client):
+    client.sign_in()
+    for asked in ("read", None):
+        text = client.authorize(scope=asked).text
+        assert 'name="write"' not in text and "Untick Write" not in text and "Make changes" not in text
+        assert "write" not in client.form_as_shown(client.authorize(scope=asked))
+
+
+def test_pressing_allow_on_the_page_as_shown_grants_what_the_app_asked_for(client):
+    client.sign_in()
+    page = client.authorize(scope="read write")
+    code = client.returned(client.answer_as_shown(page))["code"]
+    client.tokens = client.redeem(code).json()
+    assert client.tokens["scope"] == "read write"
+    names = {t["name"] for t in client.mcp("tools/list").json()["result"]["tools"]}
+    assert "save_deck" in names and "confirm_staged_upload" in names
+    read_only = client.returned(client.answer_as_shown(client.authorize(scope="read")))["code"]
+    assert client.redeem(read_only).json()["scope"] == "read"  # asked for read: read, as before
+
+
+def test_unticking_write_grants_read_only(client):
+    client.sign_in()
+    page = client.authorize(scope="read write")
+    form = client.form_as_shown(page)
+    form.pop("write")  # the person unticks Write: a browser then sends no "write" field at all
+    res = client.browser.post("/oauth/authorize", data=form, follow_redirects=False)
+    assert res.status_code == 303
+    tokens = client.redeem(client.returned(res)["code"]).json()
+    assert tokens["scope"] == "read"
+    client.tokens = tokens
+    names = {t["name"] for t in client.mcp("tools/list").json()["result"]["tools"]}
+    assert "save_deck" not in names and "confirm_staged_upload" not in names
+
+
+def test_write_is_never_granted_to_an_app_that_did_not_ask_for_it(client):
+    """The server checks the REQUESTED scopes, not the form: a posted write=on changes nothing for a read-only request."""
+    client.sign_in()
+    for asked in ("read", None):
+        page = client.authorize(scope=asked)
+        res = client.answer(page, write=True)  # a hand-made form that ticks a box the page never showed
+        assert res.status_code == 303
+        tokens = client.redeem(client.returned(res)["code"]).json()
+        assert tokens["scope"] == "read"
+        client.tokens = tokens
+        assert "save_deck" not in {t["name"] for t in client.mcp("tools/list").json()["result"]["tools"]}
+        saved = client.tool("save_deck", name="x", text="1 Sol Ring")
+        assert "error" in saved or saved["result"]["isError"]
+
+
 def test_write_is_never_granted_without_the_person_choosing_it(app, client):
     client.sign_in()
-    assert client.approve(scope="read write")  # allowed, write box left unticked
+    assert client.approve(scope="read write")  # allowed, write box unticked (the twin's default is a person who unticked it)
     tokens = client.redeem(client.approve(scope="read write")["code"]).json()
     assert tokens["scope"] == "read"
     client.tokens = tokens

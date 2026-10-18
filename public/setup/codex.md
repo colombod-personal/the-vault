@@ -20,7 +20,7 @@ The Vault gives Codex Magic: The Gathering rules (read live from Wizards of the 
 
 1. ASSISTANT: Add the server: `codex mcp add vault --url https://mtgvault.cards/api/mcp`.
 2. ASSISTANT: Start the sign-in: `codex mcp login vault`. It opens the browser. That Codex starts the sign-in for the Vault, with no client registered by hand, is not verified yet.
-3. PERSON: In the browser, sign in to The Vault with your Vault account and approve. Read-only is the default; the Vault's approval page has Write unticked and it should stay that way. Then come back here.
+3. PERSON: In the browser, sign in to The Vault with your Vault account and approve. On the Vault's approval page Write is ticked when the app asked for it (vault-0n9.5): leave it ticked if you want the assistant to save decks and import collections, or untick it to let the assistant only read. Then come back here.
 4. ASSISTANT: Confirm with `codex mcp list`: vault should be listed and enabled.
 5. PERSON: Optional: install the Vault's skills (they tell the assistant how to answer) in your own terminal: `npx skills add colombod-personal/the-vault`. It downloads and runs a package, so the assistant does not run it for you.
 
@@ -35,7 +35,7 @@ The Vault gives Codex Magic: The Gathering rules (read live from Wizards of the 
 
 ## Check it worked
 
-1. ASSISTANT: call `whoami`. Expected: the signed-in name, the scopes (`read`; `write` only if the person ticked it) and the data versions the Vault holds (the Comprehensive Rules edition, card data and price dates). `whoami` never shows the collection.
+1. ASSISTANT: call `whoami`. Expected: the signed-in name, the scopes (`read`; `write` only if the app asked for it and the person left it ticked) and the data versions the Vault holds (the Comprehensive Rules edition, card data and price dates). `whoami` never shows the collection.
 2. ASSISTANT: call `get_collection_summary`. Expected: totals; if it reports no cards, nothing is imported yet (see the table below).
 
 ## If it fails
@@ -46,7 +46,7 @@ The Vault gives Codex Magic: The Gathering rules (read live from Wizards of the 
 | Needs authentication, or a 401 | The sign-in is not finished | Run the host's sign-in step again; the browser must be able to reach mtgvault.cards |
 | whoami works but get_collection_summary reports no cards | Nothing is imported yet (whoami never shows the collection) | Tell the person to import first: sign in at https://mtgvault.cards and use Import (Dragon Shield, Moxfield or generic CSV), then ask again |
 | The tool list is empty, or whoami fails | A connection or configuration problem (a read-only caller still gets every tool that does not write, so an empty list is never the read-only grant) | Check the address is exactly `https://mtgvault.cards/api/mcp`, sign in again, and look at `codex mcp list` |
-| Tools are listed but there are no write tools (save_deck, update_deck, import_collection_csv) | Read-only access, which is the default and intended | Explain that; if the person wants saving, see Let it save decks and imports under Then |
+| Tools are listed but there are no write tools (save_deck, update_deck, import_collection_csv) | Read-only access: the app did not ask for Write, or Write was unticked on the Vault's approval page | Explain that; if the person wants saving, see Let it save decks and imports under Then |
 | It says the server already exists, or The Vault is already added | A connector or server named vault was added before | Do not add a second one: check it with `codex mcp list`, and reconnect it or sign in again if it is not connected |
 | Wrong address: the entry shows an address other than the production one | A typo, or a test address | Ask the person, then remove the entry and add it again with exactly `https://mtgvault.cards/api/mcp` |
 
@@ -66,7 +66,7 @@ The Vault gives Codex Magic: The Gathering rules (read live from Wizards of the 
 
 ### Let it save decks and imports
 
-1. PERSON: Only if you want the assistant to save decks or import collections: disconnect The Vault in Codex, connect it again, and tick Write on the Vault's approval page. Setup never asks for this.
+1. PERSON: Only if the assistant says it has read-only access and you want it to save decks or import collections: disconnect The Vault in Codex, connect it again, and leave Write ticked on the Vault's approval page (the page shows Write only when the app asks for it). Setup never asks for this.
 2. ASSISTANT: Destructive tools preview first and ask before they run; show the preview and wait for the person's yes.
 
 ## Never

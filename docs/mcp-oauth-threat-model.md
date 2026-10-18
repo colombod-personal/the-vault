@@ -235,8 +235,8 @@ against it and what is built (a recent sign-in, re-confirmed by a passkey, a pro
   (Hangul filler, braille blank), with whitespace collapsed; a name with nothing left is refused (C `test_names_lose_invisible_characters_and_keep_their_host_line`).
 - A name is only what the app says. The title is **name followed by the host that identifies it** ("Twin Agent (app.example)"),
   an IDN host shows its Unicode form and its technical (punycode) form with a warning, and a self-registered app is titled
-  "Unverified app: <name>" with a visible warning; write stays unticked (C `test_a_named_app_is_shown_with_its_address_next_to_the_name`,
-  `test_a_look_alike_address_shows_its_technical_form`, `test_a_self_registered_app_is_titled_unverified_and_write_stays_unticked`).
+  "Unverified app: <name>" with a visible warning; for such an app too, Write is ticked only when the app asked for it (section 9, "Write is ticked when the app asked for it"; C `test_a_named_app_is_shown_with_its_address_next_to_the_name`,
+  `test_a_look_alike_address_shows_its_technical_form`, `test_a_self_registered_app_is_titled_unverified_and_write_is_ticked_only_because_it_asked`).
 - The consent page names the client (name from its metadata, escaped, control and bidi characters removed),
   the **web address that identifies it** (the host of the `client_id` URL, which a document cannot fake),
   says plainly when the client is **unverified** (self-registered), the scopes in plain language, what it can
@@ -265,8 +265,10 @@ against it and what is built (a recent sign-in, re-confirmed by a passkey, a pro
   endpoints, which take no cookies, accept cross-origin calls (C `test_registration_can_be_called_from_a_browser_*`).
 
 ### 9. Scope escalation
-- No `scope` means `read`. `write` is offered only when the client asks for it and is an **unticked** box on the
-  consent page; whatever the client asks, the grant holds only what the person ticked (M `test_write_is_never_granted_without_the_person_choosing_it`).
+- No `scope` means `read`. `write` is offered only when the client asks for it and is a **ticked** box on the
+  consent page (owner decision 2026-10-18, vault-0n9.5; before it the box was unticked: see "Write is ticked when the app asked for it" below);
+  the grant holds only what the app asked for **and** the person left ticked (M `test_write_is_never_granted_without_the_person_choosing_it`
+  for an unticked box, `test_write_is_never_granted_to_an_app_that_did_not_ask_for_it` for a form that posts `write=on` to a read-only request).
 - Unknown scopes are `invalid_scope`. A refresh may narrow scopes, never widen them (M `test_refresh_cannot_widen_the_scopes`).
 - The REST layer enforces scopes: a read grant gets 403 `insufficient_scope` on writes, and write tools are not listed, with two exceptions: `start_collection_upload` and `POST /api/v1/uploads` (a link that waits for the person; the section "The upload link for a read-only connection" below says what it can cause), and `sign_out` with `POST /api/v1/agent/sign-out` (ends only the caller's own OAuth connection; the section "Signing out from the chat" below).
 
@@ -1307,3 +1309,39 @@ Residual risks, stated:
 - What ChatGPT really sends a remote plugin is not known before the first real run: the R1 probe on the desktop app handed a
   **local path** to a local server; mobile is reported to send the string `chat_upload`. Both are answered by the one-sentence
   refusal, and the evidence they leave is the logged shape.
+
+## Write is ticked when the app asked for it (vault-0n9.5, 2026-10-18)
+
+**What changed.** On the consent page (`consent_page` in `vault/oauth_routes.py`) the Write box was unticked, so a person who simply pressed
+Allow gave a read-only grant and an import from the chat could not finish (the assistant said to reconnect and tick Write; found in the real
+ChatGPT app on 2026-10-17, vault-0n9). The box is now **ticked when the app asked for `write`**, shown plainly with the same text as before
+(`SCOPE_TEXT["write"]`) and one sentence under the boxes ("Write is ticked because this app asked for it. Untick Write to let it read only.").
+Owner decision, verbatim (vault-0n9.5): "Yes pre tick write too". Read stays ticked and disabled. A person who unticks Write grants read only.
+
+**What does not change.**
+- `decide()` grants `write` only when the form says `write=on` **and** `write` is among the scopes the app *requested* (checked against the
+  authorization request kept on the server, not the form): an app that asked only for `read` can never be granted Write, whatever is posted
+  (C `test_write_is_never_granted_to_an_app_that_did_not_ask_for_it`). No `scope` still means `read`. A refresh still never widens.
+- The page is still only shown after a sign-in no older than the recent-sign-in window, the form still needs this browser's one-time nonce
+  (sections 7 and 8), the consent is still asked every time, and "Use a different account" and Cancel are as before.
+- Lifetimes are as before: access token one hour, refresh token 30 days sliding within an absolute 90 days from consent. The person can
+  disconnect the app under Connected apps, or end the connection from the chat with `sign_out`; either stops both tokens at once (section 15).
+- What Write allows is as before. The destructive tools (a replacing or merging import through `confirm_staged_upload`, resets, deletions,
+  `sign_out`) still preview first and need an explicit `confirm`, which is the person's yes in the chat. Ordinary writes that never needed
+  one (for example saving a deck, creating a bucket, tagging up to 25 cards, notes) still run without a separate confirmation.
+
+**The new risk: consent fatigue.** A person who presses Allow without reading used to give a read-only grant and now gives Write when the app
+asked for it. The ordinary writes above can then be made by the app without a further question, and a prompt-injected assistant (text in a
+deck, a card note, a web page) could make them. The destructive ones still need the person's yes. Whether a host also asks per tool call
+before a write is the host's behaviour and is not verified here.
+
+**Why it is accepted.** The owner decided it (2026-10-18), because the read-only default made the main use (importing from the chat) fail for
+the person who did nothing wrong, and a connector that needs a second visit to a consent page is the surprise this change removes. Write
+still needs the app to ask for it; the box is shown, labelled and one click from read-only; the damage an ordinary write can do is bounded
+by the Vault's own limits (a tagging call over 25 cards comes back as a preview, destructive tools preview and need a confirm, a reset has an undo);
+the grant is revocable at any time and lapses as above. Not accepted, and not done: Write for an app that did not ask for it; ticking
+anything beyond the requested scopes; any change to personal access tokens.
+
+**Residual.** An attacker who gets a person to authorize an app (consent phishing, section 7) now gets Write if the attacker's app asked for it
+and the person did not look. The look-alike and unverified warnings are the mitigation, unchanged and not eliminated. Not verified in a real
+app: how claude.ai, ChatGPT and Codex draw the page (it is the Vault's own page in the browser) and what each host shows around a write call.

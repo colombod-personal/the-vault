@@ -21,12 +21,12 @@ Use a throwaway Vault account with a small imported collection. Do not use someo
 2. Create a connector. URL: `https://<host>/api/mcp`. Authentication: **OAuth**. Leave client id and secret empty (it uses metadata documents or dynamic registration).
 3. Press Connect. Expected: a browser window opens at `https://<host>/oauth/authorize?...`.
    - [ ] If not signed in, the Vault's sign-in page shows the client name. Sign in (try a provider, then repeat once with a passkey).
-   - [ ] The consent screen names the app and its web address (or says "Unverified" for a registered one), lists Read, offers Write **unticked**, and lists what is never allowed.
-   - [ ] Allow with Read only. ChatGPT reports the connection and lists tools. No write tools appear except `import_collection_file` (a file dropped in the chat) and `start_collection_upload` (the link for a file; they import nothing) and `sign_out` (ends only this connection; destructive hint, ask before confirming).
+   - [ ] The consent screen names the app and its web address (or says "Unverified" for a registered one), lists Read, offers Write **ticked** (it asked for it; the box can be unticked), and lists what is never allowed.
+   - [ ] Untick Write and Allow, for the read-only run. ChatGPT reports the connection and lists tools. No write tools appear except `import_collection_file` (a file dropped in the chat) and `start_collection_upload` (the link for a file; they import nothing) and `sign_out` (ends only this connection; destructive hint, ask before confirming).
 4. In a new chat, enable the connector and ask: "Call the Vault's whoami tool." Expected: it names your account, the scopes you allowed (`read`, plus `write` only if ticked) and the data versions (Comprehensive Rules edition, card data and price dates).
    - [ ] `whoami` answers with the Comprehensive Rules edition (`rules_version`), not null.
    Then ask: "What is in my Vault collection summary?" Expected: it calls `get_collection_summary` and answers with your totals.
-5. Disconnect and reconnect, this time ticking **Write**. Ask it to save a small deck. Expected: `save_deck` works.
+5. Disconnect and reconnect, this time leaving **Write** ticked. Ask it to save a small deck. Expected: `save_deck` works.
 6. Note exactly: the `client_id` ChatGPT used (from the Vault logs or the Connected apps list), whether it fetched a metadata document or registered itself, the `redirect_uri`, the scopes it asked for, and whether it sent `resource`.
    - [ ] Account, Connected apps lists it with its name, scopes and a recent "last used". Revoke it there; the next tool call in ChatGPT fails and asks to reconnect.
 7. Wait more than an hour (access tokens last 1 hour) and use the connector again.

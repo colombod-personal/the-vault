@@ -32,7 +32,7 @@ The Vault gives GitHub Copilot Magic: The Gathering rules (read live from Wizard
      }
    }
    ```
-2. PERSON: Start the sign-in: in a Copilot CLI session run `/mcp auth vault`; the browser opens. Sign in to The Vault with your Vault account and approve. Read-only is the default; the Vault's approval page has Write unticked and it should stay that way. That Copilot CLI starts the sign-in for the Vault is documented for remote servers but not verified yet. If the CLI offers no sign-in for this server, stop: this page does not offer another route.
+2. PERSON: Start the sign-in: in a Copilot CLI session run `/mcp auth vault`; the browser opens. Sign in to The Vault with your Vault account and approve. On the Vault's approval page Write is ticked when the app asked for it (vault-0n9.5): leave it ticked if you want the assistant to save decks and import collections, or untick it to let the assistant only read. That Copilot CLI starts the sign-in for the Vault is documented for remote servers but not verified yet. If the CLI offers no sign-in for this server, stop: this page does not offer another route.
 3. ASSISTANT: Confirm the server with `/mcp`, which lists the servers. The exact status command is not verified yet.
 
 ### VS Code (GitHub Copilot)
@@ -49,7 +49,7 @@ The Vault gives GitHub Copilot Magic: The Gathering rules (read live from Wizard
    }
    ```
 2. PERSON: Or, instead of the file, open this install link, which has the same configuration in it (documented by VS Code, not verified yet on a real run): vscode:mcp/install?%7B%22name%22%3A%22vault%22%2C%22type%22%3A%22http%22%2C%22url%22%3A%22https%3A%2F%2Fmtgvault.cards%2Fapi%2Fmcp%22%7D
-3. PERSON: Approve the server when VS Code asks, then sign in to The Vault in the browser when it opens on the first connection. Read-only is the default; the Vault's approval page has Write unticked and it should stay that way.
+3. PERSON: Approve the server when VS Code asks, then sign in to The Vault in the browser when it opens on the first connection. On the Vault's approval page Write is ticked when the app asked for it (vault-0n9.5): leave it ticked if you want the assistant to save decks and import collections, or untick it to let the assistant only read.
 4. ASSISTANT: Use Copilot Chat in agent mode, and check that the Vault's tools are listed under the tools button.
 
 ### GitHub Copilot desktop app
@@ -59,7 +59,7 @@ The Vault gives GitHub Copilot Magic: The Gathering rules (read live from Wizard
 
 ## Check it worked
 
-1. ASSISTANT: call `whoami`. Expected: the signed-in name, the scopes (`read`; `write` only if the person ticked it) and the data versions the Vault holds (the Comprehensive Rules edition, card data and price dates). `whoami` never shows the collection.
+1. ASSISTANT: call `whoami`. Expected: the signed-in name, the scopes (`read`; `write` only if the app asked for it and the person left it ticked) and the data versions the Vault holds (the Comprehensive Rules edition, card data and price dates). `whoami` never shows the collection.
 2. ASSISTANT: call `get_collection_summary`. Expected: totals; if it reports no cards, nothing is imported yet (see the table below).
 
 ## If it fails
@@ -70,7 +70,7 @@ The Vault gives GitHub Copilot Magic: The Gathering rules (read live from Wizard
 | Needs authentication, or a 401 | The sign-in is not finished | Run the host's sign-in step again; the browser must be able to reach mtgvault.cards |
 | whoami works but get_collection_summary reports no cards | Nothing is imported yet (whoami never shows the collection) | Tell the person to import first: sign in at https://mtgvault.cards and use Import (Dragon Shield, Moxfield or generic CSV), then ask again |
 | The tool list is empty, or whoami fails | A connection or configuration problem (a read-only caller still gets every tool that does not write, so an empty list is never the read-only grant) | Check the address is exactly `https://mtgvault.cards/api/mcp`, sign in again, and look at `/mcp` in Copilot CLI or the server list in VS Code |
-| Tools are listed but there are no write tools (save_deck, update_deck, import_collection_csv) | Read-only access, which is the default and intended | Explain that; if the person wants saving, see Let it save decks and imports under Then |
+| Tools are listed but there are no write tools (save_deck, update_deck, import_collection_csv) | Read-only access: the app did not ask for Write, or Write was unticked on the Vault's approval page | Explain that; if the person wants saving, see Let it save decks and imports under Then |
 | It says the server already exists, or The Vault is already added | A connector or server named vault was added before | Do not add a second one: check it with `/mcp` in Copilot CLI or the server list in VS Code, and reconnect it or sign in again if it is not connected |
 | Wrong address: the entry shows an address other than the production one | A typo, or a test address | Ask the person, then remove the entry and add it again with exactly `https://mtgvault.cards/api/mcp` |
 
@@ -90,7 +90,7 @@ The Vault gives GitHub Copilot Magic: The Gathering rules (read live from Wizard
 
 ### Let it save decks and imports
 
-1. PERSON: Only if you want the assistant to save decks or import collections: disconnect The Vault in GitHub Copilot, connect it again, and tick Write on the Vault's approval page. Setup never asks for this.
+1. PERSON: Only if the assistant says it has read-only access and you want it to save decks or import collections: disconnect The Vault in GitHub Copilot, connect it again, and leave Write ticked on the Vault's approval page (the page shows Write only when the app asks for it). Setup never asks for this.
 2. ASSISTANT: Destructive tools preview first and ask before they run; show the preview and wait for the person's yes.
 
 ## Never

@@ -17,7 +17,7 @@ be revoked (Account → Connected apps for OAuth).
   401 from `/api/mcp` points at `/.well-known/oauth-protected-resource/api/mcp`; the server
   metadata is at `/.well-known/oauth-authorization-server`. PKCE S256, the `resource` parameter
   (`https://mtgvault.cards/api/mcp`), a Client ID Metadata Document URL or `POST /oauth/register` as
-  `client_id`, scopes `read` (default) and `write` (the person must tick it). Access tokens last
+  `client_id`, scopes `read` (default) and `write` (offered ticked when the app asks for it; the person can untick it). Access tokens last
   an hour; refresh tokens rotate, and a reused one revokes the connection. OAuth tokens work on
   `/api/mcp` only, and can never manage the account.
 - One-prompt setup: paste `Set up The Vault for me. Follow only this page: <the page below>` into your assistant. Each page says which

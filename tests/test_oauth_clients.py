@@ -525,12 +525,14 @@ def test_a_look_alike_address_shows_its_technical_form(app, universe, browser):
     assert oc.display_host("\u0430pple.example")[1] == "xn--pple-43d.example"
 
 
-def test_a_self_registered_app_is_titled_unverified_and_write_stays_unticked(app, browser):
+def test_a_self_registered_app_is_titled_unverified_and_write_is_ticked_only_because_it_asked(app, browser):
     client_id = register(browser, client_name="Totally Official Anthropic").json()["client_id"]
     c, page = start(browser, client_id, scope="read write")
     assert "Connect Unverified app: Totally Official Anthropic to your Vault?" in page.text
     assert "Unverified app." in page.text and "can't confirm who" in page.text
-    assert 'name="write"' in page.text and "checked" not in page.text.split('name="write"')[1].split(">")[0]
+    assert '<input type="checkbox" name="write" value="on" checked>' in page.text  # vault-0n9.5: it asked for write, so the box is ticked
+    c2, read_only = start(browser, client_id, scope="read")
+    assert 'name="write"' not in read_only.text  # and an unverified app that asked only for read gets no box at all
     sign_in = TestClient(app).get("/oauth/authorize?" + "&".join(f"{k}={v}" for k, v in c.authorize_params().items()
                                                               if k != "redirect_uri") + "&redirect_uri=https%3A%2F%2Fapp.example%2Fcallback")
     assert "Sign in to connect Unverified app: Totally Official Anthropic" in sign_in.text
