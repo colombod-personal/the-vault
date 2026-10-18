@@ -15,6 +15,7 @@ caller's own connection), both ``Tool.any_scope``.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -819,6 +820,84 @@ for _tool in TOOLS:
 BY_NAME = {t.name: t for t in TOOLS}
 
 
+# --- file_intake_call: what a chat app really sends for a dropped file (vault-0n9.3) -------------------------------------------
+# One log line per import_collection_file call, so any real drop settles from the production log whether an app passes a file
+# object, a web address, a path or nothing. It holds shapes only: never a value, an address, a path, a file name, a token, and
+# nothing about the person. Every field is cut to a fixed vocabulary or a short bounded form before it is logged: a name a
+# caller chose is never logged as it is, whatever it looks like (a name can hold an identifier or a secret).
+KEY_VOCABULARY = frozenset({
+    "file", "bucket_id", "download_url", "file_id", "mime_type", "file_name",  # the tool's own and ChatGPT's file object
+    "url", "uri", "href", "link", "path", "file_path", "name", "filename", "id", "type", "size", "mime", "content_type",
+    "content", "data", "text", "base64", "downloadUrl", "fileId", "mimeType", "fileName", "filePath", "contentType"})
+MAX_KEYS = 12
+PRODUCT_NAMES = frozenset({  # the clients and libraries whose name tells what is calling; any other product is logged as "other"
+    "mozilla", "applewebkit", "chrome", "safari", "gecko", "firefox", "edg", "electron", "chatgpt", "openai", "openai-mcp",
+    "claude", "claude-user", "anthropic", "codex", "codex-mcp-client", "mcp-remote", "cursor", "vscode", "node", "undici",
+    "python-httpx", "httpx", "python-requests", "aiohttp", "curl", "go-http-client", "okhttp", "cfnetwork", "darwin"})
+PRODUCT_TOKEN = re.compile(r"([A-Za-z][A-Za-z0-9._-]{0,30})/([0-9]+(?:\.[0-9]+){0,3})", re.ASCII)  # the version: digits and dots only
+MAX_PRODUCT_TOKENS = 4
+PROTOCOL_VERSION = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", re.ASCII)
+
+
+def _key_names(value: Any) -> list[str]:
+    """The sorted key names of an object: a name in the fixed vocabulary as it is, any other as "other"."""
+    if not isinstance(value, dict):
+        return []
+    return sorted({k if isinstance(k, str) and k in KEY_VOCABULARY else "other" for k in value})[:MAX_KEYS]
+
+
+def _without_comments(text: str) -> str:
+    """``text`` without its comments: what is in parentheses, nested ones and backslash-escaped characters inside them
+    included, and everything after a comment that is never closed. A stray closing parenthesis is a space."""
+    out, depth, escaped = [], 0, False
+    for ch in text:
+        if escaped:
+            escaped = False
+        elif depth and ch == "\\":
+            escaped = True
+        elif ch == "(":
+            depth += 1
+            out.append(" ")
+        elif ch == ")":
+            depth = max(depth - 1, 0)
+            out.append(" ")
+        elif not depth:
+            out.append(ch)
+    return "".join(out)
+
+
+def _product_tokens(user_agent: str | None) -> str:
+    """The product tokens of a User-Agent (name/version), at most four, and nothing else: no comment in parentheses (that is
+    where an operating system, a host name, a user name or a path would be) and no other text. The name of a product that is not
+    on the list is logged as "other" (a name can hold a host or a person); a version is digits and dots only. "unknown" when
+    no token is left."""
+    tokens = []
+    for word in _without_comments((user_agent or "")[:500]).split():
+        found = PRODUCT_TOKEN.fullmatch(word)
+        if found:
+            name = found.group(1)
+            tokens.append(f"{name if name.lower() in PRODUCT_NAMES else 'other'}/{found.group(2)}")
+    return " ".join(tokens[:MAX_PRODUCT_TOKENS]) or "unknown"
+
+
+def file_intake_call_fields(tool: Tool, args: dict, headers, settings) -> dict:
+    """The fields of the ``file_intake_call`` log event for one call of ``import_collection_file``. The hash is of the entry this server
+    would serve this client now, by its session id (compact or full, with or without the views): a client that kept an older list across
+    a deploy is not seen, so the hash says which definition the server held, and the client's own copy is unknown."""
+    sid = headers.get(mcp_session.HEADER)
+    compact = mcp_session.compact(settings.session_secret, sid)
+    apps_ui = mcp_session.read(settings.session_secret, sid)  # None: this server issued no session id for the request
+    views = apps_ui is not False or not settings.mcp_apps_require_capability  # the same rule as tools/list
+    served = mcp_profile.compact_schema(tool, views) if compact else tool.schema(ui=views)  # the entry this server serves this client
+    digest = hashlib.sha256(json.dumps(served, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()[:12]
+    given = args.get("file", ...)
+    version = headers.get("mcp-protocol-version")
+    return {"tool_definition_sha256": digest, "arg_keys": _key_names(args),
+            "file_type": "absent" if given is ... else type(given).__name__, "file_keys": _key_names(given),
+            "protocol_version": "absent" if version is None else version if PROTOCOL_VERSION.fullmatch(version) else "other",
+            "user_agent": _product_tokens(headers.get("user-agent")), "compact": compact, "apps_ui": apps_ui}
+
+
 def _rpc_error(id_, code: int, message: str) -> dict:
     return {"jsonrpc": "2.0", "id": id_, "error": {"code": code, "message": message}}
 
@@ -1064,6 +1143,13 @@ def build_router(optional_user, resource_metadata: str = "") -> APIRouter:
             tool = BY_NAME.get(name)
             if tool is None:
                 return _rpc_error(id_, -32602, f"Unknown tool: {params.get('name')}")
+            if tool.name == "import_collection_file":
+                try:  # a log line must never change an answer
+                    observability.event(logging.INFO, "file_intake_call",
+                                        request_id=request.scope.get("state", {}).get("request_id", ""),
+                                        **file_intake_call_fields(tool, args, request.headers, request.app.state.settings))
+                except Exception:
+                    log.warning("file_intake_call could not be logged")
             why = _invalid(tool.checked_schema(), args, "arguments")
             if why:
                 return _rpc_error(id_, -32602, f"Invalid arguments: {why}")
