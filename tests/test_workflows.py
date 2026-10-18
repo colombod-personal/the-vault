@@ -412,10 +412,13 @@ def test_only_the_guide_deploy_job_can_publish_pages():
     assert wf["jobs"]["build"]["if"] == "github.ref == 'refs/heads/main'", "a run from a branch does nothing"
 
 
-def test_the_test_job_pulls_the_official_postgres_image_from_a_mirror_that_does_not_rate_limit():
-    # Anonymous pulls from Docker Hub (#424) and public ECR ("toomanyrequests", vault-1dm) stalled CI. The test job
-    # pulls the same official image through Google's Docker Hub mirror, with no credentials and no extra permission.
-    job = load(ROOT / ".github" / "workflows" / "tests.yml")["jobs"]["test"]
-    service = job["services"]["postgres"]
-    assert service["image"] == "mirror.gcr.io/library/postgres:16"
-    assert "credentials" not in service and "permissions" not in job
+def test_every_postgres_service_pulls_the_official_image_from_a_mirror_that_does_not_rate_limit():
+    # Anonymous pulls from Docker Hub (#424) and public ECR ("toomanyrequests", vault-1dm) stalled CI. Every job that
+    # runs Postgres pulls the same official image through Google's Docker Hub mirror, with no credentials.
+    services = {(path.name, name): job["services"]["postgres"] for path in WORKFLOWS
+                for name, job in load(path)["jobs"].items() if "postgres" in (job.get("services") or {})}
+    assert set(services) == {("tests.yml", "test"), ("deploy.yml", "deploy")}
+    for where, service in services.items():
+        assert service["image"] == "mirror.gcr.io/library/postgres:16", where
+        assert "credentials" not in service, where
+    assert "permissions" not in load(ROOT / ".github" / "workflows" / "tests.yml")["jobs"]["test"]
