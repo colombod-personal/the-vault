@@ -151,7 +151,8 @@ def test_hostile_values_never_reach_the_log_and_the_record_is_bounded(app, agent
         {"file": "line\x00one\x1b[31m\r\ntwo\x7f"},  # control characters
         {"file": {"download_url": f"https://secret-host.example/x?sig={SECRETS[0]}", "file_id": "file-" + LONG,
                   "file_name": "my_cards.csv", "mime_type": "text/csv"}},
-        {"file": {SECRETS[0]: 1, SECRETS[1]: 2, "k" * 5000: 3, "path_C:\\Users\\someone": 4, "ok_key": 5}},  # hostile key names
+        {"file": {SECRETS[0]: 1, SECRETS[1]: 2, "k" * 5000: 3, "path_C:\\Users\\someone": 4, "Jane_Doe": 5,
+                  "deadbeefdeadbeef": 6, "download_url": 7}},  # hostile key names
         {"file": file_arg(), SECRETS[0]: "x", SECRETS[1]: ["y"], "z" * 5000: 1},  # hostile argument names
     ]
     for arguments in hostile:
@@ -165,15 +166,14 @@ def test_hostile_values_never_reach_the_log_and_the_record_is_bounded(app, agent
         assert len(line) < 1400, len(line)
         assert set(json.loads(line)) == FIELDS
     assert [e["file_type"] for e in calls(caplog)] == ["str", "str", "str", "str", "str", "dict", "dict", "dict"]
-    keys = calls(caplog)[6]["file_keys"]  # names that are not letters and underscores are logged as "other"
-    assert keys == ["ok_key", "other"]
+    assert calls(caplog)[6]["file_keys"] == ["download_url", "other"]  # a name outside the fixed list is "other", whatever it looks like
     assert calls(caplog)[7]["arg_keys"] == ["file", "other"]
 
 
 def test_the_record_is_bounded_even_when_every_list_is_full(app, agent, bot, caplog):
     caplog.set_level(logging.DEBUG)
     intake_with(app)
-    names = {f"key_{chr(97 + i)}_{'z' * 17}": 1 for i in range(26)}  # 24-character names, more than the cap
+    names = dict.fromkeys(sorted(mcp.KEY_VOCABULARY)[:20], 1)  # more names than the cap
     post(bot, token_of(agent), {"file": names, **names}, **{"MCP-Protocol-Version": "2025-06-18", "User-Agent": " ".join(f"{'p' * 30}/{'9' * 15}" for _ in range(9))})
     (line,) = raw_lines(caplog)
     event = json.loads(line)
@@ -189,8 +189,8 @@ def test_hostile_headers_are_cut_to_a_date_and_product_tokens(app, agent, bot, c
     post(bot, token, {}, **{"MCP-Protocol-Version": "9" * 4000})
     first, second = calls(caplog)
     assert first["protocol_version"] == "other" and second["protocol_version"] == "other"
-    assert "SECRET" not in "\n".join(raw_lines(caplog)) or first["user_agent"].startswith("sig-")  # a lone token is the form we keep
-    assert len(first["user_agent"]) <= 4 * 48
+    assert first["user_agent"] == "other/1" and "AAAA" not in "\n".join(raw_lines(caplog))
+    assert "SECRET" not in "\n".join(raw_lines(caplog))
 
 
 UA = [
@@ -198,12 +198,14 @@ UA = [
     ("Mozilla/5.0 (Windows NT 10.0; ALIEN51-PC; dicol; jane.doe@example.com; C:\\Users\\dicol\\AppData) ChatGPT/1.2025.280 Electron/38.0",
      "Mozilla/5.0 ChatGPT/1.2025.280 Electron/38.0"),
     ("openai-mcp/1.0 (+https://openai.com/bot; contact: jane.doe@example.com)", "openai-mcp/1.0"),
-    ("a/1 (nested (comment) with dicol) b/2", "a/1 b/2"),
-    ("a/1 (never closed C:\\Users\\dicol b/2", "a/1"),  # an unclosed comment runs to the end
-    ("a/1 stray) dicol b/2", "a/1 b/2"),
-    ("a/1 b/2 c/3 d/4 e/5 f/6", "a/1 b/2 c/3 d/4"),  # at most four tokens
+    ("a/1 (nested (comment) with dicol) b/2", "other/1 other/2"),  # a product that is not on the list is "other"
+    ("a/1 (never closed C:\\Users\\dicol b/2", "other/1"),  # an unclosed comment runs to the end
+    ("a/1 stray) dicol b/2", "other/1 other/2"),
+    ("a/1 b/2 c/3 d/4 e/5 f/6", "other/1 other/2 other/3 other/4"),  # at most four tokens
+    ("Client/1.0 (machine\\) secret-host.example/1.0)", "other/1.0"),  # an escaped parenthesis does not end a comment
+    ("Downloads/2026.csv jane.doe.example/1", "other/1"),  # a path-like version is dropped, a host-like name is not kept
     ("ALIEN51 dicol jane.doe@example.com C:\\Users\\dicol host.example.com/ /etc/passwd", "unknown"),  # no name/version token at all
-    ("dicol@alien51/1.0 C:\\Users\\dicol/1.0 name/ver /1.0 a/1\x00b ok/2", "ok/2"),  # a token must be exactly name/version
+    ("dicol@alien51/1.0 C:\\Users\\dicol/1.0 name/ver /1.0 a/1\x00b ok/2", "other/2"),  # a token must be exactly name/version
     ("", "unknown"),
     (None, "unknown"),
 ]
@@ -212,6 +214,11 @@ UA = [
 @pytest.mark.parametrize("header, kept", UA)
 def test_the_user_agent_keeps_product_tokens_only(header, kept):
     assert mcp._product_tokens(header) == kept
+
+
+def test_key_names_outside_the_fixed_list_are_other_whatever_they_look_like():
+    assert mcp._key_names({"Jane_Doe": 1, "deadbeefdeadbeef": 2, "file_id": 3, "download_url": 4}) == ["download_url", "file_id", "other"]
+    assert mcp._key_names("a string") == [] and mcp._key_names(None) == []
 
 
 def test_a_user_agent_with_a_machine_and_a_person_in_it_leaves_neither_in_the_log(app, agent, bot, caplog):
