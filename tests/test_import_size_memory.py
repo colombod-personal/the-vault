@@ -58,11 +58,11 @@ def test_a_preview_of_a_file_of_exactly_the_limit_stays_under_the_memory_ceiling
     report = probe(database_url, "preview")
     assert report["bytes"] == config.DEFAULT_IMPORT_MAX_BYTES == 8 * 1024 * 1024
     assert report["status"] == 200 and report["rows"] == config.DEFAULT_IMPORT_MAX_ROWS == 100_000, report
-    assert report["matched_rows"] == report["rows"] and report["rss_peak_mb"] < CEILING_MB, report  # measured 331 MB on 2026-10-18
+    assert report["matched_rows"] == report["rows"] and report["rss_peak_mb"] < CEILING_MB, f"peak {report['rss_peak_mb']} MB, before {report['rss_before_mb']} MB, {report['seconds']} s"  # measured 331 MB on 2026-10-18
 
 
 def test_a_file_in_parts_of_exactly_the_limit_is_assembled_and_previewed_under_the_same_ceiling(database_url):
     report = probe(database_url, "parts")
     assert report["bytes"] == 8 * 1024 * 1024
     assert report["status"] == 200 and report["answer"] == "uploaded" and report["rows"] == 100_000, report
-    assert report["rss_peak_mb"] < CEILING_MB, report  # measured 340 MB on 2026-10-18
+    assert report["rss_peak_mb"] < CEILING_MB, f"peak {report['rss_peak_mb']} MB, before {report['rss_before_mb']} MB, {report['seconds']} s"  # measured 340 MB on 2026-10-18

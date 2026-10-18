@@ -75,7 +75,8 @@ def check_rows(source: str, text: str, rows_max: int) -> None:
     try:
         formats.parse(text, source)
     except _Lexing as seen:
-        lexing = seen
+        stream, delimiter = seen.source, seen.delimiter
+        seen.__traceback__ = None  # it holds the parser's frames, and so its copies of the whole text, in a cycle until the collector runs
     except (ValueError, TypeError, AttributeError, OverflowError, csv.Error):
         return  # not a file the parse accepts: it says why
     else:
@@ -84,7 +85,7 @@ def check_rows(source: str, text: str, rows_max: int) -> None:
         _CAPTURE.reset(token)
     rows = 0
     try:
-        for row in csv.reader(lexing.source, delimiter=lexing.delimiter):
+        for row in csv.reader(stream, delimiter=delimiter):
             if any(cell.strip() for cell in row):
                 rows += 1
                 if rows > rows_max + 1:  # the header is a row
