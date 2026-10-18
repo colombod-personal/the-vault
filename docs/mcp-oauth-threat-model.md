@@ -1326,20 +1326,30 @@ Owner decision, verbatim (vault-0n9.5): "Yes pre tick write too". Read stays tic
   (sections 7 and 8), the consent is still asked every time, and "Use a different account" and Cancel are as before.
 - Lifetimes are as before: access token one hour, refresh token 30 days sliding within an absolute 90 days from consent. The person can
   disconnect the app under Connected apps, or end the connection from the chat with `sign_out`; either stops both tokens at once (section 15).
-- What Write allows is as before. The destructive tools (a replacing or merging import through `confirm_staged_upload`, resets, deletions,
-  `sign_out`) still preview first and need an explicit `confirm`, which is the person's yes in the chat. Ordinary writes that never needed
-  one (for example saving a deck, creating a bucket, tagging up to 25 cards, notes) still run without a separate confirmation.
+- What Write allows is as before, and so is how it is protected. Two different things must not be confused here:
+  - *Assistant instructions* (the tool descriptions and skills say: preview, show it to the person, ask, and only then send `confirm: true`).
+    These bind only an assistant that follows them. `confirm: true` is a value the client supplies; it is **not proof** that the person
+    said yes. `delete_deck` maps `confirm: true` straight to `DELETE /decks/{id}` (`vault/api/mcp.py`, `vault/api/v1.py`) and the handler
+    deletes without checking for a preview or a human answer. A client can also fetch a reset's preview itself and send its confirmation text.
+  - *Server-enforced limits*: the scope (no Write, no write tools), the importer's `content_hash` of the stored preview that
+    `confirm_staged_upload` must match, the 25-card and 10-copy thresholds above which a call must be repeated with the preview's value,
+    the undo of a reset, and revocation. None of these asks the person.
+  Ordinary writes (saving a deck, creating a bucket, tagging up to 25 cards, notes) never had even the assistant-level confirmation.
 
 **The new risk: consent fatigue.** A person who presses Allow without reading used to give a read-only grant and now gives Write when the app
-asked for it. The ordinary writes above can then be made by the app without a further question, and a prompt-injected assistant (text in a
-deck, a card note, a web page) could make them. The destructive ones still need the person's yes. Whether a host also asks per tool call
-before a write is the host's behaviour and is not verified here.
+asked for it. A malicious or prompt-injected client (text in a deck, a card note, a web page that the assistant obeys) can then make every
+write the scope allows, **destructive ones included**: deleting a deck, replacing the collection through a staged file it uploaded itself,
+resetting a bucket, tagging, saving decks. The "preview and ask" steps are assistant behaviour, not a server check of the person's yes
+(see above). Whether a host also asks per tool call before a write is the host's behaviour and is **not verified here**; this document does
+not rely on it.
 
 **Why it is accepted.** The owner decided it (2026-10-18), because the read-only default made the main use (importing from the chat) fail for
 the person who did nothing wrong, and a connector that needs a second visit to a consent page is the surprise this change removes. Write
-still needs the app to ask for it; the box is shown, labelled and one click from read-only; the damage an ordinary write can do is bounded
-by the Vault's own limits (a tagging call over 25 cards comes back as a preview, destructive tools preview and need a confirm, a reset has an undo);
-the grant is revocable at any time and lapses as above. Not accepted, and not done: Write for an app that did not ask for it; ticking
+still needs the app to ask for it; the box is shown, labelled and one click from read-only; a reset can be undone and the other server-enforced
+limits above hold; the grant is revocable at any time and lapses as above. It is **not** accepted because destructive writes are protected by
+the person's yes at the tool: they are not, server-side. That gap exists for every Write grant today (before this change too, for a person who
+ticked the box); this change makes it reachable by a plain Allow. A server-checked confirmation (for example a one-time token the person's
+own page issues for deletes) would close it and is not built; the independent security review is asked to assess this exposure explicitly. Not accepted, and not done: Write for an app that did not ask for it; ticking
 anything beyond the requested scopes; any change to personal access tokens.
 
 **Residual.** An attacker who gets a person to authorize an app (consent phishing, section 7) now gets Write if the attacker's app asked for it
