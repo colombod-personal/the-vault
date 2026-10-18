@@ -166,6 +166,22 @@ class McpClient:
         data = {"nonce": self.nonce(page), "decision": decision, **({"write": "on"} if write else {})}
         return self.browser.post("/oauth/authorize", data=data, headers=headers, follow_redirects=False)
 
+    @staticmethod
+    def form_as_shown(page: httpx.Response, decision: str = "allow") -> dict:
+        """What a browser posts when the person only presses the button on the consent page: every named input that is not disabled,
+        as the page renders it (a checkbox only when the page ticks it), plus the button. It reads the page, so a test sees what the
+        Write box really does by default (vault-0n9.5); ``answer(write=...)`` is the person changing the box before pressing."""
+        form = {"decision": decision}
+        for tag in re.findall(r"<input\b[^>]*>", page.text):
+            attrs = dict(re.findall(r'([\w-]+)(?:="([^"]*)")?', tag[len("<input"):-1]))
+            if "name" not in attrs or "disabled" in attrs or (attrs.get("type") == "checkbox" and "checked" not in attrs):
+                continue
+            form[attrs["name"]] = attrs.get("value", "on")
+        return form
+
+    def answer_as_shown(self, page: httpx.Response, decision: str = "allow", **headers) -> httpx.Response:
+        return self.browser.post("/oauth/authorize", data=self.form_as_shown(page, decision), headers=headers, follow_redirects=False)
+
     def approve(self, write: bool = False, **override) -> dict:
         """The whole browser trip: authorize, allow, and the parameters the app is sent back with."""
         page = self.authorize(**override)

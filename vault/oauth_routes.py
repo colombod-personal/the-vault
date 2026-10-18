@@ -52,7 +52,9 @@ SCOPE_TEXT = {
     "read": ("Read your collection, decks, value history and what others shared with you. It can also give you a one-hour link "
              "to upload a collection file, or take a file you attach in the chat and keep it for an hour, and read what importing "
              "that file would change. Importing it needs Write."),
-    "write": "Make changes: import collections, save and edit decks, change which cards you own, refresh prices, share",
+    "write": ("Make changes, including deleting decks and emptying or replacing your whole collection: import collections, save and "
+              "edit decks, change which cards you own, reset your collection, remove tags, refresh prices, share. "
+              "Without Write the app can only read."),
 }
 NEVER = ("Delete your account", "Export all your data", "Create or revoke access tokens",
          "Manage your sign-in methods or other connected apps")
@@ -257,15 +259,25 @@ def sign_in_page(req: AuthRequest, providers: list[str], passkeys: bool, dev_log
 
 
 def consent_page(req: AuthRequest, user: User, nonce: str) -> HTMLResponse:
-    write = ('<label><input type="checkbox" name="write" value="on"> <strong>Write.</strong> '
-             f"{esc(SCOPE_TEXT['write'])}</label>") if "write" in req.scopes else ""
+    # Write is offered only when the app asked for it. For an app identified by its web address (a client metadata document: claude.ai,
+    # ChatGPT, Codex) it is then ticked, like Read: the person who clicks Allow gets what the app asked for (a read-only grant made the
+    # import fail, vault-0n9.5; owner decision 2026-10-18, narrowed by the Product Manager after the security review). A self-registered
+    # ("Unverified app") client keeps the old default: unticked. Unticking grants read only.
+    # decide() still grants Write only when "write" is among the REQUESTED scopes, whatever the form says.
+    ticked = req.client.kind == "cimd"
+    write = ('<label><input type="checkbox" name="write" value="on"' + (" checked" if ticked else "") + ' aria-describedby="write-note"> '
+             f"<strong>Write.</strong> {esc(SCOPE_TEXT['write'])}</label>") if "write" in req.scopes else ""
+    write_note = ('<p class=small id="write-note">' + (
+        "Write is ticked because this app asked for it. Untick Write to let it read only." if ticked else
+        "This app asked for Write. It is not ticked, because the Vault cannot confirm who made this app. Tick Write only if you trust it.")
+        + "</p>") if write else ""
     never = "".join(f"<li>{esc(n)}</li>" for n in NEVER)
     body = (f"<h1>Connect {esc(client_label(req.client))} to your Vault?</h1><p>{who_is_asking(req.client)}</p>"
             f"{where_it_returns(req.redirect_uri)}"
             f'<p class=small>Signed in as <strong>{esc(user.name or user.email or "your account")}</strong>.</p>'
             '<form method="post" action="/oauth/authorize"><input type="hidden" name="nonce" value="' + esc(nonce) + '">'
             f"<fieldset><legend>It will be able to</legend><label><input type=\"checkbox\" checked disabled> "
-            f"<strong>Read.</strong> {esc(SCOPE_TEXT['read'])}</label>{write}</fieldset>"
+            f"<strong>Read.</strong> {esc(SCOPE_TEXT['read'])}</label>{write}</fieldset>{write_note}"
             f"<p>It will <strong>never</strong> be able to:</p><ul class=never>{never}</ul>"
             '<button type="submit" name="decision" value="allow">Allow</button>'
             '<button type="submit" name="decision" value="deny">Cancel</button>'

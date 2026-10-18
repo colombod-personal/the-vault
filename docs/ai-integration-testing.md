@@ -267,7 +267,7 @@ link, the criterion stays open.
 ### Script (about 10 minutes)
 
 1. **Connect with read scope only.** In claude.ai: Customize, Connectors, remove The Vault if it is there, add it again
-   (`https://mtgvault.cards/api/mcp`), and on the Vault's approval page leave **Write unticked**. claude.ai keeps the tool
+   (`https://mtgvault.cards/api/mcp`), and on the Vault's approval page untick **Write** (it is ticked for this app because it asks for it; Write unticked is the read-only run). claude.ai keeps the tool
    list from the moment the connector is added, so a stale connector would test the old tools. Open the connector's tool list
    and note the number of tools; it must equal what `tools/list` returns for a read-only token (`vault.api.mcp.TOOLS` without the write tools, except `import_collection_file`, `start_collection_upload` and `sign_out`, which are listed for read-only tokens).
 2. **Open a new chat** with The Vault enabled for it (the connector toggle under the message box). Do not install the
@@ -338,7 +338,7 @@ ChatGPT, #155 Codex, #156 GitHub Copilot, #362 Perplexity) and copies the verdic
 | 1 | Steps the person did | Only the ones the page marks PERSON; each of them exists on screen under the name the page gives (a menu name that differs is a defect in the page, with the real name attached) |
 | 2 | Time to first answer | recorded in minutes; no pass line, it is the number the issue asks for |
 | 3 | Sign-in method | OAuth in the browser (say which client path: Client ID Metadata Document or registration, from the Vault's log or the host); no token in chat, a command or a file |
-| 4 | Consent screen | read-only by default (Write unticked); the app name and the address shown are the Vault's |
+| 4 | Consent screen | Write ticked when the app asked for it (untick it for the read-only run); the app name and the address shown are the Vault's |
 | 5 | `whoami` | the signed-in name, scopes `read`, and the data versions; the assistant shows them |
 | 6 | The tour | `vault_start` ran (or the quoted text was followed), used `get_collection_summary` and the person's own cards, answered one rules question with a rule number and the edition, handled no decks by offering a pasted list, and ended with three next steps; it wrote nothing |
 | 7 | Tools and views | the tool count shown; whether views render (hosts that support them) |

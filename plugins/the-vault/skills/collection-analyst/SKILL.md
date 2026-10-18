@@ -46,7 +46,7 @@ that deserve a look (a conflict, a card that would be removed), and ask for **on
 with that `id` as `upload_id`, `confirm` true and the `content_hash`, and say what changed in plain words: no link, no page, no
 "tell me when it is done". Any connection can drop a file and read the preview, read-only ones included; only the import needs write
 access, so a read-only connection is told at that step, in one sentence, that nothing was changed and why, and how to reconnect the
-Vault and tick Write on its consent page.
+Vault and make sure Write is ticked on its consent page.
 
 **Never ask the person to fix, edit, re-export or re-upload the file**, and never hand them a list of rows to correct: the Vault
 matches the rows itself.
@@ -209,7 +209,7 @@ changed. An import applies only what changed in their app since their last impor
    - Stop: only after they say yes in this chat. If they want the file to replace everything (`replace_everything`), say first how
      many edits made here it discards and ask again. If it is refused (expired, or the collection changed), preview again. If
      the connection is read-only, the import is refused: say the file is staged and waiting (links work for one hour), that the
-     import needs the write permission, and that they reconnect the Vault and tick Write on its consent page (the same upload
+     import needs the write permission, and that they reconnect the Vault and make sure Write is ticked on its consent page (the same upload
      can then be confirmed while its hour lasts; after that, make a new link).
 5. **Say what happened.**
    - Calls: `get_import`, `refresh_prices`.
