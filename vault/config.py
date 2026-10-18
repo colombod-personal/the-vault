@@ -21,8 +21,14 @@ DEFAULT_FILE_INTAKE_HOSTS = "oaiusercontent.com,openai.com,chatgpt.com"
 # preview costs at exactly this size (tests/test_import_size_memory.py). The hosting platform's request limit (about 4.5 MB) bounds
 # each request, so each part and each upload-page file, not the total.
 DEFAULT_IMPORT_MAX_BYTES = 8 * 1024 * 1024
-# Part writes a minute for one person (a file sent in parts counts ONE against IMPORT_LIMIT, its parts against this): 512 parts is
-# the biggest file in the default part size (16 KiB), doubled for one retry in halves, rounded up.
+# The most rows a file may hold, a product rule next to the size: about 7 times the owner's 14,597 rows. Memory follows rows more than
+# bytes (a file of 29-byte rows at the size limit has 291,740 rows and peaked at 577 MB in a review of PR #483), so the size limit alone
+# does not bound it; tests/test_import_size_memory.py measures a file of exactly this many rows at exactly the size limit.
+DEFAULT_IMPORT_MAX_ROWS = 100_000
+# Part writes a minute for one person (a file sent in parts counts ONE against IMPORT_LIMIT, its parts against this). The script sends
+# parts of 16,384 bytes and, when a read comes back truncated, of 8,192 bytes at the smallest (and sends nothing until every read of a
+# size has succeeded): a file at the size limit is then at most 8 MiB / 8,192 = 1,024 parts in one pass, so 1,200 covers a pass with
+# 17% to spare; a second pass after a refused file or a throttled minute waits for the next minute (the script backs off on a 429).
 DEFAULT_IMPORT_PART_LIMIT = 1200
 DOMAIN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")  # a name of at least two labels
 
@@ -40,6 +46,11 @@ def parse_hosts(text: str) -> tuple[str, ...]:
 def import_max_bytes() -> int:
     """The import-size limit (env ``IMPORT_MAX_BYTES``, default 8 MiB), read each time so there is one source for every path."""
     return int(_env("IMPORT_MAX_BYTES", str(DEFAULT_IMPORT_MAX_BYTES)))
+
+
+def import_max_rows() -> int:
+    """The most rows a collection file may hold (env ``IMPORT_MAX_ROWS``, default 100,000), read each time, for every path."""
+    return int(_env("IMPORT_MAX_ROWS", str(DEFAULT_IMPORT_MAX_ROWS)))
 
 
 def size_text(size: int) -> str:
@@ -192,6 +203,8 @@ class Settings:
             raise RuntimeError("FILE_INTAKE_HOSTS must list domains with at least two labels (example.com), comma-separated")
         if import_max_bytes() < 1:
             raise RuntimeError("IMPORT_MAX_BYTES must be a number of bytes, at least 1 (default 8388608, 8 MiB)")
+        if import_max_rows() < 1:
+            raise RuntimeError("IMPORT_MAX_ROWS must be a number of rows, at least 1 (default 100000)")
         if self.import_part_limit < 1:
             raise RuntimeError("IMPORT_PART_LIMIT must be at least 1")
         if self.reviewer_passphrase and len(self.reviewer_passphrase) < 16:

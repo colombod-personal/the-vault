@@ -24,13 +24,12 @@ from vault.models import Import, StagedUpload, StagedUploadPart
 BOM = chr(0xFEFF)
 EXTRA = "my cards,2,0,Jötun Grunt \u2014 Æther,XYZ,Invented Set,1,Mint,Normal,English,0.10,2024-01-01,0.05,0.10,0.08\n"
 BASE = CSV.decode("utf-8") + EXTRA
-# Without the `"sep=,"` first line: with CRLF line ends the library does not recognise that line (every route says unreadable, the upload
-# page too), a finding of this build, not something the parts route decides.
-NO_SEP = BASE.split("\n", 1)[1]
 
 
 def crlf_bom(text: str) -> str:
-    return BOM + text.replace("\n", "\r\n")
+    """The text with CRLF line ends and a byte-order mark. The fixture may already have CRLF (a Windows checkout): normalise first, or
+    the sep line becomes CR CR LF, which no route reads (review of PR 483, L5)."""
+    return BOM + text.replace("\r\n", "\n").replace("\n", "\r\n")
 
 
 def cut(text: str, parts: int) -> list[str]:
@@ -42,7 +41,7 @@ def cut(text: str, parts: int) -> list[str]:
 
 
 def facts(text: str) -> dict:
-    return {"lines": file_parts.line_count(text), "sum": file_parts.checksum(text)}
+    return {"lines": file_parts.line_count(text), "chars": len(text.encode("utf-16-le", "surrogatepass")) // 2, "sum": file_parts.checksum(text)}
 
 
 def token_of(agent, *scopes):  # noqa: F811
@@ -73,7 +72,7 @@ def imports_of(app):
 # ---- the happy path ---------------------------------------------------------------------------------------------------------------
 
 def test_parts_in_any_order_make_one_staged_file_that_is_previewed_and_imports_nothing(app, agent, bot):  # noqa: F811
-    text = crlf_bom(NO_SEP)  # CRLF, a byte-order mark, accents and a dash
+    text = crlf_bom(BASE)  # CRLF with the sep line, a byte-order mark, accents and a dash
     pieces = cut(text, 5)
     before = imports_of(app)
     token = token_of(agent, "read", "write")
@@ -162,10 +161,28 @@ def test_after_the_file_is_complete_a_part_sent_again_is_a_no_op_that_returns_th
     pieces = cut(BASE, 3)
     final = sent(bot, token, pieces)[-1]
     again = send_part(bot, token, pieces, 2)["structuredContent"]
-    assert again["status"] == "uploaded" and again["id"] == final["id"] and again["content_hash"] == final["content_hash"]
+    assert again["status"] == "already_staged" and again["id"] == final["id"] and again["content_hash"] == final["content_hash"]
+    assert "get_staged_upload" in again["next"] and "rows" not in again and again["changed"] is False
     differently = send_part(bot, token, pieces, 2, text="not the part at all")["structuredContent"]  # too late to replace anything
     assert differently["id"] == final["id"] and differently["content_hash"] == final["content_hash"]
     assert tables(app) == (1, 0)
+    # the preview is one call away, and it is the one the completing answer carried
+    assert call_tool(bot, token, "get_staged_upload", upload_id=final["id"])["structuredContent"]["changes"] == final["changes"]
+
+
+def test_a_hundred_resends_of_a_completed_file_cost_one_preview(app, agent, bot, monkeypatch):  # noqa: F811
+    """Review of PR 483 (M2, thread 4): a part of a completed set re-ran the preview under the lock, without an allowance debit."""
+    from vault import intake
+    runs = []
+    real = intake.preview_import
+    monkeypatch.setattr(intake, "preview_import", lambda *a, **k: (runs.append(1), real(*a, **k))[1])
+    token = token_of(agent)
+    pieces = cut(BASE, 3)
+    sent(bot, token, pieces)
+    assert len(runs) == 1  # the answer that completed the file
+    for n in range(100):
+        assert send_part(bot, token, pieces, 1 + n % 3)["structuredContent"]["status"] == "already_staged"
+    assert len(runs) == 1
 
 
 def test_the_answer_to_a_part_names_the_parts_still_missing(app, agent, bot):  # noqa: F811
@@ -211,6 +228,7 @@ def test_the_parts_have_a_counter_of_their_own(app, agent, bot):  # noqa: F811
 @pytest.mark.parametrize("what, change, reason", [
     ("a line count that is one too many", lambda f: {"lines": f["lines"] + 1}, "lines"),
     ("a line count that is one too few", lambda f: {"lines": f["lines"] - 1}, "lines"),
+    ("a length that is one too many", lambda f: {"chars": f["chars"] + 1}, "length"),
     ("a checksum that is not the file's", lambda f: {"sum": f["sum"] ^ 1}, "checksum"),
 ])
 def test_parts_that_do_not_match_the_file_are_refused_in_one_sentence_and_nothing_is_staged(app, agent, bot, what, change, reason):  # noqa: F811
@@ -233,6 +251,12 @@ def test_a_read_cut_short_can_never_become_a_partial_import(app, agent, bot):  #
     truncated = pieces[:2] + [pieces[2][:len(pieces[2]) // 2]]  # the tail of the last part is missing
     out = [send_part(bot, token, pieces, i, text=truncated[i - 1], **whole)["structuredContent"] for i in (1, 2, 3)]
     assert out[-1]["status"] == "mismatch" and tables(app) == (0, 0)
+    # lines and sum of what was read agree with a cut text; the length of the whole file, from a read of its own, does not (M4)
+    cutoff = BASE[:-9]
+    cut_pieces = cut(cutoff, 3)
+    agree = {"lines": file_parts.line_count(cutoff), "sum": file_parts.checksum(cutoff)}
+    out = [send_part(bot, token, cut_pieces, i, **agree, chars=facts(BASE)["chars"])["structuredContent"] for i in (1, 2, 3)]
+    assert out[-1]["status"] == "mismatch" and out[-1]["detail"] == "length" and tables(app) == (0, 0)
     # a half-sent file that is abandoned stays a pending set only, never a staged file with content
     send_part(bot, token, pieces, 1)
     with app.state.db.sessions() as db:
@@ -242,9 +266,9 @@ def test_a_read_cut_short_can_never_become_a_partial_import(app, agent, bot):  #
 def test_numbers_that_do_not_make_sense_are_answered_in_one_sentence_and_store_nothing(app, agent, bot):  # noqa: F811
     token = token_of(agent)
     bad = [dict(part=0, parts=3), dict(part=4, parts=3), dict(part=1, parts=file_parts.max_parts() + 1), dict(part=1, parts=3, lines=-1),
-           dict(part=1, parts=3, sum=2 ** 32)]
+           dict(part=1, parts=3, chars=-1), dict(part=1, parts=3, sum=2 ** 32)]
     for extra in bad:
-        args = {"text": "a,b\n", "part": 1, "parts": 3, "lines": 1, "sum": 5, **extra}
+        args = {"text": "a,b\n", "part": 1, "parts": 3, "lines": 1, "chars": 4, "sum": 5, **extra}
         out = call_tool(bot, token, "import_collection_file", **args)["structuredContent"]
         assert out["status"] == "bad_part" and out["changed"] is False and out["say"].count(".") == 1, extra
     out = call_tool(bot, token, "import_collection_file", text="a,b\n", part=1)["structuredContent"]  # the others are missing
@@ -253,12 +277,13 @@ def test_numbers_that_do_not_make_sense_are_answered_in_one_sentence_and_store_n
 
 
 def test_a_file_at_the_import_limit_in_parts_of_the_smallest_size_the_script_uses_is_within_the_cap(app, agent, bot):  # noqa: F811
-    """Review of PR 483: 8 MiB in parts of 1,024 characters is 8,192 parts, which a cap of 4,096 refused as bad_part."""
+    """Review of PR 483: the cap must cover a file of the limit in the smallest parts the script uses (8 MiB / 8,192 bytes = 1,024 parts)."""
     token = token_of(agent)
-    assert file_parts.max_parts() == config.import_max_bytes() // file_parts.MIN_PART_CHARS == 8192
-    first = call_tool(bot, token, "import_collection_file", text="a,b\n", part=1, parts=8192, lines=1, sum=5)["structuredContent"]
-    assert first["status"] == "part_received" and first["parts"] == 8192 and len(first["missing"]) == file_parts.MAX_LISTED
-    over = call_tool(bot, token, "import_collection_file", text="a,b\n", part=1, parts=8193, lines=1, sum=5)["structuredContent"]
+    cap = file_parts.max_parts()
+    assert cap >= -(-config.import_max_bytes() // file_parts.MIN_PART_BYTES) == 1024 and cap == file_parts.MIN_PARTS_CAP
+    first = call_tool(bot, token, "import_collection_file", text="a,b\n", part=1, parts=cap, lines=1, chars=4, sum=5)["structuredContent"]
+    assert first["status"] == "part_received" and first["parts"] == cap and len(first["missing"]) == file_parts.MAX_LISTED
+    over = call_tool(bot, token, "import_collection_file", text="a,b\n", part=1, parts=cap + 1, lines=1, chars=4, sum=5)["structuredContent"]
     assert over["status"] == "bad_part"
 
 
@@ -310,7 +335,7 @@ def test_a_part_that_is_not_valid_text_is_refused_without_storing_anything(app, 
     token = token_of(agent)
     with TestClient(app) as http:
         res = http.post(f"{V1}/uploads/from-file", headers=auth(token), content=json.dumps(
-            {"text": "a\ud800b", "part": 1, "parts": 1, "lines": 0, "sum": 0}).encode("ascii"))  # a lone surrogate, as JSON escapes it
+            {"text": "a\ud800b", "part": 1, "parts": 1, "lines": 0, "chars": 3, "sum": 0}).encode("ascii"))  # a lone surrogate, as JSON escapes it
     assert res.status_code in (200, 422) and (res.status_code == 422 or res.json()["status"] in ("bad_part", "mismatch")) and tables(app) == (0, 0)
 
 
@@ -319,7 +344,7 @@ def test_a_part_that_is_not_valid_text_is_refused_without_storing_anything(app, 
 def test_a_part_over_the_import_limit_is_refused_and_nothing_is_kept(app, agent, bot, monkeypatch):  # noqa: F811
     monkeypatch.setenv("IMPORT_MAX_BYTES", "500")
     token = token_of(agent)
-    out = call_tool(bot, token, "import_collection_file", text="x" * 501, part=1, parts=1, lines=0, sum=1)["structuredContent"]
+    out = call_tool(bot, token, "import_collection_file", text="x" * 501, part=1, parts=1, lines=0, chars=501, sum=1)["structuredContent"]
     assert out["status"] == "too_large" and "500 bytes" in out["say"] and out["say"].count(".") == 1
     assert out["changed"] is False and tables(app) == (0, 0)
 
@@ -451,7 +476,7 @@ def test_the_log_holds_no_value_from_a_file_sent_in_parts(app, agent, bot, caplo
     logged = "\n".join(r.getMessage() for r in caplog.records)
     assert secret not in logged and str(facts(text)["sum"]) not in logged
     calls = [json.loads(r.getMessage()) for r in caplog.records if r.name == "vault.access" and '"file_intake_call"' in r.getMessage()]
-    assert len(calls) == 3 and all(c["arg_keys"] == ["lines", "part", "parts", "sum", "text"] for c in calls)
+    assert len(calls) == 3 and all(c["arg_keys"] == ["chars", "lines", "part", "parts", "sum", "text"] for c in calls)
     events = [json.loads(r.getMessage()) for r in caplog.records if r.name == "vault.access" and '"file_intake"' in r.getMessage()]
     assert [e["outcome"] for e in events] == ["part", "part", "staged"] and events[-1]["parts"] == 3 and events[-1]["bytes"] == len(text.encode())
     assert not {"text", "content", "sum"} & set().union(*events)

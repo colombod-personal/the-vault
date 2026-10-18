@@ -6,8 +6,8 @@ process of its own (so the peak is this import's and not the test run's) against
 ``preview`` posts the file to ``/api/v1/imports/preview`` (the path the Import CSV button, the upload page and a fetched file
 share: ``importer.preview_import``); ``parts`` sends it as 16 KiB parts to ``/api/v1/uploads/from-file`` (the new route: parts stored,
 checked, assembled once, previewed). The file is synthetic and Dragon Shield-shaped, with invented names, and is exactly
-``IMPORT_MAX_BYTES`` long. ``rows_shape`` is ``short`` (about 100 bytes a row: the most rows a file of this size can hold, the worst
-case for memory) or ``real`` (about 243 bytes a row, the owner's real export). Prints one JSON line: the process's peak resident set
+``IMPORT_MAX_BYTES`` long. ``rows_shape`` is ``worst`` (exactly IMPORT_MAX_ROWS rows in exactly the size limit: the most the two
+limits let in), ``short`` (about 108 bytes a row, 77,579 rows) or ``real`` (about 243 bytes a row, the owner's real export). Prints one JSON line: the process's peak resident set
 size (``ru_maxrss``, MB) before and after, and what the import answered.
 """
 
@@ -33,7 +33,24 @@ def rss_mb() -> float:
 
 
 def synthetic_csv(size: int, shape: str) -> bytes:
-    """A file of exactly ``size`` bytes: the header, then rows of invented cards, the last one's name padded with spaces to fill the size."""
+    """A file of exactly ``size`` bytes: the header, then rows of invented cards, the last one's name padded with spaces to fill the size.
+    Shape ``worst`` has exactly IMPORT_MAX_ROWS rows (the most the row limit allows) of equal width, padded to fill the size: the file
+    that costs the most memory the two limits together let in."""
+    if shape == "worst":
+        from vault.config import import_max_rows
+
+        count = import_max_rows()
+        width = (size - len(HEADER.encode())) // count
+        rows = []
+        for i in range(count):
+            s, n = i % SETS, (i // SETS) % NUMBERS + 1
+            tail = f",Z{s:02d},,{n},,,,,,,,\n"
+            head = f"my cards,1,0,Invented Card {i:06d}"
+            rows.append(head + " " * (width - len(head) - len(tail)) + tail)
+        rows[-1] = rows[-1].replace(",Z", " " * (size - len(HEADER.encode()) - sum(len(r) for r in rows)) + ",Z", 1)
+        out = HEADER + "".join(rows)
+        assert len(out.encode()) == size, (len(out), size)
+        return out.encode()
     long_name = " of the Long Winding Road and the Quiet Harbour Beyond the Western Hills" if shape == "real" else ""
     long_set = " and the Sleeping Cartographers of the Hollow Coast Archive" if shape == "real" else ""
     rows, total, i = [], len(HEADER.encode()), 0
@@ -80,7 +97,7 @@ def main(mode: str, shape: str) -> None:
         else:
             text = content.decode("utf-8")
             pieces = [text[i:i + PART_CHARS] for i in range(0, len(text), PART_CHARS)]
-            facts = {"parts": len(pieces), "lines": text.count("\n"), "sum": zlib.crc32(text.encode("utf-16-le"))}
+            facts = {"parts": len(pieces), "lines": text.count("\n"), "chars": len(text), "sum": zlib.crc32(text.encode("utf-16-le"))}
             for number, piece in enumerate(pieces, 1):
                 res = client.post("/api/v1/uploads/from-file", json={"text": piece, "part": number, **facts})
                 answer = res.json()

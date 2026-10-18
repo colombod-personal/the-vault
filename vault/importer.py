@@ -23,6 +23,7 @@ from .prices import MAX_PRICE, compute_values
 from .printing_lookup import front, printings_of
 
 EXACT = ("set_number", "id")
+HEADER_LINES = 3  # the lines a file may carry besides its rows (a "sep=," line, a header, a last line): the row limit is checked on lines first
 # The CSV formats other apps import: a cell that starts like a formula is written with a leading single quote, and
 # removed again when the Vault reads such a file back (vault/csv_safe.py, #351). Dragon Shield is neither.
 SAFE_CSV = ("moxfield", "archidekt", "csv")
@@ -179,6 +180,9 @@ def read_file(content: bytes):
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise ImportError_("File is not UTF-8 text") from exc
+    rows_max = config.import_max_rows()  # the second product limit: memory follows rows more than bytes (before anything is parsed)
+    if text.count("\n") > rows_max + HEADER_LINES:
+        raise ImportError_(f"File has too many rows ({rows_max:,} max)")
     try:
         source = formats.detect(text)
         if source in SAFE_CSV:  # the marker our own export put in front of a formula-shaped cell (#351)
@@ -188,6 +192,8 @@ def read_file(content: bytes):
         raise ImportError_(f"No cards found. {exc}") from exc
     if not entries:
         raise ImportError_("No cards found in the file.")
+    if len(entries) > rows_max:
+        raise ImportError_(f"File has too many rows ({rows_max:,} max)")
     for row, e in enumerate(entries, 1):
         _clean(e, row)
     if sum(e.quantity for e in entries) > MAX_COPIES:

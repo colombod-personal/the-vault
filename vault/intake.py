@@ -65,7 +65,7 @@ PART_SAY = {
                 "line count and its checksum), so nothing was staged and the collection was not changed.",
     "mismatch": "The Vault did not get the whole file in this app just now (what arrived did not match the file's own line count or "
                 "checksum), so nothing was staged and the collection was not changed.",
-    "why": {"lines": "the line count did not match", "checksum": "the checksum did not match", "text": "the text was not valid"},
+    "why": {"lines": "the line count did not match", "length": "the length did not match", "checksum": "the checksum did not match", "text": "the text was not valid"},
 }
 
 
@@ -80,6 +80,7 @@ class FileIntake(BaseModel):
     part: Any = None
     parts: Any = None
     lines: Any = None
+    chars: Any = None
     sum: Any = None
 
 
@@ -115,6 +116,8 @@ def plain_reason(exc: Exception) -> str:
         return "it is not UTF-8 text"
     if text.startswith("File is too large"):
         return "it is too large"
+    if text.startswith("File has too many rows"):
+        return "it has too many rows"
     return "no cards could be read from its columns and cells"
 
 
@@ -197,8 +200,8 @@ def build_router(get_db, current_user, settings) -> APIRouter:
                 log(request, "unreadable", bytes=len(fetched.content), content_type=fetched.content_type)
                 reason = plain_reason(exc)  # a fixed phrase: the library's message can quote a cell of the file
                 raise Declined({"status": "unreadable", "changed": False, "detail": reason,
-                                "say": f"The Vault could not read this file as a collection export ({reason}). "
-                                       "The collection was not changed."}) from None
+                                "say": f"The Vault could not read this file as a collection export ({reason}), "
+                                       "so the collection was not changed."}) from None
             staged = stage(db, user, fetched.content, file_fetch.clean_filename(handoff.file_name), body.bucket_id)
             log(request, "staged", bytes=len(fetched.content), content_type=fetched.content_type, rows=preview["rows"],
                 source=preview["source"])
@@ -216,11 +219,11 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         return JSONResponse({"status": "bad_part", "changed": False, "say": PART_SAY["bad_part"]})
 
     def stage_parts(request: Request, body: FileIntake, user: User, db: Session):
-        numbers = {"part": body.part, "parts": body.parts, "lines": body.lines, "sum": body.sum}
+        numbers = {"part": body.part, "parts": body.parts, "lines": body.lines, "chars": body.chars, "sum": body.sum}
         if any(isinstance(v, bool) or not isinstance(v, int) for v in numbers.values()):
             return bad_part(request, "numbers_missing", given=sorted(k for k, v in numbers.items() if v is not None))
-        part, parts, lines, total_sum = body.part, body.parts, body.lines, body.sum
-        if not (1 <= part <= parts <= file_parts.max_parts() and 0 <= lines and 0 <= total_sum <= 0xFFFFFFFF):
+        part, parts, lines, chars, total_sum = body.part, body.parts, body.lines, body.chars, body.sum
+        if not (1 <= part <= parts <= file_parts.max_parts() and 0 <= lines and 0 <= chars and 0 <= total_sum <= 0xFFFFFFFF):
             return bad_part(request, "numbers_out_of_range", parts=min(max(parts, 0), 10**6))
         try:
             data = file_parts.to_bytes(body.text)
@@ -229,7 +232,7 @@ def build_router(get_db, current_user, settings) -> APIRouter:
         limit = config.import_max_bytes()
         if len(data) > limit:
             return JSONResponse(answer(request, "too_large", bytes=len(data), parts=parts))
-        key = file_parts.set_key(user.id, total_sum, parts, lines, body.bucket_id)
+        key = file_parts.set_key(user.id, total_sum, parts, lines, chars, body.bucket_id)
         per_user(request, "file intake part", user.id, settings.import_part_limit, db)  # the parts have a counter of their own
 
         def run() -> dict:
@@ -238,9 +241,16 @@ def build_router(get_db, current_user, settings) -> APIRouter:
             now = _now()
             db.execute(delete(StagedUpload).where(StagedUpload.expires_at <= now))
             row = db.scalar(select(StagedUpload).where(StagedUpload.ticket_hash == key, StagedUpload.user_id == user.id))
-            if row is not None and row.content is not None:  # complete already: a part sent again changes nothing
-                preview = preview_import(db, user, row.content, ImportOptions(bucket_id=row.bucket_id))
-                return staged_payload(db, row, preview)
+            if row is not None and row.content is not None:
+                # Complete already: a part sent again changes nothing and costs a lookup, not a preview (a preview parses the whole file;
+                # the answer that completed the file carried it, and get_staged_upload gives it again).
+                bucket = db.get(Bucket, row.bucket_id) if row.bucket_id is not None else None
+                return {"status": "already_staged", "changed": False, "id": row.id, "filename": row.filename,
+                        "expires_at": row.expires_at.isoformat(), "bucket": {"id": bucket.id, "name": bucket.name} if bucket else None,
+                        "content_hash": content_hash(row.content, row.bucket_id),
+                        "next": "This file is already staged, complete, and nothing has been imported. For its preview call "
+                                "get_staged_upload with this id as upload_id, show the person what would change, and ask for one yes; "
+                                "on their yes call confirm_staged_upload with this id, confirm true and this content_hash."}
             if row is None:  # one file in progress at a time: an earlier unfinished one is dropped with its parts
                 db.execute(delete(StagedUpload).where(StagedUpload.user_id == user.id, StagedUpload.content.is_(None),
                                                       StagedUpload.ticket_hash.like(MARKER + "%")))
@@ -278,7 +288,7 @@ def build_router(get_db, current_user, settings) -> APIRouter:
             chunks = (c for (c,) in db.execute(select(StagedUploadPart.content).where(StagedUploadPart.staged_upload_id == row.id)
                                                .order_by(StagedUploadPart.part_index)))
             try:
-                content = file_parts.assemble(chunks, lines, total_sum)
+                content = file_parts.assemble(chunks, lines, chars, total_sum)
             except file_parts.Mismatch as exc:  # a truncated or altered read must never become a partial import
                 db.delete(row)
                 db.flush()
@@ -300,8 +310,8 @@ def build_router(get_db, current_user, settings) -> APIRouter:
                 log(request, "unreadable", bytes=len(content), parts=parts)
                 reason = plain_reason(exc)
                 return {"status": "unreadable", "changed": False, "detail": reason,
-                        "say": f"The Vault could not read this file as a collection export ({reason}). "
-                               "The collection was not changed."}
+                        "say": f"The Vault could not read this file as a collection export ({reason}), "
+                               "so the collection was not changed."}
             row.content, row.filename, row.uploaded_at, row.expires_at = content, file_parts.FILE_NAME, now, now + LIFETIME
             db.execute(delete(StagedUploadPart).where(StagedUploadPart.staged_upload_id == row.id))
             db.execute(delete(StagedUpload).where(StagedUpload.user_id == user.id, StagedUpload.id != row.id,

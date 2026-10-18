@@ -231,11 +231,12 @@ FILE_ARG = {"type": "object", "required": ["download_url", "file_id"],
                            "file_id": {"type": "string", "description": "The app's file id"},
                            "mime_type": {"type": "string"}, "file_name": {"type": "string"}}}
 # A file sent as text in ordered parts, for a coding app that has the file's path but no file object (vault.file_parts, vault.intake).
-PART_ARGS = {"text": {"type": "string", "description": "One part's text"},
+PART_ARGS = {"text": {"type": "string", "description": "Part text"},
              "part": {"type": "integer", "description": "Its number, from 1"},
              "parts": {"type": "integer", "description": "Number of parts"},
-             "lines": {"type": "integer", "description": "Line feeds in the whole file"},
-             "sum": {"type": "integer", "description": "CRC-32 of the whole text"}}
+             "lines": {"type": "integer", "description": "Line feeds in the file"},
+             "chars": {"type": "integer", "description": "UTF-16 length of the file"},
+             "sum": {"type": "integer", "description": "CRC-32 of the text"}}
 SHARE = {"share_id": {**ID, "description": "Read a collection someone shared with you (from list_shared_with_me) instead of your own"}}
 DECKLIST = {"type": "string", "maxLength": 50_000}  # as the API's TextIn and DeckIn
 CONFIRM = {"type": "boolean", "description": "true only after the person agreed to this exact change"}
@@ -676,7 +677,7 @@ TOOLS = [
          "nothing in the collection: the import is confirm_staged_upload. Any connection may use it, read-only ones included. "
          "Given `file`, the Vault fetches it from the chat app and stages it. A coding app that gives no file object but the file's "
          "local path sends the file's text in ordered parts instead: `text` (a part), `part` (its number from 1), `parts` (how many), "
-         "`lines` (the file's line feeds) and `sum` (CRC-32 of the whole text's UTF-16 code units); a call with neither returns the "
+         "`lines` (the file's line feeds), `chars` (its length in UTF-16 code units) and `sum` (CRC-32 of the whole text's UTF-16 code units); a call with neither returns the "
          "exact steps in `next`. The preview comes when every part is here and checked; each answer names the parts still missing. "
          "If the app can hand the file over by neither route the answer says so in a sentence.",
          {"file": FILE_ARG, "bucket_id": IMPORT_BUCKET["bucket_id"], **PART_ARGS}, required=["file"], method="POST",
@@ -835,7 +836,7 @@ BY_NAME = {t.name: t for t in TOOLS}
 # nothing about the person. Every field is cut to a fixed vocabulary or a short bounded form before it is logged: a name a
 # caller chose is never logged as it is, whatever it looks like (a name can hold an identifier or a secret).
 KEY_VOCABULARY = frozenset({
-    "file", "bucket_id", "text", "part", "parts", "lines", "sum",  # the tool's own (a file sent in parts: vault.file_parts)
+    "file", "bucket_id", "text", "part", "parts", "lines", "chars", "sum",  # the tool's own (a file sent in parts: vault.file_parts)
     "download_url", "file_id", "mime_type", "file_name",  # ChatGPT's file object
     "url", "uri", "href", "link", "path", "file_path", "name", "filename", "id", "type", "size", "mime", "content_type",
     "content", "data", "text", "base64", "downloadUrl", "fileId", "mimeType", "fileName", "filePath", "contentType"})

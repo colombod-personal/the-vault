@@ -98,7 +98,7 @@ def test_a_file_in_parts_takes_a_file_at_the_limit_and_refuses_one_byte_more(app
     def parts(content: bytes) -> list[dict]:
         text = content.decode("utf-8")
         pieces = [text[i:i + 1000] for i in range(0, len(text), 1000)]
-        facts = {"parts": len(pieces), "lines": file_parts.line_count(text), "sum": file_parts.checksum(text)}
+        facts = {"parts": len(pieces), "lines": file_parts.line_count(text), "chars": len(text), "sum": file_parts.checksum(text)}
         return [call_tool(bot, token, "import_collection_file", text=p, part=i, **facts)["structuredContent"] for i, p in enumerate(pieces, 1)]
 
     assert parts(at_limit())[-1]["status"] == "uploaded"
@@ -117,3 +117,55 @@ def test_the_tool_texts_and_the_pages_state_the_limit_from_the_setting_and_no_mo
         assert not re.search(r"\b(?:5|8|12|20) ?(?:MB|MiB)\b", re.sub(r"\(IMPORT_MAX_BYTES[^)]*\)|8 MiB", "", source)), f"{name}: a limit in words"
     from vault.api import mcp
     assert f"up to {config.size_text(config.import_max_bytes())}" in mcp.BY_NAME["start_collection_upload"].description
+
+
+# ---- the row limit, the second product limit (IMPORT_MAX_ROWS) ----------------------------------------------------------------------
+
+def test_the_row_limit_is_a_setting_with_a_default_and_a_file_of_tiny_rows_is_refused_before_it_is_parsed(monkeypatch):
+    """Review of PR 483 (M1): the size limit alone does not bound memory; a file of 29-byte rows at 8 MiB has 291,740 rows and peaked at
+    577 MB. The row limit is checked on the lines before anything is parsed."""
+    import time
+
+    from vault import importer
+    monkeypatch.delenv("IMPORT_MAX_ROWS", raising=False)
+    assert config.import_max_rows() == config.DEFAULT_IMPORT_MAX_ROWS == 100_000
+    tiny = b"Card Name,Quantity\n" + b"x,1\n" * 291_740
+    started = time.perf_counter()
+    with pytest.raises(importer.ImportError_, match="too many rows"):
+        importer.read_file(tiny)
+    assert time.perf_counter() - started < 1.0 and len(tiny) < config.import_max_bytes()  # within the size limit, over the row limit
+    monkeypatch.setenv("IMPORT_MAX_ROWS", "0")
+    with pytest.raises(RuntimeError, match="IMPORT_MAX_ROWS"):
+        config.Settings(database_url="postgresql://x", session_secret="s", dev_login=True, base_url="http://localhost").check()
+
+
+@pytest.mark.parametrize("rows", ["2", "4"], ids=["refused on the lines before parsing", "refused on the parsed rows"])
+def test_every_path_refuses_a_file_over_the_row_limit_in_one_sentence_and_stages_nothing(app, agent, bot, monkeypatch, rows):  # noqa: F811
+    from tests.test_agents import CSV  # five card rows, a header and the sep line
+    monkeypatch.setenv("IMPORT_MAX_ROWS", rows)
+    write = make_token(agent, scopes=["read", "write"])
+    for route in ("/imports", "/imports/preview"):
+        refused = agent.post(f"{V1}{route}", files={"file": ("my_cards.csv", CSV, "text/csv")})
+        assert refused.status_code == 400 and "too many rows" in refused.json()["detail"], route
+    out = call_tool(bot, write, "import_collection_csv", csv=CSV.decode("utf-8"))
+    assert out["isError"] is True and "too many rows" in out["content"][0]["text"]
+    intake_with(app, lambda r: httpx.Response(200, content=CSV, headers={"content-type": "text/csv"}))
+    fetched = call_tool(bot, write, "import_collection_file", file=file_arg())["structuredContent"]
+    assert fetched["status"] == "unreadable" and "too many rows" in fetched["say"] and fetched["say"].count(".") == 1
+    text = CSV.decode("utf-8")
+    pieces = [text[i:i + 40] for i in range(0, len(text), 40)]
+    facts = {"parts": len(pieces), "lines": file_parts.line_count(text), "chars": len(text), "sum": file_parts.checksum(text)}
+    parts = [call_tool(bot, write, "import_collection_file", text=p, part=i, **facts)["structuredContent"] for i, p in enumerate(pieces, 1)]
+    assert parts[-1]["status"] == "unreadable" and "too many rows" in parts[-1]["say"]
+    with app.state.db.sessions() as db:
+        assert db.query(StagedUpload).count() == 0 and db.query(StagedUploadPart).count() == 0
+    with TestClient(app) as page:  # the upload page: the file is kept as received and the person is told it could not be read
+        started = agent.post(f"{V1}/uploads").json()
+        res = page.post("/upload", data={"ticket": started["url"].split("ticket=")[1]}, files={"file": ("my_cards.csv", CSV, "text/csv")})
+        assert "too many rows" in res.text
+
+
+def test_a_file_at_the_row_limit_is_taken(app, agent, monkeypatch):  # noqa: F811
+    from tests.test_agents import CSV
+    monkeypatch.setenv("IMPORT_MAX_ROWS", "5")
+    assert agent.post(f"{V1}/imports/preview", files={"file": ("my_cards.csv", CSV, "text/csv")}).status_code == 200

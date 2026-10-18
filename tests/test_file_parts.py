@@ -9,6 +9,7 @@ there is one (the owner's PC).
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import textwrap
@@ -80,81 +81,116 @@ def parts_of(text: str, size: int) -> list[bytes]:
     return [file_parts.to_bytes(data[i:i + 2 * size].decode("utf-16-le", "surrogatepass")) for i in range(0, len(data), 2 * size)]
 
 
-def test_parts_are_put_together_after_the_line_count_and_the_checksum_are_checked():
+def chars_of(text: str) -> int:
+    return len(units(text)) // 2
+
+
+def test_parts_are_put_together_after_the_line_count_the_length_and_the_checksum_are_checked():
     text = "\ufeff" + "Folder,Card\r\n" + "my cards,Jötun Grunt \U0001F600\r\n" * 40
     chunks = parts_of(text, 37)  # a cut falls inside the pair: half at the end of one part, half at the start of the next
     assert any(c.endswith(b"\xed\xa0\xbd") for c in chunks), "the vector must split a pair"
-    assert assemble(chunks, line_count(text), checksum(text)) == text.encode("utf-8")
+    n, c, s = line_count(text), chars_of(text), checksum(text)
+    assert assemble(chunks, n, c, s) == text.encode("utf-8")
     with pytest.raises(Mismatch) as lines:
-        assemble(chunks, line_count(text) + 1, checksum(text))
+        assemble(chunks, n + 1, c, s)
     assert lines.value.reason == "lines"
     with pytest.raises(Mismatch) as truncated:
-        assemble(chunks[:-1], line_count(text), checksum(text))  # a read cut short: fewer lines than the file has
+        assemble(chunks[:-1], n, c, s)  # a read cut short: fewer lines than the file has
     assert truncated.value.reason == "lines"
+    with pytest.raises(Mismatch) as wrong_length:
+        assemble(chunks, n, c + 1, s)
+    assert wrong_length.value.reason == "length"
     with pytest.raises(Mismatch) as wrong_sum:
-        assemble(chunks, line_count(text), checksum(text) ^ 1)
+        assemble(chunks, n, c, s ^ 1)
     assert wrong_sum.value.reason == "checksum"
     altered = list(chunks)
     altered[3] = altered[3].replace(b"J", b"K", 1)
     with pytest.raises(Mismatch) as swapped:
-        assemble(altered, line_count(text), checksum(text))  # the same length and lines, one letter different
+        assemble(altered, n, c, s)  # the same length and lines, one letter different
     assert swapped.value.reason == "checksum"
+
+
+def test_a_self_consistent_truncated_text_is_refused_because_the_length_comes_from_a_separate_read():
+    """Review of PR 483 (M4): lines and sum computed from what was read agree with a cut text; the length of the whole file, read
+    on its own, does not."""
+    whole = "Folder,Card\r\n" + "my cards,Sol Ring\r\n" * 40
+    cut = whole[:-9]  # the last row has no line feed and is cut short
+    chunks = parts_of(cut, 100)
+    assert assemble(chunks, line_count(cut), chars_of(cut), checksum(cut)) == cut.encode()  # what a cut text claims about itself
+    with pytest.raises(Mismatch) as caught:
+        assemble(chunks, line_count(cut), chars_of(whole), checksum(cut))
+    assert caught.value.reason == "length"
 
 
 def test_half_a_pair_that_is_never_completed_is_not_valid_text():
     text = "a\nb \ud83d\n"
     with pytest.raises(Mismatch) as half:
-        assemble([file_parts.to_bytes(text)], line_count(text), checksum(text))
+        assemble([file_parts.to_bytes(text)], line_count(text), chars_of(text), checksum(text))
     assert half.value.reason == "text"
 
 
 def test_the_set_of_a_file_is_the_persons_and_the_files_own_identity():
-    a = file_parts.set_key(1, 99, 4, 10, None)
-    assert a == file_parts.set_key(1, 99, 4, 10, None) and a.startswith(file_parts.MARKER) and len(a) == 63
-    others = {file_parts.set_key(2, 99, 4, 10, None), file_parts.set_key(1, 98, 4, 10, None), file_parts.set_key(1, 99, 5, 10, None),
-              file_parts.set_key(1, 99, 4, 11, None), file_parts.set_key(1, 99, 4, 10, 7)}
-    assert a not in others and len(others) == 5
+    a = file_parts.set_key(1, 99, 4, 10, 500, None)
+    assert a == file_parts.set_key(1, 99, 4, 10, 500, None) and a.startswith(file_parts.MARKER) and len(a) == 63
+    others = {file_parts.set_key(2, 99, 4, 10, 500, None), file_parts.set_key(1, 98, 4, 10, 500, None), file_parts.set_key(1, 99, 5, 10, 500, None),
+              file_parts.set_key(1, 99, 4, 11, 500, None), file_parts.set_key(1, 99, 4, 10, 501, None), file_parts.set_key(1, 99, 4, 10, 500, 7)}
+    assert a not in others and len(others) == 6
 
 
 # ---- the script the assistant runs ------------------------------------------------------------------------------------------------
 
 HARNESS = textwrap.dedent(r"""
     const fs = require('fs'), cp = require('child_process');
-    const [, , recipePath, filePath, shell, cap] = process.argv;
+    const [, , recipePath, filePath, shell] = process.argv;
+    const opts = JSON.parse(process.env.HARNESS_OPTS || '{}');
     const BS = String.fromCharCode(92);
-    const winPath = filePath.split('/').join(BS);
+    const winPath = process.platform === 'win32' ? filePath.split('/').join(BS) : filePath;
     const code = fs.readFileSync(recipePath, 'utf8').replace('<PATH>', () => JSON.stringify(winPath).slice(1, -1));
-    const calls = [], printed = []; let shellCalls = 0;
-    const fileText = () => { const t = fs.readFileSync(filePath).toString('utf8'); return t.charCodeAt(0) === 0xFEFF ? t.slice(1) : t; };
+    const calls = [], printed = [], cmds = []; let shellCalls = 0, sends = 0;
+    const strict = new TextDecoder('utf-8', {fatal: true});
     const escape = s => JSON.stringify(s).replace(/[^ -~]/g, c => BS + 'u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
-    function standIn(cmd) {  // what the two PowerShell commands print, computed here
-      const named = /ReadAllText\('((?:[^']|'')*)'\)/.exec(cmd);
-      if (!named || named[1].split("''").join("'") !== winPath) throw new Error('the shell was given another path: ' + (named && named[1]));
-      const t = fileText();
-      const plan = /\$i=(\d+);/.exec(cmd);
-      if (plan) {
-        const N = Number(plan[1]), c = [0]; let i = N;
-        while (i < t.length) { if (t.charCodeAt(i) >= 0xDC00 && t.charCodeAt(i) <= 0xDFFF) i--; c.push(i); i += N; }
-        c.push(t.length);
-        return (t.split('\n').length - 1) + ',' + c.join(',');
+    function standIn(cmd) {  // what the PowerShell commands print, computed here
+      if (cmd.startsWith('Start-Sleep')) return '';
+      const hex = /^\$h='([0-9a-f]+)';/.exec(cmd);
+      if (!hex) throw new Error('a command that does not begin by decoding the path from hex digits');
+      let named = ''; for (let i = 0; i < hex[1].length; i += 4) named += String.fromCharCode(parseInt(hex[1].slice(i, i + 4), 16));
+      if (named !== winPath) throw new Error('the shell was given another path: ' + named);
+      const bytes = fs.readFileSync(filePath);
+      if (cmd.includes('ReadAllBytes')) {
+        const o = bytes.length >= 3 && bytes[0] === 239 && bytes[1] === 187 && bytes[2] === 191 ? 3 : 0;
+        let t; try { t = strict.decode(bytes.subarray(o)); } catch (e) { return 'Exception calling GetString: invalid UTF-8'; }
+        return t.length + ',' + (t.split('\n').length - 1) + ',' + (bytes.length - o) + ',' + o;
       }
-      const read = /Substring\((\d+),(\d+)\)/.exec(cmd);
-      return escape(t.substr(Number(read[1]), Number(read[2])));
+      const geo = /Min\(\$f\.Length,(\d+)\+\$k\*(\d+)\)/.exec(cmd), ks = /\$s=\(b (\d+)\);\$e=\(b (\d+)\)/.exec(cmd);
+      const O = Number(geo[1]), N = Number(geo[2]);
+      const b = k => {
+        if (k <= 0) return O;
+        let q = Math.min(bytes.length, O + k * N);
+        if (q >= bytes.length) return bytes.length;
+        for (let i = 0; i < 3; i++) { const c = bytes[q]; if (c === undefined || c < 128 || c > 191) break; q++; }
+        return q;
+      };
+      let part = strict.decode(bytes.subarray(b(Number(ks[1])), b(Number(ks[2]))));
+      if (opts.drop_last_row && Number(ks[2]) * N + O >= bytes.length) part = part.slice(0, -9);  // a silent short read
+      return escape(part);
     }
-    function real(cmd) {
-      const r = cp.spawnSync(shell, ['-NoProfile', '-NonInteractive', '-Command', cmd], {encoding: 'utf8'});
-      return r.stdout + r.stderr;
-    }
+    const real = cmd => new Promise(res =>  // asynchronous, as the app runs them: eight at a time really are eight processes
+      cp.execFile(shell, ['-NoProfile', '-NonInteractive', '-Command', cmd], {encoding: 'utf8', maxBuffer: 1 << 26}, (e, so, se) => res(so + se)));
     const tools = {
       exec_command: async ({cmd, login}) => {
-        shellCalls++;
+        shellCalls++; cmds.push(cmd);
         if (login !== false) throw new Error('login must be false: the profile prints noise before the output');
-        let out = shell === 'standin' ? standIn(cmd) : real(cmd);
+        let out = shell === 'standin' ? standIn(cmd) : await real(cmd);
         let tokens = Math.ceil(out.length / 2.5);
-        if (cap && out.length > Number(cap)) { out = out.slice(0, Number(cap)); tokens = 20000; }  // a truncated read
+        if (opts.cap && out.length > opts.cap) { out = out.slice(0, opts.cap); tokens = 20000; }  // a truncated read
         return {output: out, original_token_count: tokens, exit_code: 0, wall_time_seconds: 0.2};
       },
       mcp__the_vault__import_collection_file: async (a) => {
+        sends++;
+        if (opts.throttle_part === a.part && (opts.throttled = (opts.throttled || 0) + 1) <= opts.throttle_times) {
+          return {isError: true, content: [{type: 'text', text: 'Too many file intake part requests'}], structuredContent: {status: 429, retry_after_seconds: 1}};
+        }
+        if (opts.fail_part === a.part) return {isError: true, content: [{type: 'text', text: 'boom'}]};
         calls.push(a);
         const same = calls.filter(c => c.parts === a.parts);
         const done = new Set(same.map(c => c.part)).size === a.parts;
@@ -163,20 +199,20 @@ HARNESS = textwrap.dedent(r"""
     };
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     new AsyncFunction('tools', 'text', code)(tools, v => printed.push(v)).then(() => {
-      console.log(JSON.stringify({calls, printed, shellCalls}));
+      console.log(JSON.stringify({calls, printed, shellCalls, cmds, sends}));
     });
 """)
 
 
-def run_recipe(tmp_path, text: str, shell: str = "standin", cap: int | None = None, name: str = "my cards.csv",
-               bucket_id: int | None = None) -> dict:
-    """Run the recipe in Node over a file made of ``text`` (written as UTF-8, with a BOM when ``text`` begins with one)."""
+def run_recipe(tmp_path, text: str, shell: str = "standin", name: str = "my cards.csv", bucket_id: int | None = None, raw: bytes | None = None,
+               **opts) -> dict:
+    """Run the recipe in Node over a file made of ``text`` (UTF-8, with a byte-order mark when ``text`` begins with one) or of ``raw``."""
     file = tmp_path / name
-    file.write_bytes(text.encode("utf-8"))
+    file.write_bytes(text.encode("utf-8") if raw is None else raw)
     (tmp_path / "recipe.js").write_text(file_parts.recipe(bucket_id), encoding="utf-8")
     (tmp_path / "harness.js").write_text(HARNESS, encoding="utf-8")
     args = [NODE, str(tmp_path / "harness.js"), str(tmp_path / "recipe.js"), str(file).replace("\\", "/"), shell]
-    done = subprocess.run(args + ([str(cap)] if cap else []), capture_output=True, text=True, timeout=120)
+    done = subprocess.run(args, capture_output=True, text=True, timeout=300, cwd=tmp_path, env={**os.environ, "HARNESS_OPTS": json.dumps(opts)})
     assert done.returncode == 0, done.stderr
     return json.loads(done.stdout)
 
@@ -189,30 +225,51 @@ def sample_text(rows: int = 400) -> str:
 needs_node = pytest.mark.skipif(NODE is None, reason="Node is not installed")
 
 
+def sent_text(ran: dict) -> str:
+    return "".join(c["text"] for c in sorted(ran["calls"], key=lambda c: c["part"]))
+
+
 @needs_node
-def test_the_script_sends_every_part_with_the_files_own_line_count_and_the_checksum_of_the_whole(tmp_path):
+def test_the_script_sends_every_part_with_the_files_own_length_line_count_and_the_checksum_of_the_whole(tmp_path):
     text = sample_text()
     ran = run_recipe(tmp_path, text)
     calls = sorted(ran["calls"], key=lambda c: c["part"])
     n = len(calls)
     assert n > 1 and [c["part"] for c in calls] == list(range(1, n + 1)) and {c["parts"] for c in calls} == {n}
-    sent = "".join(c["text"] for c in calls)
-    assert sent == text[1:]  # the shell's ReadAllText drops the byte-order mark; everything else is as in the file, CRLF included
-    assert {c["lines"] for c in calls} == {line_count(text)}
+    sent = sent_text(ran)
+    assert sent == text[1:]  # the byte-order mark is dropped; everything else is as in the file, CRLF included
+    assert {c["lines"] for c in calls} == {line_count(text)} and {c["chars"] for c in calls} == {chars_of(text[1:])}
     assert {c["sum"] for c in calls} == {checksum(sent)}  # the JavaScript checksum is the server's
     assert json.loads(ran["printed"][0])["status"] == "uploaded"
-    assert all(len(c["text"]) <= file_parts.PART_CHARS for c in calls)
+    assert all(len(c["text"].encode("utf-8")) <= file_parts.PART_BYTES for c in calls)
 
 
 @needs_node
-def test_a_path_is_data_in_the_script_nothing_in_a_file_name_is_evaluated_or_changed(tmp_path):
-    """Review of PR 483: the path went into a template literal, where ${...} is evaluated. It goes into a JSON string now; the stand-in
-    shell fails the run if it is given any path other than the file's."""
-    for name in ("cards${1+1}.csv", "my `cards` $HOME.csv", "owner's cards (2026).csv"):
+def test_a_part_is_cut_at_a_character_boundary_so_no_part_holds_half_of_a_character(tmp_path):
+    cut = file_parts.PART_BYTES
+    text = "\ufeffa,b\r\n" + "x" * (cut - 6) + "\U0001F600é" + "y,z\r\n" * 30  # a four-byte character across the first cut
+    assert 0x80 <= text[1:].encode("utf-8")[cut] <= 0xBF  # the first cut falls inside a character
+    ran = run_recipe(tmp_path, text)
+    assert sent_text(ran) == text[1:] and len(ran["calls"]) >= 2
+
+
+@needs_node
+def test_a_path_never_reaches_a_command_as_text_whatever_the_name_holds(tmp_path):
+    """Review of PR 483 (H1): PowerShell reads U+2018, U+2019, U+201A and U+201B as quotes, so doubling the ASCII quote let a file name end
+    the string and run commands. The path is now hex digits in every command. The stand-in fails the run if a command carries any other
+    path; the commands are searched for the name too."""
+    names = ["a’);Set-Content inj.txt INJECTED;(’b.csv", "q‘‚‛'.csv", "cards${1+1}.csv", "my `cards` $HOME $(whoami).csv",
+             "owner's cards (2026); ls.csv", "nö \U0001F600 café.csv"]
+    if os.name != "nt":
+        names.append("line\nbreak\"quote.csv")
+    for name in names:
         ran = run_recipe(tmp_path, sample_text(20), name=name)
-        assert ran["calls"] and json.loads(ran["printed"][0])["status"] == "uploaded", name
-    steps = file_parts.steps()
-    assert "String.raw" not in file_parts.recipe() and "JavaScript string in double quotes" in steps and "backslash" in steps
+        assert json.loads(ran["printed"][0])["status"] == "uploaded", name
+        assert not any(name in c or name.replace("'", "''") in c for c in ran["cmds"]), name
+        assert not (tmp_path / "inj.txt").exists()
+    recipe = file_parts.recipe()
+    assert "String.raw" not in recipe and "replace(/'/g" not in recipe and "charCodeAt(i).toString(16)" in recipe
+    assert "JavaScript string in double quotes" in file_parts.steps()
 
 
 @needs_node
@@ -225,31 +282,57 @@ def test_every_part_goes_into_the_bucket_the_call_was_made_for(tmp_path):
 
 
 @needs_node
-def test_a_cut_between_the_two_halves_of_a_character_is_moved_so_no_part_holds_half_of_one(tmp_path):
-    cut = file_parts.PART_CHARS
-    text = "\ufeffa,b\r\n" + "x" * (cut - 6) + "\U0001F600" + "y,z\r\n" * 30
-    assert units(text[1:])[2 * (cut - 1):2 * cut] == units("\ud83d")  # the first cut falls between the halves
-    ran = run_recipe(tmp_path, text)
-    calls = sorted(ran["calls"], key=lambda c: c["part"])
-    for c in calls:
-        assert not 0xD800 <= ord(c["text"][-1]) <= 0xDBFF and not 0xDC00 <= ord(c["text"][0]) <= 0xDFFF, "a part was cut inside a pair"
-    assert units("".join(c["text"] for c in calls)) == units(text[1:])
-
-
-@needs_node
 def test_a_read_that_comes_back_truncated_is_read_again_in_halves_and_nothing_truncated_is_sent(tmp_path):
     text = sample_text(600)
-    ran = run_recipe(tmp_path, text, cap=6000)  # the shell's output budget is smaller than a first-size part
+    ran = run_recipe(tmp_path, text, cap=12000)  # the shell's output budget is smaller than a first-size part
     calls = ran["calls"]
-    assert max(len(c["text"]) for c in calls) <= 4096 and len({c["parts"] for c in calls}) == 1  # one consistent set, smaller parts
-    assert "".join(c["text"] for c in sorted(calls, key=lambda c: c["part"])) == text[1:]
-    assert json.loads(ran["printed"][0])["status"] == "uploaded"
+    assert max(len(c["text"].encode("utf-8")) for c in calls) <= file_parts.MIN_PART_BYTES and len({c["parts"] for c in calls}) == 1
+    assert sent_text(ran) == text[1:] and json.loads(ran["printed"][0])["status"] == "uploaded"
 
 
 @needs_node
 def test_a_file_whose_reads_are_always_truncated_sends_nothing(tmp_path):
     ran = run_recipe(tmp_path, sample_text(300), cap=200)
     assert ran["calls"] == [] and json.loads(ran["printed"][0]) == {"status": "not_read"}
+
+
+@needs_node
+def test_a_truncated_first_read_sends_nothing_because_the_length_and_line_count_cannot_be_trusted(tmp_path):
+    """Review of PR 483 (thread 1): the offsets list was read in one capped output; a truncated list could parse and make its last offset
+    the file's length. Now the length and line count come from a four-number read of their own, and a cut one is not used."""
+    ran = run_recipe(tmp_path, sample_text(300), cap=6)  # the four numbers are longer than 6 characters
+    assert ran["calls"] == [] and json.loads(ran["printed"][0]) == {"status": "not_read"} and ran["shellCalls"] == 1
+
+
+@needs_node
+def test_a_short_read_that_nothing_flags_is_caught_by_the_length_and_line_count_of_the_first_read(tmp_path):
+    ran = run_recipe(tmp_path, sample_text(300), drop_last_row=True)
+    assert ran["calls"] == [] and json.loads(ran["printed"][0]) == {"status": "not_read"}
+
+
+@needs_node
+def test_a_file_that_is_not_utf8_is_not_read_and_the_names_of_other_encodings_are_not_guessed(tmp_path):
+    ran = run_recipe(tmp_path, "", raw=b"Folder Name,Card Name\r\nmy cards,Caf\xe9\r\n")
+    assert ran["calls"] == [] and json.loads(ran["printed"][0]) == {"status": "not_read"}
+
+
+@needs_node
+def test_a_throttled_part_is_sent_again_after_the_wait_and_a_failed_one_stops_the_script_naming_it(tmp_path):
+    text = sample_text(200)
+    throttled = run_recipe(tmp_path, text, throttle_part=2, throttle_times=2)
+    assert sent_text(throttled) == text[1:] and json.loads(throttled["printed"][0])["status"] == "uploaded"
+    assert any(c.startswith("Start-Sleep -Seconds 1") for c in throttled["cmds"]) and throttled["sends"] == len(throttled["calls"]) + 2
+    failed = run_recipe(tmp_path, sample_text(2000), fail_part=3)
+    stopped = json.loads(failed["printed"][0])
+    assert stopped == {"status": "stopped", "failed_parts": [3]}
+    assert sorted(c["part"] for c in failed["calls"]) == [1, 2, 4, 5, 6, 7, 8]  # the group went through; no group after the failing one
+
+
+@needs_node
+def test_the_smallest_part_size_keeps_a_pass_inside_the_default_part_allowance():
+    from vault import config
+    passes = config.DEFAULT_IMPORT_MAX_BYTES // file_parts.MIN_PART_BYTES
+    assert passes == 1024 and passes <= config.DEFAULT_IMPORT_PART_LIMIT and file_parts.max_parts() >= passes
 
 
 @needs_node
@@ -265,17 +348,23 @@ def test_the_javascript_checksum_is_the_server_checksum_for_every_vector(tmp_pat
     assert got == [checksum(t) for t in texts]
 
 
-@pytest.mark.skipif(NODE is None or POWERSHELL is None, reason="needs Node and PowerShell (the owner's PC; a Linux lane has neither)")
-def test_the_script_works_with_the_real_powershell_for_a_path_with_spaces_and_an_apostrophe(tmp_path):
+@pytest.mark.skipif(NODE is None or POWERSHELL is None, reason="needs Node and PowerShell (the owner's PC; the CI runner has pwsh 7)")
+@pytest.mark.parametrize("name", ["my cards, the owner's.csv", "a’);Set-Content inj.txt INJECTED;(’b.csv", "dán‘s `cards` $(whoami) ; x.csv"])
+def test_the_script_works_with_the_real_powershell_and_a_name_cannot_run_anything(tmp_path, name):
+    """The recipe runs under the real shell: parts equal the file, the length and checksum are the server's, and the name that ran an
+    injected command in the review (curly quotes ending the string) creates no file."""
     text = sample_text(500)
-    ran = run_recipe(tmp_path, text, shell=POWERSHELL, name="my cards, the owner's.csv")
+    ran = run_recipe(tmp_path, text, shell=POWERSHELL, name=name)
     calls = sorted(ran["calls"], key=lambda c: c["part"])
-    assert "".join(c["text"] for c in calls) == text[1:] and {c["sum"] for c in calls} == {checksum(text[1:])}
-    assert {c["lines"] for c in calls} == {line_count(text)}
+    assert sent_text(ran) == text[1:] and {c["sum"] for c in calls} == {checksum(text[1:])}
+    assert {c["lines"] for c in calls} == {line_count(text)} and {c["chars"] for c in calls} == {chars_of(text[1:])}
+    assert not (tmp_path / "inj.txt").exists()
 
 
 def test_the_steps_for_the_model_say_what_to_do_and_tell_the_person_nothing_to_do():
     steps = file_parts.steps()
     assert "<PATH>" in steps and "exec_command" in steps and "confirm_staged_upload" in steps and "Never send the person to a link" in steps
-    assert "login:false" in steps and "original_token_count" in steps and str(file_parts.PART_CHARS) in steps
-    assert "@PART@" not in steps and "@@N" not in steps and "@PARALLEL@" not in steps and "@MIN@" not in steps
+    assert "login:false" in file_parts.recipe() and "original_token_count" in file_parts.recipe() and str(file_parts.PART_BYTES) in steps
+    assert "PowerShell" in steps and "macOS or Linux" in steps and "give the person `say`" in steps  # the limit is stated, not hidden
+    assert "already_staged" in steps and "get_staged_upload" in steps
+    assert "@PART@" not in steps and "@PARALLEL@" not in steps and "@MIN@" not in steps and "@BUCKET@" not in steps
