@@ -220,10 +220,15 @@ def test_write_is_ticked_on_the_consent_page_when_the_app_asked_for_it(client):
     """vault-0n9.5 (owner: "Yes pre tick write too"): the person who only presses Allow gets what the app asked for."""
     client.sign_in()
     text = client.authorize(scope="read write").text
-    assert write_box(text) == '<input type="checkbox" name="write" value="on" checked>'  # ticked, and the person can untick it
+    # ticked (this app is identified by its web address), the person can untick it, and the note under the boxes is linked to it
+    assert write_box(text) == '<input type="checkbox" name="write" value="on" checked aria-describedby="write-note">'
+    assert '<p class=small id="write-note">Write is ticked because this app asked for it. Untick Write to let it read only.</p>' in text
     assert '<input type="checkbox" checked disabled> <strong>Read.</strong>' in text  # Read: ticked and fixed
-    assert "Make changes: import collections" in text  # what Write allows is still stated, next to the box
-    assert "Untick Write to let it read only." in text  # and the page says read only is one click away
+    # what Write allows is stated plainly next to the box, the destructive part included (security review of #484, H1)
+    label = text.split('name="write"')[1].split("</label>")[0]
+    for must in ("deleting decks", "emptying or replacing your whole collection", "import collections", "save and edit decks",
+                 "Without Write the app can only read."):
+        assert must in label, must
     assert client.form_as_shown(client.authorize(scope="read write")).get("write") == "on"  # what a browser posts untouched
 
 

@@ -113,7 +113,7 @@ def test_add_by_hand_has_the_three_connectors_with_the_address_and_a_copy_button
     assert "red notice" in claude and "press Continue" in claude and bp.CLAUDE_LINK_CHECKED in claude
     assert "Settings → Connectors → Add custom connector" in claude
     assert "Plugins → Add → Add custom MCP server" in hand and "keep OAuth" in hand
-    assert "Tick <strong>Write</strong> only if the assistant may change" in hand
+    assert "<strong>Write</strong> is already ticked there because the assistant asks for it" in hand and "Untick it to keep the assistant read-only." in hand
 
 
 def test_the_landing_page_and_the_connect_page_give_the_same_steps():

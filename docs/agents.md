@@ -71,7 +71,7 @@ URL. The threat model, with the tests that prove each mitigation, is in
   app refreshing at once); a client should still serialise its refreshes and store the new tokens before using them.
   A refresh can narrow scopes, never widen them.
   A grant lasts at most 90 days from the person's consent, however often it is refreshed; then the app asks again.
-- **read** is the default. **write** is offered only if the app asks for it, and then it is a ticked box on the consent screen (since 2026-10-18, vault-0n9.5); the person can untick it to grant read only.
+- **read** is the default. **write** is offered only if the app asks for it, and then it is a box on the consent screen: ticked for an app identified by its web address, unticked for an unverified one (since 2026-10-18, vault-0n9.5); the person can change it, and unticking grants read only.
 - Tokens are for `https://<host>/api/mcp` only (RFC 8707). Used on `/api/v1` directly they are refused (401).
   They never get account powers: no tokens, export, deletion, sign-in or app management (403 even on the tools' own calls).
 - Only SHA-256 hashes are stored. Rate limits: `OAUTH_RATE_LIMIT` (120 a minute per IP) for authorize, token and revoke,

@@ -11,7 +11,7 @@ the label of the control, written in “quotes” exactly as the app shows it. `
 quoted label exists in the front end, that every MCP tool is named here, and that the table has this column. Where the web app has
 no place for an action it says **none**.
 
-Scopes: **read**, **write** (changes the collection or decks; ticked on the consent screen when the app asks for it, and the person can untick it), **account**
+Scopes: **read**, **write** (changes the collection or decks; shown on the consent screen when the app asks for it, ticked for an app identified by its web address, and the person can change it), **account**
 (never given to AI apps).
 
 ## Collection
