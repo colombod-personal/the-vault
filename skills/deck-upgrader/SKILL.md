@@ -6,7 +6,7 @@ description: >-
   build, a tune-up, or help with a weak role (ramp, draw, removal, sweepers), or wants to save, change or delete a deck.
 license: MIT
 metadata:
-  vault-tools: "whoami list_decks get_deck import_deck_from_link get_archidekt_deck save_deck update_deck delete_deck deck_stats simulate_draws deck_legality get_deck_ideas get_card_alternatives card_roles find_upgrades validate_deck_changes find_combos get_card_oracle"
+  vault-tools: "whoami list_decks get_deck import_deck_from_link get_archidekt_deck save_deck update_deck delete_deck list_recently_deleted restore_deleted deck_stats simulate_draws deck_legality get_deck_ideas get_card_alternatives card_roles find_upgrades validate_deck_changes find_combos get_card_oracle"
 ---
 
 # Deck upgrader
@@ -17,7 +17,7 @@ the candidates it returns, explain why, and present only a plan that the validat
 
 **The person's decks and collection are in the Vault: read them with the Vault's tools, never with a browser or computer.** Their saved decks, their collection and everything computed from them come from the tools named in the steps below, even when they are signed in to the Vault's website: do not open it, a browser or computer use to look. If a tool the steps name is not in your list, look it up by that name before saying it is missing; if you have `vault_tools`, reach it through `vault_tools` (it lists the Vault's other tools and shows one in full), `vault_call` (it runs one that only reads) or `vault_write` (it runs one that changes something), each by name with its arguments; a tool that deletes or revokes is done in the Vault's web app, so say that; say a tool is missing only after you have looked, and never fall back to a browser.
 
-In a host whose tool list is compact, `delete_deck` is done by the person in the Vault's web app: say so instead of looking for it.
+In a host whose tool list is compact, `delete_deck` is done by the person in the Vault's web app: say so instead of looking for it. A deleted deck is not lost: `list_recently_deleted` and `restore_deleted` bring it back for 30 days.
 
 **Check the connection when something is off.** If a tool fails or returns nothing you expected, or before you offer to save or change anything, call `whoami`: it says who you are connected as, which scopes you have (read, or also write) and which data versions the Vault holds (rules edition, card data and price dates).
 
@@ -99,8 +99,11 @@ enforces it in code: you choose well among what it returns and show only a plan 
   `import_deck_from_link`, not this.
 - **Rename it or fix its format:** `update_deck` replaces a saved deck's name and text, so send the current text from `get_deck`
   with the change; ask first.
-- **Delete a deck:** `delete_deck` without `confirm` shows the deck and changes nothing. Show it, say it cannot be brought back
-  from here, and send `confirm` only after the person says yes to that deck. Deleting a deck never touches the collection.
+- **Delete a deck:** `delete_deck` without `confirm` shows the deck and changes nothing. Show it, say it is kept for 30 days
+  and can be restored, and send `confirm` only after the person says yes to that deck. Deleting a deck never touches the collection.
+- **Bring a deleted deck back:** `list_recently_deleted` lists what was deleted in the last 30 days, with who deleted it and when; `restore_deleted`
+  with that item's id puts the deck back with its saved versions (its shares are not reopened: the person shares it again in the Vault). If
+  you deleted a deck that was not asked for, restore it and say so.
 
 ## Say plainly
 
