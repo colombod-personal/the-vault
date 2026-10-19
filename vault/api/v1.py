@@ -32,7 +32,7 @@ from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .. import analytics, card_roles, catalog_queries, deck_text, lab, oauth_server, outbound, tags as card_tags, tokens
+from .. import analytics, card_roles, catalog_queries, deck_text, lab, oauth_server, outbound, recovery, tags as card_tags, tokens
 from ..catalog import Catalog
 from .. import recent_signin
 from ..auth import (RECENT_SIGN_IN_METHOD_HOURS, IdentityInUse, Profile, email_verified, find_or_create, remove_identity,
@@ -1247,11 +1247,56 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         db.commit()
         return {**_deck(deck), "recorded": recorded}  # the deck as it is now, with its links
 
-    @router.delete("/decks/{deck_id}", tags=["decks"])
-    def delete_deck(deck_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    @router.delete("/decks/{deck_id}", tags=["decks"],
+                   summary="Delete a saved deck; it is kept 30 days and can be restored (GET /recovery)")
+    def delete_deck(request: Request, deck_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         deck = owned_deck(db, user, deck_id)
+        per_user(request, "deck delete", user.id, 30, db)  # a loop of deletes is cut at 30 a minute (each one is kept anyway)
+        who = card_tags.writer_of(db, getattr(request.state, "bearer", None))
+        try:
+            # kept in this transaction: the deck is gone only if its copy is stored, and an app is refused when the space is full
+            item = recovery.keep_deck(db, user, deck, assistant=who.detail if who.source == "assistant" else None)
+        except recovery.RecoveryError as exc:
+            raise HTTPException(exc.status, str(exc)) from None
         db.execute(delete(Share).where(Share.deck_id == deck.id))
         db.delete(deck)
+        db.commit()
+        return {"deleted": True, "recoverable_until": _iso(item.expires_at), "recovery_id": item.id,
+                "restore": "restore_deleted with item_id (assistants), or Account, Recently deleted (web app)",
+                "_links": {"recovery": link(f"{V1}/recovery")}}
+
+    # -- recently deleted: what can still be put back (vault.recovery) ------------------------------------------------
+    @router.get("/recovery", tags=["recovery"], summary="What was deleted in the last 30 days and can be put back")
+    def list_recovery(request: Request, cursor: str | None = None, limit: int | None = None,
+                      user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+        rows = recovery.listing(db, user)
+        db.commit()  # listing deleted this person's expired items
+        page, nxt = paginate(rows, lambda r: (-r.id,), lambda r: r.id, cursor=cursor, limit=limit)
+        body = page_body(request, [recovery.describe(r) for r in page], nxt, len(rows), limit=limit)
+        return {**body, "days": recovery.DAYS}
+
+    @router.post("/recovery/{item_id}/restore", tags=["recovery"], summary="Put a deleted item back (within 30 days)")
+    def restore_recovery(request: Request, item_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)):
+        per_user(request, "restore", user.id, 30, db)
+
+        def run() -> dict:
+            try:
+                out = recovery.restore(db, user, item_id, max_decks=settings.max_decks)
+            except recovery.RecoveryError as exc:
+                raise HTTPException(exc.status, str(exc)) from None
+            if out["kind"] == "deck":
+                out["_links"] = {"deck": link(f"{V1}/decks/{out['deck']['id']}")}
+            return out
+
+        return idempotent(request, db, user, 200, run)
+
+    @router.delete("/recovery/{item_id}", tags=["recovery"],
+                   summary="Remove a deleted item for good (the person, in the web app; a token cannot)")
+    def remove_recovery(item_id: Id, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
+        try:
+            recovery.purge(db, user, item_id)
+        except recovery.RecoveryError as exc:
+            raise HTTPException(exc.status, str(exc)) from None
         db.commit()
         return {"deleted": True}
 

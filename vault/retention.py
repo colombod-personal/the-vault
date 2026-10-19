@@ -19,6 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import delete, text
 from sqlalchemy.orm import Session
 
+from . import recovery
 from .models import CollectionValue, EmailCode, IdempotentRequest, ResetSnapshot, StagedUpload
 
 DAILY_DAYS = 90
@@ -72,6 +73,12 @@ def prune_reset_snapshots(db: Session) -> int:
     return db.execute(delete(ResetSnapshot).where(ResetSnapshot.expires_at <= datetime.now(timezone.utc))).rowcount or 0
 
 
+def prune_recovery_items(db: Session) -> int:
+    """Deleted decks (and later the other things the Vault keeps for a person to restore) are kept 30 days: the copy holds what the
+    person removed, so it is deleted when its time is up, whether or not anyone asked (vault.recovery, docs/gdpr.md)."""
+    return recovery.prune_expired(db)
+
+
 EMAIL_CODE_KEEP_HOURS = 48
 
 
@@ -91,6 +98,7 @@ def prune_idempotent_requests(db: Session) -> int:
 def apply(db: Session, today: date | None = None) -> dict:
     report = {"prices_deleted": prune_price_snapshots(db, today), "values_deleted": prune_collection_values(db, today),
               "uploads_deleted": prune_staged_uploads(db), "reset_snapshots_deleted": prune_reset_snapshots(db),
+              "recovery_items_deleted": prune_recovery_items(db),
               "email_codes_deleted": prune_email_codes(db),
               "idempotent_requests_deleted": prune_idempotent_requests(db)}
     db.commit()

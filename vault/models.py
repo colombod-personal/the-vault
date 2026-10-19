@@ -312,6 +312,32 @@ class DeckVersion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class RecoveryItem(Base):
+    """Something an assistant or the person removed, kept 30 days so it can be put back (vault.recovery, vault-wxy.18). One row per
+    removal: ``kind`` says what it is (``deck`` today; later the copies a replace removed, a tag, a share), ``payload`` is
+    compact JSON compressed with zlib (everything needed to put it back), ``summary`` says in words and numbers what it holds,
+    and ``source`` / ``source_detail`` say who removed it (the person, or the app's name) so the screen can show it. Written in the
+    same transaction as the removal, restored by id, deleted by the daily retention job once ``expires_at`` has passed (restoring
+    stops at that moment whether or not the row is still there), by the person from the web app, and with the account."""
+
+    __tablename__ = "recovery_items"
+    __table_args__ = (CheckConstraint("kind IN ('deck', 'collection_rows', 'tag', 'share')", name="ck_recovery_items_kind"),
+                      CheckConstraint("source IN ('person', 'assistant')", name="ck_recovery_items_source"))
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    label: Mapped[str] = mapped_column(String(200))  # what the person calls it (the deck's name)
+    summary: Mapped[dict] = mapped_column(JSON, default=dict)
+    payload: Mapped[bytes] = mapped_column(LargeBinary)
+    raw_bytes: Mapped[int] = mapped_column(Integer)  # the JSON before compression
+    stored_bytes: Mapped[int] = mapped_column(Integer)  # len(payload): what the per-person cap counts
+    source: Mapped[str] = mapped_column(String(12), default="person")
+    source_detail: Mapped[str | None] = mapped_column(String(200))  # which app, for an assistant
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class Share(Base):
     """Read access one user grants another, to their collection or to one deck.
 

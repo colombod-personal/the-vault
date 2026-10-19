@@ -1471,7 +1471,8 @@ revocation. **None of the server-enforced limits asks the person.**
 - **One call replaces the whole collection**: `import_collection_csv` with `confirm: true` and `replace_everything: true` needs no staged file
   and no preview, and takes **no snapshot** (the import history records counts, not content). It cannot be undone.
 - **The reset undo is limited**: `reset_collection` keeps one snapshot per person for 7 days; the snapshot ends when anything else changes the
-  collection, and a second reset replaces it. `undo_owned_cards_update` undoes only the last change. Deleting a deck has no undo.
+  collection, and a second reset replaces it. `undo_owned_cards_update` undoes only the last change. Deleting a deck had no undo; since vault-wxy.18 part 1 a deleted deck is kept 30 days
+  and restorable (section "Recoverable deletes" at the end of this file).
 - **There is no per-person rate limit on deletes**, nor on `save_deck`, `update_deck`, tag or bucket calls (imports, resets and owned-card
   changes are limited), so a loop can delete every deck in seconds.
 - Ordinary writes (saving a deck, creating a bucket, tagging up to 25 cards, notes) never had even an assistant-level confirmation.
@@ -1498,3 +1499,45 @@ not ask for it; ticking anything beyond the requested scopes; Write pre-ticked f
 person did not look (consent phishing, section 7); the address and look-alike warnings are the mitigation, unchanged and not eliminated. The
 destructive-write exposure above stays open until vault-wxy.18. Not verified in a real app: how claude.ai, ChatGPT and Codex draw the page (it is
 the Vault's own page in the browser) and what each host shows around a write call; the review read the HTML, not rendered pixels.
+
+
+## Recoverable deletes: decks (vault-wxy.18 part 1, 2026-10-19)
+
+The owner's decision (2026-10-18, verbatim from the record in vault-wxy.18): "deleted deck should be recoverable for 30 daus, i like that". It
+answers finding M1 of the security review of PR 484 for decks: with Write ticked, an app can send `delete_deck` with `confirm: true`, and the
+server cannot tell that from the person's yes. The server does not try to prove a human. It makes the delete **recoverable**.
+
+**What was built.** `delete_deck` (REST `DELETE /decks/{id}` and the tool) writes one `recovery_items` row **in the same transaction** as the
+delete: the deck, its saved versions, who deleted it (the person, or the app's name through `tags.writer_of`) and a **count** of the shares it had.
+Restore is `POST /recovery/{id}/restore` (the web app's Recently deleted section, and the tool `restore_deleted`); the list is
+`GET /recovery` (`list_recently_deleted`). 30 days (`vault.recovery.DAYS`); `restore` refuses an item past `expires_at` even while its row
+exists; the daily retention job deletes expired rows, and listing or storing deletes the caller's own at once, so a failed job never stretches
+the window. The tools are not core: the compact tool list for the Codex family is the core tools plus three dispatchers, so adding them costs
+0 bytes there (`tests/test_recovery.py` asserts the exact list and the 30,000-byte budget); `restore_deleted` is not destructive, so
+`vault_write` runs it.
+
+**Threats and what answers them** (tests in `tests/test_recovery.py`, `tests/test_recovery_oauth.py`).
+- *A hostile or injected assistant deletes decks.* Each delete is kept; 30 deletes a minute at most (`per_user`), then 429; the deck is restored
+  from the person's screen route or by tool (test: the OAuth app deletes with `confirm: true`, then both routes restore the same deck, id and
+  versions included). The screen shows who deleted it, so the person sees what an app did.
+- *The assistant tries to destroy the way back.* Removing an item for good is `DELETE /recovery/{id}` behind `account_user`: no personal access
+  token and no OAuth grant has the `account` scope (an OAuth token is refused outside `/api/mcp` altogether), and no tool does it. It cannot make room
+  by filling the space either: at 200 items or 8 MB stored a person, **an app's delete is refused with 409 and nothing is deleted**; only the person's own
+  web session may push the oldest items out. So earlier good items are never evicted by a loop of an app's deletes.
+- *The assistant restores something the person deleted on purpose.* Restore needs the write scope, is rate limited (30 a minute) and only brings back
+  the person's own deck, which the assistant could read before it was deleted; **shares and invites are never reopened** (a restore must not widen
+  who sees the deck, so no grantee or invite token is stored, only a count; the person shares again, which an assistant cannot do).
+- *Another person's items.* Every lookup is by id **and** `user_id`; another person's id is a 404 (listing, restore, removal: tested).
+- *Races.* A removal takes the person's row lock before it checks the space (two at once cannot both fit); a restore locks the item row (two at
+  once restore once).
+- *Privacy and retention.* The copy holds personal data: it is in the data map (`docs/gdpr.md`), the privacy notice, the export
+  (`recently_deleted.json`), erasure (`purge_user`, `ON DELETE CASCADE`) and the retention job, all tested. Neon point-in-time backups keep deleted rows
+  for their own window, as for any deletion.
+- *Storage.* Capped per person (above); a deck is text of a few KB, compressed; the daily job removes expired rows.
+- *What an unreadable copy does.* Restore answers 409 with a sentence, the item can still be removed and the export does not fail.
+
+**What does not change, and stays open.** This is recoverability for **decks only**. `import_collection_csv` with `replace_everything`, `delete_tag`,
+`untag_cards` and `stop_sharing` stay as described in the section above until the next parts of vault-wxy.18 (the copies an import replaced are
+kept 30 days in a "Recovered" bucket; tags; a share is recoverable on the screen only, because a restore tool would let an injected assistant reopen
+an access the person revoked on purpose). `update_deck` still overwrites (20 saved versions remain). A deleted deck's content is still readable to the
+app before it deletes it. Whether the server should also require a human yes at the tool is still not built; the owner chose recoverability.

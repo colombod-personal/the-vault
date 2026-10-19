@@ -448,6 +448,54 @@ function Section({ title, children }) {
 
 const rowStyle = { display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', padding: '6px 0' };
 
+// Decks deleted in the last 30 days (by the person or by an assistant), kept so they can be put back (docs/gdpr.md). Each row says what,
+// who deleted it and when; Restore puts it back; Remove for good deletes it now (the person's alone: an assistant's token cannot).
+function RecentlyDeleted({ onRestored }) {
+  const api = window.VaultApi;
+  const [items, setItems] = useStateAcc(null);
+  const [busy, setBusy] = useStateAcc(null);
+  const [note, setNote] = useStateAcc(null);
+  const [error, setError] = useStateAcc(null);
+  const load = () => api.recentlyDeleted().then(setItems, () => setItems([]));
+  useEffectAcc(() => { load(); }, []);
+  const who = (i) => i.deleted_by.who === 'assistant' ? `an assistant (${i.deleted_by.app || 'an app'})` : 'you';
+  const act = async (i, fn, done) => {
+    setError(null); setNote(null); setBusy(i.id);
+    try { const res = await fn(); setNote(done(res)); await load(); onRestored && onRestored(); }
+    catch (e) { setError(e.message); }
+    setBusy(null);
+  };
+  const restore = (i) => act(i, () => api.restoreDeleted(i.id),
+    (res) => `Restored “${res.deck.name}” with its saved versions.` + (res.shares ? ` ${res.shares}` : ''));
+  const forGood = (i) => {
+    if (confirm(`Remove “${i.name}” for good? It can then no longer be restored.`)) act(i, () => api.removeDeletedForGood(i.id), () => `Removed “${i.name}” for good.`);
+  };
+  if (items === null || (items.length === 0 && !note)) return null;
+  return (
+    <Section title="Recently deleted">
+      <p className="label-mono" style={{ marginBottom: 8 }}>
+        A deleted deck is kept for 30 days, whoever deleted it, so you can put it back. After that it is deleted for good.
+      </p>
+      {error && <p role="alert" style={{ color: 'var(--danger)', marginBottom: 8 }}>{error}</p>}
+      {note && <p role="status" className="label-mono" style={{ color: 'var(--good)', marginBottom: 8 }}>{note}</p>}
+      {items.map((i) => (
+        <div key={i.id} style={rowStyle}>
+          <span>
+            {i.name}
+            <span className="label-mono" style={{ display: 'block' }}>
+              Deleted by {who(i)} on {new Date(i.deleted_at).toLocaleDateString()}; can be restored until {new Date(i.restorable_until).toLocaleDateString()}
+            </span>
+          </span>
+          <span style={{ display: 'flex', gap: 6 }}>
+            <button className="btn xs" disabled={busy === i.id} onClick={() => restore(i)}>Restore</button>
+            <button className="btn xs ghost" disabled={busy === i.id} onClick={() => forGood(i)}>Remove for good</button>
+          </span>
+        </div>
+      ))}
+    </Section>
+  );
+}
+
 function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged, onCollectionChanged }) {
   const [name, setName] = useStateAcc(me?.name || '');
   const [shares, setShares] = useStateAcc([]);
@@ -507,7 +555,7 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged, onCo
   const saveName = wrap(async () => { await api.updateName(name); onMeChanged && onMeChanged(); });
   const revoke = wrap(async (id) => { await api.removeShare(id); reload(); });
   const removeDeck = wrap(async (id) => {
-    if (confirm('Delete this deck? Anyone you shared it with loses access.')) { await api.deleteDeck(id); reload(); }
+    if (confirm('Delete this deck? Anyone you shared it with loses access. You can restore the deck for 30 days under Recently deleted (its shares are not restored).')) { await api.deleteDeck(id); reload(); }
   });
   const deleteAccount = wrap(async () => {
     await runWithConfirm(askConfirm, 'delete my account', () => api.deleteAccount());
@@ -589,6 +637,8 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged, onCo
           </div>
         ))}
       </Section>
+
+      <RecentlyDeleted onRestored={reload} />
 
       <SignInMethods me={me} onChanged={onMeChanged} />
 

@@ -339,7 +339,7 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved, sw
     } catch (e) { setError('Saving failed: ' + e.message); }
   }
   async function remove() {
-    if (!saved || !confirm(`Remove “${saved.name}” from your decks?`)) return;
+    if (!saved || !confirm(`Remove “${saved.name}” from your decks? You can restore it for 30 days under Account, Recently deleted.`)) return;
     try { await window.VaultApi.deleteDeck(saved.id); await refreshDecks(); onBack(); }
     catch (e) { setError('Removing failed: ' + e.message); }
   }

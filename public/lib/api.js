@@ -568,6 +568,10 @@ window.VaultApi = (() => {
       : Promise.resolve(null)),
     updateDeck: (id, name, text, source_url, source_author) => call(V1 + '/decks/' + id, { method: 'PUT', json: { name, text, source_url, source_author } }),
     deleteDeck: (id) => call(V1 + '/decks/' + id, { method: 'DELETE' }),
+    // what was deleted in the last 30 days (a deck is kept so it can be put back), restoring one, and removing one for good
+    recentlyDeleted: () => all(V1 + '/recovery'),
+    restoreDeleted: (id) => create(V1 + '/recovery/' + id + '/restore', { json: {} }),
+    removeDeletedForGood: (id) => call(V1 + '/recovery/' + id, { method: 'DELETE' }),
     // a saved deck's versions (at most 20), and the open: records the list the page showed if its cards changed and says what
     // changed since the person last looked
     deckVersions: (id) => call(V1 + '/decks/' + id + '/versions'),
