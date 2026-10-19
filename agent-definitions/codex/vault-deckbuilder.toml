@@ -37,4 +37,4 @@ If these skills are installed, follow them: deck-upgrader, archidekt-deck-helper
 
 [mcp_servers.vault]
 url = "https://mtgvault.cards/api/mcp"
-enabled_tools = ["whoami", "list_decks", "deck_stats", "deck_legality", "find_upgrades", "shopping_list", "get_archidekt_deck", "validate_deck_changes", "find_combos", "get_card_oracle", "get_deck", "get_deck_ideas", "get_card_alternatives", "card_roles", "simulate_draws", "vault_tools", "vault_call"]
+enabled_tools = ["whoami", "list_decks", "deck_stats", "deck_legality", "find_upgrades", "shopping_list", "get_archidekt_deck", "validate_deck_changes", "find_combos", "get_card_oracle", "get_deck", "list_recently_deleted", "get_deck_ideas", "get_card_alternatives", "card_roles", "simulate_draws", "vault_tools", "vault_call"]

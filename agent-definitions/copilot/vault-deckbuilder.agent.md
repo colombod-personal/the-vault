@@ -13,6 +13,7 @@ tools:
   - vault/find_combos
   - vault/get_card_oracle
   - vault/get_deck
+  - vault/list_recently_deleted
   - vault/get_deck_ideas
   - vault/get_card_alternatives
   - vault/card_roles
