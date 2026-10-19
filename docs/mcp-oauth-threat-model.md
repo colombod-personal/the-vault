@@ -1523,8 +1523,11 @@ the window. The tools are not core: the compact tool list for the Codex family i
 - *The assistant tries to destroy the way back.* Removing an item for good is `DELETE /recovery/{id}` behind `account_user`: no personal access
   token and no OAuth grant has the `account` scope (an OAuth token is refused outside `/api/mcp` altogether), and no tool does it. It cannot make room
   by filling the space either: at 200 items or 8 MB stored a person, **an app's delete is refused with 409 and nothing is deleted**. The person's own
-  delete in the web app makes room only by dropping the oldest items **an app** made (and the screen says which); if only the person's own items are
-  left it is refused with a plain sentence and nothing of the person's is dropped. So a hostile app that fills the space with junk cannot push the
+  delete in the web app makes room only by dropping items **an app** made, in this order (and the screen says which, on the deck's own page too): one
+  already restored, then one with a newer item of the same name, then the oldest, **which is dropped only if it is more than 7 days old**; younger, the
+  delete is refused with a sentence that sends the person to Recently deleted (an app that deleted the one deck that matters and then filled the space with
+  junk cannot have it dropped by the person's next delete, final review of PR 485, M-1). If only the person's own items are left it is refused with a plain
+  sentence and nothing of the person's is dropped. So a hostile app that fills the space with junk cannot push the
   person's own recoverable items out, not even through the person's next delete (review of PR 485, M1). The cost is that the junk, which sits in the
   person's list until it is dropped or expires, can be removed one by one with Remove for good.
 - *The assistant destroys the original by restoring it, editing the restored deck and deleting it again* (Copilot review of PR 485). A restore does
@@ -1538,7 +1541,7 @@ the window. The tools are not core: the compact tool list for the Codex family i
 - *Races.* One lock order everywhere: the person's account lock (`FOR NO KEY UPDATE` on the user row, taken by deck creation, removal and restore, so
   the count of decks and the recovery space are checked one request at a time and it cannot deadlock with a foreign-key insert), then the deck row
   (`FOR UPDATE`, re-read from the database, so an edit committed meanwhile is in the copy and a second delete of the same deck finds nothing: 404), then
-  the item row. Tests: a double delete (one item), a restore against a deck creation with one slot left, two restores of one item, two app deletes with room
+  the item row; the wait for the account lock is bounded (`vault.locks.LOCK_TIMEOUT`, 5 seconds, then the usual 503 with Retry-After). Tests: a double delete (one item), a restore against a deck creation with one slot left, two restores of one item, two app deletes with room
   for one, and failure injection between the copy and the delete and at the commit (nothing is lost and no copy is left).
 - *Privacy and retention.* The copy holds personal data: it is in the data map (`docs/gdpr.md`), the privacy notice, the export
   (`recently_deleted.json`), erasure (`purge_user`, `ON DELETE CASCADE`) and the retention job, all tested. Neon point-in-time backups keep deleted rows
@@ -1548,7 +1551,7 @@ the window. The tools are not core: the compact tool list for the Codex family i
   it does not see the deck text. That is the same data an app with Read could have read before the deck was deleted.
 - *Storage.* Capped per person (above); a deck is text of a few KB, compressed; the daily job removes expired rows.
 - *What an unreadable or tampered copy does.* A copy is never decompressed past 64 MB (a bomb is refused, not expanded), must carry the format number, and
-  a missing or mistyped field is an "unreadable" 409, never a 500; the item can still be removed and the export does not fail. A restore runs in a savepoint,
+  a missing or mistyped field, or a value the database refuses (a database error inside the restore's savepoint), is an "unreadable" 409; the item can still be removed and the export does not fail. A restore runs in a savepoint,
   and an id conflict is a plain 409.
 - *The demo account.* `reviewer.seed(reset=True)` clears the previous reviewer's recovery items with the demo decks.
 

@@ -9,6 +9,7 @@ commit order, the ``v`` check, the cap on decompression) and the test fails.
 import json
 import threading
 import zlib
+from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -220,10 +221,102 @@ def test_a_hostile_fill_then_the_persons_delete_drops_the_apps_junk_not_the_pers
     agent.delete(f"{V1}/decks/{make_deck(agent, name='Legit old deck')['id']}")
     junk = [make_deck(agent, name=f"junk{n}")["id"] for n in range(5)]
     assert [delete_as_app(bot, write, i).status_code for i in junk] == [200, 200, 200, 409, 409]
-    mine = agent.delete(f"{V1}/decks/{make_deck(agent, name='Mine')['id']}")
-    assert mine.status_code == 200 and [d["name"] for d in mine.json()["recovery_dropped"]] == ["junk0"]  # said, and only the app's
+    mine_id = make_deck(agent, name="Mine")["id"]
+    refused = agent.delete(f"{V1}/decks/{mine_id}")  # the oldest app item is young: the person chooses, nothing of theirs is dropped
+    assert refused.status_code == 409 and "Look at Account, Recently deleted" in refused.json()["detail"]
+    first_junk = next(i["id"] for i in agent.get(RECOVERY).json()["items"] if i["name"] == "junk0")
+    assert agent.delete(f"{RECOVERY}/{first_junk}").status_code == 200  # the person's own choice, in the Account panel
+    assert agent.delete(f"{V1}/decks/{mine_id}").status_code == 200
     names = [i["name"] for i in agent.get(RECOVERY).json()["items"]]
     assert "Legit old deck" in names and "Mine" in names and "junk0" not in names
+
+
+def age(app, item_id, days: int):
+    with app.state.db.sessions() as db:
+        db.get(RecoveryItem, item_id).created_at -= timedelta(days=days)
+        db.commit()
+
+
+def test_an_app_that_deletes_the_valuable_deck_and_fills_the_space_cannot_have_it_dropped_by_the_persons_next_delete(app, agent, bot, monkeypatch):
+    monkeypatch.setattr(recovery, "MAX_ITEMS", 5)
+    write = make_token(agent, scopes=["read", "write"])
+    valuable = make_deck(agent, name="VALUABLE", text="1 Sol Ring\n1 Arcane Signet")["id"]
+    assert delete_as_app(bot, write, valuable).status_code == 200
+    junk = [make_deck(agent, name=f"junk{n}")["id"] for n in range(6)]
+    assert [delete_as_app(bot, write, i).status_code for i in junk] == [200, 200, 200, 200, 409, 409]
+    mine = make_deck(agent, name="My own deck")["id"]
+    refused = agent.delete(f"{V1}/decks/{mine}")
+    assert refused.status_code == 409 and "VALUABLE" in refused.json()["detail"] and agent.get(f"{V1}/decks/{mine}").status_code == 200
+    assert "VALUABLE" in [i["name"] for i in agent.get(RECOVERY).json()["items"]]  # not dropped, and the refusal names it
+    valuable_item = next(i["id"] for i in agent.get(RECOVERY).json()["items"] if i["name"] == "VALUABLE")
+    age(app, valuable_item, 8)  # a week on, nobody asked for it back: now it is the oldest to drop
+    done = agent.delete(f"{V1}/decks/{mine}")
+    assert done.status_code == 200 and [d["name"] for d in done.json()["recovery_dropped"]] == ["VALUABLE"]
+
+
+def deleted_by_app(agent, bot, write, name):
+    deck = make_deck(agent, name=name)["id"]
+    assert delete_as_app(bot, write, deck).status_code == 200
+    return deck
+
+
+def test_eviction_takes_an_item_that_was_restored_before_an_older_one(app, agent, bot, monkeypatch):
+    monkeypatch.setattr(recovery, "MAX_ITEMS", 4)
+    write = make_token(agent, scopes=["read", "write"])
+    for name in ("Alpha", "Beta", "Gamma", "Delta"):
+        deleted_by_app(agent, bot, write, name)
+    by_name = {i["name"]: i["id"] for i in agent.get(RECOVERY).json()["items"]}
+    assert agent.post(f"{RECOVERY}/{by_name['Beta']}/restore").status_code == 200  # Beta is back: its copy is the cheapest to lose
+    done = agent.delete(f"{V1}/decks/{make_deck(agent, name='Mine')['id']}")
+    assert done.status_code == 200 and [d["name"] for d in done.json()["recovery_dropped"]] == ["Beta"]
+    assert "Alpha" in [i["name"] for i in agent.get(RECOVERY).json()["items"]]  # the older, never restored one stays
+
+
+def test_eviction_takes_a_duplicate_before_the_oldest_item(app, agent, bot, monkeypatch):
+    monkeypatch.setattr(recovery, "MAX_ITEMS", 4)
+    write = make_token(agent, scopes=["read", "write"])
+    for name in ("Solo", "Dup", "Dup", "Other"):  # the older Dup has a newer item of the same name
+        deleted_by_app(agent, bot, write, name)
+    items_before = {i["id"]: i["name"] for i in agent.get(RECOVERY).json()["items"]}
+    done = agent.delete(f"{V1}/decks/{make_deck(agent, name='Mine')['id']}")
+    assert done.status_code == 200 and [d["name"] for d in done.json()["recovery_dropped"]] == ["Dup"]
+    left = [i["name"] for i in agent.get(RECOVERY).json()["items"]]
+    assert sorted(left) == ["Dup", "Mine", "Other", "Solo"] and len(items_before) == 4  # Solo, the oldest, was not the one dropped
+
+
+def test_the_deck_pages_delete_says_in_the_screen_text_that_it_shows_what_was_dropped():
+    from pathlib import Path
+    source = (Path(__file__).parent.parent / "public" / "views" / "deck.jsx").read_text(encoding="utf-8")
+    assert "recovery_dropped" in source and "dropped from Recently deleted" in source  # a delete from a deck's own page is not silent
+
+
+def test_waiting_for_the_account_lock_is_bounded_then_a_503_and_nothing_is_lost(app, agent, monkeypatch):
+    from sqlalchemy import select as pick
+
+    from vault import locks
+    from vault.models import User
+    deck = make_deck(agent)
+    monkeypatch.setattr(locks, "LOCK_TIMEOUT", "300ms")
+    with app.state.db.sessions() as other:  # another request of the same person is mid-way: it holds the account lock
+        other.execute(pick(User.id).where(User.email == "dev@localhost").with_for_update(key_share=True))
+        res = agent.delete(f"{V1}/decks/{deck['id']}")
+        assert res.status_code == 503 and "retry-after" in res.headers
+        other.rollback()
+    assert agent.get(f"{V1}/decks/{deck['id']}").status_code == 200 and items(app) == []
+    assert agent.delete(f"{V1}/decks/{deck['id']}").status_code == 200  # free again
+
+
+def test_a_value_the_database_refuses_in_a_copy_is_an_unreadable_409_not_a_500(app, agent):
+    deck = make_deck(agent)
+    agent.delete(f"{V1}/decks/{deck['id']}")
+    item = items(app)[0].id
+    for field, value in (("id", "not a number"), ("format", "f" * 100), ("source_url", "u" * 600), ("text", "NUL\u0000in the text")):
+        good = payload_of(app, item)
+        good["deck"][field] = value
+        set_payload(app, item, good)
+        res = agent.post(f"{RECOVERY}/{item}/restore")
+        assert res.status_code == 409 and "cannot be read" in res.json()["detail"], field
+    assert agent.get(f"{V1}/decks").json()["total"] == 0
 
 
 def test_when_the_space_is_full_of_the_persons_own_decks_the_persons_delete_is_refused_with_a_sentence_and_drops_nothing(app, agent, monkeypatch):

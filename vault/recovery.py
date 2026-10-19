@@ -13,8 +13,10 @@ Recently deleted) and an assistant can list and restore it with ``list_recently_
   restored deck is gone. While the restored deck still exists a second restore is refused (no duplicates).
 * **Space**: at most ``MAX_ITEMS`` items and ``MAX_BYTES`` stored bytes a person. When full, a removal made by an assistant (an OAuth app or
   a personal access token) is refused with 409 and nothing is deleted. The person's own removal makes room only by dropping the oldest
-  items an **app** made (and says which); if only the person's own items are left it is refused with a plain sentence: nothing of the
-  person's is ever dropped silently, and a loop of an app's deletes can never push the person's own items out.
+  items an **app** made (and says which): first one already restored, then one with a newer item of the same name, then the oldest, which is
+  dropped only when it is more than ``PROTECTED_DAYS`` old (otherwise the person is told to choose in the Account panel). If only the person's
+  own items are left it is refused with a plain sentence. Nothing of the person's is ever dropped silently, and a loop of an app's deletes can
+  never push out the person's own items or the deck the app deleted last week.
 * **Locks, always in this order**: the account (``lock_account``: ``FOR NO KEY UPDATE`` on the user row, which every deck creation and
   every removal or restore takes, so the deck count and the space are checked one at a time per person and a restore can never
   deadlock with a foreign-key insert), then the deck, then the recovery item.
@@ -30,10 +32,11 @@ import json
 import zlib
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import delete, func, select, text
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
+from . import locks
 from .models import Deck, DeckVersion, RecoveryItem, Share, User
 
 DAYS = 30
@@ -41,6 +44,7 @@ MAX_ITEMS = 200
 MAX_BYTES = 8 * 1024 * 1024  # stored (compressed) bytes a person may keep
 MAX_ITEM_JSON_BYTES = 20 * 1024 * 1024  # what one item may hold when it is written
 MAX_UNPACKED_BYTES = 64 * 1024 * 1024  # what a reader will decompress: more is refused, never expanded
+PROTECTED_DAYS = 7  # an item an app deleted this recently is never dropped to make room: the person is asked to choose instead
 FORMAT = 1  # the payload's ``v``; a reader refuses any other
 
 
@@ -70,7 +74,9 @@ def _when(text: str | None) -> datetime | None:
 def lock_account(db: Session, user: User) -> None:
     """Take the person's account lock (``FOR NO KEY UPDATE`` on the user row) until the transaction ends. Deck creation, removal and
     restore all take it first, so the count of decks and the recovery space are read and changed one request at a time. It does not
-    conflict with the ``FOR KEY SHARE`` a foreign-key insert takes, so it cannot deadlock with one."""
+    conflict with the ``FOR KEY SHARE`` a foreign-key insert takes, so it cannot deadlock with one. The wait is bounded like every other
+    account lock (``vault.locks.LOCK_TIMEOUT``, ``SET LOCAL`` for the transaction): past it the caller gets the usual 503 with Retry-After."""
+    db.execute(text(f"SET LOCAL lock_timeout = '{locks.LOCK_TIMEOUT}'"))
     db.execute(select(User.id).where(User.id == user.id).with_for_update(key_share=True))
 
 
@@ -105,6 +111,31 @@ def prune_expired(db: Session) -> int:
                       .execution_options(synchronize_session=False)).rowcount or 0
 
 
+def _victim(db: Session, user: User) -> RecoveryItem:
+    """The app-made item to drop so the person's own removal fits, or ``RecoveryError``. Only items an app made are ever candidates.
+    In this order: one that was restored already (its deck is back), then one with a newer item of the same name (a duplicate), then
+    the oldest. The oldest is dropped only when its 7 days are over: an app that deleted the one deck that matters and then filled the
+    space with junk must not be able to have it dropped by the person's next delete, so the person is asked to choose instead."""
+    apps = db.execute(select(RecoveryItem.id, RecoveryItem.label, RecoveryItem.restored_at, RecoveryItem.created_at)
+                      .where(RecoveryItem.user_id == user.id, RecoveryItem.source == "assistant").order_by(RecoveryItem.id)).all()
+    if not apps:
+        raise RecoveryError(
+            "Nothing was deleted: the 30-day recovery space is full of decks you deleted yourself. Remove some for good under "
+            "Account, Recently deleted (they cannot be restored after that), then delete again.", 409)
+    newest = dict(db.execute(select(RecoveryItem.label, func.max(RecoveryItem.id)).where(RecoveryItem.user_id == user.id)
+                             .group_by(RecoveryItem.label)).all())
+    chosen = (next((a for a in apps if a.restored_at is not None), None)
+              or next((a for a in apps if newest.get(a.label, a.id) > a.id), None))
+    if chosen is None:
+        chosen = apps[0]
+        if _now() - chosen.created_at < timedelta(days=PROTECTED_DAYS):
+            raise RecoveryError(
+                f"Nothing was deleted: the 30-day recovery space is full, and the oldest item to drop (“{chosen.label}”, deleted by an app "
+                f"less than {PROTECTED_DAYS} days ago) may be the one you want back. Look at Account, Recently deleted, remove something "
+                "for good (it cannot be restored after that), then delete again.", 409)
+    return db.get(RecoveryItem, chosen.id)
+
+
 def keep(db: Session, user: User, kind: str, label: str, summary: dict, payload: dict, *,
          assistant: str | None) -> tuple[RecoveryItem, list[dict]]:
     """Store a removal that is about to happen, in the caller's transaction; returns the item and the older items dropped to make
@@ -123,12 +154,7 @@ def keep(db: Session, user: User, kind: str, label: str, summary: dict, payload:
             raise RecoveryError(
                 "Nothing was deleted: the 30-day recovery space for this account is full, and an app may not make room by "
                 "discarding earlier items. The person can remove some for good in the Vault web app (Account, Recently deleted).", 409)
-        victim = db.scalar(select(RecoveryItem).where(RecoveryItem.user_id == user.id, RecoveryItem.source == "assistant")
-                           .order_by(RecoveryItem.id).limit(1))
-        if victim is None:
-            raise RecoveryError(
-                "Nothing was deleted: the 30-day recovery space is full of decks you deleted yourself. Remove some for good under "
-                "Account, Recently deleted (they cannot be restored after that), then delete again.", 409)
+        victim = _victim(db, user)
         dropped.append({"name": victim.label, "deleted_by": victim.source_detail, "deleted_at": _iso(victim.created_at)})
         total -= victim.stored_bytes
         count -= 1
@@ -225,6 +251,8 @@ def restore(db: Session, user: User, item_id: int, *, max_decks: int) -> dict:
         raise
     except IntegrityError:
         raise RecoveryError("This could not be put back because something changed at the same moment. Try again.", 409) from None
+    except DBAPIError:  # a value the database refuses (too long, not a number): the copy is not what this code wrote
+        raise RecoveryError(UNREADABLE, 409) from None
     except (KeyError, TypeError, ValueError, AttributeError):  # a copy that is not shaped as this code wrote it
         raise RecoveryError(UNREADABLE, 409) from None
     item.restored_at, item.restored_deck_id = _now(), out["deck"]["id"]
