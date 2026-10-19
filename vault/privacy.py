@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from .importer import export_collection
 from .sharing import display_name
-from .models import AccessToken, ApiSession, Bucket, BucketBaseline, BuySettings, CardAnnotation, TagAssignment, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, EmailCode, CollectionBaseline, ResetSnapshot, CollectionValue, Deck, DeckVersion, Entry, Identity, Import, Share, StagedUpload, User
+from .models import AccessToken, ApiSession, Bucket, BucketBaseline, BuySettings, CardAnnotation, TagAssignment, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthRetiredRefresh, RetiredRefreshToken, Passkey, IdempotentRequest, AuthCode, EmailCode, CollectionBaseline, RecoveryItem, ResetSnapshot, CollectionValue, Deck, DeckVersion, Entry, Identity, Import, Share, StagedUpload, User
 from .prices import history
 from .collection_view import CollectionView
 
@@ -50,6 +50,7 @@ tags.json            the tags you (or an assistant you allowed) put on cards, an
 card_annotations.json   notes about cards written by you or an assistant
 buy_settings.json    where you buy: the country you chose and the shops you typed for the "Where to buy" menu
 last_reset.json      if you reset your collection in the last 7 days: what it removed (the undo copy), until it is deleted
+recently_deleted.json  decks you (or an assistant you allowed) deleted in the last 30 days, which can still be restored: each with its list and saved versions
 
 Card data, images and prices come from Scryfall (https://scryfall.com), which sources prices
 from TCGplayer and Cardmarket. They are not personal data. Thank you, Scryfall.
@@ -107,6 +108,22 @@ def _last_reset(db: Session, user: User) -> dict | None:
             "removed_rows": [dict(zip(columns, row)) for row in payload["entries"]],
             "removed_tags": [dict(zip(payload.get("tag_columns", []), row)) for row in payload.get("tags", [])],
             "removed_notes": [dict(zip(payload.get("note_columns", []), row)) for row in payload.get("notes", [])]}
+
+
+def _recently_deleted(db: Session, user: User) -> list[dict]:
+    """What was deleted in the last 30 days and can still be put back (vault.recovery): what each item is, who deleted it, and the
+    data it holds (a deck's name, list and saved versions)."""
+    from . import recovery
+
+    out = []
+    for item in recovery.listing(db, user):
+        row = recovery.describe(item)
+        try:
+            row["data"] = {k: v for k, v in recovery._unpack(item).items() if k != "v"}
+        except recovery.RecoveryError as exc:
+            row["data"], row["readable"], row["note"] = None, False, str(exc)
+        out.append(row)
+    return out
 
 
 def export_archive(db: Session, user: User) -> bytes:
@@ -178,6 +195,7 @@ def export_archive(db: Session, user: User) -> bytes:
                                                                        .order_by(CardAnnotation.id))]))
         z.writestr("buy_settings.json", _json(_buy_settings(db, user)))
         z.writestr("last_reset.json", _json(_last_reset(db, user)))
+        z.writestr("recently_deleted.json", _json(_recently_deleted(db, user)))
         z.writestr("decks.json", _json([
             {"id": d.id, "name": d.name, "source_url": d.source_url, "source_author": d.source_author,
              "source_fetched_at": d.source_fetched_at, "created_at": d.created_at,
@@ -246,6 +264,7 @@ def personal_data(user_id: int) -> dict:
         "bucket_baselines": delete(BucketBaseline).where(BucketBaseline.user_id == user_id),  # before the buckets they belong to
         "buckets": delete(Bucket).where(Bucket.user_id == user_id),  # after the entries: a bucket with copies can't be deleted
         "collection_baselines": delete(CollectionBaseline).where(CollectionBaseline.user_id == user_id),
+        "recovery_items": delete(RecoveryItem).where(RecoveryItem.user_id == user_id),  # decks deleted in the last 30 days, restorable
         "reset_snapshots": delete(ResetSnapshot).where(ResetSnapshot.user_id == user_id),  # the undo of a reset: copies the person removed
         "imports": delete(Import).where(Import.user_id == user_id),
         "collection_values": delete(CollectionValue).where(CollectionValue.user_id == user_id),

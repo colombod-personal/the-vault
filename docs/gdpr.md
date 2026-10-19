@@ -30,9 +30,10 @@ This is an engineering document, not legal advice: have the privacy notice
 | `tag_assignments` | yes | tags you, or an assistant you allowed, put on cards (keyed by the card, not a printing): the card's id, the tag, who wrote it (person, assistant or system, and which app) and notes (`vault_metadata`) | `tags.json` | `purge_user` |
 | `card_annotations` | yes | notes about a card written by you or an assistant (`vault_metadata`, at most 8 KB), keyed by the card | `card_annotations.json` | `purge_user` |
 | `reset_snapshots` | yes | the undo of the latest reset of the collection or of one bucket (#129): the copies it removed (every column of each row, with its bucket and folder), the baselines of that scope and, when the reset cleared them, the tags, notes and import history it removed, as zlib-compressed JSON; one per person (the next reset replaces it), at most 20 MB of JSON, **valid 7 days** | `last_reset.json` (the removed rows readable, while it exists) | deleted by the daily retention job when its 7 days are over, when the undo is used, when the next reset replaces it, and by `purge_user` |
+| `recovery_items` | yes | what was deleted in the last 30 days and can be put back (vault-wxy.18): today a saved deck, as zlib-compressed JSON (its name, list, source link and author, format and saved versions), with who deleted it (the person, or the app's name), the time, and a count of the shares it had (no grantee and no invite token are kept; a restore never reopens a share); at most 200 items and 8 MB stored a person, **kept 30 days from the deletion, also after a restore** | `recently_deleted.json` (each item with its data, while it exists) | deleted by the daily retention job when its 30 days are over, when the person removes it for good (Account, Recently deleted) and by `purge_user` |
 | `buy_settings` | yes | where you buy (#212): the country you chose (two letters) and up to three shops you typed for the "Where to buy" menu (a name, a web address and, if you pasted one, a search address). Shown as links and never requested. Nothing else: no postcode, address, coordinates, IP address or browser language. It can say roughly where you live, so it is personal data | `buy_settings.json` (the country and the shops as typed) | `purge_user`, and Account → Where I buy → Remove (`DELETE /api/v1/me/buy-settings`) |
 | `decks` | yes | saved decklists, with the link and author of the deck they came from | `decks.json`, `decks/*.txt` | `purge_user` |
-| `deck_versions` | via its deck | each saved deck's earlier lists (at most 20 a deck): the decklist text, when and from what | `decks.json` (`versions` of each deck) | deleted with the deck (`ON DELETE CASCADE`), so with the account |
+| `deck_versions` | via its deck | each saved deck's earlier lists (at most 20 a deck): the decklist text, when and from what | `decks.json` (`versions` of each deck) | deleted with the deck (`ON DELETE CASCADE`), so with the account; the copy kept for a deleted deck for 30 days (`recovery_items`) holds them too |
 | `shares` | yes | who shared what with whom | `shares.json` (given and received) | `purge_user` (both directions) |
 | `api_sessions` | yes | signed-in apps: client, device name, dates, token hashes | `app_sessions.json` (no hashes) | `purge_user` |
 | `retired_refresh_tokens` | yes | hashes of already-rotated app refresh tokens, kept until they would expire, to detect a copied token | – (hashes only) | `purge_user`, and with their app session |
@@ -88,6 +89,22 @@ exported (`last_reset.json`), erased with the account, and deleted by the daily 
 are over, whether or not anyone asked. A person who wants the copies gone at once uses `no_undo` (nothing is kept) or deletes the
 account; the 7 days are stated in the privacy notice. Database backups (Neon point-in-time restore) still hold deleted rows for their
 own window, as for any deletion (see the checklist below). **Erasure** (`DELETE /api/v1/me`) removes every row, the snapshot included.
+
+## Recently deleted (vault-wxy.18)
+
+Deleting a saved deck, in the web app or through an assistant, keeps a copy in `recovery_items` for **30 days** so it can be put back
+(Account, "Recently deleted", or the tools `list_recently_deleted` and `restore_deleted`). The copy holds the same personal data the deck
+held (its name, list, source link and author, saved versions), so it is in the data map, exported (`recently_deleted.json`), erased with
+the account, and deleted by the daily retention job (`vault/retention.py`, `prune_recovery_items`) when its 30 days are over, whether or
+not anyone asked. The job runs inside the daily price-sync job, so if that job fails the rows wait; restoring stops at `expires_at` whatever
+the job does, and the person's own next listing or deletion removes that person's expired items at once. A **restore does not delete the copy**:
+it stays, marked restored, until its 30 days from the deletion are over (so editing the restored deck and deleting it again can never lose the
+original); the person can remove it for good at any time. Any assistant with the read permission can list the deleted decks' names (not their
+text), who deleted them and when, with `list_recently_deleted`. Only the person, in the web app, can remove an item for good before then (no token has the
+account scope); an assistant can neither purge nor, when the space is full, make room by discarding earlier items. A deck's shares are
+counted, not kept: a restore never reopens access. The 30 days are stated in the privacy notice. Database backups (Neon point-in-time
+restore) still hold deleted rows for their own window, as for any deletion (see the checklist below). **Erasure** (`DELETE /api/v1/me`)
+removes every row, the recovery items included.
 
 ## Tenant isolation
 

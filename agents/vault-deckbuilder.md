@@ -16,6 +16,7 @@ vault-tools:
   - find_combos
   - get_card_oracle
   - get_deck
+  - list_recently_deleted
   - get_deck_ideas
   - get_card_alternatives
   - card_roles

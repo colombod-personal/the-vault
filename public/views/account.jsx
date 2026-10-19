@@ -448,6 +448,70 @@ function Section({ title, children }) {
 
 const rowStyle = { display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', padding: '6px 0' };
 
+// Decks deleted in the last 30 days (by the person or by an assistant), kept so they can be put back (docs/gdpr.md). Each row says what,
+// who deleted it and when; Restore puts it back; Remove for good deletes it now (the person's alone: an assistant's token cannot).
+// A restored deck's copy stays until its 30 days are over (so the original can be restored again if the deck is deleted again).
+// `tick` changes when the panel deleted a deck, so the list is read again. A failed read keeps what was shown and says so.
+function RecentlyDeleted({ tick, onRestored }) {
+  const api = window.VaultApi;
+  const [items, setItems] = useStateAcc(null);
+  const [loadError, setLoadError] = useStateAcc(null);
+  const [busy, setBusy] = useStateAcc(null);
+  const [note, setNote] = useStateAcc(null);
+  const [error, setError] = useStateAcc(null);
+  const load = () => api.recentlyDeleted().then((rows) => { setItems(rows); setLoadError(null); },
+    (e) => setLoadError((e && e.message) || "The list of recently deleted decks can't be read right now."));
+  useEffectAcc(() => { load(); }, [tick]);
+  const who = (i) => i.deleted_by.who === 'assistant' ? `an assistant (${i.deleted_by.app || 'an app'})` : 'you';
+  const act = async (i, fn, done) => {
+    setError(null); setNote(null); setBusy(i.id);
+    try { const res = await fn(); setNote(done(res)); await load(); onRestored && onRestored(); }
+    catch (e) { setError(e.message); }
+    setBusy(null);
+  };
+  const restore = (i) => act(i, () => api.restoreDeleted(i.id),
+    (res) => `Restored “${res.deck.name}” with its saved versions.` + (res.shares ? ` ${res.shares}` : ''));
+  const forGood = (i) => {
+    if (confirm(`Remove “${i.name}” for good? It can then no longer be restored.`)) act(i, () => api.removeDeletedForGood(i.id), () => `Removed “${i.name}” for good.`);
+  };
+  if (items === null && !loadError) return null;
+  if (!loadError && items.length === 0 && !note) return null;
+  const day = (t) => new Date(t).toLocaleDateString();
+  return (
+    <Section title="Recently deleted">
+      <p className="label-mono" style={{ marginBottom: 8 }}>
+        A deleted deck is kept for 30 days, whoever deleted it, so you can put it back. After that it is deleted for good.
+      </p>
+      {loadError && (
+        <p role="alert" style={{ color: 'var(--danger)', marginBottom: 8 }}>
+          {loadError} {items ? 'What is shown may be out of date. ' : ''}
+          <button type="button" className="btn xs" onClick={load}>Try again</button>
+        </p>
+      )}
+      {error && <p role="alert" style={{ color: 'var(--danger)', marginBottom: 8 }}>{error}</p>}
+      {note && <p role="status" className="label-mono" style={{ color: 'var(--good)', marginBottom: 8 }}>{note}</p>}
+      {(items || []).map((i) => {
+        const back = i.restored && i.restored.deck_exists;
+        return (
+          <div key={i.id} style={rowStyle}>
+            <span>
+              {i.name}
+              <span className="label-mono" style={{ display: 'block' }}>
+                Deleted by {who(i)} on {day(i.deleted_at)}; kept until {day(i.restorable_until)}
+                {i.restored ? (back ? `. Restored on ${day(i.restored.at)}: the deck is back` : `. Restored on ${day(i.restored.at)}, then deleted again: this is the original`) : ''}
+              </span>
+            </span>
+            <span style={{ display: 'flex', gap: 6 }}>
+              {!back && <button className="btn xs" disabled={busy === i.id} onClick={() => restore(i)}>Restore</button>}
+              <button className="btn xs ghost" disabled={busy === i.id} onClick={() => forGood(i)}>Remove for good</button>
+            </span>
+          </div>
+        );
+      })}
+    </Section>
+  );
+}
+
 function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged, onCollectionChanged }) {
   const [name, setName] = useStateAcc(me?.name || '');
   const [shares, setShares] = useStateAcc([]);
@@ -480,13 +544,15 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged, onCo
   }, []);
 
   const [loadFailed, setLoadFailed] = useStateAcc(false);
-  const reload = () => {
+  const [recoveryTick, setRecoveryTick] = useStateAcc(0);  // a deck was deleted here: Recently deleted reads its list again
+  const reloadLists = () => {
     setLoadFailed(false);
     const failed = () => setLoadFailed(true);  // offline or server unreachable: say so, keep what's shown
     api.shares().then(setShares, failed);
     api.sharedWithMe().then(setIncoming, failed);
     api.decks().then(setDecks, failed);
   };
+  const reload = () => { reloadLists(); setRecoveryTick((t) => t + 1); };
   useEffectAcc(reload, []);
 
   const wrap = (fn) => async (...args) => {
@@ -507,7 +573,12 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged, onCo
   const saveName = wrap(async () => { await api.updateName(name); onMeChanged && onMeChanged(); });
   const revoke = wrap(async (id) => { await api.removeShare(id); reload(); });
   const removeDeck = wrap(async (id) => {
-    if (confirm('Delete this deck? Anyone you shared it with loses access.')) { await api.deleteDeck(id); reload(); }
+    if (confirm('Delete this deck? Anyone you shared it with loses access. You can restore the deck for 30 days under Recently deleted (its shares are not restored).')) {
+      const res = await api.deleteDeck(id);
+      const dropped = (res && res.recovery_dropped) || [];
+      setBack(dropped.length ? `To keep this deck recoverable, ${dropped.length === 1 ? 'an older deleted deck an app made was' : dropped.length + ' older deleted decks an app made were'} dropped from Recently deleted: ${dropped.map((d) => '“' + d.name + '”').join(', ')}.` : null);
+      reload();
+    }
   });
   const deleteAccount = wrap(async () => {
     await runWithConfirm(askConfirm, 'delete my account', () => api.deleteAccount());
@@ -589,6 +660,8 @@ function AccountPanel({ me, onClose, onOpenShared, onOpenDeck, onMeChanged, onCo
           </div>
         ))}
       </Section>
+
+      <RecentlyDeleted tick={recoveryTick} onRestored={reloadLists} />
 
       <SignInMethods me={me} onChanged={onMeChanged} />
 

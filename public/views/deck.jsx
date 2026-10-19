@@ -339,8 +339,13 @@ function DeckPage({ source, myDecks, refreshDecks, openCard, onBack, onSaved, sw
     } catch (e) { setError('Saving failed: ' + e.message); }
   }
   async function remove() {
-    if (!saved || !confirm(`Remove “${saved.name}” from your decks?`)) return;
-    try { await window.VaultApi.deleteDeck(saved.id); await refreshDecks(); onBack(); }
+    if (!saved || !confirm(`Remove “${saved.name}” from your decks? You can restore it for 30 days under Account, Recently deleted.`)) return;
+    try {
+      const res = await window.VaultApi.deleteDeck(saved.id);
+      const dropped = (res && res.recovery_dropped) || [];
+      if (dropped.length) alert(`To keep this deck recoverable, ${dropped.length === 1 ? 'an older deleted deck an app made was' : dropped.length + ' older deleted decks an app made were'} dropped from Recently deleted: ${dropped.map((d) => '“' + d.name + '”').join(', ')}.`);
+      await refreshDecks(); onBack();
+    }
     catch (e) { setError('Removing failed: ' + e.message); }
   }
 

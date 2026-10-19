@@ -72,6 +72,8 @@ priced daily from Scryfall, plus their saved decks and what others have shared w
   returned only when they clearly asked for that exact reset. Never reset to make an import or an edit easier. A reset can be
   undone for 7 days with undo_collection_reset, but only until anything else changes the collection: it is best-effort, so offer
   the export first. Clearing tags, notes or history and resetting with no undo are the person's, in the web app.
+- A deck deleted with delete_deck is kept for 30 days: list_recently_deleted shows it and restore_deleted puts it back. If the
+  person says a deck was deleted by mistake, or you deleted one that was not asked for, restore it and say so.
 - To sign out or switch Vault account, call sign_out without confirm, say which account and app it would end, and send
   confirm true only once the person said yes.
 """
@@ -762,10 +764,24 @@ TOOLS = [
     Tool("get_import", "One collection import: when it ran, the file, and what it added, removed and changed.",
          {"import_id": ID}, ["import_id"], path=lambda a: f"{V1}/imports/{int(a['import_id'])}"),
     Tool("delete_deck", "Deletes one of the person's saved decks. With confirm false or absent it returns the deck "
-         "that would be deleted and changes nothing; with confirm true it deletes it.",
+         "that would be deleted and changes nothing; with confirm true it deletes it. A deleted deck is kept for 30 days: "
+         "list_recently_deleted shows it and restore_deleted puts it back, with its saved versions (its shares are not "
+         "reopened). When the account's recovery space is full an app's delete is refused and nothing is deleted.",
          {"deck_id": ID, "confirm": CONFIRM}, ["deck_id"],
          method=lambda a: "DELETE" if a.get("confirm") is True else "GET",
          path=lambda a: f"{V1}/decks/{int(a['deck_id'])}", write=True, destructive=True),
+    Tool("list_recently_deleted", "What was deleted from the Vault in the last 30 days and can still be put back (decks today): "
+         "for each item its id, kind, name, who deleted it (the person, or an app by name), when, until when it can be "
+         "restored, and whether it was restored already. The id is what restore_deleted takes. Items past 30 days are gone.",
+         dict(PAGING), path=lambda a: f"{V1}/recovery", query=("limit", "cursor"), title="Recently deleted"),
+    Tool("restore_deleted", "Puts back an item listed by list_recently_deleted, by its item_id, within 30 days of its deletion. A "
+         "deck comes back with its name, list, source link and saved versions; the shares and invites it had are not reopened "
+         "(the person shares it again in the Vault). The item stays listed, marked restored, until its 30 days are over, so "
+         "the original can be restored again if the restored deck is deleted; while that deck exists a second restore is "
+         "refused. Fails when the 30 days are over or the account already has the most decks the Vault keeps. Removing an "
+         "item for good is the person's, in the Vault web app.",
+         {"item_id": ID}, ["item_id"], method="POST", path=lambda a: f"{V1}/recovery/{int(a['item_id'])}/restore", write=True,
+         title="Restore something deleted"),
     Tool("list_my_shares", "What this person has shared (their collection or a deck), with whom, and whether the "
          "invite was accepted. Creating a share is done by the person in the Vault, not by an assistant.",
          dict(PAGING), path=lambda a: f"{V1}/shares", query=("limit", "cursor")),
@@ -817,7 +833,7 @@ OWN_DATA_ONLY = {"list_buckets", "create_bucket", "rename_bucket", "delete_bucke
                  "import_collection_csv", "list_export_formats", "list_shared_with_me", "get_import", "delete_deck",
                  "list_my_shares", "accept_share", "stop_sharing", "sign_out", "start_collection_upload",
                  "import_collection_file", "get_staged_upload", "confirm_staged_upload", "council_brief", "expert_brief",
-                 "confirm_owned_cards_update", "undo_owned_cards_update"}
+                 "confirm_owned_cards_update", "undo_owned_cards_update", "list_recently_deleted", "restore_deleted"}
 DECK_ANALYSIS = {"deck_stats", "simulate_draws", "deck_legality", "find_upgrades", "validate_deck_changes", "find_combos",
                  "shopping_list"}
 for _tool in TOOLS:

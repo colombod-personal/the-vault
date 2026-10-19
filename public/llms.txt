@@ -207,6 +207,9 @@ be revoked (Account → Connected apps for OAuth).
     `get_card_alternatives`, `save_deck`,
     `update_deck`, `delete_deck` (asks first), `get_archidekt_deck`, `import_deck_from_link`,
     `refresh_deck` (shows what changed on Archidekt, replaces only with the preview's fingerprint)
+  - a deleted deck is kept 30 days, whoever deleted it: `list_recently_deleted` (its id, name, who deleted it and when) and
+    `restore_deleted` (by that id; brings back the list and its saved versions, not its shares). Removing one for good is the
+    person's, in the web app
   - can the saved decks all be built at the same time? `get_deck_overlap`: per deck what it holds and what it lacks
     (a lacking copy is `not_owned`, so buy it, or `held_by_other_deck`, so it can be moved), the contested cards (some copies
     owned, fewer than the decks need together) with their `move` and `buy` options, and what finishing every deck costs, each
