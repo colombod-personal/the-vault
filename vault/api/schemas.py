@@ -574,6 +574,60 @@ class DeckPage(Page):
     closest: list[str] | None = Field(None, description="With ?q= and no match: the nearest deck names")
 
 
+class Deleted(BaseModel):
+    deleted: bool
+
+
+class DeckDeleted(Hal):
+    deleted: bool
+    recoverable_until: str = Field(description="Until when the deck can be restored: 30 days from now")
+    recovery_id: int = Field(description="The item to restore it with (restore_deleted, or Account, Recently deleted)")
+    restore: str
+    recovery_dropped: list[dict] = Field(default_factory=list, description="Older items an app made that were dropped to make room "
+                                         "(only when the person deletes and the recovery space was full): name, app and date")
+
+
+class RecoveryDeletedBy(BaseModel):
+    who: Literal["person", "assistant"]
+    app: str | None = Field(None, description="For an assistant: the app's name")
+
+
+class RecoveryRestored(BaseModel):
+    at: str
+    deck_id: int | None = None
+    deck_exists: bool = Field(description="False once the restored deck is deleted again: the original can then be restored again")
+
+
+class RecoveryItem(BaseModel):
+    id: int
+    kind: str = Field(description="deck (the only kind today)")
+    name: str
+    summary: dict = Field(description="What it holds: for a deck its format, saved versions and how many shares ended")
+    deleted_by: RecoveryDeletedBy
+    deleted_at: str
+    restorable_until: str
+    restored: RecoveryRestored | None = Field(None, description="Set when it was restored; the copy stays until restorable_until")
+    restore: str
+
+
+class RecoveryPage(Page):
+    items: list[RecoveryItem]
+    days: int = Field(description="How long a deleted item is kept: 30")
+
+
+class RestoredDeck(BaseModel):
+    id: int
+    name: str
+
+
+class RestoreResult(Hal):
+    restored: bool
+    kind: str
+    deck: RestoredDeck
+    versions_restored: int
+    shares: str | None = Field(None, description="Said when the deck had shares: they are not reopened")
+
+
 class AuthorRecorded(Deck):
     recorded: bool = Field(description="False when the deck has another link or already has an author")
 

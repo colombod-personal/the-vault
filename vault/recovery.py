@@ -5,12 +5,19 @@ tell that from the person's yes. Instead of trying to prove a human, the removal
 ``recovery_items`` row in the **same transaction** as the delete (both happen or neither), the person sees it in the web app (Account,
 Recently deleted) and an assistant can list and restore it with ``list_recently_deleted`` and ``restore_deleted``.
 
-* **Window**: 30 days from the removal (``DAYS``). ``restore`` refuses an item past ``expires_at`` even while its row still exists; the
-  daily retention job (``prune_expired``) deletes expired rows, and listing or storing deletes the caller's own expired rows too, so a
-  failed job never stretches the window. Account erasure removes the rows (``ON DELETE CASCADE`` and ``privacy.personal_data``).
-* **Space**: at most ``MAX_ITEMS`` items and ``MAX_BYTES`` stored bytes a person. When full, a removal made by an assistant (an OAuth
-  app or a personal access token) is refused with 409 and nothing is deleted: a loop of removals can never push the earlier,
-  good items out. The person in the web app is not blocked: the oldest items make room (the owner's own hands).
+* **Window**: 30 days from the removal (``DAYS``). ``restore`` refuses an item past ``expires_at`` even while its row still exists. The
+  rows are deleted by the daily retention job (``prune_expired``, which runs inside the price-sync job) and, whatever that job does, by
+  the person's own next listing or removal (``drop_expired``). Account erasure removes them (``ON DELETE CASCADE``, ``privacy.personal_data``).
+* **A restore keeps the copy** (``restored_at``, ``restored_deck_id``) until ``expires_at``: the restored deck can be edited and deleted
+  again by an app without losing the original (a second delete is an item of its own), and the original can be restored again once the
+  restored deck is gone. While the restored deck still exists a second restore is refused (no duplicates).
+* **Space**: at most ``MAX_ITEMS`` items and ``MAX_BYTES`` stored bytes a person. When full, a removal made by an assistant (an OAuth app or
+  a personal access token) is refused with 409 and nothing is deleted. The person's own removal makes room only by dropping the oldest
+  items an **app** made (and says which); if only the person's own items are left it is refused with a plain sentence: nothing of the
+  person's is ever dropped silently, and a loop of an app's deletes can never push the person's own items out.
+* **Locks, always in this order**: the account (``lock_account``: ``FOR NO KEY UPDATE`` on the user row, which every deck creation and
+  every removal or restore takes, so the deck count and the space are checked one at a time per person and a restore can never
+  deadlock with a foreign-key insert), then the deck, then the recovery item.
 * **Who may do what**: restore needs the write scope (a tool can do it); removing an item for good is the person's alone
   (``account_user``: no token has the ``account`` scope). A deck's shares are not reopened by a restore: it never widens who can see.
 
@@ -24,6 +31,7 @@ import zlib
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .models import Deck, DeckVersion, RecoveryItem, Share, User
@@ -31,7 +39,8 @@ from .models import Deck, DeckVersion, RecoveryItem, Share, User
 DAYS = 30
 MAX_ITEMS = 200
 MAX_BYTES = 8 * 1024 * 1024  # stored (compressed) bytes a person may keep
-MAX_ITEM_JSON_BYTES = 20 * 1024 * 1024
+MAX_ITEM_JSON_BYTES = 20 * 1024 * 1024  # what one item may hold when it is written
+MAX_UNPACKED_BYTES = 64 * 1024 * 1024  # what a reader will decompress: more is refused, never expanded
 FORMAT = 1  # the payload's ``v``; a reader refuses any other
 
 
@@ -41,6 +50,9 @@ class RecoveryError(ValueError):
     def __init__(self, message: str, status: int = 409):
         super().__init__(message)
         self.status = status
+
+
+UNREADABLE = "This item cannot be read any more, so it cannot be put back. It is deleted when its 30 days are over."
 
 
 def _now() -> datetime:
@@ -55,6 +67,13 @@ def _when(text: str | None) -> datetime | None:
     return datetime.fromisoformat(text) if text else None
 
 
+def lock_account(db: Session, user: User) -> None:
+    """Take the person's account lock (``FOR NO KEY UPDATE`` on the user row) until the transaction ends. Deck creation, removal and
+    restore all take it first, so the count of decks and the recovery space are read and changed one request at a time. It does not
+    conflict with the ``FOR KEY SHARE`` a foreign-key insert takes, so it cannot deadlock with one."""
+    db.execute(select(User.id).where(User.id == user.id).with_for_update(key_share=True))
+
+
 def _pack(payload: dict) -> tuple[int, bytes]:
     raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()
     return len(raw), zlib.compress(raw, 6)
@@ -62,13 +81,16 @@ def _pack(payload: dict) -> tuple[int, bytes]:
 
 def _unpack(item: RecoveryItem) -> dict:
     try:
-        payload = json.loads(zlib.decompress(item.payload))
+        reader = zlib.decompressobj()
+        raw = reader.decompress(item.payload, MAX_UNPACKED_BYTES)
+        if reader.unconsumed_tail:  # more than the cap: refuse, do not expand it
+            raise ValueError("too big")
+        payload = json.loads(raw)
         if not isinstance(payload, dict) or payload.get("v") != FORMAT:
             raise ValueError("unknown format")
         return payload
     except (zlib.error, ValueError, TypeError, MemoryError, RecursionError):
-        raise RecoveryError("This item cannot be read any more, so it cannot be put back. It is deleted when its 30 days are over.",
-                            409) from None
+        raise RecoveryError(UNREADABLE, 409) from None
 
 
 def drop_expired(db: Session, user: User) -> int:
@@ -83,34 +105,42 @@ def prune_expired(db: Session) -> int:
                       .execution_options(synchronize_session=False)).rowcount or 0
 
 
-def keep(db: Session, user: User, kind: str, label: str, summary: dict, payload: dict, *, assistant: str | None) -> RecoveryItem:
-    """Store a removal that is about to happen, in the caller's transaction. ``assistant`` is the app's name when an assistant is
-    removing it (it is then refused, not given room, when the person's space is full); None for the person.
+def keep(db: Session, user: User, kind: str, label: str, summary: dict, payload: dict, *,
+         assistant: str | None) -> tuple[RecoveryItem, list[dict]]:
+    """Store a removal that is about to happen, in the caller's transaction; returns the item and the older items dropped to make
+    room (always empty for an assistant). ``assistant`` is the app's name when an assistant is removing it, None for the person.
     Raises ``RecoveryError`` (409) when it cannot be kept: the caller must not remove anything then."""
-    # one removal at a time per person, so two at once cannot both pass the space check
-    db.execute(select(User.id).where(User.id == user.id).with_for_update())
+    lock_account(db, user)
     drop_expired(db, user)
     raw_len, packed = _pack({"v": FORMAT, **payload})
     if raw_len > MAX_ITEM_JSON_BYTES or len(packed) > MAX_BYTES:
         raise RecoveryError("This is too big to keep for the 30-day recovery, so it was not removed.", 413)
     count, total = db.execute(select(func.count(), func.coalesce(func.sum(RecoveryItem.stored_bytes), 0))
                               .where(RecoveryItem.user_id == user.id)).one()
+    dropped: list[dict] = []
     while count >= MAX_ITEMS or total + len(packed) > MAX_BYTES:
-        if assistant is not None or count == 0:
+        if assistant is not None:
             raise RecoveryError(
                 "Nothing was deleted: the 30-day recovery space for this account is full, and an app may not make room by "
-                "discarding earlier items. The person can empty it in the Vault web app (Account, Recently deleted).", 409)
-        oldest = db.scalar(select(RecoveryItem).where(RecoveryItem.user_id == user.id).order_by(RecoveryItem.id).limit(1))
-        total -= oldest.stored_bytes
+                "discarding earlier items. The person can remove some for good in the Vault web app (Account, Recently deleted).", 409)
+        victim = db.scalar(select(RecoveryItem).where(RecoveryItem.user_id == user.id, RecoveryItem.source == "assistant")
+                           .order_by(RecoveryItem.id).limit(1))
+        if victim is None:
+            raise RecoveryError(
+                "Nothing was deleted: the 30-day recovery space is full of decks you deleted yourself. Remove some for good under "
+                "Account, Recently deleted (they cannot be restored after that), then delete again.", 409)
+        dropped.append({"name": victim.label, "deleted_by": victim.source_detail, "deleted_at": _iso(victim.created_at)})
+        total -= victim.stored_bytes
         count -= 1
-        db.delete(oldest)
+        db.delete(victim)
+        db.flush()
     now = _now()
     item = RecoveryItem(user_id=user.id, kind=kind, label=label[:200], summary=summary, payload=packed, raw_bytes=raw_len,
                         stored_bytes=len(packed), source="assistant" if assistant is not None else "person",
                         source_detail=assistant, created_at=now, expires_at=now + timedelta(days=DAYS))
     db.add(item)
     db.flush()
-    return item
+    return item, dropped
 
 
 def listing(db: Session, user: User) -> list[RecoveryItem]:
@@ -119,10 +149,20 @@ def listing(db: Session, user: User) -> list[RecoveryItem]:
     return list(db.scalars(select(RecoveryItem).where(RecoveryItem.user_id == user.id).order_by(RecoveryItem.id.desc())))
 
 
-def describe(item: RecoveryItem) -> dict:
+def live_decks(db: Session, user: User, items: list[RecoveryItem]) -> set[int]:
+    """The ids, among the decks the items were restored as, that exist now."""
+    ids = {i.restored_deck_id for i in items if i.restored_deck_id is not None}
+    return set(db.scalars(select(Deck.id).where(Deck.user_id == user.id, Deck.id.in_(ids)))) if ids else set()
+
+
+def describe(item: RecoveryItem, live: set[int] | None = None) -> dict:
+    restored = None
+    if item.restored_at is not None:
+        restored = {"at": _iso(item.restored_at), "deck_id": item.restored_deck_id,
+                    "deck_exists": item.restored_deck_id in (live or set())}
     return {"id": item.id, "kind": item.kind, "name": item.label, "summary": item.summary,
             "deleted_by": {"who": item.source, "app": item.source_detail}, "deleted_at": _iso(item.created_at),
-            "restorable_until": _iso(item.expires_at),
+            "restorable_until": _iso(item.expires_at), "restored": restored,
             "restore": "restore_deleted with this item_id (tool), or Restore under Account, Recently deleted (web app)"}
 
 
@@ -130,7 +170,7 @@ def _item(db: Session, user: User, item_id: int, *, lock: bool = False) -> Recov
     query = select(RecoveryItem).where(RecoveryItem.id == item_id, RecoveryItem.user_id == user.id)  # another person's id is a 404
     item = db.scalar(query.with_for_update() if lock else query)
     if item is None:
-        raise RecoveryError("Nothing to restore with that id: it may already be restored, removed for good, or past its 30 days.", 404)
+        raise RecoveryError("Nothing to restore with that id: it may be removed for good or past its 30 days.", 404)
     if item.expires_at <= _now():
         raise RecoveryError(f"Its {DAYS} days are over, so it can no longer be restored.", 404)
     return item
@@ -138,21 +178,18 @@ def _item(db: Session, user: User, item_id: int, *, lock: bool = False) -> Recov
 
 def purge(db: Session, user: User, item_id: int) -> None:
     """Remove one item for good (the person's own act: the route needs a sign-in that may manage the account)."""
-    db.delete(_item_any(db, user, item_id))
-
-
-def _item_any(db: Session, user: User, item_id: int) -> RecoveryItem:
     item = db.scalar(select(RecoveryItem).where(RecoveryItem.id == item_id, RecoveryItem.user_id == user.id))
     if item is None:
         raise RecoveryError("Not found", 404)
-    return item
+    db.delete(item)
 
 
 # -- decks ----------------------------------------------------------------------------------------------------------------------
 
-def keep_deck(db: Session, user: User, deck: Deck, *, assistant: str | None) -> RecoveryItem:
-    """Keep the deck, its saved versions and the count of its shares, before the caller deletes it. Shares are counted, not kept:
-    a restore never reopens access, so no invite token or grantee is stored."""
+def keep_deck(db: Session, user: User, deck: Deck, *, assistant: str | None) -> tuple[RecoveryItem, list[dict]]:
+    """Keep the deck, its saved versions and the count of its shares, before the caller deletes it. ``deck`` must be the row the
+    caller read ``FOR UPDATE`` after taking the account lock, so what is kept is what is deleted. Shares are counted, not kept: a
+    restore never reopens access, so no invite token or grantee is stored."""
     versions = list(db.scalars(select(DeckVersion).where(DeckVersion.deck_id == deck.id).order_by(DeckVersion.id)))
     shares = list(db.scalars(select(Share).where(Share.deck_id == deck.id)))
     ended = {"active": sum(1 for s in shares if s.grantee_id), "pending": sum(1 for s in shares if not s.grantee_id)}
@@ -170,12 +207,27 @@ def keep_deck(db: Session, user: User, deck: Deck, *, assistant: str | None) -> 
 
 
 def restore(db: Session, user: User, item_id: int, *, max_decks: int) -> dict:
-    """Put an item back and use it up. The caller commits. ``RecoveryError`` says why not (404 gone or expired, 409 no room)."""
+    """Put an item back. The copy stays (marked restored) until its 30 days are over. The caller commits. ``RecoveryError`` says why
+    not (404 gone or expired, 409 no room, already restored, unreadable or changed at the same moment)."""
+    lock_account(db, user)  # the same lock deck creation takes: the count below cannot change meanwhile
     item = _item(db, user, item_id, lock=True)
     if item.kind != "deck":  # the other kinds are not built yet
         raise RecoveryError("This kind of item cannot be restored yet.", 409)
-    out = _restore_deck(db, user, item, max_decks)
-    db.delete(item)
+    if item.restored_deck_id is not None:
+        name = db.scalar(select(Deck.name).where(Deck.id == item.restored_deck_id, Deck.user_id == user.id))
+        if name is not None:
+            raise RecoveryError(f"Already restored as the deck “{name}” (id {item.restored_deck_id}). If that deck is deleted "
+                                "again, this original can be restored again.", 409)
+    try:
+        with db.begin_nested():  # a savepoint: a failure leaves nothing half put back
+            out = _restore_deck(db, user, item, max_decks)
+    except RecoveryError:  # a reason of its own (no room, unreadable): said as it is
+        raise
+    except IntegrityError:
+        raise RecoveryError("This could not be put back because something changed at the same moment. Try again.", 409) from None
+    except (KeyError, TypeError, ValueError, AttributeError):  # a copy that is not shaped as this code wrote it
+        raise RecoveryError(UNREADABLE, 409) from None
+    item.restored_at, item.restored_deck_id = _now(), out["deck"]["id"]
     db.flush()
     return out
 
@@ -185,11 +237,11 @@ def _restore_deck(db: Session, user: User, item: RecoveryItem, max_decks: int) -
     if db.scalar(select(func.count()).select_from(Deck).where(Deck.user_id == user.id)) >= max_decks:
         raise RecoveryError(f"You have {max_decks} saved decks, the most the Vault keeps. Delete one first, then restore this.", 409)
     d = data["deck"]
-    # the same ids as before when they are free (they always are: an id is never reused), so a link to the deck works again
+    # the same ids as before when they are free, so a link to the deck works again; another copy of the same deck gets new ones
     ids = {"id": d["id"]} if db.get(Deck, d["id"]) is None else {}
-    deck = Deck(**ids, user_id=user.id, name=d["name"], text=d["text"], source_url=d["source_url"], source_author=d["source_author"],
-                source_fetched_at=_when(d["source_fetched_at"]), format=d["format"], created_at=_when(d["created_at"]),
-                updated_at=_when(d["updated_at"]))
+    deck = Deck(**ids, user_id=user.id, name=str(d["name"])[:200], text=d["text"], source_url=d["source_url"],
+                source_author=d["source_author"], source_fetched_at=_when(d["source_fetched_at"]), format=d["format"],
+                created_at=_when(d["created_at"]), updated_at=_when(d["updated_at"]))
     db.add(deck)
     db.flush()
     new_ids: dict[int, int] = {}

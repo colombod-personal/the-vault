@@ -32,7 +32,8 @@ def test_a_connected_app_that_deletes_with_confirm_true_leaves_the_deck_restorab
 
     again = structured(client.tool("delete_deck", deck_id=deck_id, confirm=True))  # and by tool, the app undoing its own deletion
     listing = structured(client.tool("list_recently_deleted"))
-    assert [i["id"] for i in listing["items"]] == [again["recovery_id"]]
+    assert listing["items"][0]["id"] == again["recovery_id"] and listing["items"][1]["restored"]["deck_exists"] is False  # the first
+    # restore left its copy, marked: with the deck deleted again, the original could be restored once more
     assert structured(client.tool("restore_deleted", item_id=again["recovery_id"]))["restored"] is True
     assert client.browser.get(f"{V1}/decks/{deck_id}").status_code == 200
 

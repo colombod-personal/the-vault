@@ -22,7 +22,7 @@ import io
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from .models import BucketBaseline, CollectionBaseline, Deck, Entry, Import, User
+from .models import BucketBaseline, CollectionBaseline, Deck, Entry, Import, RecoveryItem, User
 
 EMAIL = "reviewer@demo.invalid"
 NAME = "Demo reviewer"
@@ -185,6 +185,7 @@ def seed(db: Session, *, reset: bool = False, collection: bytes | None = None) -
     reset = reset or (has_entries and current is None)  # data from an older version of the demo
     if reset:
         db.execute(delete(Deck).where(Deck.user_id == user.id))
+        db.execute(delete(RecoveryItem).where(RecoveryItem.user_id == user.id))  # the last reviewer's deleted decks go too
         db.execute(delete(Entry).where(Entry.user_id == user.id))
         db.execute(delete(CollectionBaseline).where(CollectionBaseline.user_id == user.id))
         db.execute(delete(BucketBaseline).where(BucketBaseline.user_id == user.id))

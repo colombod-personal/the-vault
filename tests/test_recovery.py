@@ -66,7 +66,10 @@ def test_an_app_deletes_a_deck_with_confirm_true_and_it_comes_back_by_the_screen
     assert back.status_code == 200 and back.json()["restored"] is True and back.json()["deck"]["id"] == deck["id"]
     again = agent.get(f"{V1}/decks/{deck['id']}").json()
     assert again["name"] == "Ramp" and "Command Tower" in again["text"]  # the same deck, the same id
-    assert agent.get(RECOVERY).json()["total"] == 0  # used up
+    kept = agent.get(RECOVERY).json()["items"]  # the copy stays until its 30 days are over, marked as restored
+    assert len(kept) == 1 and kept[0]["restored"]["deck_exists"] is True and kept[0]["restored"]["deck_id"] == deck["id"]
+    assert agent.post(f"{RECOVERY}/{row['id']}/restore").status_code == 409  # not twice: no duplicate deck
+    assert agent.get(f"{V1}/decks").json()["total"] == 1
 
 
 def test_the_same_deletion_is_restored_by_a_tool(agent, bot):
@@ -266,7 +269,8 @@ def test_when_the_space_is_full_an_apps_delete_is_refused_and_nothing_is_lost_bu
     assert refused.status_code == 409 and "Nothing was deleted" in refused.json()["detail"]
     assert agent.get(f"{V1}/decks/{ids[2]}").status_code == 200  # still there
     assert [i["name"] for i in agent.get(RECOVERY).json()["items"]] == ["D1", "D0"]  # the earlier two were not pushed out
-    assert agent.delete(f"{V1}/decks/{ids[2]}").status_code == 200  # the person is not blocked: the oldest makes room
+    made_room = agent.delete(f"{V1}/decks/{ids[2]}")  # the person is not blocked: the oldest app item makes room, and it is said
+    assert made_room.status_code == 200 and [d["name"] for d in made_room.json()["recovery_dropped"]] == ["D0"]
     assert [i["name"] for i in agent.get(RECOVERY).json()["items"]] == ["D2", "D1"]
 
 

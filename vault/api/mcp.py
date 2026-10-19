@@ -771,13 +771,15 @@ TOOLS = [
          method=lambda a: "DELETE" if a.get("confirm") is True else "GET",
          path=lambda a: f"{V1}/decks/{int(a['deck_id'])}", write=True, destructive=True),
     Tool("list_recently_deleted", "What was deleted from the Vault in the last 30 days and can still be put back (decks today): "
-         "for each item its id, kind, name, who deleted it (the person, or an app by name), when, and until when it can be "
-         "restored. The id is what restore_deleted takes. Items past 30 days are gone.",
+         "for each item its id, kind, name, who deleted it (the person, or an app by name), when, until when it can be "
+         "restored, and whether it was restored already. The id is what restore_deleted takes. Items past 30 days are gone.",
          dict(PAGING), path=lambda a: f"{V1}/recovery", query=("limit", "cursor"), title="Recently deleted"),
     Tool("restore_deleted", "Puts back an item listed by list_recently_deleted, by its item_id, within 30 days of its deletion. A "
          "deck comes back with its name, list, source link and saved versions; the shares and invites it had are not reopened "
-         "(the person shares it again in the Vault). Fails when the 30 days are over or the account already has the most "
-         "decks the Vault keeps. Removing an item for good is the person's, in the Vault web app.",
+         "(the person shares it again in the Vault). The item stays listed, marked restored, until its 30 days are over, so "
+         "the original can be restored again if the restored deck is deleted; while that deck exists a second restore is "
+         "refused. Fails when the 30 days are over or the account already has the most decks the Vault keeps. Removing an "
+         "item for good is the person's, in the Vault web app.",
          {"item_id": ID}, ["item_id"], method="POST", path=lambda a: f"{V1}/recovery/{int(a['item_id'])}/restore", write=True,
          title="Restore something deleted"),
     Tool("list_my_shares", "What this person has shared (their collection or a deck), with whom, and whether the "

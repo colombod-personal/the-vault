@@ -318,7 +318,9 @@ class RecoveryItem(Base):
     compact JSON compressed with zlib (everything needed to put it back), ``summary`` says in words and numbers what it holds,
     and ``source`` / ``source_detail`` say who removed it (the person, or the app's name) so the screen can show it. Written in the
     same transaction as the removal, restored by id, deleted by the daily retention job once ``expires_at`` has passed (restoring
-    stops at that moment whether or not the row is still there), by the person from the web app, and with the account."""
+    stops at that moment whether or not the row is still there), by the person from the web app, and with the account. A restore
+    does NOT delete the row: it marks ``restored_at`` and ``restored_deck_id`` and the copy stays until ``expires_at``, so editing the
+    restored deck and deleting it again can never lose the original (the second delete is an item of its own)."""
 
     __tablename__ = "recovery_items"
     __table_args__ = (CheckConstraint("kind IN ('deck', 'collection_rows', 'tag', 'share')", name="ck_recovery_items_kind"),
@@ -336,6 +338,8 @@ class RecoveryItem(Base):
     source_detail: Mapped[str | None] = mapped_column(String(200))  # which app, for an assistant
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    restored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # when it was last put back (the row stays)
+    restored_deck_id: Mapped[int | None] = mapped_column(Integer)  # the deck it was put back as; not a foreign key: it may be deleted again
 
 
 class Share(Base):

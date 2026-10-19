@@ -1107,7 +1107,9 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         return body
 
     def _room_for_a_deck(db: Session, user: User) -> None:
-        """At most ``max_decks`` saved decks a person: ``/decks/overlap`` parses all of them, and nothing else bounds the count (#353)."""
+        """At most ``max_decks`` saved decks a person: ``/decks/overlap`` parses all of them, and nothing else bounds the count (#353).
+        Takes the account lock first, the one a restore of a deleted deck takes, so the count and the insert are one at a time."""
+        recovery.lock_account(db, user)
         if db.scalar(select(func.count()).select_from(Deck).where(Deck.user_id == user.id)) >= settings.max_decks:
             raise HTTPException(409, f"You have {settings.max_decks} saved decks, the most the Vault keeps. Delete one first.")
 
@@ -1247,15 +1249,24 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         db.commit()
         return {**_deck(deck), "recorded": recorded}  # the deck as it is now, with its links
 
-    @router.delete("/decks/{deck_id}", tags=["decks"],
+    @router.delete("/decks/{deck_id}", tags=["decks"], response_model=S.DeckDeleted,
                    summary="Delete a saved deck; it is kept 30 days and can be restored (GET /recovery)")
     def delete_deck(request: Request, deck_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-        deck = owned_deck(db, user, deck_id)
-        per_user(request, "deck delete", user.id, 30, db)  # a loop of deletes is cut at 30 a minute (each one is kept anyway)
         who = card_tags.writer_of(db, getattr(request.state, "bearer", None))
+        app = who.detail if who.source == "assistant" else None
+        # a loop of deletes is cut at 30 a minute (each one is kept anyway); an app's deletes are counted apart from the person's,
+        # so a burst by an app can never block the person's own delete
+        per_user(request, "deck delete", user.id, 30, db, kind="assistant" if app else "user")
+        recovery.lock_account(db, user)  # one removal, restore or deck creation at a time per person: first lock, always
+        # the deck is read now, under the lock, from the database (not the session's older copy): what is kept is what is deleted,
+        # a second delete of the same deck finds nothing, and an edit committed meanwhile is in the copy
+        deck = db.execute(select(Deck).where(Deck.id == deck_id, Deck.user_id == user.id).with_for_update()
+                          .execution_options(populate_existing=True)).scalar_one_or_none()
+        if deck is None:
+            raise HTTPException(404, "Deck not found")
         try:
             # kept in this transaction: the deck is gone only if its copy is stored, and an app is refused when the space is full
-            item = recovery.keep_deck(db, user, deck, assistant=who.detail if who.source == "assistant" else None)
+            item, dropped = recovery.keep_deck(db, user, deck, assistant=app)
         except recovery.RecoveryError as exc:
             raise HTTPException(exc.status, str(exc)) from None
         db.execute(delete(Share).where(Share.deck_id == deck.id))
@@ -1263,21 +1274,25 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
         db.commit()
         return {"deleted": True, "recoverable_until": _iso(item.expires_at), "recovery_id": item.id,
                 "restore": "restore_deleted with item_id (assistants), or Account, Recently deleted (web app)",
-                "_links": {"recovery": link(f"{V1}/recovery")}}
+                "recovery_dropped": dropped, "_links": {"recovery": link(f"{V1}/recovery")}}
 
     # -- recently deleted: what can still be put back (vault.recovery) ------------------------------------------------
-    @router.get("/recovery", tags=["recovery"], summary="What was deleted in the last 30 days and can be put back")
+    @router.get("/recovery", tags=["recovery"], response_model=S.RecoveryPage,
+                summary="What was deleted in the last 30 days and can be put back")
     def list_recovery(request: Request, cursor: str | None = None, limit: int | None = None,
                       user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
         rows = recovery.listing(db, user)
         db.commit()  # listing deleted this person's expired items
         page, nxt = paginate(rows, lambda r: (-r.id,), lambda r: r.id, cursor=cursor, limit=limit)
-        body = page_body(request, [recovery.describe(r) for r in page], nxt, len(rows), limit=limit)
+        live = recovery.live_decks(db, user, page)
+        body = page_body(request, [recovery.describe(r, live) for r in page], nxt, len(rows), limit=limit)
         return {**body, "days": recovery.DAYS}
 
-    @router.post("/recovery/{item_id}/restore", tags=["recovery"], summary="Put a deleted item back (within 30 days)")
+    @router.post("/recovery/{item_id}/restore", tags=["recovery"], response_model=S.RestoreResult,
+                 summary="Put a deleted item back (within 30 days); the copy stays until its 30 days are over")
     def restore_recovery(request: Request, item_id: Id, user: User = Depends(current_user), db: Session = Depends(get_db)):
-        per_user(request, "restore", user.id, 30, db)
+        who = card_tags.writer_of(db, getattr(request.state, "bearer", None))
+        per_user(request, "restore", user.id, 30, db, kind="assistant" if who.source == "assistant" else "user")
 
         def run() -> dict:
             try:
@@ -1290,7 +1305,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
 
         return idempotent(request, db, user, 200, run)
 
-    @router.delete("/recovery/{item_id}", tags=["recovery"],
+    @router.delete("/recovery/{item_id}", tags=["recovery"], response_model=S.Deleted,
                    summary="Remove a deleted item for good (the person, in the web app; a token cannot)")
     def remove_recovery(item_id: Id, user: User = Depends(account_user), db: Session = Depends(get_db)) -> dict:
         try:
