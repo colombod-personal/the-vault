@@ -270,7 +270,7 @@ def test_when_the_space_is_full_an_apps_delete_is_refused_and_nothing_is_lost_bu
     assert agent.get(f"{V1}/decks/{ids[2]}").status_code == 200  # still there
     assert [i["name"] for i in agent.get(RECOVERY).json()["items"]] == ["D1", "D0"]  # the earlier two were not pushed out
     young = agent.delete(f"{V1}/decks/{ids[2]}")  # the oldest app item is under 7 days old: not dropped, the person is asked to choose
-    assert young.status_code == 409 and "less than 7 days ago" in young.json()["detail"] and agent.get(f"{V1}/decks/{ids[2]}").status_code == 200
+    assert young.status_code == 409 and "less than 7 days old" in young.json()["detail"] and agent.get(f"{V1}/decks/{ids[2]}").status_code == 200
     with app.state.db.sessions() as db:  # a week and a day on
         for row in db.scalars(select(RecoveryItem)):
             row.created_at -= timedelta(days=8)

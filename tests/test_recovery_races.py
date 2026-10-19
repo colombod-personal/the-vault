@@ -267,6 +267,8 @@ def test_eviction_takes_an_item_that_was_restored_before_an_older_one(app, agent
         deleted_by_app(agent, bot, write, name)
     by_name = {i["name"]: i["id"] for i in agent.get(RECOVERY).json()["items"]}
     assert agent.post(f"{RECOVERY}/{by_name['Beta']}/restore").status_code == 200  # Beta is back: its copy is the cheapest to lose
+    for item in by_name.values():
+        age(app, item, 8)  # only items older than 7 days are ever candidates
     done = agent.delete(f"{V1}/decks/{make_deck(agent, name='Mine')['id']}")
     assert done.status_code == 200 and [d["name"] for d in done.json()["recovery_dropped"]] == ["Beta"]
     assert "Alpha" in [i["name"] for i in agent.get(RECOVERY).json()["items"]]  # the older, never restored one stays
@@ -278,10 +280,45 @@ def test_eviction_takes_a_duplicate_before_the_oldest_item(app, agent, bot, monk
     for name in ("Solo", "Dup", "Dup", "Other"):  # the older Dup has a newer item of the same name
         deleted_by_app(agent, bot, write, name)
     items_before = {i["id"]: i["name"] for i in agent.get(RECOVERY).json()["items"]}
+    for item in items_before:
+        age(app, item, 8)  # only items older than 7 days are ever candidates
     done = agent.delete(f"{V1}/decks/{make_deck(agent, name='Mine')['id']}")
     assert done.status_code == 200 and [d["name"] for d in done.json()["recovery_dropped"]] == ["Dup"]
     left = [i["name"] for i in agent.get(RECOVERY).json()["items"]]
     assert sorted(left) == ["Dup", "Mine", "Other", "Solo"] and len(items_before) == 4  # Solo, the oldest, was not the one dropped
+
+
+def test_an_app_cannot_steer_the_choice_with_a_junk_deck_of_the_same_name(app, agent, bot, monkeypatch):
+    monkeypatch.setattr(recovery, "MAX_ITEMS", 5)
+    write = make_token(agent, scopes=["read", "write"])
+    deleted_by_app(agent, bot, write, "VALUABLE")  # the real one
+    deleted_by_app(agent, bot, write, "VALUABLE")  # a junk deck of the same name: the real one now "has a newer duplicate"
+    for n in range(3):
+        deleted_by_app(agent, bot, write, f"junk{n}")  # the space is full (5)
+    ids_before = sorted(i["id"] for i in agent.get(RECOVERY).json()["items"])
+    mine = make_deck(agent, name="Mine")["id"]
+    refused = agent.delete(f"{V1}/decks/{mine}")
+    assert refused.status_code == 409 and "less than 7 days old" in refused.json()["detail"] and agent.get(f"{V1}/decks/{mine}").status_code == 200
+    assert sorted(i["id"] for i in agent.get(RECOVERY).json()["items"]) == ids_before  # the real VALUABLE is still there
+
+
+def test_an_app_cannot_steer_the_choice_by_restoring_editing_and_deleting_the_valuable_deck_again(app, agent, bot, monkeypatch):
+    monkeypatch.setattr(recovery, "MAX_ITEMS", 5)
+    write = make_token(agent, scopes=["read", "write"])
+    deck = make_deck(agent, name="VALUABLE", text="1 Sol Ring\n1 Arcane Signet")["id"]
+    assert delete_as_app(bot, write, deck).status_code == 200
+    original = agent.get(RECOVERY).json()["items"][0]["id"]
+    assert call_tool(bot, write, "restore_deleted", item_id=original)["structuredContent"]["restored"] is True  # the original is "restored"
+    for n in range(22):
+        assert bot.put(f"{V1}/decks/{deck}", json={"name": "VALUABLE", "text": f"1 Sol Ring\n1 Card Number {n}"}, headers=auth(write)).status_code == 200
+    assert delete_as_app(bot, write, deck).status_code == 200
+    for n in range(3):
+        deleted_by_app(agent, bot, write, f"junk{n}")
+    mine = make_deck(agent, name="Mine")["id"]
+    refused = agent.delete(f"{V1}/decks/{mine}")
+    assert refused.status_code == 409 and agent.get(f"{V1}/decks/{mine}").status_code == 200
+    assert original in [i["id"] for i in agent.get(RECOVERY).json()["items"]]  # the original copy is intact
+    assert agent.post(f"{RECOVERY}/{original}/restore").status_code == 200  # and can still be restored
 
 
 def test_the_deck_pages_delete_says_in_the_screen_text_that_it_shows_what_was_dropped():

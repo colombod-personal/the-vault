@@ -1523,10 +1523,11 @@ the window. The tools are not core: the compact tool list for the Codex family i
 - *The assistant tries to destroy the way back.* Removing an item for good is `DELETE /recovery/{id}` behind `account_user`: no personal access
   token and no OAuth grant has the `account` scope (an OAuth token is refused outside `/api/mcp` altogether), and no tool does it. It cannot make room
   by filling the space either: at 200 items or 8 MB stored a person, **an app's delete is refused with 409 and nothing is deleted**. The person's own
-  delete in the web app makes room only by dropping items **an app** made, in this order (and the screen says which, on the deck's own page too): one
-  already restored, then one with a newer item of the same name, then the oldest, **which is dropped only if it is more than 7 days old**; younger, the
-  delete is refused with a sentence that sends the person to Recently deleted (an app that deleted the one deck that matters and then filled the space with
-  junk cannot have it dropped by the person's next delete, final review of PR 485, M-1). If only the person's own items are left it is refused with a plain
+  delete in the web app makes room only by dropping items **an app** made, (and the screen says which, on the deck's own page too), and **only items more than
+  7 days old are candidates at all**: among those, one already restored, then one with a newer item of the same name, then the oldest. If none is old enough the
+  delete is refused with a sentence that names the oldest and sends the person to Recently deleted. The age check comes first so an app cannot steer the choice
+  (a junk deck of the same name, or restoring and editing the valuable deck and deleting it again) and have the person's next delete drop what the app deleted
+  (final reads of PR 485, M-1 and F-1; both attacks are tests). If only the person's own items are left it is refused with a plain
   sentence and nothing of the person's is dropped. So a hostile app that fills the space with junk cannot push the
   person's own recoverable items out, not even through the person's next delete (review of PR 485, M1). The cost is that the junk, which sits in the
   person's list until it is dropped or expires, can be removed one by one with Remove for good.
