@@ -3,27 +3,97 @@ in any format people can take elsewhere (``mtg_toolkits.formats``)."""
 
 from __future__ import annotations
 
+import contextvars
 import csv
+import io
 import math
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date
 
-from mtg_toolkits import delta, formats
+from mtg_toolkits import delta, dragonshield, formats, moxfield
 from mtg_toolkits import normalize_collector_number, normalize_set_code
 from mtg_toolkits.matching import PrintingIndex
 from mtg_toolkits.models import CollectionEntry, Finish
 from sqlalchemy import delete, func, select, tuple_, update
 from sqlalchemy.orm import Session
 
-from . import buckets, merge
+from . import buckets, config, merge
 from .csv_safe import neutralise_csv, restore_csv
 from .models import Bucket, BucketBaseline, Card, CollectionBaseline, Entry, Import, TagAssignment, User, utcnow
 from .prices import MAX_PRICE, compute_values
 from .printing_lookup import front, printings_of
 
-MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 EXACT = ("set_number", "id")
+
+
+class _Lexing(Exception):
+    """Raised by the capture below the moment a reader of the library asks for its ``csv`` reader: what it would read, and with which delimiter."""
+
+    def __init__(self, source: io.StringIO, delimiter: str):
+        super().__init__("lexing")
+        self.source, self.delimiter = source, delimiter
+
+
+_CAPTURE: contextvars.ContextVar[bool] = contextvars.ContextVar("vault_capture_lexing", default=False)
+
+
+class _CsvProxy:
+    """Stands in for ``csv`` inside the library's readers (``dragonshield``, ``moxfield``, ``formats``). Nothing changes until ``_CAPTURE`` is
+    set (for the one call, in the one thread or task that set it): then the reader the library is about to open is handed over, unread, as
+    ``_Lexing``, so the row count below runs on the text and the delimiter the library itself chose (its own ``sep=`` rules, its own
+    formats), not on a copy of its rules."""
+
+    def __init__(self, real):
+        self._real = real
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+    def reader(self, source, *args, **kwargs):
+        if _CAPTURE.get() and isinstance(source, io.StringIO):
+            raise _Lexing(source, kwargs.get("delimiter", ","))
+        return self._real.reader(source, *args, **kwargs)
+
+    def DictReader(self, source, *args, **kwargs):  # noqa: N802 (the csv module's name)
+        if _CAPTURE.get() and isinstance(source, io.StringIO):
+            raise _Lexing(source, kwargs.get("delimiter", ","))
+        return self._real.DictReader(source, *args, **kwargs)
+
+
+for _reader_module in (dragonshield, moxfield, formats):
+    if not isinstance(_reader_module.csv, _CsvProxy):
+        _reader_module.csv = _CsvProxy(_reader_module.csv)
+
+
+def check_rows(source: str, text: str, rows_max: int) -> None:
+    """Refuse a file with more than ``rows_max`` rows (plus its header), before a single entry is built. The library's own reader decides what
+    the rows are: ``formats.parse`` is run until the reader it would read with is opened (``_CsvProxy``), and the rows are counted by
+    iterating that reader lazily, in constant memory, stopping the moment the count is over the limit. A blank row is none, as for the
+    parsers. Raises ``ImportError_``; a file the reader cannot lex (``csv.Error``) is left to the parse to report."""
+    token = _CAPTURE.set(True)
+    try:
+        formats.parse(text, source)
+    except _Lexing as seen:
+        stream, delimiter = seen.source, seen.delimiter
+        seen.__traceback__ = None  # it holds the parser's frames, and so its copies of the whole text, in a cycle until the collector runs
+    except (ValueError, TypeError, AttributeError, OverflowError, csv.Error):
+        return  # not a file the parse accepts: it says why
+    else:
+        raise ImportError_("This file could not be checked for its number of rows.")  # never a silent skip
+    finally:
+        _CAPTURE.reset(token)
+    rows = 0
+    try:
+        for row in csv.reader(stream, delimiter=delimiter):
+            if any(cell.strip() for cell in row):
+                rows += 1
+                if rows > rows_max + 1:  # the header is a row
+                    raise ImportError_(f"File has too many rows ({rows_max:,} max)")
+    except csv.Error:
+        return
+
+
 # The CSV formats other apps import: a cell that starts like a formula is written with a leading single quote, and
 # removed again when the Vault reads such a file back (vault/csv_safe.py, #351). Dragon Shield is neither.
 SAFE_CSV = ("moxfield", "archidekt", "csv")
@@ -174,8 +244,8 @@ def _prepare(db: Session, user: User, source: str, entries: list[CollectionEntry
 
 def read_file(content: bytes):
     """The file's format and entries, checked (size, encoding, limits). Raises ImportError_."""
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise ImportError_("File is too large (20 MB max)")
+    if len(content) > config.import_max_bytes():  # the one import-size limit (IMPORT_MAX_BYTES)
+        raise ImportError_(f"File is too large ({config.size_text(config.import_max_bytes())} max)")
     try:
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
@@ -183,8 +253,12 @@ def read_file(content: bytes):
     try:
         source = formats.detect(text)
         if source in SAFE_CSV:  # the marker our own export put in front of a formula-shaped cell (#351)
-            text = restore_csv(text)
+            text = restore_csv(text)  # row by row into a text of the same size: nothing is kept per row
+        if source is not None:  # the second product limit: memory follows rows more than bytes, checked on what the parser reads
+            check_rows(source, text, config.import_max_rows())
         source, entries = formats.parse(text, source)
+    except ImportError_:
+        raise  # the row guard's own sentence
     except (ValueError, TypeError, AttributeError, OverflowError, csv.Error) as exc:  # whatever the library raises
         raise ImportError_(f"No cards found. {exc}") from exc
     if not entries:

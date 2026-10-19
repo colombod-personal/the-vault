@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from tests.test_agents import CSV, V1, agent, bot, call_tool, make_token, rpc  # noqa: F401 - fixtures
 from tests.test_mcp_profile import hello, listed
-from vault import file_fetch, importer, intake
+from vault import config, file_fetch, intake
 from vault.api import mcp, mcp_profile
 from vault.file_fetch import FileFetcher, Handoff, Refused
 from vault.models import Import, StagedUpload
@@ -192,12 +192,15 @@ def test_at_most_two_redirects_are_followed():
 
 # ============================== size, time, type ===============================================================================
 
-def test_the_intake_takes_five_megabytes_which_is_under_what_the_importer_would_take():
-    """Review of PR #478: a 17.9 MB, 190,000-row file took 8.9 s and about 450 MB for one request, for any token."""
-    assert FileFetcher().max_bytes == file_fetch.INTAKE_MAX_BYTES == 5 * 1024 * 1024 < importer.MAX_UPLOAD_BYTES
+def test_the_intake_takes_what_every_other_path_takes_the_one_import_limit(monkeypatch):
+    """One limit (IMPORT_MAX_BYTES, default 8 MiB), read each time: the fetch has no number of its own."""
+    assert FileFetcher().max_bytes == config.import_max_bytes() == 8 * 1024 * 1024
+    monkeypatch.setenv("IMPORT_MAX_BYTES", "4096")
+    assert FileFetcher().max_bytes == 4096
 
 
-def test_a_declared_size_over_the_cap_is_refused_before_reading():
+def test_a_declared_size_over_the_cap_is_refused_before_reading(monkeypatch):
+    monkeypatch.setenv("IMPORT_MAX_BYTES", "1000")
     read = []
 
     class Spy(httpx.SyncByteStream):
@@ -205,23 +208,24 @@ def test_a_declared_size_over_the_cap_is_refused_before_reading():
             read.append(1)
             yield b"x"
 
-    f = fetcher(lambda r: httpx.Response(200, headers={"content-type": "text/csv", "content-length": "5000"}, stream=Spy()),
-                max_bytes=1000)
+    f = fetcher(lambda r: httpx.Response(200, headers={"content-type": "text/csv", "content-length": "5000"}, stream=Spy()))
     assert refused(lambda: fetch(f)).kind == "too_large" and not read
 
 
-def test_a_body_over_the_cap_is_cut_off_whatever_it_declares():
+def test_a_body_over_the_cap_is_cut_off_whatever_it_declares(monkeypatch):
+    monkeypatch.setenv("IMPORT_MAX_BYTES", "10000")
     class Endless(httpx.SyncByteStream):
         def __iter__(self):
             while True:
                 yield b"a,b,c\n" * 100
 
-    f = fetcher(lambda r: httpx.Response(200, headers={"content-type": "text/csv"}, stream=Endless()), max_bytes=10_000)
+    f = fetcher(lambda r: httpx.Response(200, headers={"content-type": "text/csv"}, stream=Endless()))
     assert refused(lambda: fetch(f)).kind == "too_large"
 
 
-def test_a_file_exactly_at_the_cap_is_taken():
-    f = fetcher(lambda r: httpx.Response(200, content=b"a" * 1000, headers={"content-type": "text/csv"}), max_bytes=1000)
+def test_a_file_exactly_at_the_cap_is_taken(monkeypatch):
+    monkeypatch.setenv("IMPORT_MAX_BYTES", "1000")
+    f = fetcher(lambda r: httpx.Response(200, content=b"a" * 1000, headers={"content-type": "text/csv"}))
     assert len(fetch(f).content) == 1000
 
 
@@ -567,12 +571,12 @@ def test_the_host_is_shown_the_file_as_required_in_the_full_and_the_compact_list
     assert len(compact) <= 30 and len(json.dumps(compact)) < 30_000
     for label, tools in (("full", full), ("compact", compact)):
         tool = {t["name"]: t for t in tools}["import_collection_file"]
-        assert tool["inputSchema"]["required"] == ["file"], label
+        assert tool["inputSchema"]["required"] == (["file"] if label == "full" else []), label  # the coding apps have no file object
         assert tool["_meta"] == {"openai/fileParams": ["file"]}, label
         file = tool["inputSchema"]["properties"]["file"]
         assert set(file["properties"]) == {"download_url", "file_id", "mime_type", "file_name"} and file["required"] == ["download_url", "file_id"]
         assert "attached to the chat" in file["description"] and "the attachment" in file["description"], label
-        assert "`file`" in tool["description"] and "attached to the chat" in tool["description"], label
+        assert "`file`" in tool["description"] and "attached" in tool["description"], label
     # the check a call goes through leaves `file` to the endpoint, whatever the host sends
     assert "file" not in mcp.BY_NAME["import_collection_file"].checked_schema()["required"]
     assert mcp.BY_NAME["import_collection_file"].checked_schema()["properties"]["file"] == {}
@@ -655,10 +659,11 @@ def test_a_failed_fetch_says_what_to_do_in_plain_words_and_changes_nothing(app, 
     assert "Import CSV" in answer["say"] and staged_rows(app) == 0
 
 
-def test_a_file_over_the_cap_is_refused_in_plain_words(app, agent, bot):
-    intake_with(app, lambda r: httpx.Response(200, content=b"a" * 2000, headers={"content-type": "text/csv"}), max_bytes=1000)
+def test_a_file_over_the_cap_is_refused_in_plain_words(app, agent, bot, monkeypatch):
+    monkeypatch.setenv("IMPORT_MAX_BYTES", "1000")
+    intake_with(app, lambda r: httpx.Response(200, content=b"a" * 2000, headers={"content-type": "text/csv"}))
     answer = call_tool(bot, token_of(agent), "import_collection_file", file=file_arg())["structuredContent"]
-    assert answer["status"] == "too_large" and "5 MB" in answer["say"] and "Import CSV" in answer["say"] and staged_rows(app) == 0
+    assert answer["status"] == "too_large" and "1,000 bytes" in answer["say"] and answer["changed"] is False and staged_rows(app) == 0
 
 
 def test_the_filename_shown_for_a_staged_file_is_the_declared_name_without_a_path(app, agent, bot):

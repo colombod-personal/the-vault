@@ -41,7 +41,8 @@ from ..deck_tools import loose_name
 from ..collection_view import SORTS, CollectionView, filtered, filtered_printing, finite, history_days, history_summary, import_days, view_version
 from .. import archidekt_cache, deck_import, deck_match, deck_overview, deck_refresh, deck_versions, experts, owned_changes
 from .. import deck_tools, lookouts, possible_loops
-from ..importer import (MAX_UPLOAD_BYTES, ImportConflict, ImportError_, ImportOptions, NoSuchBucket, export_collection,
+from .. import config
+from ..importer import (ImportConflict, ImportError_, ImportOptions, NoSuchBucket, export_collection,
                         import_collection, preview_import as preview_collection_import, user_entries)
 from ..models import AccessToken, ApiSession, Bucket, Card, CatalogSource, Deck, Identity, Import, NativeNonce, OAuthClient, OAuthGrant, OracleCard, Passkey, PriceSnapshot, Share, User
 from ..native import LEEWAY as NATIVE_LEEWAY, NativeTokenError, NativeVerifier, ProviderUnavailable
@@ -940,8 +941,8 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
                          "Vault (conflicts keep the Vault's edit unless answered); records what changed")
     async def create_import(request: Request, file: UploadFile, user: User = Depends(current_user),
                             db: Session = Depends(get_db), options: ImportOptions = Depends(import_options)):
-        per_user(request, "import", user.id, settings.import_limit, db)  # up to 20 MB of parsing and matching (#353)
-        content = await file.read(MAX_UPLOAD_BYTES + 1)  # enough to reject an oversized file, no more
+        per_user(request, "import", user.id, settings.import_limit, db)  # up to IMPORT_MAX_BYTES of parsing and matching (#353)
+        content = await file.read(config.import_max_bytes() + 1)  # enough to reject an oversized file, no more
 
         def run():
             try:
@@ -960,7 +961,7 @@ def build_router(get_db, current_user, optional_user, settings, verifier: Native
     async def preview_import(request: Request, file: UploadFile, user: User = Depends(current_user), db: Session = Depends(get_db),
                              options: ImportOptions = Depends(import_options)) -> dict:
         per_user(request, "import", user.id, settings.import_limit, db)
-        content = await file.read(MAX_UPLOAD_BYTES + 1)
+        content = await file.read(config.import_max_bytes() + 1)
         try:
             return preview_collection_import(db, user, content, options)
         except NoSuchBucket as exc:

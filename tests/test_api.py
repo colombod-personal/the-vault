@@ -314,7 +314,7 @@ def test_openapi_documents_the_api(client):
 def test_uploads_are_read_only_up_to_the_limit(signed_in, monkeypatch):
     from starlette.datastructures import UploadFile
 
-    from vault.importer import MAX_UPLOAD_BYTES
+    from vault import config
 
     asked = []
     real = UploadFile.read
@@ -325,7 +325,7 @@ def test_uploads_are_read_only_up_to_the_limit(signed_in, monkeypatch):
 
     monkeypatch.setattr(UploadFile, "read", read)
     assert upload(signed_in).status_code == 201
-    assert asked == [MAX_UPLOAD_BYTES + 1]  # never the whole body, whatever its size
+    assert asked == [config.import_max_bytes() + 1]  # never the whole body, whatever its size
 
 
 def test_an_import_starts_the_value_history(signed_in):

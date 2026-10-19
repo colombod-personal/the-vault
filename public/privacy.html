@@ -110,7 +110,10 @@
     <li><strong>The file host of your chat app</strong> (for ChatGPT, an address on OpenAI's own domains): when you drop a
       collection file in a chat, the app hands your assistant a temporary address and the Vault's server fetches that one file
       from it. It sends nothing about you, and the file waits in your account, not imported, until you say yes. It can be
-      used for one hour only, and the Vault's daily clean-up deletes it after that (at once when you import it).</li>
+      used for one hour only, and the Vault's daily clean-up deletes it after that (at once when you import it). If your assistant is a
+      coding app on your own computer, it may instead read the file from your disk and send its text to the Vault in parts: the Vault
+      keeps those parts, not imported, only until all have arrived and been checked and no longer than the same hour, then keeps just the
+      one waiting file.</li>
     <li>Your <strong>AI assistant</strong>, if you connect one (for example Claude or ChatGPT): it receives what you ask the
       Vault for, under the permissions (read, or read and write) you granted when you connected it, and under its own
       provider's terms. You can disconnect it at any time in Account.</li>

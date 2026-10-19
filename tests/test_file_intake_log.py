@@ -252,8 +252,13 @@ def test_a_log_that_cannot_be_written_does_not_change_the_answer(app, agent, bot
 def test_the_skill_says_what_to_do_when_the_app_gives_no_file_and_makes_no_promise_that_the_app_fills_it_in():
     text = " ".join((ROOT / "skills" / "collection-analyst" / "SKILL.md").read_text(encoding="utf-8").split())
     assert "call `import_collection_file` with the attached file as `file`" in text
-    assert "If the app does not give you a file" in text and "no file object, only a path or nothing" in text
-    assert "do not call `import_collection_file` with no arguments: call `start_collection_upload` and give the person the link" in text
+    # the file's local path is read in parts by the coding app itself (vault-0n9.3, content parts): the old "never read the file" is gone
+    assert "If the app gives you no file object but a local path" in text and "Files mentioned by the user: <path>" in text
+    assert "call `import_collection_file` with no arguments: its answer carries the exact script to run" in text
+    assert "reads the attached path in parts with the app's own shell tool (exec_command) and passes every part to `import_collection_file` in the same script" in text
+    assert "give the person the preview it ends with, never the `say` sentence" in text
+    assert "If the app gives you neither a file object nor a readable path**, call `start_collection_upload` and give the person the link" in text
+    assert "Never read, open, summarise or paste the file" not in text and "The file is never read, pasted" not in text
     assert "nothing is imported until their yes" in text
     assert "at once, with `file`" not in text and "pass the attachment itself" not in text  # the old promise is gone
     assert "Never ask the person to fix, edit, re-export or re-upload the file" in text  # the experience rule stays

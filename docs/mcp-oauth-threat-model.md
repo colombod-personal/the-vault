@@ -918,8 +918,8 @@ What a read-only caller can now cause, and what stops it (all in `vault/uploads.
   10 are started a minute per person (429), expired rows are deleted by the next start and by the daily retention job
   (`tests/test_staged_upload.py`, `tests/test_upload_read_only.py::test_a_read_only_app_can_rotate_the_persons_waiting_links_but_not_read_or_import_what_they_hold`, `test_a_read_only_connection_names_only_the_persons_own_buckets`).
 - **Storage, bounded and not new.** A file is stored only by `POST /upload`, which needs the ticket, which the tool answer gives the
-  caller as it gives a write caller. One file per link (a new one replaces it), 20 MB at most (413, nothing kept:
-  `test_a_link_started_by_a_read_only_connection_takes_no_more_than_twenty_megabytes`), so at most 5 x 20 MB for one hour per person,
+  caller as it gives a write caller. One file per link (a new one replaces it), `IMPORT_MAX_BYTES` at most (413, nothing kept:
+  `test_a_link_started_by_a_read_only_connection_takes_no_more_than_the_import_limit`; it was a fixed 20 MB until vault-0n9.3), so at most 5 files of that size for one hour per person,
   the same ceiling a write connection has. The cost is the person's own allowance, not the server's.
 - **It imports nothing and changes nothing in the collection or decks.** The file waits. The preview (`GET /uploads/{id}`, a read) compares it with the collection, which
   a read connection can already read in full, so it shows the caller nothing new. The import is `POST /uploads/{id}/apply`: write
@@ -937,7 +937,7 @@ What a read-only caller can now cause, and what stops it (all in `vault/uploads.
   needs Write." (`tests/test_upload_read_only.py::test_the_consent_screen_tells_a_person_that_read_includes_the_upload_link`.)
   This is the one file of section 6's list that this change touches, only for that sentence.
 - **An allowance of its own on the page (review of 2026-10-11, corrected after the re-review of `56939d5`).** `POST /upload` is the
-  one route that parses and matches up to 20 MB for a ticket's holder, and it had no limit; the first fix counted it against the
+  one route that parses and matches up to `IMPORT_MAX_BYTES` for a ticket's holder, and it had no limit; the first fix counted it against the
   person's `import` counter. That counter counts refused tries too, so an app the person had since disconnected, still holding its
   ticket, could loop on the page and keep the person's own `/imports` at 429 for as long as it looped. The page now has a counter
   per link (`import_limit` a minute for each link, 429 page with `Retry-After`, a different counter key kind from the person's), so
@@ -1208,7 +1208,7 @@ the conversation. That is an SSRF surface, so every step is bounded (C = `tests/
   A refused host is logged **by host name only** (`file_intake` event, `host`), never with its path or query, which carry the token,
   and only its **last three labels** (`*.files.example.com` for `<token>.files.example.com`), so a secret in the first labels of a
   name stays out of the log (C `test_a_host_name_is_logged_by_its_last_three_labels_so_a_secret_in_the_first_ones_stays_out`).
-- **What a real drop sends is logged as a shape** (vault-0n9.3): the `file_intake_call` event, one per `import_collection_file` call, has exactly the fields `event`, `ts`, `request_id`, `tool_definition_sha256` (12 hex of the hash of the tool entry this server serves this client now, by its session id: a client that kept an older list across a deploy is not seen, so its own copy is unknown), `arg_keys`, `file_type` (the type name of `file`, or `absent`), `file_keys` (key names inside an object value), `protocol_version` (the `MCP-Protocol-Version` header: a date, `other` or `absent`), `user_agent` (at most four `name/version` tokens, the version digits and dots only, nothing in parentheses, the name only if it is on a fixed list of known clients and libraries, else `other`, `unknown` if none), `compact` and `apps_ui`. A key name is logged only if it is on a fixed list of expected field names (`url`, `file_id`, `download_url`, ...), else as `other`, whatever it looks like. No value, address, path, file name, token or anything about the person is logged (C `tests/test_file_intake_log.py`).
+- **What a real drop sends is logged as a shape** (vault-0n9.3): the `file_intake_call` event, one per `import_collection_file` call, has exactly the fields `event`, `ts`, `request_id`, `tool_definition_sha256` (12 hex of the hash of the tool entry this server serves this client now, by its session id: a client that kept an older list across a deploy is not seen, so its own copy is unknown), `arg_keys`, `file_type` (the type name of `file`, or `absent`), `file_keys` (key names inside an object value), `protocol_version` (the `MCP-Protocol-Version` header: a date, `other` or `absent`), `user_agent` (at most four `name/version` tokens, the version digits and dots only, nothing in parentheses, the name only if it is on a fixed list of known clients and libraries, else `other`, `unknown` if none), `compact` and `apps_ui`. A key name is logged only if it is on a fixed list of expected field names (`url`, `file_id`, `download_url`, and the parts' `text`, `part`, `parts`, `lines`, `sum`, ...), else as `other`, whatever it looks like. No value, address, path, file name, token or anything about the person is logged (C `tests/test_file_intake_log.py`).
 - **The name is resolved here and every address must be public** (`oauth_clients.public_address`: private, loopback, link-local
   including the cloud metadata address, shared 100.64/10, multicast, reserved, unspecified, IPv4-mapped, NAT64 and 6to4 forms, Teredo;
   one bad address among good ones refuses the host), and **the connection goes to the address that was checked**, with the name kept
@@ -1221,8 +1221,8 @@ the conversation. That is an SSRF surface, so every step is bounded (C = `tests/
   brief ("no redirects")**, on purpose: the real host and its redirects are unknown before the first real run, a refused redirect
   would cost a whole iteration, and a hop to a host that is on the allow-list and resolves to public addresses is no wider than the
   first request.
-- **Size and time.** At most `INTAKE_MAX_BYTES` (**5 MB**; the importer's own cap is 20 MB, see "Egress and time" for why the intake
-  takes less) is read, in plain bytes (`Accept-Encoding: identity`; a
+- **Size and time.** At most `IMPORT_MAX_BYTES` (**8 MiB** by default: the one import-size limit every path uses, see "Egress and time")
+  is read, in plain bytes (`Accept-Encoding: identity`; a
   compressed answer is refused), checked against `Content-Length` and while streaming; 15 seconds in total, as a wall clock the
   caller waits on (the fetch, including DNS, runs in a worker joined with a timeout), so a server that drips or never answers
   cannot hold the request (C size, drip and slow-resolver tests). At most 4 fetches at once per process; a fifth is told it is busy.
@@ -1244,12 +1244,12 @@ still the app's own text and is treated as data wherever it is shown (it appears
 is never used to name a path on the server (C `test_the_filename_shown_for_a_staged_file_is_the_declared_name_without_a_path`).
 A file that cannot be read is answered with a phrase the Vault wrote (not the library's message, which can quote a cell: C
 `test_an_unreadable_answer_never_repeats_text_from_the_file`). The bytes are parsed by the existing
-importer (UTF-8 check, 20 MB, the same row and column limits as an upload through the link), and shown to the person only through
+importer (UTF-8 check, `IMPORT_MAX_BYTES`, the same row and column limits as an upload through the link), and shown to the person only through
 the preview, whose text the Vault writes. A file holding an instruction to the assistant is data, as for any import.
 
 **Rate and storage.** Every try counts against the person's import allowance (`IMPORT_LIMIT`, 10 a minute) on a counter of its own
 (`file intake`), so a loop does not keep the person's own `/imports` at 429. A person holds **one** fetched file at a time (a new one
-replaces the earlier, an identical one is the same row, so a host's duplicate call returns the same id); that is one 5 MB row beside
+replaces the earlier, an identical one is the same row, so a host's duplicate call returns the same id); that is one row of at most `IMPORT_MAX_BYTES` beside
 the five link rows already allowed (the link cap, the replacement of the oldest waiting link and the list of held
 files count links only: C `test_a_dropped_file_is_not_one_of_the_five_links_and_is_not_listed_with_them`), expiring in one hour like a link, deleted by the daily retention job and when applied. Fetched
 rows have no ticket: `ticket_hash` starts `intake-`, which no sha256 digest can equal, so `/upload` can never open one (C
@@ -1292,11 +1292,132 @@ only when it is the one known sentinel `chat_upload` (ChatGPT mobile, issue #185
 others; a path by its root. (C `test_the_logged_shape_never_holds_a_value_that_could_be_a_token_or_a_name`.)
 
 **Egress and time from a Vercel function.** The fetch is an outbound HTTPS request from the same function that answers the tool call
-(60 seconds maximum, `vercel.json`): the fetch is capped at 15 seconds, leaving the rest for the preview. **The intake takes 5 MB, not the
-importer's 20 MB** (review of PR #478): measured in a lane process, a 17.9 MB, 190,000-row file took 8.9 s and about 450 MB of memory for
-one request, for any token, read-only included, 10 calls a minute per person; the upload page is cut near 4 MB by the hosting platform
-in production, so 20 MB had never been processed there. Memory on Vercel is not measured. A larger file is answered `too_large`, naming
-'Import CSV' on the website. No change to the function's permissions or secrets.
+(60 seconds maximum, `vercel.json`): the fetch is capped at 15 seconds, leaving the rest for the preview. **Every path takes the same two limits: `IMPORT_MAX_BYTES` (8 MiB by default) and `IMPORT_MAX_ROWS` (100,000).** History: the first draft took the importer's own 20 MB, and the
+review of PR #478 measured a 17.9 MB, 190,000-row file at 8.9 s and about 450 MB of memory for one request, so the intake was cut to 5 MB;
+now the importer (`/imports`, `/imports/preview`), the upload page, `import_collection_csv`, the fetch and the parts share the two settings
+(vault-0n9.3). Both are **product rules**, not figures derived from the memory of an instance (the size of a Vercel 'standard' function has
+not been read): 8 MiB is about 4.9 times the largest real export seen (1.7 MB, about 7,000 cards, 243 bytes a row, so about 34,000 rows in
+8 MiB), and 100,000 rows is about 7 times the owner's 14,597. **The size alone does not bound memory**: the review of PR #483 built a file of
+exactly 8 MiB with 29-byte rows (291,740 rows) and measured a peak of 577 MB (preview) and 595 MB (parts), more than the ceiling the first
+draft claimed as "the worst case". The row limit closes that, and it uses **the library's own reader, not a copy of its rules** (review of PR #483, four threads on
+a hand-written lexer that mis-read `sep=` first lines and quotes inside cells): `importer.check_rows` runs `formats.parse` only until the reader
+the library would read with is opened (`dragonshield`, `moxfield` and `formats` reach `csv` through a thin proxy that, for the one call that set
+a context variable, hands over that reader's text and delimiter unread), so the library's own `sep=` rules and format choice decide what a
+row is, and then counts that reader's rows by iterating it lazily, in constant memory, stopping the moment the count passes the limit; no
+list, no entry is built, and a blank row is none. It runs on what the parser will read (after `restore_csv`, which rewrites a marked file
+row by row into a text of the same size and keeps nothing per row), on every path, so a file of 29-byte rows, of one stray quote followed by
+291,740 rows, or of a padded `sep=;` line is refused in a fraction of a second with one sentence and nothing staged (C `test_the_row_limit_is_a_setting_with_a_default_and_a_file_of_tiny_rows_is_refused_before_it_is_parsed`,
+`test_the_guard_uses_the_delimiter_and_the_rows_the_library_chose_and_builds_no_entry`, `test_no_form_of_first_line_lets_a_file_of_more_rows_than_the_limit_through`,
+`test_every_path_refuses_a_file_over_the_row_limit_in_one_sentence_and_stages_nothing`); a valid `sep=;` file of 50,000 records with line feeds
+inside quoted cells is taken. If a library update stopped opening its readers through the module-level `csv`, the guard fails loudly
+instead of skipping itself (C `test_the_guard_reaches_the_reader_of_every_format_the_importer_reads`). A file the reader cannot lex (a bare-CR
+file, a field over the csv limit) is left to the parse, which refuses it. What the two limits together let in is measured:
+`tests/test_import_size_memory.py` builds a synthetic file of exactly 8 MiB with exactly 100,000 rows, every row matched to the catalog, and runs the
+existing preview path and the assembled-parts path: the process peak resident size is 331 MB (preview) and 340 MB (parts) where it held
+151 MB before, in 3.4 s and 7.1 s, and the test fails above 512 MB (the file of 77,579 rows of 108 bytes measured 327 and 342 MB, the
+owner's real shape of 35,078 rows 259 and 277 MB). Matched rows are not the most the limits allow: the delta review of PR #483 measured
+378 MB for 100,000 rows none of which matches the catalog, so 340 MB is the matched case and 512 MB is the ceiling for both. The guard costs 77 ms on the 8 MiB / 100,000-row file, 39 ms on 100,000 rows with
+every cell quoted and 46 ms to refuse two million tiny rows (C `test_the_guard_costs_little_on_the_biggest_file_the_limits_allow_and_on_a_file_that_quotes_every_cell`),
+and the memory figures above were re-measured with it in place (331 and 341 MB). One import at the limits fits a 1 GB function with room to spare; four at the same
+moment would not, and the instance size and its concurrency are **not verified**. The hosting platform's request limit (about 4.5 MB)
+bounds each request, so each part and each upload-page file, not the total. A larger file is answered `too_large`, and one with too many
+rows `unreadable`, each in one sentence, nothing staged. No change to the function's permissions or secrets.
+
+**A file sent as text in ordered parts** (content parts, vault-0n9.3, 2026-10-18). What changed: in the ChatGPT desktop app's code
+mode (Codex) the model is given **no file object** for a dropped file, only the text 'Files mentioned by the user: <local path>' (Codex
+rollouts of 2026-10-17). It can read that file with its shell and call the Vault's tool in the same script, so `import_collection_file`
+also takes the file as `text` in ordered parts (`text`, `part`, `parts`, `lines`, `chars`, `sum`). Files: `vault/file_parts.py` (the checksum, the
+checks, the script the assistant is told to run), `vault/intake.py` (the route: the same path, the same tool, the same
+`READ_ONLY_POSTS` entry), `vault/models.py` and migration 0124 (`staged_upload_parts`). C = `tests/test_file_parts_route.py`, `tests/test_file_parts.py`,
+`tests/test_import_size_limit.py`, `tests/test_import_size_memory.py`.
+
+- **No new network surface.** Nothing is fetched and nothing is sent anywhere: a part is text in the body of the same authenticated call a
+  `file` object arrives in. The shell read happens on the person's own computer, by the person's own assistant, under that app's own
+  sandbox; the Vault is not involved in it and learns only the text it is sent. Authentication, scopes and `READ_ONLY_POSTS` are
+  unchanged: a read-only connection can send parts and read the preview, and importing is still `confirm_staged_upload`, write scope,
+  bound to the preview's `content_hash` (C `test_a_read_only_connection_can_send_parts_and_see_the_preview_but_cannot_import_them`).
+- **Size and memory caps.** The stored parts of a file are added up as each part arrives against `IMPORT_MAX_BYTES`; over it the
+  whole set is deleted with its parts and one sentence is the answer, nothing staged (C `test_parts_that_add_up_to_more_than_the_import_limit_are_dropped_and_nothing_is_staged`);
+  a single part over the limit is refused before anything is stored; at most `max(4096, IMPORT_MAX_BYTES / 8192)` parts a file (4,096 for
+  the default: the biggest file in parts of the smallest size the script sends, 1,024, is far inside it; C `test_a_file_at_the_import_limit_in_parts_of_the_smallest_size_the_script_uses_is_within_the_cap`).
+  The file is assembled **once**, inside the request that completes it, and the cost of that is measured (above). The request body of a
+  part has no length limit of the Vault's own (the hosting platform's 4.5 MB bounds it when hosted; a self-hosted server has no body limit
+  middleware), so a part is parsed whole before its size is checked.
+- **Storage and retention.** One new table, `staged_upload_parts`: the staged upload's id, the part's number, the SHA-256 of the part and
+  its UTF-8 bytes; primary key (staged upload, number); `ON DELETE CASCADE` from `staged_uploads`. **The parts live exactly as long as the
+  staged upload**: one hour, deleted with it by the daily retention job and with the account, and deleted by the Vault as soon as the file
+  is complete (only the assembled file remains, as for any staged file; C `test_parts_expire_with_the_staged_upload_and_go_with_the_account`).
+  A person has **one** file in progress at a time, by design: starting another deletes the unfinished one with its parts, and each new set
+  debits the upload allowance, so **two files read at the same moment never complete** (each new first part drops the other's set; the
+  answer to the dropped set's next part only shows fewer parts held). The assistant is told to read one file at a time; a person who
+  drops two files in one message gets them one after the other. It is a file in progress, not one of the five links (C `test_a_new_file_replaces_the_one_in_progress_and_a_file_in_progress_is_not_one_of_the_five_links`). Its
+  staged row has a `ticket_hash` starting `intake-` (no ticket opens it) and no content until it is complete. No route reads a part: a
+  file can be seen only as the preview of the complete, checked file, by its owner.
+- **Truncation guard.** Nothing is previewed, and nothing is staged for import, until every part is present and the whole has been checked
+  against three things the caller sends and the server does not trust: the **total line count** and the **total length** (UTF-16 code
+  units), both read by the assistant's shell from the whole file in one small read of its own that no output cap can cut (four numbers),
+  and the **checksum** (CRC-32 over the UTF-16 code units of the whole text, the same algorithm on both sides, tested with non-ASCII
+  text, CRLF, a byte-order mark and a character split between two parts); then that the parts join into valid text. Before this review the
+  server had only `lines` and `sum`, both computed from what the script had read, so a self-consistent truncated text was accepted
+  (C `test_a_self_consistent_truncated_text_is_refused_because_the_length_comes_from_a_separate_read`); the script also refuses to send
+  anything whose joined length and line count differ from that first read, and a truncated first read is not used
+  (C `test_a_truncated_first_read_sends_nothing_because_the_length_and_line_count_cannot_be_trusted`, `test_a_short_read_that_nothing_flags_is_caught_by_the_length_and_line_count_of_the_first_read`).
+  A mismatch deletes the set, answers one sentence, stages nothing and changes nothing (C `test_parts_that_do_not_match_the_file_are_refused_in_one_sentence_and_nothing_is_staged`,
+  `test_a_read_cut_short_can_never_become_a_partial_import`). This holds **for a script run as written**: the server cannot know the file's
+  length, so an assistant that invents its own reading and its own numbers can send a self-consistent file of its choosing, as any holder of
+  the token could; the import still needs the person's yes. The checksum protects against truncation and corruption, **not against a
+  malicious sender**.
+- **Resending, order, what is missing.** The same part again (same number, same hash) is a no-op; a different text for a number replaces it
+  until the file is complete; a part sent after completion changes nothing and costs a lookup, not a preview: the answer is
+  `already_staged` with the upload's id and `content_hash`, and the preview is one `get_staged_upload` away (a hundred resends run one
+  preview, the one that completed the file; C `test_a_hundred_resends_of_a_completed_file_cost_one_preview`). Parts may arrive in any order, and
+  each answer names the parts still missing. Part writes of one person are ordered by the advisory lock the upload links use, and
+  `Idempotency-Key` is honoured as for every creating POST, **per request**: the same key on two different parts replays the first answer, so a
+  client that sets one must use a key for each part (C `test_a_part_sent_again_changes_nothing_and_a_different_text_for_its_number_replaces_it_until_the_file_is_complete`,
+  `test_the_answer_to_a_part_names_the_parts_still_missing`, `test_a_retry_with_the_same_key_replays_the_answer`).
+- **Rate.** Asking for the recipe (a call with neither `file` nor `text`, or a `file` that is not an address) is not an upload and debits a cheap counter of its own
+  (`file intake help`, `IMPORT_PART_LIMIT` a minute; C `test_asking_for_the_recipe_is_not_an_upload_and_the_whole_file_follows_on_a_one_upload_allowance`,
+  `test_recipe_discovery_is_bounded_by_a_counter_of_its_own`). One upload counts **once** against `IMPORT_LIMIT`, debited inside the per-person lock at the moment its first part creates the
+  staged upload (and undone with it when the person is over the allowance), so a hundred parts do not trip the 10 a minute and eight
+  first parts sent at the same moment count once, not eight times (C `test_simultaneous_first_parts_of_one_file_count_once_against_the_import_allowance`); the parts count against a counter of their own, `IMPORT_PART_LIMIT`
+  (default 1,200 a minute per person). The script sends parts of 16,384 bytes and, when a read comes back truncated, of 8,192 at the smallest,
+  and sends nothing until every read of a size has succeeded; it reads nothing at all when the file's length, asked first on its own (`FileInfo`, a number; a 12 MiB file runs one
+  command), is over `IMPORT_MAX_BYTES`, or when the small read that follows says it would be more than 1,024 parts (C `test_a_file_far_over_the_limit_is_refused_from_its_length_alone_without_being_read`), and it stops at the first answer that is not progress (`bad_part`, `too_large`,
+  `unreadable`, `mismatch`, a refusal), printing the Vault's sentence (C `test_the_script_stops_at_the_first_answer_that_is_not_progress_and_prints_the_vaults_sentence`,
+  `test_a_file_over_the_size_limit_or_in_too_many_parts_is_not_read_at_all`): a file at the size limit is at most 8 MiB / 8,192 = 1,024 calls in one pass, so
+  1,200 covers a pass with 17% to spare (a halving of the part size before the first send costs reads, not calls; a smaller part is never
+  used). A send answered 429 is retried after the wait the answer names, up to four times, and the script stops naming the parts it could not
+  send (C `test_a_throttled_part_is_sent_again_after_the_wait_and_a_failed_one_stops_the_script_naming_it`, `test_the_smallest_part_size_keeps_a_pass_inside_the_default_part_allowance`). Both counters are per person,
+  whichever token (C `test_a_hundred_parts_count_once_against_the_import_allowance_and_a_new_upload_counts_again`, `test_the_parts_have_a_counter_of_their_own`).
+- **Another person** cannot reach a part or the file: the set's identity includes the person's id, the staged row is theirs, and another
+  person's id is the same 404 (C `test_another_person_cannot_reach_a_file_that_is_sent_in_parts`).
+- **What the model is told, and the path.** `next` in the answer to a call with neither `file` nor `text` (and in any `cannot_receive`) is a
+  fixed text the Vault wrote (with the call's `bucket_id`, if it named one, in every part's call), with a script the assistant runs in its own
+  sandbox (a JavaScript isolate with no network and no file system, and its shell). It tells the assistant nothing to do to the person.
+  **The path of the file is never spliced into a command as text** (review of PR #483, HIGH: a file name containing U+2019 ended the
+  PowerShell string, because PowerShell reads U+2018, U+2019, U+201A and U+201B as quotes and only the ASCII quote was doubled, and ran an
+  injected command on the person's computer). The script writes the path as hex digits of its UTF-16 code units, and every command begins by
+  turning those digits back into the path inside PowerShell: no character of a file name can end a string or run anything. The path is also
+  the inside of a double-quoted JavaScript string in the script (not a template literal, where `${...}` would be evaluated). Tested with
+  the four curly quotes, backticks, `$()`, `;`, brackets, accents, an emoji and, off Windows, a newline, in the commands the script
+  produces (the stand-in shell fails the run if a command carries any other path) and under the real PowerShell 5.1 and 7 (C
+  `test_a_path_never_reaches_a_command_as_text_whatever_the_name_holds`, `test_the_script_works_with_the_real_powershell_and_a_name_cannot_run_anything`). Residual: a prompt injection
+  in the conversation could make the assistant read a different local file than the attached one and send it into the person's own
+  account; it would be staged (not imported) for an hour, answered as unreadable unless it is a collection, and never leaves that account.
+- **The shell the script is written for is PowerShell** (Windows PowerShell 5.1 or PowerShell 7, the coding apps on Windows). On macOS or
+  Linux the Codex shell is not PowerShell and the script does not apply: the text of `next` says so, and tells the assistant to give the
+  person the sentence in `say` in that case. The file is read by byte offsets, cut forward to a character boundary (no part holds half a
+  character), without opening the whole file for each part, and decoded strictly: a file that is not valid UTF-8 is not read, as on every
+  other route. Cost, measured with real shells and synthetic files, shell time only: 104 parts for 1.7 MB in 9.5 s (PowerShell 5.1) and
+  6.6 s (PowerShell 7), 513 parts for 8 MiB in 47 s and 32 s, eight reads at a time; the `exec` tool yields after 30 s and the script can
+  simply be run again (sending a part again is harmless).
+- **Logging.** The `file_intake_call` event has the same fixed fields; the new argument names (`text`, `part`, `parts`, `lines`, `chars`, `sum`)
+  are on the fixed list of key names. `file_intake` gains the outcomes `part`, `mismatch` and `bad_part`, with counts only (the part's number,
+  the number of parts, byte counts, a fixed reason word). No text, checksum or line count is logged (C `test_the_log_holds_no_value_from_a_file_sent_in_parts`).
+- **Not verified in a real app:** that the ChatGPT desktop app's code mode runs the script as written (`tools.exec_command` with
+  `login:false`, parallel reads and calls, the `exec` tool's own 30-second yield, `original_token_count` marking a truncated read). The script
+  was run with Node against a stand-in shell and against the real Windows PowerShell 5.1 and 7, on synthetic files only (the real-shell test
+  runs wherever PowerShell exists, and the CI runner has PowerShell 7).
 
 Residual risks, stated:
 

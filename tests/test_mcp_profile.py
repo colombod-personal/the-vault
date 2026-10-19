@@ -71,6 +71,9 @@ def test_the_codex_client_gets_the_core_tools_and_the_dispatchers_within_the_bud
     # the same arguments as the full definition: a call built from the short text is checked exactly as before
     for t in tools[: len(mcp_profile.CORE)]:
         full = mcp.BY_NAME[t["name"]].schema(ui=False)
+        # the one deliberate difference: a coding app has no file object to require (a copy: schema() shares the tool's own list)
+        full["inputSchema"] = {**full["inputSchema"], "required": [n for n in full["inputSchema"]["required"]
+                                                                   if n not in mcp_profile.PARTS_TOOLS.get(t["name"], ())]}
         assert without_prose(t["inputSchema"]) == without_prose(full["inputSchema"]), t["name"]  # every type, enum, bound, default
         assert t["annotations"] == full["annotations"]  # each keeps its own approval hints
         assert t["name"] == full["name"] and t["title"] == full["title"]
