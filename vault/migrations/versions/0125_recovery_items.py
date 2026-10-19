@@ -38,8 +38,6 @@ def upgrade() -> None:
         sa.Column('source_detail', sa.String(length=200), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
         sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False),
-        sa.Column('restored_at', sa.DateTime(timezone=True), nullable=True),
-        sa.Column('restored_deck_id', sa.Integer(), nullable=True),
         sa.CheckConstraint("kind IN ('deck', 'collection_rows', 'tag', 'share')", name='ck_recovery_items_kind'),
         sa.CheckConstraint("source IN ('person', 'assistant')", name='ck_recovery_items_source'),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
