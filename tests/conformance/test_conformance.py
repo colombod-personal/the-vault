@@ -573,8 +573,14 @@ def test_github_lists_a_public_repositorys_issues_without_a_token_and_refuses_an
     r = real.get(url, params={"state": "open", "per_page": 5}, headers=GITHUB_HEADERS)
     t = twin.get(url, params={"state": "open", "per_page": 5}, headers=GITHUB_HEADERS)
     assert r.status_code == t.status_code == 200 and isinstance(r.json(), list)
-    real_issue = next((i for i in r.json() if "pull_request" not in i), r.json()[0])
-    real_pr = next((i for i in r.json() if "pull_request" in i), None)
+    real_items = r.json()
+    if not real_items:  # the repository can have no open issue or pull request; closed ones carry the same fields
+        everything = real.get(url, params={"state": "all", "per_page": 5}, headers=GITHUB_HEADERS)
+        assert everything.status_code == 200
+        real_items = everything.json()
+    assert real_items, f"{GITHUB_REPO} has no issues at all to compare the twin with"
+    real_issue = next((i for i in real_items if "pull_request" not in i), real_items[0])
+    real_pr = next((i for i in real_items if "pull_request" in i), None)
     for key in ("number", "title", "state", "body", "labels", "html_url", "user", "comments", "created_at", "updated_at"):
         assert key in real_issue, key  # the fields jobs/budget_alert.py reads must exist in the real answer
     twin_issue = next(i for i in t.json() if "pull_request" not in i)
